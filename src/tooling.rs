@@ -2539,12 +2539,15 @@ pub fn parse_semver(s: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
-/// `req` is exact `1.2.3`, caret `^1.2.3` (compat within major), or tilde `~1.2.3` (compat within minor).
+/// `req` is exact `1.2.3`, caret `^1.2.3` (compat within major), tilde `~1.2.3` (compat within minor), or `*` (any).
 pub fn version_satisfies(version: &str, req: &str) -> bool {
     let Some(ver) = parse_semver(version) else {
         return version == req;
     };
     let req = req.trim();
+    if req == "*" {
+        return true;
+    }
     if let Some(rest) = req.strip_prefix('^') {
         let Some(r) = parse_semver(rest) else {
             return false;

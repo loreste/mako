@@ -857,7 +857,10 @@ fn resolve_one(
 
 // ---- Remote registry: HTTPS index + tarball fetch + signature verification ----
 
-/// Remote registry URL from `MAKO_REGISTRY_URL` or mako.toml `[registry] url`.
+/// Default public registry (GitHub Pages).
+const DEFAULT_REGISTRY_URL: &str = "https://loreste.github.io/mako-packages";
+
+/// Remote registry URL: `MAKO_REGISTRY_URL` env → mako.toml `[registry] url` → default.
 fn remote_registry_url(project: &Path) -> Option<String> {
     if let Ok(url) = std::env::var("MAKO_REGISTRY_URL") {
         if !url.is_empty() {
@@ -891,7 +894,7 @@ fn remote_registry_url(project: &Path) -> Option<String> {
             }
         }
     }
-    None
+    Some(DEFAULT_REGISTRY_URL.to_string())
 }
 
 /// Fetch a package index from a remote HTTPS registry.

@@ -105,7 +105,9 @@ produce standalone binaries.
 
 **Packages.** `mako pkg` manages dependencies with a lockfile, SHA-256 content
 hashes, and SemVer resolution. Supports path deps, git deps, local registry,
-and remote HTTPS registry. Packages can be signed with ed25519 and verified
+and remote HTTPS registry. The default public registry is
+`https://loreste.github.io/mako-packages` — `mako pkg get <name>` fetches
+from it automatically. Packages can be signed with ed25519 and verified
 on fetch.
 
 **Tooling.** `mako fmt`, `mako lint`, `mako test` (with JSON reports), `mako check`.
@@ -118,7 +120,7 @@ and inlay hints. VS Code extension.
 - No debugger product (lldb works with `#line` source mapping, but no IDE integration beyond seeds)
 - Stdlib coverage is uneven — some APIs are shape-only
 - No stable ABI promise
-- Package registry is new and has no public hosted instance yet
+- Package registry is public but has few packages so far
 - Windows HTTP engine is incomplete
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
