@@ -30,7 +30,7 @@ if [[ ! -x "$BIN" ]]; then
 fi
 
 mkdir -p out
-"$BIN" build --release --no-incremental examples/bench/micro.mko -o out/bench_micro_gate
+"$BIN" build --release --no-incremental --backend c examples/bench/micro.mko -o out/bench_micro_gate
 rustc -C opt-level=3 -C lto -C codegen-units=1 \
   examples/bench/micro_rs.rs -o out/bench_micro_rs_gate 2>/dev/null
 

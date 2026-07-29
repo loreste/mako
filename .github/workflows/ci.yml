@@ -69,10 +69,10 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          ./target/release/mako test examples/testing/add_test.mko --json --coverage |
+          ./target/release/mako test examples/testing/add_test.mko --json --coverage --backend c |
             python -c 'import json,sys; r=json.load(sys.stdin); assert r["schemaVersion"] == 1 and r["ok"] and r["summary"]["passed"] == 1 and r["summary"]["tests"] == 3 and r["runs"][0]["coverage"]["testFunctions"] == 3 and r["runs"][0]["files"][0]["stdout"].splitlines()[-1] == "PASS"'
           set +e
-          failure_json="$(./target/release/mako test examples/ci/json_report_failure_test.mko --json)"
+          failure_json="$(./target/release/mako test examples/ci/json_report_failure_test.mko --json --backend c)"
           failure_status=$?
           set -e
           test "$failure_status" -ne 0
@@ -139,7 +139,7 @@ jobs:
       - name: Recursive debug compiler (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: cargo run --quiet --release -- test examples/testing/deep_expr_stack_test.mko
+        run: cargo run --quiet --release -- test examples/testing/deep_expr_stack_test.mko --backend c
         env:
           RUST_MIN_STACK: "8388608"
 
