@@ -75,16 +75,15 @@ enum BackendCli {
 
 /// Resolve the effective codegen backend.
 ///
-/// Explicit `--backend` (anything other than the default `c`) always wins.
-/// When the CLI still says `c`, honor env overrides in order:
+/// Explicit `--backend` (anything other than the default `native`) always wins.
+/// When the CLI still says `native` (the default), honor env overrides in order:
 /// - `env_keys` (e.g. `MAKO_TEST_BACKEND` then `MAKO_BACKEND` for tests)
 ///
-/// Policy (product): default remains **c** for widest compatibility (sanitizers,
-/// cross, wasm). Recommended local workflow: `MAKO_BACKEND=native` for debug
-/// iteration; `mako build --release --backend llvm` when the llvm-backend
-/// feature is built. See docs/BUILD.md § Backend policy.
+/// Policy (0.5.0): default is **native** for fast debug iteration.
+/// `--backend c` for sanitizers/cross/emit-c/static/wasm.
+/// `--backend llvm --release` for optimized builds when llvm-backend is built.
 fn resolve_backend(cli: BackendCli, env_keys: &[&str]) -> BackendCli {
-    if !matches!(cli, BackendCli::C) {
+    if !matches!(cli, BackendCli::Native) {
         return cli;
     }
     for key in env_keys {
@@ -115,21 +114,33 @@ fn backend_label(backend: BackendCli) -> &'static str {
     }
 }
 
-/// Fail closed for modes the direct backends do not implement.
+/// Check whether the direct backend supports the requested mode.
 ///
-/// Never silently fall back to the C backend. Users must pass `--backend c`
-/// (or drop the unsupported flag) explicitly. See docs/BUILD.md § Modes matrix.
+/// When `auto_fallback` is true (default invocation — user did not explicitly
+/// pass `--backend native`), silently falls back to C for unsupported modes.
+/// When false (user explicitly chose `--backend native`), hard-errors.
 fn validate_direct_backend_modes(
     backend: BackendCli,
     level: OptLevel,
     opts: &BuildOpts,
     emit_c: bool,
-) -> Result<(), ()> {
+) -> Result<BackendCli, ()> {
     if matches!(backend, BackendCli::C) {
-        return Ok(());
+        return Ok(BackendCli::C);
     }
     let name = backend_label(backend);
     let use_c = "use `--backend c` (or drop the unsupported flag)";
+
+    // Auto-fallback: when native is the default (not explicitly requested)
+    // and a mode is incompatible, silently use C instead of erroring.
+    let needs_c = emit_c
+        || opts.target.is_some()
+        || matches!(opts.sanitize.as_deref(), Some(s) if !matches!(s, "leak" | "address"))
+        || opts.static_link;
+    let explicit_native = std::env::args().any(|a| a == "--backend" || a.starts_with("--backend="));
+    if needs_c && !explicit_native {
+        return Ok(BackendCli::C);
+    }
 
     if emit_c {
         emit_plain_error(&format!(
@@ -195,7 +206,7 @@ fn validate_direct_backend_modes(
     // Overflow wrap/trap/ignore: honored on the shared-IR path (ignore ≡ wrap).
     // Bounds-always: typecheck/codegen still enforce SAFE release bounds on native.
     let _ = opts.overflow;
-    Ok(())
+    Ok(backend)
 }
 
 #[derive(Subcommand)]
@@ -253,8 +264,8 @@ enum Commands {
         /// Additional C source file to compile and link (repeatable; native targets only)
         #[arg(long = "native-source", value_name = "FILE")]
         native_sources: Vec<PathBuf>,
-        /// Code-generation backend: `c` (default) or direct `native` object code
-        #[arg(long, value_enum, default_value_t = BackendCli::C)]
+        /// Code-generation backend: `native` (default) or `c` for sanitizers/cross
+        #[arg(long, value_enum, default_value_t = BackendCli::Native)]
         backend: BackendCli,
         /// Optimize (`-O3 -flto`); default is debug `-O0`
         #[arg(long, default_value_t = false)]
@@ -321,8 +332,8 @@ enum Commands {
         /// Optimize before run (`-O3 -flto`)
         #[arg(long, default_value_t = false)]
         release: bool,
-        /// Code-generation backend: `c` (default) or direct `native` object code
-        #[arg(long, value_enum, default_value_t = BackendCli::C)]
+        /// Code-generation backend: `native` (default) or `c` for sanitizers/cross
+        #[arg(long, value_enum, default_value_t = BackendCli::Native)]
         backend: BackendCli,
         /// Additional C source file to compile and link (repeatable; native targets only)
         #[arg(long = "native-source", value_name = "FILE")]
@@ -393,9 +404,10 @@ enum Commands {
         /// Emit one stable JSON report and capture test output
         #[arg(long, default_value_t = false)]
         json: bool,
-        /// Code-generation backend: `c` (default) or direct `native` object code.
+        /// Code-generation backend: `native` (default) or `c` for sanitizers/cross.
+        /// Auto-falls back to `c` for modes native does not support.
         /// Env override: `MAKO_TEST_BACKEND=native|c` (CLI wins when set).
-        #[arg(long, value_enum, default_value_t = BackendCli::C)]
+        #[arg(long, value_enum, default_value_t = BackendCli::Native)]
         backend: BackendCli,
         /// Additional C source file to compile and link (repeatable; native targets only)
         #[arg(long = "native-source", value_name = "FILE")]
@@ -2448,7 +2460,7 @@ fn cmd_test(
 ) -> Result<(), ()> {
     let sanitize = sanitize.map(|s| s.to_string());
     let native_sources = resolve_native_sources(native_sources, None)?;
-    if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
+    let backend = if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
         let opts = BuildOpts {
             target: None,
             sanitize: sanitize.clone(),
@@ -2463,8 +2475,10 @@ fn cmd_test(
         } else {
             OptLevel::Debug
         };
-        validate_direct_backend_modes(backend, level, &opts, false)?;
-    }
+        validate_direct_backend_modes(backend, level, &opts, false)?
+    } else {
+        backend
+    };
     if path.is_dir() {
         if let Some(members) = tooling::workspace_member_dirs(path) {
             let members = filter_workspace_members(members, package)?;
@@ -2568,7 +2582,7 @@ fn cmd_test_json(
             )];
         }
     };
-    if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
+    let backend = if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
         let opts = BuildOpts {
             target: None,
             sanitize: sanitize.map(str::to_string),
@@ -2582,14 +2596,17 @@ fn cmd_test_json(
         } else {
             OptLevel::Debug
         };
-        if validate_direct_backend_modes(backend, level, &opts, false).is_err() {
-            return vec![tooling::TestRunReport::error(
+        match validate_direct_backend_modes(backend, level, &opts, false) {
+            Ok(b) => b,
+            Err(()) => return vec![tooling::TestRunReport::error(
                 iteration,
                 path,
                 "invalid backend or sanitizer combination",
-            )];
+            )],
         }
-    }
+    } else {
+        backend
+    };
 
     let mut roots = vec![path.to_path_buf()];
     if path.is_dir() {
@@ -4152,8 +4169,12 @@ fn build_incremental(
     };
     let frontend_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
+    let backend = if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
+        validate_direct_backend_modes(backend, level, opts, emit_c)?
+    } else {
+        backend
+    };
     if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
-        validate_direct_backend_modes(backend, level, opts, emit_c)?;
         let backend_ms =
             build_native_object(&program, out_bin, file, level, backend, opts, &[])?;
         return Ok((frontend_ms, backend_ms));
@@ -4464,7 +4485,7 @@ fn build_native_object(
     test_fns: &[String],
 ) -> Result<f64, ()> {
     // Mode gate (also called from build_incremental); keep here for direct callers.
-    validate_direct_backend_modes(backend, level, opts, false)?;
+    let _ = validate_direct_backend_modes(backend, level, opts, false)?;
     if matches!(opts.overflow, OverflowMode::Ignore) {
         // Ignore is documented as wrap-equivalent for native/LLVM.
     }

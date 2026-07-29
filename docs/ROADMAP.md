@@ -1,11 +1,11 @@
 # Mako roadmap
 
-**Product version:** **0.4.21** (tip) · last tagged **v0.4.21** · Last sync: **2026-07-28**.  
-**Suite:** **393** Mako tests on `examples/testing` (C + native backends) + 134
-Rust unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configured.
+**Product version:** **0.5.0** (tip) · last tagged **v0.5.0** · Last sync: **2026-07-29**.  
+**Suite:** **394** Mako tests on `examples/testing` (C + native backends) + 139
+Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configured.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.4.21`** published; tip train **0.4.21+ → 0.5.0**.
+**Release:** tag **`v0.5.0`** published; tip train **0.5.0+ → 0.5.1**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -30,7 +30,7 @@ Rust unit tests, 0 failures on the native gate · CI ASan/UBSan/TSan as configur
 | **0.4.19** | Remote HTTPS registry · ed25519 package signing · `mako pkg get` | **Shipped** |
 | **0.4.20** | `#line` source mapping directives · debugger-friendly C output | **Shipped** |
 | **0.4.21** | Public package registry · default registry URL · wildcard version fix | **Shipped** |
-| **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Planned** minor |
+| **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Shipped** |
 | **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
 | **0.5.x** | Further patches on 0.5 | **Planned** as needed |

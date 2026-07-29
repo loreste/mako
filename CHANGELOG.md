@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 — 2026-07-29
+
+### Native-first default
+
+The default compilation backend is now **native** (Cranelift). `mako build`,
+`mako run`, and `mako test` produce native object code directly — no C
+intermediate step.
+
+The C backend remains available via `--backend c` and is used **automatically**
+for modes the native backend does not support: sanitizers (thread, undefined),
+cross-compilation, `--emit-c`, and `--static`. If you explicitly pass
+`--backend native` with an unsupported mode, you get a hard error with
+guidance.
+
+Both backends pass 394/394 tests.
+
 ## 0.4.21 — 2026-07-28
 
 ### Public package registry + wildcard version fix

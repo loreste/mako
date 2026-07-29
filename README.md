@@ -4,7 +4,7 @@ Mako is a compiled language for backend and systems work. You write `.mko`
 files; Mako turns them into standalone native binaries — no garbage collector,
 no VM, nothing extra to install next to them at runtime.
 
-**Status: alpha (v0.4.21).** It works, it compiles real programs, people have
+**Status: alpha (v0.5.0).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -98,10 +98,10 @@ File I/O. Regex. UUID. Base64. Binary buffers. Prometheus metrics. Crypto
 (SHA-256, HMAC, PBKDF2, AEAD). Coverage is uneven — [STDLIB.md](docs/STDLIB.md)
 records what has real tests and what only verifies its shape.
 
-**Backends.** Two compilation paths: a C backend (mature, full language) and a
-native backend (Cranelift for debug, LLVM for release). The native backend
-passes 393/393 tests but does not cover every language feature yet. Both
-produce standalone binaries.
+**Backends.** Native object code is the default (Cranelift). The C backend
+remains available via `--backend c` and is used automatically for sanitizers,
+cross-compilation, and emit-c. Both pass 394/394 tests and produce standalone
+binaries. LLVM release builds available with `--backend llvm --release`.
 
 **Packages.** `mako pkg` manages dependencies with a lockfile, SHA-256 content
 hashes, and SemVer resolution. Supports path deps, git deps, local registry,
@@ -116,7 +116,7 @@ and inlay hints. VS Code extension.
 
 ## What does not work yet
 
-- The native backend does not cover the full language (use `--backend c` for everything)
+- Sanitizers, cross-compilation, and emit-c auto-fall back to the C backend
 - No debugger product (lldb works with `#line` source mapping, but no IDE integration beyond seeds)
 - Stdlib coverage is uneven — some APIs are shape-only
 - No stable ABI promise
