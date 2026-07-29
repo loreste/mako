@@ -155,30 +155,17 @@ jobs:
           MAKO_LIVE_NGHTTP2: ""
           MAKO_LIVE_QUIC: ""
 
-      # 0.4.5 gate: Cranelift native backend requires --features llvm-backend for
-      # the bundled linker. Skip when the feature is not built (default CI builds).
-      #
-      # This step used to run with continue-on-error, on the belief that the
-      # proxy and SQL failures came from missing backend services. They did not:
-      # the SQL abort was free() on a handle owned by SQLite, and the proxy
-      # crashes were SIGPIPE the native test harness never ignored. Both were
-      # fixed in 0.4.16, so the step gates again (417-A). If it fails, a real
-      # fault is being reported — do not re-suppress it.
+      # Native backend test suite: mandatory since 0.5.0 (native is now the
+      # default). A skipped native backend is not a successful gate.
       - name: Native backend test suite (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
-        run: |
-          if cargo run --quiet --release -- build examples/testing/add_test.mko --backend native -o /dev/null 2>/dev/null; then
-            cargo run --quiet --release -- test examples/testing --backend native
-          else
-            echo "::notice::Native backend linking not available (requires --features llvm-backend); skipping native test suite"
-          fi
+        run: cargo run --quiet --release -- test examples/testing --backend native
         env:
           MAKO_TEST_TIMEOUT_SECS: "120"
           MAKO_LIVE_TLS: ""
           MAKO_LIVE_NGHTTP2: ""
           MAKO_LIVE_QUIC: ""
-          MAKO_RUNTIME: ${{ github.workspace }}/runtime
 
       # Windows full suite: reports, does not gate. 21 fixtures still fail on the
       # platform (38 before the SRWLOCK and portable-crypto fixes), across areas
@@ -596,6 +583,38 @@ jobs:
           MAKO_BACKEND: c
         run: |
           ./target/release/mako test --sanitize undefined examples/testing
+
+  memory-safety:
+    name: Memory safety gate
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build mako
+        run: cargo build --release
+      - name: Memory safety gate
+        env:
+          MAKO_RUNTIME: ${{ github.workspace }}/runtime
+          MAKO_MS_SKIP_HTTP: "1"
+        run: ./scripts/memory-safety-gate.sh
+
+  sanitizer-sweep:
+    name: Sanitizer sweep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build mako
+        run: cargo build --release
+      - name: Sanitizer sweep (quick)
+        env:
+          MAKO_RUNTIME: ${{ github.workspace }}/runtime
+          MAKO_TEST_TIMEOUT_SECS: "120"
+        run: ./scripts/sanitize-all.sh --quick
 
   gcc:
     name: GCC compilation

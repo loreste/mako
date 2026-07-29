@@ -23,11 +23,15 @@ focused concurrency suite under TSan · [The Mako Book](book/).
 | **Target pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
 | **Dual-form coverage (optional sugar)** | **~94%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol or integration) |
-| **Soundness (SAFE/RT core)** | **Shipped in 0.2.4** — [SOUNDNESS.md](SOUNDNESS.md); optional soaks remain |
+| **Soundness (SAFE/RT core)** | Introduced in 0.2.4, actively hardened — [SOUNDNESS.md](SOUNDNESS.md); soaks and edge cases remain |
 
 ---
 
-## Soundness — **shipped in 0.2.4**
+## Soundness — introduced in 0.2.4, actively hardened
+
+The core ownership and runtime safety model was introduced in 0.2.4 and
+continues to be hardened through adversarial tests, sanitizers, and regression
+gates. It is not a completed, permanently solved property.
 
 Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.md) · roadmap: [ROADMAP.md](ROADMAP.md).
 
