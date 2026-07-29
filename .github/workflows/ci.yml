@@ -13,6 +13,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      MAKO_RUNTIME: ${{ github.workspace }}/runtime
     steps:
       - uses: actions/checkout@v4
 
