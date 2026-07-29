@@ -263,7 +263,11 @@ jobs:
         shell: bash
         run: |
           ./target/release/mako init "${RUNNER_TEMP}/mako-ci-demo" --name ci-demo
-          ./target/release/mako run "${RUNNER_TEMP}/mako-ci-demo/main.mko"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./target/release/mako run "${RUNNER_TEMP}/mako-ci-demo/main.mko" --backend c
+          else
+            ./target/release/mako run "${RUNNER_TEMP}/mako-ci-demo/main.mko"
+          fi
 
       # 0.4.9 49-B: doctor + init/run install smoke on every primary host.
       - name: Install / doctor smoke
