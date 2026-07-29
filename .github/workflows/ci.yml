@@ -599,7 +599,6 @@ jobs:
         env:
           MAKO_RUNTIME: ${{ github.workspace }}/runtime
           MAKO_MS_SKIP_HTTP: "1"
-          MAKO_BACKEND: c
         run: ./scripts/memory-safety-gate.sh
 
   sanitizer-sweep:
