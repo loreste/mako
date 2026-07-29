@@ -207,6 +207,7 @@ jobs:
           exit 0
         env:
           MAKO_TEST_TIMEOUT_SECS: "90"
+          MAKO_BACKEND: c
           MAKO_LIVE_TLS: ""
           MAKO_LIVE_NGHTTP2: ""
           MAKO_LIVE_QUIC: ""
@@ -214,6 +215,9 @@ jobs:
       - name: Core language tests (Windows — must pass)
         if: runner.os == 'Windows'
         shell: bash
+        env:
+          MAKO_TEST_TIMEOUT_SECS: "90"
+          MAKO_BACKEND: c
         run: |
           cargo run --quiet --release -- test examples/testing/match_guard_test.mko
           cargo run --quiet --release -- test examples/testing/match_or_test.mko
@@ -243,15 +247,13 @@ jobs:
           cargo run --quiet --release -- test examples/testing/file_env_test.mko
           cargo run --quiet --release -- test examples/testing/fs_polish_test.mko
           cargo run --quiet --release -- test examples/testing/plugin_product_test.mko
-        env:
-          MAKO_TEST_TIMEOUT_SECS: "90"
 
       - name: Windows storage I/O
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cargo run --quiet --release -- test examples/testing/storage_portable_io_test.mko
-          cargo run --quiet --release -- test examples/ci/windows_direct_io_test.mko
+          cargo run --quiet --release -- test examples/testing/storage_portable_io_test.mko --backend c
+          cargo run --quiet --release -- test examples/ci/windows_direct_io_test.mko --backend c
         env:
           MAKO_TEST_TIMEOUT_SECS: "90"
 
@@ -464,6 +466,7 @@ jobs:
       - name: Verify claims and regression fixtures
         env:
           MAKO_CACHE: ${{ runner.temp }}/mako-claims-cache
+          MAKO_BACKEND: c
         run: ./scripts/claims-gate.sh
 
   tsan:
@@ -600,6 +603,7 @@ jobs:
       - name: Run full suite compiled with GCC
         env:
           MAKO_CC: gcc
+          MAKO_BACKEND: c
           MAKO_TEST_TIMEOUT_SECS: "90"
         run: |
           ./target/release/mako test examples/testing
