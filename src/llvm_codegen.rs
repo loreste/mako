@@ -91,6 +91,8 @@ fn llvm_type<'ctx>(context: &'ctx Context, ty: Type) -> BasicTypeEnum<'ctx> {
         | Type::Nursery
         | Type::Task
         | Type::Opaque
+        | Type::Builder
+        | Type::OwnedOpaque(_)
         | Type::FnPtr
         | Type::StructSlice(_)
         | Type::ShareInt
@@ -356,6 +358,8 @@ fn emit_instruction<'ctx>(
                 | Type::Nursery
                 | Type::Task
                 | Type::Opaque
+                | Type::Builder
+                | Type::OwnedOpaque(_)
                 | Type::FnPtr
                 | Type::StructSlice(_)
                 | Type::BoolSlice
@@ -1721,6 +1725,21 @@ fn llvm_emit_struct_clone<'ctx>(
                     .basic()
                     .ok_or_else(|| LlvmError::new("share clone returned void"))?
             }
+            Type::OwnedOpaque(kind) => {
+                let ptr_ty = context.ptr_type(Default::default());
+                let name = kind.clone_fn();
+                let clone = external_function(
+                    module,
+                    name,
+                    ptr_ty.fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(clone, &[loaded.into()], "clone.owned_opaque")
+                    .map_err(builder_error)?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmError::new("owned opaque clone returned void"))?
+            }
             Type::MapII
             | Type::MapSI
             | Type::MapSS
@@ -1874,6 +1893,21 @@ fn llvm_emit_struct_drop<'ctx>(
                 );
                 builder
                     .build_call(drop, &[loaded.into()], "drop.share.call")
+                    .map_err(builder_error)?;
+            }
+            Type::OwnedOpaque(kind) => {
+                let loaded = builder
+                    .build_load(llvm_type(context, *field_ty), gep, "drop.owned_opaque")
+                    .map_err(builder_error)?;
+                let ptr_ty = context.ptr_type(Default::default());
+                let name = kind.drop_fn();
+                let drop = external_function(
+                    module,
+                    name,
+                    context.void_type().fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(drop, &[loaded.into()], "drop.owned_opaque.call")
                     .map_err(builder_error)?;
             }
             Type::MapII

@@ -354,13 +354,15 @@ exports `free_string`, so it stays borrowed; the aliasing string-array helpers
 share buffers, so freeing both input and output would be a double free;
 `sctp_connectx` passes a non-packed address array.
 
-`mako_native_opaque_drop` is now a no-op, which trades a heap corruption for a
-leak: `Type::Opaque` covers both blocks this runtime allocated and handles owned
-by a foreign library, and nothing at runtime distinguishes them, so the boxes in
-the first group are no longer reclaimed. Emitting a typed drop from codegen
-would let it free the ones it owns again and would also close the leaks in the
-`http_request_parse` opaque box and in struct-key map drops, which have the same
-root cause.
+**Native typed drops.** The shared IR now distinguishes runtime-owned opaque
+values from foreign handles. Interface boxes are reference-counted,
+`http_request_parse` results are deep-cloned and dropped, and foreign database,
+registry, and OS handles remain on their explicit close paths. Content-keyed
+struct maps also clone values returned by reads and release stored keys and
+values on overwrite, delete, copy, clear, and final drop. Interface boxes retain
+the concrete type's compiler-generated recursive destructor, including slices,
+maps, nested structs, and owned handles. The focused native fixture and the full
+struct-key map suite pass under LeakSanitizer and AddressSanitizer.
 
 ### General networking primitives (protocol-agnostic)
 

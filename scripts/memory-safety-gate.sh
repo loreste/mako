@@ -102,12 +102,13 @@ fi
 # allocations made from generated code too. A bad access *inside* Cranelift
 # output is still not visible — that is what the C backend's ASan run is for.
 #
-# Soft-fails like the ASan step below: not every host has a sanitizer runtime,
-# and this gate must stay runnable on developer machines.
+# Linux sanitizer failures are hard failures. Other hosts skip this block
+# because the native sanitizer runtime is not reliable there.
 echo "=== memory-safety-gate: native backend under LeakSanitizer ==="
 if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep -q 'native'; then
   ms_native_leak_failed=0
   for f in examples/testing/memory_safety_contract_test.mko \
+           examples/native/owned_handle_drop/native_owned_handle_drop_test.mko \
            examples/testing/leak_detector_test.mko \
            examples/testing/own_branch_regress_test.mko \
            examples/testing/env_vars_test.mko; do
@@ -125,6 +126,25 @@ else
   # macOS: the ASan/LSan runtime deadlocks at startup here, so this is not
   # evidence on a Mac and is skipped rather than reported as passing.
   echo "memory-safety-gate: native LSan skipped (Linux-only; Mac sanitizer runtime hangs)"
+fi
+
+echo "=== memory-safety-gate: native backend under AddressSanitizer ==="
+if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep -q 'native'; then
+  ms_native_asan_failed=0
+  for f in examples/native/owned_handle_drop/native_owned_handle_drop_test.mko \
+           examples/testing/map_struct_key_test.mko; do
+    if ! "$mako_bin" test "$repo_dir/$f" --backend native --sanitize address \
+         >/tmp/mako-ms-native-asan.out 2>&1; then
+      echo "memory-safety-gate: native ASan FAILED on $f" >&2
+      tail -20 /tmp/mako-ms-native-asan.out >&2 || true
+      ms_native_asan_failed=1
+    else
+      echo "  native+asan ok $f"
+    fi
+  done
+  [[ "$ms_native_asan_failed" -eq 0 ]] || exit 1
+else
+  echo "memory-safety-gate: native ASan skipped (Linux-only)"
 fi
 
 echo "=== memory-safety-gate: ASan (optional if toolchain supports) ==="

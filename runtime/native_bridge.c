@@ -824,17 +824,25 @@ MakoNativePtrSlice *mako_native_ptr_slice_clone_deep(const MakoNativePtrSlice *s
     return out;
 }
 
-/* Subslice of pointer array [low:high); owned shallow copy of pointers. */
-MakoNativePtrSlice *mako_native_ptr_slice_slice(const MakoNativePtrSlice *s, int64_t low, int64_t high, int64_t max) {
-    (void)max;
+/* Subslice of pointer array [low:high); non-owning view of the backing array. */
+MakoNativePtrSlice *mako_native_ptr_slice_slice(
+    const MakoNativePtrSlice *s, int64_t low, int64_t high, int64_t max
+) {
     if (!s) return mako_native_ptr_slice_make(0, 0);
     int64_t n = (int64_t)s->len;
     if (low < 0) low = 0;
     if (high < 0 || high > n) high = n;
     if (low > high) low = high;
-    int64_t len = high - low;
-    MakoNativePtrSlice *out = mako_native_ptr_slice_make(len, len);
-    for (int64_t i = 0; i < len; ++i) out->data[i] = s->data[low + i];
+    int64_t cap = max >= 0 && max <= (int64_t)s->cap
+        ? max - low
+        : (int64_t)s->cap - low;
+    if (cap < high - low) cap = high - low;
+    MakoNativePtrSlice *out = (MakoNativePtrSlice *)calloc(1, sizeof(*out));
+    if (!out) abort();
+    out->data = s->data ? s->data + low : NULL;
+    out->len = (size_t)(high - low);
+    out->cap = (size_t)cap;
+    out->owned = 0;
     return out;
 }
 
@@ -1037,29 +1045,6 @@ MakoNativeIntSlice *mako_native_int_map_apply(MakoNativeIntSlice *src, void *fn_
     for (int64_t i = 0; i < n; ++i)
         out->data[i] = fn(src->data[i]);
     return out;
-}
-
-/* Type::Opaque covers two unrelated kinds of handle, and nothing at runtime
- * distinguishes them:
- *
- *   1. blocks this runtime malloc'd (e.g. the box behind http_request_parse),
- *      which free() would correctly reclaim;
- *   2. handles owned by a foreign library or by one of our registries — a
- *      sqlite3* from mako_sql_open_sqlite, a TlsConn — which must be released
- *      through their own API (sqlite3_close, tls_conn_close) and must never be
- *      passed to free().
- *
- * The SqlDB value handed to Mako code is `(int64_t)(intptr_t)db.sqlite`
- * (mako_sql_meta_key), so a bare free() here corrupts the heap on every scope
- * exit that holds a database handle: glibc aborts with "free(): invalid
- * pointer", and macOS silently tolerates it, which is why this only ever
- * reproduced on Linux.
- *
- * Until codegen emits a typed drop that knows which kind it has, do nothing.
- * Kind 2 must not be freed at all; kind 1 leaks its box, which is recoverable.
- * Corrupting the allocator is not. */
-void mako_native_opaque_drop(void *p) {
-    (void)p;
 }
 
 // parse_int → try: returns 1 and writes *out on success, else 0.
@@ -1737,18 +1722,30 @@ int64_t mako_native_http2_conn_new(void) {
     return c ? (int64_t)(intptr_t)c : -1;
 }
 
-/* Interface fat pointer: { tag, data* } */
+typedef void (*MakoNativeIfaceDrop)(void *);
+
+/* Interface fat pointer with the concrete value's compiler-generated drop. */
 typedef struct {
     int64_t tag;
     void *data;
+    MakoNativeIfaceDrop drop;
+    _Atomic size_t refs;
 } MakoNativeIface;
 
-void *mako_native_iface_box(int64_t tag, void *data) {
+void *mako_native_iface_box(int64_t tag, void *data, MakoNativeIfaceDrop drop) {
     MakoNativeIface *b = (MakoNativeIface *)malloc(sizeof(MakoNativeIface));
     if (!b) abort();
     b->tag = tag;
     b->data = data; /* takes ownership of struct heap block */
+    b->drop = drop;
+    atomic_init(&b->refs, 1);
     return b;
+}
+
+void *mako_native_iface_clone(void *box) {
+    MakoNativeIface *b = (MakoNativeIface *)box;
+    if (b) atomic_fetch_add_explicit(&b->refs, 1, memory_order_relaxed);
+    return box;
 }
 
 int64_t mako_native_iface_tag(void *box) {
@@ -1759,9 +1756,13 @@ void *mako_native_iface_data(void *box) {
     return box ? ((MakoNativeIface *)box)->data : NULL;
 }
 
-/* opaque_drop already frees; iface box free frees header only if data freed separately.
- * For owned iface drop: free data via struct drop then free box — IR uses opaque_drop
- * which free(box) only. Leak of struct data — acceptable seed; improve later. */
+void mako_native_iface_drop(void *box) {
+    MakoNativeIface *b = (MakoNativeIface *)box;
+    if (!b) return;
+    if (atomic_fetch_sub_explicit(&b->refs, 1, memory_order_acq_rel) != 1) return;
+    if (b->drop) b->drop(b->data);
+    free(box);
+}
 
 int64_t mako_native_http2_conn_use(int64_t c) {
     return mako_http2_conn_use((MakoHttp2Conn *)(intptr_t)c);
@@ -8507,6 +8508,19 @@ typedef struct {
     MakoNativeString *path;
     MakoNativeString *body;
 } MakoNativeHttpRequest;
+
+static MakoNativeHttpRequest *mako_native_http_request_clone(
+    const MakoNativeHttpRequest *src
+) {
+    if (!src) return NULL;
+    MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)calloc(1, sizeof(*box));
+    if (!box) abort();
+    box->method = mako_native_string_clone_ptr(src->method);
+    box->path = mako_native_string_clone_ptr(src->path);
+    box->body = mako_native_string_clone_ptr(src->body);
+    return box;
+}
+
 int64_t mako_native_http_request_parse_ptr(MakoNativeString *raw) {
     MakoHttpRequest r = mako_http_request_parse(bridge_borrow_str(raw));
     MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)calloc(1, sizeof(*box));
@@ -8515,6 +8529,34 @@ int64_t mako_native_http_request_parse_ptr(MakoNativeString *raw) {
     box->path = bridge_take_str(mako_http_request_path(r));
     box->body = bridge_take_str(mako_http_request_body(r));
     return (int64_t)(intptr_t)box;
+}
+int64_t mako_native_http_request_clone_ptr(int64_t h) {
+    return (int64_t)(intptr_t)mako_native_http_request_clone(
+        (MakoNativeHttpRequest *)(intptr_t)h
+    );
+}
+int64_t mako_native_http_request_eq_ptr(int64_t a, int64_t b) {
+    MakoNativeHttpRequest *left = (MakoNativeHttpRequest *)(intptr_t)a;
+    MakoNativeHttpRequest *right = (MakoNativeHttpRequest *)(intptr_t)b;
+    if (left == right) return 1;
+    if (!left || !right) return 0;
+    return mako_str_eq(
+               bridge_borrow_str(left->method), bridge_borrow_str(right->method)
+           ) &&
+           mako_str_eq(
+               bridge_borrow_str(left->path), bridge_borrow_str(right->path)
+           ) &&
+           mako_str_eq(
+               bridge_borrow_str(left->body), bridge_borrow_str(right->body)
+           );
+}
+void mako_native_http_request_drop_ptr(int64_t h) {
+    MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)(intptr_t)h;
+    if (!box) return;
+    mako_native_string_drop_ptr(box->method);
+    mako_native_string_drop_ptr(box->path);
+    mako_native_string_drop_ptr(box->body);
+    free(box);
 }
 MakoNativeString *mako_native_http_request_method_ptr(int64_t h) {
     MakoNativeHttpRequest *b = (MakoNativeHttpRequest *)(intptr_t)h;
@@ -10816,4 +10858,3 @@ int64_t mako_native_peer_table_capacity(int64_t a0) {
 int64_t mako_native_peer_table_alive(int64_t a0, int64_t a1) {
     return mako_peer_table_alive(a0, a1);
 }
-

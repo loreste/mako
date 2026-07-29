@@ -1640,6 +1640,7 @@ fn ir_clif_type(ty: IrType) -> Result<cranelift_codegen::ir::Type, NativeError> 
         | IrType::Task
         | IrType::Opaque
         | IrType::Builder
+        | IrType::OwnedOpaque(_)
         | IrType::FnPtr
         | IrType::StructSlice(_)
         | IrType::ShareInt
@@ -1714,6 +1715,18 @@ fn emit_struct_clone(
                         Linkage::Import,
                         &sig,
                     )
+                    .map_err(|e| NativeError::new(e.to_string()))?;
+                let f = module.declare_func_in_func(id, &mut fb.func);
+                let call = fb.ins().call(f, &[loaded]);
+                fb.inst_results(call)[0]
+            }
+            IrType::OwnedOpaque(kind) => {
+                let name = kind.clone_fn();
+                let mut sig = module.make_signature();
+                sig.params.push(AbiParam::new(types::I64));
+                sig.returns.push(AbiParam::new(types::I64));
+                let id = module
+                    .declare_function(name, Linkage::Import, &sig)
                     .map_err(|e| NativeError::new(e.to_string()))?;
                 let f = module.declare_func_in_func(id, &mut fb.func);
                 let call = fb.ins().call(f, &[loaded]);
@@ -1809,6 +1822,16 @@ fn emit_struct_drop(
                         Linkage::Import,
                         &sig,
                     )
+                    .map_err(|e| NativeError::new(e.to_string()))?;
+                let f = module.declare_func_in_func(id, &mut fb.func);
+                fb.ins().call(f, &[loaded]);
+            }
+            IrType::OwnedOpaque(kind) => {
+                let name = kind.drop_fn();
+                let mut sig = module.make_signature();
+                sig.params.push(AbiParam::new(types::I64));
+                let id = module
+                    .declare_function(name, Linkage::Import, &sig)
                     .map_err(|e| NativeError::new(e.to_string()))?;
                 let f = module.declare_func_in_func(id, &mut fb.func);
                 fb.ins().call(f, &[loaded]);
