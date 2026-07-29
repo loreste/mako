@@ -10,7 +10,7 @@ CARGO ?= cargo
 TARGET_DIR ?= $(shell $(CARGO) metadata --format-version 1 --no-deps 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])' 2>/dev/null || echo target)
 MAKO_BIN := $(TARGET_DIR)/release/mako
 
-.PHONY: all release build install uninstall test help clean version
+.PHONY: all release build install uninstall test help clean version structure
 
 all: release
 
@@ -63,8 +63,11 @@ version:
 	$(CARGO) run --quiet --release -- --version
 
 help:
-	@echo "Targets: release install uninstall test version help"
+	@echo "Targets: release install uninstall test version help structure"
 	@echo "PREFIX=$(PREFIX)  RUNTIME_DST=$(RUNTIME_DST)"
 
 clean:
 	$(CARGO) clean
+
+structure:
+	@bash scripts/update_structure.sh
