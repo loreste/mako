@@ -39,7 +39,10 @@ echo "install-smoke: init + run"
 tmp="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mako-install-smoke-$$"
 rm -rf "$tmp"
 "$mako_bin" init "$tmp" --name install-smoke
-"$mako_bin" run "$tmp/main.mko"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) "$mako_bin" run "$tmp/main.mko" --backend c ;;
+  *) "$mako_bin" run "$tmp/main.mko" ;;
+esac
 rm -rf "$tmp"
 
 echo "install-smoke: ok"
