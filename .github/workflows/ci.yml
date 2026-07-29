@@ -586,17 +586,20 @@ jobs:
 
   memory-safety:
     name: Memory safety gate
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang ripgrep
       - name: Build mako
         run: cargo build --release
       - name: Memory safety gate
         env:
           MAKO_RUNTIME: ${{ github.workspace }}/runtime
           MAKO_MS_SKIP_HTTP: "1"
+          MAKO_BACKEND: c
         run: ./scripts/memory-safety-gate.sh
 
   sanitizer-sweep:

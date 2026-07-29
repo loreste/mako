@@ -77,7 +77,7 @@ stdlib, free `go` outside `crew`, or lifetime parameters.
 | Shared ownership-explicit IR | `src/native_ir.rs` |
 | Cranelift debug backend | `src/native_codegen.rs` |
 | Native bridge + embedded runtime archive | `runtime/native_bridge.c` |
-| Full testing corpus on native | **393/393** `mako test examples/testing --backend native` |
+| Full testing corpus on native | **394/394** `mako test examples/testing --backend native` |
 | Portable IO + concurrent select | seek/read_exact/append3 bridges; TLS select; recv closed vs timeout |
 | Language residual pack | mut-self `for` iterators; multi-stmt mut captures; const `s[i]` |
 | Product version string | `0.4.5` in `Cargo.toml` |
@@ -134,7 +134,7 @@ Phase 4 — Post-tag (Homebrew/winget follow-through; then 0.5 / 1.0 planning)
 
 ### Ship checklist
 
-- [x] Native language gate: full `examples/testing` green (**393/393**)  
+- [x] Native language gate: full `examples/testing` green (**394/394**)  
 - [x] Version `0.4.5` in tree  
 - [x] LLVM release path usable on primary host (Apple arm64) when llvm-backend + lld present  
 - [x] Bench numbers published (fib/parity ~1.01× Rust; slice ~1.12×; string_slice ~1.15× residual; binary ~1.01× after dead_strip)  
@@ -160,7 +160,7 @@ silently falling back to C.
 - [x] `defer`, labeled loops, match guards (shared IR + corpus)
 - [x] Native runtime interop via `runtime/native_bridge.c` (net/TLS/SQL/HTTP/SIP/…)
 - [x] `crew`, `kick`, `fan`, channels, and `select` (corpus green)
-- [x] Full `examples/testing` native correctness gate — **393/393** (2026-07-22)
+- [x] Full `examples/testing` native correctness gate — **394/394** (2026-07-22)
 - [x] Mut-self iterators · multi-stmt mut captures · const string index
 - [ ] LLVM release path: broad workload runtime ≤ C and ≤ Rust (slice/map/I/O/CPU/RSS)
 - [ ] Cross-compilation, WASM, static, sanitizer, and overflow build modes (or hard-error)

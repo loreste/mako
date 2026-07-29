@@ -2,8 +2,8 @@
 
 **Product version:** **0.5.0** (`Cargo.toml` / `mako version`);
 last published tag **v0.5.0**.  
-**Tree status:** native compiler language gate **393/393** on
-`mako test examples/testing --backend native` (2026-07-28).  
+**Tree status:** native compiler language gate **394/394** on
+`mako test examples/testing --backend native` (2026-07-29).  
 **Versioning:** small patches preferred — [VERSIONING.md](VERSIONING.md).  
 **Backends:** default **c**; recommend `MAKO_BACKEND=native` for debug and
 `--backend llvm --release` for optimizing builds (see [BUILD.md § Backend policy](BUILD.md)).  
