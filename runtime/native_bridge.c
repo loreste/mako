@@ -14,6 +14,7 @@
 // TLS before WebSocket — WSS client frames over TlsConn.
 // mako_log.h redefines symbols already in mako_stdlib.h — use stdlib log only.
 #include "mako_tls.h"
+#include "mako_dtls.h"
 #include "mako_ws.h"
 #include "mako_db.h"
 #include "mako_evloop.h"
@@ -1810,6 +1811,50 @@ int64_t mako_native_tls_write_ptr(int64_t conn, MakoNativeString *s) {
 }
 int64_t mako_native_tls_conn_close(int64_t c) {
     return mako_tls_conn_close((void *)(intptr_t)c);
+}
+
+int64_t mako_native_dtls_available(void) {
+    return mako_dtls_available();
+}
+int64_t mako_native_dtls_ctx_new_ptr(MakoNativeString *c, MakoNativeString *k, int64_t srtp) {
+    /* Opaque handle: store pointer as i64 for IR ABI. */
+    void *ctx = mako_dtls_ctx_new(bridge_borrow_str(c), bridge_borrow_str(k), srtp);
+    return (int64_t)(intptr_t)ctx;
+}
+int64_t mako_native_dtls_ctx_free(int64_t ctx) {
+    return mako_dtls_ctx_free((void *)(intptr_t)ctx);
+}
+int64_t mako_native_dtls_connect_ptr(int64_t ctx, int64_t fd, MakoNativeString *h, int64_t port) {
+    void *conn = mako_dtls_connect((void *)(intptr_t)ctx, fd, bridge_borrow_str(h), port);
+    return (int64_t)(intptr_t)conn;
+}
+int64_t mako_native_dtls_accept(int64_t ctx, int64_t fd) {
+    void *conn = mako_dtls_accept((void *)(intptr_t)ctx, fd);
+    return (int64_t)(intptr_t)conn;
+}
+int64_t mako_native_dtls_send_ptr(int64_t conn, MakoNativeString *d) {
+    return mako_dtls_send((void *)(intptr_t)conn, bridge_borrow_str(d));
+}
+MakoNativeString *mako_native_dtls_recv(int64_t conn, int64_t max) {
+    return bridge_take_str(mako_dtls_recv((void *)(intptr_t)conn, max));
+}
+int64_t mako_native_dtls_close(int64_t conn) {
+    return mako_dtls_close((void *)(intptr_t)conn);
+}
+int64_t mako_native_dtls_conn_fd(int64_t conn) {
+    return mako_dtls_conn_fd((void *)(intptr_t)conn);
+}
+MakoNativeString *mako_native_dtls_peer_fingerprint(int64_t conn) {
+    return bridge_take_str(mako_dtls_peer_fingerprint((void *)(intptr_t)conn));
+}
+MakoNativeString *mako_native_dtls_local_fingerprint(int64_t ctx) {
+    return bridge_take_str(mako_dtls_local_fingerprint((void *)(intptr_t)ctx));
+}
+MakoNativeString *mako_native_dtls_export_srtp_keys(int64_t conn) {
+    return bridge_take_str(mako_dtls_export_srtp_keys((void *)(intptr_t)conn));
+}
+MakoNativeString *mako_native_dtls_srtp_profile(int64_t conn) {
+    return bridge_take_str(mako_dtls_srtp_profile((void *)(intptr_t)conn));
 }
 
 int64_t mako_native_h3_server_close(int64_t h) {

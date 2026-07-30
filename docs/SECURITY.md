@@ -294,7 +294,30 @@ framing, multi-round negotiation) stay **application code** — Mako ships diges
 HMAC, PBKDF2, SCRAM schedule + channel-binding helpers, not a SASL framework.
 
 **Still out of scope (product):** full CA/HSM/ACME product, WebPKI store beyond
-CA PEM paths, DTLS/WebRTC as first-class products.
+CA PEM paths, browser WebRTC as a first-class product (the DTLS-SRTP building
+block ships — see below).
+
+### DTLS over UDP (Done — building block)
+
+DTLS 1.2 over a UDP socket (`std/dtls` / `dtls_*` builtins,
+`runtime/mako_dtls.h`): the WebRTC DTLS-SRTP handshake primitive.
+
+- **Cookie exchange** — `dtls_accept` runs the RFC 6347 stateless
+  HelloVerifyRequest exchange (per-connection HMAC-SHA256 cookie secret), so a
+  bound UDP socket is not an amplification/CPU oracle before the peer proves
+  its address.
+- **Fingerprints** — `dtls_local_fingerprint` / `dtls_peer_fingerprint` expose
+  SHA-256 cert digests for SDP `a=fingerprint` pinning; apps authenticate the
+  peer by comparing against the signaled fingerprint (there is no WebPKI in
+  DTLS-SRTP — the fingerprint IS the trust anchor).
+- **Key material** — `dtls_export_srtp_keys` returns raw RFC 5764 SRTP master
+  key+salt bytes. Treat it as a secret: use `dtls.export_srtp_secret` (or
+  `secret_from_str` + `secret_drop`) so the bytes are wiped on drop instead of
+  lingering in the heap.
+- **v1 limits** — DTLS 1.2 only, PEM-path certs, one peer per UDP socket
+  (after `accept` the socket is `connect()`ed to that peer), POSIX only.
+
+Tests: `examples/testing/dtls_test.mko` · interop: `scripts/dtls-smoke.sh`.
 
 Tests: `security_test.mko`, `security_crypto_test.mko`, `password_hash_test.mko`,
 `bcrypt_test.mko`, `scram_test.mko`, `tls_aead_test.mko`, `tls_server_test.mko`,

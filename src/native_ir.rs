@@ -1257,6 +1257,8 @@ fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
                     | "BufReader"
                     | "BufWriter"
                     | "TlsServer"
+                    | "DtlsCtx"
+                    | "DtlsConn"
                     | "WaitGroup"
                     | "Once"
                     | "Cond"
@@ -17092,6 +17094,19 @@ impl<'a> FunctionLowerer<'a> {
             "hpack_decode_block" if args.len() == 1 => Some(("mako_native_hpack_decode_block_ptr", &[Type::Str], Some(Type::I64), false)),
             "http2_response" if args.len() == 3 => Some(("mako_native_http2_response_ptr", &[Type::I64, Type::I64, Type::Str], Some(Type::Str), true)),
             "tls_server_available" if args.is_empty() => Some(("mako_native_tls_server_available", &[], Some(Type::I64), false)),
+            "dtls_available" if args.is_empty() => Some(("mako_native_dtls_available", &[], Some(Type::I64), false)),
+            "dtls_ctx_new" if args.len() == 3 => Some(("mako_native_dtls_ctx_new_ptr", &[Type::Str, Type::Str, Type::I64], Some(Type::Opaque), false)),
+            "dtls_ctx_free" if args.len() == 1 => Some(("mako_native_dtls_ctx_free", &[Type::Opaque], Some(Type::I64), false)),
+            "dtls_connect" if args.len() == 4 => Some(("mako_native_dtls_connect_ptr", &[Type::Opaque, Type::I64, Type::Str, Type::I64], Some(Type::Opaque), false)),
+            "dtls_accept" if args.len() == 2 => Some(("mako_native_dtls_accept", &[Type::Opaque, Type::I64], Some(Type::Opaque), false)),
+            "dtls_send" if args.len() == 2 => Some(("mako_native_dtls_send_ptr", &[Type::Opaque, Type::Str], Some(Type::I64), false)),
+            "dtls_recv" if args.len() == 2 => Some(("mako_native_dtls_recv", &[Type::Opaque, Type::I64], Some(Type::Str), true)),
+            "dtls_close" if args.len() == 1 => Some(("mako_native_dtls_close", &[Type::Opaque], Some(Type::I64), false)),
+            "dtls_conn_fd" if args.len() == 1 => Some(("mako_native_dtls_conn_fd", &[Type::Opaque], Some(Type::I64), false)),
+            "dtls_peer_fingerprint" if args.len() == 1 => Some(("mako_native_dtls_peer_fingerprint", &[Type::Opaque], Some(Type::Str), true)),
+            "dtls_local_fingerprint" if args.len() == 1 => Some(("mako_native_dtls_local_fingerprint", &[Type::Opaque], Some(Type::Str), true)),
+            "dtls_export_srtp_keys" if args.len() == 1 => Some(("mako_native_dtls_export_srtp_keys", &[Type::Opaque], Some(Type::Str), true)),
+            "dtls_srtp_profile" if args.len() == 1 => Some(("mako_native_dtls_srtp_profile", &[Type::Opaque], Some(Type::Str), true)),
             "tls_server_new" if args.len() == 2 => Some(("mako_native_tls_server_new_ptr", &[Type::Str, Type::Str], Some(Type::Opaque), false)),
             "tls_accept" if args.len() == 2 => Some(("mako_native_tls_accept", &[Type::I64, Type::I64], Some(Type::I64), false)),
             "tls_read" if args.len() == 2 => Some(("mako_native_tls_read", &[Type::Opaque, Type::I64], Some(Type::Str), true)),

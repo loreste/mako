@@ -17,10 +17,12 @@
 
 void mako_native_print_i64(int64_t value) {
     printf("%lld\n", (long long)value);
+    fflush(stdout); /* see mako_native_string_print_ptr */
 }
 
 void mako_native_print_bool(int32_t value) {
     puts(value ? "true" : "false");
+    fflush(stdout); /* see mako_native_string_print_ptr */
 }
 
 typedef struct {
@@ -103,6 +105,9 @@ int32_t mako_native_string_equal_ptr(const MakoNativeString *left,
 void mako_native_string_print_ptr(const MakoNativeString *value) {
     fwrite(value->data, 1, mako_str_raw_len(value->len), stdout);
     fputc('\n', stdout);
+    /* Line semantics must match mako_rt.h (writev, unbuffered): flush so
+     * log markers are visible while the process is blocked in I/O. */
+    fflush(stdout);
 }
 
 void mako_native_string_drop_ptr(MakoNativeString *value) {
@@ -150,6 +155,7 @@ int32_t mako_native_string_equal(MakoNativeString left,
 void mako_native_string_print(MakoNativeString value) {
     fwrite(value.data, 1, mako_str_raw_len(value.len), stdout);
     fputc('\n', stdout);
+    fflush(stdout); /* see mako_native_string_print_ptr */
 }
 
 void mako_native_string_drop(MakoNativeString value) {

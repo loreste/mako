@@ -70,6 +70,7 @@ symbol-for-symbol parity with Go or any optional platform integration.
 | `timer` | **Done** | general deadline min-heap (`timer_heap_*`) — protocol-agnostic |
 | `peer` | **Done** | general named peers + string-key routes (`peer_table_*`) |
 | `sctp` | **Done** | general SCTP transport (streams/PPID/HB/multihome where kernel allows) |
+| `dtls` | **Done** | DTLS 1.2 over UDP + SRTP key export + fingerprints (WebRTC building block) |
 | `diameter` | **Optional pack** | RFC 6733 codec + optional managers; one protocol over general primitives |
 | `collections` | **Done** | List[T]=[]T + set/heap/ring/stack/queue/stats |
 | `graphql` | **Done seed** | HTTP body query/vars, field list, data/error JSON ([MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md)) |
@@ -893,6 +894,50 @@ fn main() {
 
 ---
 
+## `dtls`
+
+DTLS 1.2 over UDP — the WebRTC DTLS-SRTP building block. Blocking handshake
+with RFC 6347 retransmit timers and stateless cookie exchange, SHA-256 cert
+fingerprints (SDP `a=fingerprint`), and RFC 5764 keying-material export for
+SRTP. Requires OpenSSL linked (`dtls.available() == 1`); otherwise every
+constructor fails cleanly. Runtime: `runtime/mako_dtls.h`. Full builtin table:
+[BUILTINS.md](BUILTINS.md) § Crypto & Security → DTLS.
+
+```mko
+pull "dtls"
+
+fn main() {
+    let fd = udp_bind_addr("127.0.0.1", 19499)
+    let ctx = dtls.ctx_new("cert.pem", "key.pem", 1)  // use_srtp=1
+    print(dtls.local_fingerprint(ctx))                 // SDP a=fingerprint:sha-256
+    let conn = dtls.accept(ctx, fd)                    // or dtls.connect(ctx, fd, host, port)
+    let msg = dtls.recv(conn, 4096)
+    let _ = dtls.send(conn, msg)
+    let keys = dtls.export_srtp_keys(conn)             // client_key|client_salt|server_key|server_salt
+    print(dtls.srtp_profile(conn))
+    let _ = dtls.close(conn)
+    let _ = udp_close(fd)
+    let _ = dtls.ctx_free(ctx)
+}
+```
+
+| Area | API |
+|------|-----|
+| Context | `ctx_new` (cert+key PEM paths, `use_srtp`) / `ctx_free` / `available` |
+| Handshake | `connect` (client) / `accept` (server, cookie exchange) — blocking |
+| I/O | `send` / `recv` / `close` (does not close the UDP fd) / `conn_fd` |
+| Fingerprints | `local_fingerprint` (SDP offer) / `peer_fingerprint` — `AA:BB:…` SHA-256 |
+| SRTP | `export_srtp_keys` (RFC 5764; 60 B AES128_CM, 88 B AEAD_AES_256_GCM) / `srtp_profile` / `export_srtp_secret` (Secret, wiped on drop) |
+
+v1 limits: DTLS 1.2 only, PEM-path certs, one peer per UDP socket (after
+`accept` the socket is `connect()`ed to that peer), POSIX only. Exported key
+material is a plain `string` — route it through `export_srtp_secret` (or
+`secret_from_str` + `secret_drop`) so it is wiped on drop. Tests:
+`examples/testing/dtls_test.mko` · interop: `scripts/dtls-smoke.sh`
+(`openssl s_client -dtls1_2`) · demo: `examples/dtls_echo_server.mko`.
+
+---
+
 ## `llm` (LLM programming)
 
 OpenAI-compatible chat runtime for **low-latency agent/tool loops** in Mako.
@@ -1511,6 +1556,7 @@ composes them; no pack invents timeouts or peer policy defaults.
 | Pack / builtins | Role |
 |-----------------|------|
 | `tcp_pool_*` / `tls_pool_*` | Connection pools with **caller-supplied** timeouts; mTLS optional |
+| `dtls_*` / `std/dtls` | DTLS 1.2 over UDP + SRTP key export + cert fingerprints (WebRTC DTLS-SRTP building block) |
 | `sctp_*` / `std/sctp` | General SCTP (streams, PPID, HB, multihoming where kernel allows) |
 | `timer_heap_*` / `std/timer` | Protocol-agnostic deadline min-heap |
 | `peer_table_*` / `std/peer` | Protocol-agnostic named peers + string-key routing + scan helpers |
@@ -1588,8 +1634,9 @@ fn on_datagram(raw: string, peer_host: string, peer_port: int) {
 Package mirror: `pull "std/sip"` (`std/sip/sip.mko`).  
 Tests: `examples/testing/sip_test.mko` · demo: `examples/sip_ua.mko`.
 
-**Not shipped as product libraries:** a complete softphone, SBCs, DTLS-SRTP
-handshake, or browser WebRTC. Those are **Mako programs** on top of this surface.
+**Not shipped as product libraries:** a complete softphone, SBCs, SRTP media
+encryption, or browser WebRTC. Those are **Mako programs** on top of this
+surface (the DTLS-SRTP handshake itself ships as `std/dtls`).
 
 ---
 

@@ -1,0 +1,24 @@
+// DTLS echo server for scripts/dtls-smoke.sh: accepts one DTLS 1.2 client on
+// 127.0.0.1:19499, echoes one datagram, and exits. Interop target for
+// `openssl s_client -dtls1_2`.
+
+pull "dtls"
+
+fn main() {
+    let fd = udp_bind_addr("127.0.0.1", 19499)
+    if fd < 0 {
+        print("dtls_smoke: bind failed")
+        return
+    }
+    let ctx = dtls.ctx_new("runtime/certs/dev.crt", "runtime/certs/dev.key", 1)
+    print("dtls_smoke: listening on 127.0.0.1:19499")
+    let conn = dtls.accept(ctx, fd)
+    let msg = dtls.recv(conn, 4096)
+    if len(msg) > 0 {
+        let _ = dtls.send(conn, msg)
+    }
+    let _ = dtls.close(conn)
+    let _ = udp_close(fd)
+    let _ = dtls.ctx_free(ctx)
+    print("dtls_smoke: done")
+}

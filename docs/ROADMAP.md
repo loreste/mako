@@ -1,11 +1,11 @@
 # Mako roadmap
 
-**Product version:** **0.5.0** (tip) · last tagged **v0.5.0** · Last sync: **2026-07-29**.  
-**Suite:** **394** Mako tests on `examples/testing` (C + native backends) + 139
+**Product version:** **0.5.1** (tip) · last tagged **v0.5.1** · Last sync: **2026-07-30**.  
+**Suite:** **395** Mako tests on `examples/testing` (C + native backends) + 140
 Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configured.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.0`** published; tip train **0.5.0+ → 0.5.1**.
+**Release:** tag **`v0.5.1`** published; tip train **0.5.1+ → 0.5.2**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -31,7 +31,7 @@ Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configu
 | **0.4.20** | `#line` source mapping directives · debugger-friendly C output | **Shipped** |
 | **0.4.21** | Public package registry · default registry URL · wildcard version fix | **Shipped** |
 | **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Shipped** |
-| **0.5.1** | Toolchain & IDE depth (LSP, DAP/DWARF, doc/bench product) | **Planned** |
+| **0.5.1** | DTLS 1.2 + SRTP key export · DCE underscore fix · native stdout flush | **Shipped** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Planned** |
 | **0.5.x** | Further patches on 0.5 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
@@ -77,7 +77,7 @@ stdlib, free `go` outside `crew`, or lifetime parameters.
 | Shared ownership-explicit IR | `src/native_ir.rs` |
 | Cranelift debug backend | `src/native_codegen.rs` |
 | Native bridge + embedded runtime archive | `runtime/native_bridge.c` |
-| Full testing corpus on native | **394/394** `mako test examples/testing --backend native` |
+| Full testing corpus on native | **395/395** `mako test examples/testing --backend native` |
 | Portable IO + concurrent select | seek/read_exact/append3 bridges; TLS select; recv closed vs timeout |
 | Language residual pack | mut-self `for` iterators; multi-stmt mut captures; const `s[i]` |
 | Product version string | `0.4.5` in `Cargo.toml` |
@@ -134,7 +134,7 @@ Phase 4 — Post-tag (Homebrew/winget follow-through; then 0.5 / 1.0 planning)
 
 ### Ship checklist
 
-- [x] Native language gate: full `examples/testing` green (**394/394**)  
+- [x] Native language gate: full `examples/testing` green (**395/395**)  
 - [x] Version `0.4.5` in tree  
 - [x] LLVM release path usable on primary host (Apple arm64) when llvm-backend + lld present  
 - [x] Bench numbers published (fib/parity ~1.01× Rust; slice ~1.12×; string_slice ~1.15× residual; binary ~1.01× after dead_strip)  
@@ -160,7 +160,7 @@ silently falling back to C.
 - [x] `defer`, labeled loops, match guards (shared IR + corpus)
 - [x] Native runtime interop via `runtime/native_bridge.c` (net/TLS/SQL/HTTP/SIP/…)
 - [x] `crew`, `kick`, `fan`, channels, and `select` (corpus green)
-- [x] Full `examples/testing` native correctness gate — **394/394** (2026-07-22)
+- [x] Full `examples/testing` native correctness gate — **395/395** (2026-07-22)
 - [x] Mut-self iterators · multi-stmt mut captures · const string index
 - [ ] LLVM release path: broad workload runtime ≤ C and ≤ Rust (slice/map/I/O/CPU/RSS)
 - [ ] Cross-compilation, WASM, static, sanitizer, and overflow build modes (or hard-error)

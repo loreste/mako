@@ -4,7 +4,7 @@ Mako is a compiled language for backend and systems work. You write `.mko`
 files; Mako turns them into standalone native binaries — no garbage collector,
 no VM, nothing extra to install next to them at runtime.
 
-**Status: alpha (v0.5.0).** It works, it compiles real programs, people have
+**Status: alpha (v0.5.1).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -103,7 +103,7 @@ records what has real tests and what only verifies its shape.
 
 **Backends.** Native object code is the default (Cranelift). The C backend
 remains available via `--backend c` and is used automatically for sanitizers,
-cross-compilation, and emit-c. Both pass 394/394 tests and produce standalone
+cross-compilation, and emit-c. Both pass 395/395 tests and produce standalone
 binaries. LLVM release builds available with `--backend llvm --release`.
 Both the C and native backends require clang for final linking. Only specially
 built LLVM/LLD configurations avoid the system linker.
@@ -175,7 +175,7 @@ mako test -r TestAdd -v                   # filter + verbose
 mako test --sanitize address examples/testing  # under ASan
 ```
 
-394 test files. The complete suite is exercised under ASan and UBSan in CI.
+395 test files. The complete suite is exercised under ASan and UBSan in CI.
 A focused concurrency subset is exercised under TSan.
 
 ## Docs

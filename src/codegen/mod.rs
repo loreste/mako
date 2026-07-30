@@ -2530,7 +2530,9 @@ impl Codegen {
         "diameter_msg_build", "diameter_session_key", "diameter_set_e2e", "diameter_set_hbh",
         "diameter_tcm_take_out", "diameter_txn_key", "dns_join_host_port", "dns_lookup_all",
         "dns_lookup_ipv4", "dns_lookup_ipv6", "dns_naptr_lookup", "dns_normalize_host",
-        "dns_split_host", "dns_srv_lookup", "duration_string", "embed_file", "env_get",
+        "dns_split_host", "dns_srv_lookup", "dtls_export_srtp_keys", "dtls_local_fingerprint",
+        "dtls_peer_fingerprint", "dtls_recv", "dtls_srtp_profile", "duration_string",
+        "embed_file", "env_get",
         "env_get_or", "error_as_tag", "exec_output", "ffi_abi_name", "file_read_exact",
         "flag_string", "fmt_errorf", "fmt_errorf2", "fmt_sprint", "fmt_sprint2", "fmt_sprint3",
         "fmt_sprintf", "fmt_sprintf2", "fmt_sprintf3", "fmt_sprintf4", "fmt_sprintf_d",
@@ -4065,6 +4067,7 @@ impl Codegen {
             self.out.push_str("#include \"mako_leak.h\"\n");
             self.out.push_str("#include \"mako_shutdown.h\"\n");
             self.out.push_str("#include \"mako_tls.h\"\n");
+            self.out.push_str("#include \"mako_dtls.h\"\n");
             self.out.push_str("#include \"mako_llm.h\"\n");
             self.out.push_str("#include \"mako_sip.h\"\n");
             self.out.push_str("#include \"mako_nghttp2.h\"\n");
@@ -4432,6 +4435,7 @@ impl Codegen {
         // Optional headers — only when the program uses their functions.
         let conditional: &[(&[&str], &str)] = &[
             (&["mako_tls_", "tls_", "ssl_", "jwt_", "hmac_", "x509_", "pem_", "scram_"], "mako_tls.h"),
+            (&["mako_dtls_", "dtls_"], "mako_dtls.h"),
             (&["mako_llm_", "llm_"], "mako_llm.h"),
             (&["mako_sip_", "sip_"], "mako_sip.h"),
             (&["mako_nghttp2", "nghttp2_"], "mako_nghttp2.h"),
@@ -11221,6 +11225,7 @@ impl Codegen {
                 "GameUDP" => "MakoGameUDP*".into(),
                 "Http2Conn" => "MakoHttp2Conn*".into(),
                 "TlsServer" | "TlsClient" | "TlsConn" | "Watcher" => "void*".into(),
+                "DtlsCtx" | "DtlsConn" => "void*".into(),
                 "CHash" => "MakoCHash*".into(),
                 "RateLimiter" => "MakoRateLimiter*".into(),
                 "CircuitBreaker" => "MakoCircuitBreaker*".into(),
@@ -30555,6 +30560,99 @@ impl Codegen {
                         "tls_conn_fd" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_tls_conn_fd({c})"));
+                        }
+                        "dtls_available" => {
+                            return ("int64_t".into(), "mako_dtls_available()".into());
+                        }
+                        "dtls_ctx_new" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, s) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("dctx");
+                            self.line(&format!(
+                                "void *{tmp} = mako_dtls_ctx_new({c}, {k}, {s});"
+                            ));
+                            return ("void*".into(), tmp);
+                        }
+                        "dtls_ctx_free" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_dtls_ctx_free({c});"));
+                            return ("int64_t".into(), "0".into());
+                        }
+                        "dtls_connect" => {
+                            let (_, ctx) = self.emit_expr(&args[0]);
+                            let (_, fd) = self.emit_expr(&args[1]);
+                            let (_, h) = self.emit_expr(&args[2]);
+                            let (_, p) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("dcon");
+                            self.line(&format!(
+                                "void *{tmp} = mako_dtls_connect({ctx}, {fd}, {h}, {p});"
+                            ));
+                            return ("void*".into(), tmp);
+                        }
+                        "dtls_accept" => {
+                            let (_, ctx) = self.emit_expr(&args[0]);
+                            let (_, fd) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dac");
+                            self.line(&format!(
+                                "void *{tmp} = mako_dtls_accept({ctx}, {fd});"
+                            ));
+                            return ("void*".into(), tmp);
+                        }
+                        "dtls_send" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, d) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("dsnd");
+                            self.line(&format!("int64_t {tmp} = mako_dtls_send({c}, {d});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "dtls_recv" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("drcv");
+                            self.line(&format!("MakoString {tmp} = mako_dtls_recv({c}, {n});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "dtls_close" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_dtls_close({c});"));
+                            return ("int64_t".into(), "0".into());
+                        }
+                        "dtls_conn_fd" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_dtls_conn_fd({c})"));
+                        }
+                        "dtls_peer_fingerprint" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dpfp");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_dtls_peer_fingerprint({c});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "dtls_local_fingerprint" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dlfp");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_dtls_local_fingerprint({c});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "dtls_export_srtp_keys" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dek");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_dtls_export_srtp_keys({c});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "dtls_srtp_profile" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("dsp");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_dtls_srtp_profile({c});"
+                            ));
+                            return ("MakoString".into(), tmp);
                         }
                         "tls_read_nb" => {
                             let (_, c) = self.emit_expr(&args[0]);

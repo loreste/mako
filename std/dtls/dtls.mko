@@ -1,0 +1,68 @@
+// std/dtls — DTLS 1.2 over UDP + SRTP key export + cert fingerprints.
+// Thin pack over the platform dtls_* builtins (runtime/mako_dtls.h).
+// Real handshakes require OpenSSL linked into the binary; elsewhere
+// available()==0 and every constructor fails cleanly.
+//
+// WebRTC-style DTLS-SRTP usage:
+//   ctx := dtls.ctx_new("cert.pem", "key.pem", 1)   // use_srtp=1
+//   offer fingerprint := dtls.local_fingerprint(ctx) // SDP a=fingerprint
+//   conn := dtls.connect(ctx, udp_fd, host, port)   // or dtls.accept(ctx, fd)
+//   keys := dtls.export_srtp_keys(conn)             // RFC 5764 keying material
+//
+// export_srtp_keys layout (2 * (key + salt) bytes total):
+//   client_key | client_salt | server_key | server_salt
+//   SRTP_AES128_CM_SHA1_80/32: 16+14 → 60 bytes (offsets 0, 16, 30, 46)
+//   SRTP_AEAD_AES_256_GCM:     32+12 → 88 bytes (offsets 0, 32, 44, 76)
+// Key material should go through export_srtp_secret (or secret_from_str +
+// secret_drop) so it is wiped on drop.
+//
+// v1: DTLS 1.2 only, PEM-path certs, one peer per UDP socket (after accept
+// the socket is connect()ed to that peer). POSIX only.
+
+pack dtls
+
+export fn available() -> int {
+    return dtls_available()
+}
+export fn ctx_new(cert_path: string, key_path: string, use_srtp: int) -> DtlsCtx {
+    return dtls_ctx_new(cert_path, key_path, use_srtp)
+}
+export fn ctx_free(ctx: DtlsCtx) -> int {
+    return dtls_ctx_free(ctx)
+}
+export fn connect(ctx: DtlsCtx, udp_fd: int, host: string, port: int) -> DtlsConn {
+    return dtls_connect(ctx, udp_fd, host, port)
+}
+export fn accept(ctx: DtlsCtx, udp_fd: int) -> DtlsConn {
+    return dtls_accept(ctx, udp_fd)
+}
+export fn send(conn: DtlsConn, data: string) -> int {
+    return dtls_send(conn, data)
+}
+export fn recv(conn: DtlsConn, max: int) -> string {
+    return dtls_recv(conn, max)
+}
+export fn close(conn: DtlsConn) -> int {
+    return dtls_close(conn)
+}
+export fn conn_fd(conn: DtlsConn) -> int {
+    return dtls_conn_fd(conn)
+}
+export fn peer_fingerprint(conn: DtlsConn) -> string {
+    return dtls_peer_fingerprint(conn)
+}
+export fn local_fingerprint(ctx: DtlsCtx) -> string {
+    return dtls_local_fingerprint(ctx)
+}
+export fn export_srtp_keys(conn: DtlsConn) -> string {
+    return dtls_export_srtp_keys(conn)
+}
+export fn srtp_profile(conn: DtlsConn) -> string {
+    return dtls_srtp_profile(conn)
+}
+
+// Convenience: exported SRTP key material wrapped as a Secret (wiped on
+// secret_drop). An empty Secret (len 0) means export failed / no SRTP.
+export fn export_srtp_secret(conn: DtlsConn) -> Secret {
+    return secret_from_str(dtls_export_srtp_keys(conn))
+}

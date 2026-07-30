@@ -1,0 +1,82 @@
+// DTLS 1.2 over UDP: loopback handshake, echo round-trip, cert fingerprints,
+// SRTP profile negotiation and RFC 5764 key-material export.
+// Skips cleanly when OpenSSL is not linked (dtls.available() == 0).
+
+pull "dtls"
+
+fn dtls_echo_server(ctx: DtlsCtx, fd: int) -> int {
+    let conn = dtls.accept(ctx, fd)
+    let msg = dtls.recv(conn, 4096)
+    if len(msg) == 0 {
+        let _ = dtls.close(conn)
+        return 2
+    }
+    if dtls.send(conn, msg) < 0 {
+        let _ = dtls.close(conn)
+        return 3
+    }
+    let _ = dtls.close(conn)
+    return 0
+}
+
+func TestDtlsAvailable() {
+    let ok = dtls.available()
+    assert(ok == 0 or ok == 1)
+}
+
+func TestDtlsCtxNewBadCertIsSafe() {
+    // A missing cert/key must fail gracefully (no crash); freeing it is safe.
+    let ctx = dtls.ctx_new("/no/such/cert.pem", "/no/such/key.pem", 1)
+    let _ = dtls.local_fingerprint(ctx)
+    let _ = dtls.ctx_free(ctx)
+    assert(true)
+}
+
+func TestDtlsLoopbackEcho() {
+    if dtls.available() == 0 {
+        return
+    }
+    let cert = "runtime/certs/dev.crt"
+    let key = "runtime/certs/dev.key"
+    // Ephemeral-ish port: avoid clashing with concurrent suite jobs.
+    let port = 19440 + (now_ms() % 500)
+    // Bind in the parent so a busy port soft-skips before kicking the server;
+    // the bound socket also buffers the ClientHello, so no accept race.
+    let sfd = udp_bind_addr("127.0.0.1", port)
+    if sfd < 0 {
+        return
+    }
+    let sctx = dtls.ctx_new(cert, key, 1)
+    crew t {
+        let j = t.kick(dtls_echo_server(sctx, sfd))
+        sleep_ms(50)
+
+        let cfd = udp_bind(0)
+        let cctx = dtls.ctx_new(cert, key, 1)
+        let conn = dtls.connect(cctx, cfd, "127.0.0.1", port)
+
+        // Handshake succeeded: echo round-trip works.
+        assert(dtls.send(conn, "dtls-ping") > 0)
+        assert_eq_str(dtls.recv(conn, 4096), "dtls-ping")
+        assert_eq(dtls.conn_fd(conn), cfd)
+
+        // Peer's cert fingerprint == our local fingerprint (same dev cert).
+        let peer_fp = dtls.peer_fingerprint(conn)
+        let local_fp = dtls.local_fingerprint(cctx)
+        assert_eq(len(local_fp), 95) // SHA-256: 32 bytes → "AA:BB:…" (95 chars)
+        assert_eq_str(peer_fp, local_fp)
+
+        // SRTP: a profile was negotiated and key material exports.
+        let prof = dtls.srtp_profile(conn)
+        assert(len(prof) > 0)
+        let keys = dtls.export_srtp_keys(conn)
+        assert(len(keys) == 60 or len(keys) == 88)
+
+        let _ = dtls.close(conn)
+        let _ = udp_close(cfd)
+        let _ = dtls.ctx_free(cctx)
+        assert_eq(j.join(), 0)
+    }
+    let _ = udp_close(sfd)
+    let _ = dtls.ctx_free(sctx)
+}
