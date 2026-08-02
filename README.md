@@ -122,6 +122,7 @@ and inlay hints. VS Code extension.
 ## What does not work yet
 
 - Both backends require clang for linking (the installer handles this on Linux)
+- WASM: WASI Preview 1 only — no sockets, no TLS, no Preview 2/WIT/DOM
 - Sanitizers, cross-compilation, and emit-c auto-fall back to the C backend
 - No debugger product (lldb works with `#line` source mapping, but no IDE integration beyond seeds)
 - Stdlib coverage is uneven — some APIs are shape-only
@@ -155,6 +156,35 @@ for msg in range ch {
     print(msg)
 }
 ```
+
+## WebAssembly
+
+Mako compiles to WASM via the C backend and zig (or wasi-sdk):
+
+```bash
+mako build main.mko --target wasm32-wasip1 -o main.wasm
+wasmtime main.wasm
+```
+
+WASI Preview 1 is supported — args, env, filesystem (via preopens), stdout.
+Networking, TLS, and stdlib areas that depend on POSIX sockets or OpenSSL are
+not available in WASM. The output is a standalone `.wasm` module runnable by
+wasmtime, wasmer, or any WASI-compatible runtime.
+
+```bash
+# With filesystem access
+wasmtime --dir=./data::. main.wasm
+
+# With env vars and args
+wasmtime --env KEY=value main.wasm arg1 arg2
+
+# Browser/edge scaffold
+mako deploy wasm dist --entry main.mko --wasm app.wasm --port 8080
+```
+
+**Limitations:** WASI Preview 1 only. No Preview 2 component model, no WIT,
+no browser DOM bindings, no WASM sockets. Cross-compilation requires zig on
+PATH or `WASI_SDK_PATH` set.
 
 ## Errors
 

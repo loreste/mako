@@ -1,5 +1,5 @@
 // WASI preview1 argv + environ via wasi-libc (`args_get` / `environ_get`).
-// Build: mako build examples/wasi_args_env.mko --target wasm32-wasi -o out/wasi_args_env.wasm
+// Build: mako build examples/wasi_args_env.mko --target wasm32-wasip1 -o out/wasi_args_env.wasm
 // Run:   wasmtime --env MAKO_WASI_GREET=hi out/wasi_args_env.wasm hello
 // Note: `env_set` soft-fails on WASI — pass env from the host (wasmtime --env).
 fn main() {
