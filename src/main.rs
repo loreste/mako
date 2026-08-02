@@ -4338,6 +4338,31 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
         }
         cc::OsKind::Windows | cc::OsKind::Wasm => {}
     }
+    // WSI platform frameworks (mako_wsi.h).
+    match os {
+        cc::OsKind::Macos => {
+            args.push("-framework".into());
+            args.push("Cocoa".into());
+            args.push("-framework".into());
+            args.push("CoreGraphics".into());
+        }
+        cc::OsKind::Linux | cc::OsKind::Other => {
+            // X11 linked only when available; headless servers skip.
+            if std::process::Command::new("pkg-config")
+                .args(["--exists", "x11"])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+            {
+                args.push("-lX11".into());
+            }
+        }
+        cc::OsKind::Windows => {
+            args.push("-lgdi32".into());
+            args.push("-luser32".into());
+        }
+        cc::OsKind::Wasm => {}
+    }
     // Years-up: optional production allocator (docs/LONG_RUNNING.md · LR-3).
     //   MAKO_ALLOCATOR=mimalloc|jemalloc|system
     //   MAKO_ALLOCATOR=/path/to/libmimalloc.a

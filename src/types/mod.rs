@@ -2611,6 +2611,34 @@ impl TypeChecker {
             Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
         );
         fns.insert(
+            "gfx_present".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_event_type".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_event_key".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_event_mouse_x".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_event_mouse_y".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_event_mouse_button".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_is_open".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
             "gfx_backend_name".into(),
             Type::Fn(vec![], Box::new(Type::String)),
         );

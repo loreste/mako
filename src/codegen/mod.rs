@@ -17864,6 +17864,34 @@ impl Codegen {
                             let (_, w) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_gfx_poll({w})"));
                         }
+                        "gfx_present" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_gfx_present({w})"));
+                        }
+                        "gfx_event_type" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_gfx_event_type({w})"));
+                        }
+                        "gfx_event_key" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_gfx_event_key({w})"));
+                        }
+                        "gfx_event_mouse_x" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_gfx_event_mouse_x({w})"));
+                        }
+                        "gfx_event_mouse_y" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_gfx_event_mouse_y({w})"));
+                        }
+                        "gfx_event_mouse_button" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_gfx_event_mouse_button({w})"));
+                        }
+                        "gfx_is_open" => {
+                            let (_, w) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_gfx_is_open({w})"));
+                        }
                         "gfx_backend_name" => {
                             let tmp = self.fresh("gbn");
                             self.line(&format!("MakoString {tmp} = mako_gfx_backend_name();"));

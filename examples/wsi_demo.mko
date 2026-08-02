@@ -1,0 +1,44 @@
+// WSI demo: opens a real OS window, draws a gradient, handles events.
+fn main() {
+    print("backend: " + gfx_backend_name())
+    let win = gfx_window_open(400, 300, "Mako WSI Demo")
+
+    // Draw a red-blue gradient
+    for y in 300 {
+        for x in 400 {
+            let r = x * 255 / 400
+            let b = y * 255 / 300
+            let argb = (255 * 16777216) + (r * 65536) + b
+            let _ = gfx_window_set_pixel(win, x, y, argb)
+        }
+    }
+    let _ = gfx_present(win)
+
+    // Event loop
+    let mut frames = 0
+    while gfx_is_open(win) == 1 {
+        let ev = gfx_poll(win)
+        if ev == 1 {
+            print("window closed")
+            break
+        }
+        if ev == 2 {
+            let key = gfx_event_key(win)
+            print(fmt_sprintf_d("key down: %d", key))
+            if key == 53 {
+                break
+            }
+        }
+        if ev == 4 {
+            let mx = gfx_event_mouse_x(win)
+            let my = gfx_event_mouse_y(win)
+            print(fmt_sprintf_d("mouse: %d", mx))
+        }
+        frames = frames + 1
+        if frames > 1000000 {
+            break
+        }
+    }
+    let _ = gfx_window_close(win)
+    print("done")
+}
