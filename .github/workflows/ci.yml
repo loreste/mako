@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  MAKO_GFX_HEADLESS: "1"
+
 jobs:
   native:
     strategy:

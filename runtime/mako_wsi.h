@@ -274,9 +274,9 @@ static void mako_wsi_set_title(MakoWsiWindow *win, const char *title) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- * Linux — X11 / Xlib
+ * Linux — X11 / Xlib (only when X11 headers are available)
  * ═══════════════════════════════════════════════════════════════════════ */
-#elif defined(__linux__)
+#elif defined(__linux__) && __has_include(<X11/Xlib.h>)
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>

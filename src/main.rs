@@ -4347,13 +4347,14 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
             args.push("CoreGraphics".into());
         }
         cc::OsKind::Linux | cc::OsKind::Other => {
-            // X11 linked only when available; headless servers skip.
+            // X11 linked only when dev headers are available; headless servers skip.
             if std::process::Command::new("pkg-config")
                 .args(["--exists", "x11"])
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false)
             {
+                args.push("-DMAKO_HAS_X11".into());
                 args.push("-lX11".into());
             }
         }
