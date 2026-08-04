@@ -1,0 +1,17 @@
+fn compute(value: int) -> int {
+    let mut total = 0
+    if value > 1 {
+        total = 4
+    } else {
+        total = 8
+    }
+    let mut i = 0
+    while i < value * 6 {
+        i = i + 2
+        if total > 10 {
+            break
+        }
+        total = total + 3
+    }
+    return total
+}

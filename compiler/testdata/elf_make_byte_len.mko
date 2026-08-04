@@ -1,0 +1,4 @@
+fn main() -> int {
+    let values = make([]byte, 4)
+    return len(values)
+}

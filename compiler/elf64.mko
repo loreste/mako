@@ -1,0 +1,360 @@
+// Minimal deterministic ELF64 executable writer for Linux x86-64.
+// The image contains one read/execute PT_LOAD segment and no section table.
+
+const ELF_OK = 0
+const ELF_ERROR = 1
+
+struct ElfImage {
+    bytes: []int
+    status: int
+    error: string
+}
+
+fn elf_error(message: string) -> ElfImage {
+    return ElfImage { bytes: make([]int, 0, 0), status: ELF_ERROR, error: message }
+}
+
+fn elf_u16(out: []int, value: int) -> []int {
+    let mut bytes = out
+    bytes = append(bytes, value & 255)
+    bytes = append(bytes, (value >> 8) & 255)
+    return bytes
+}
+
+fn elf_u32(out: []int, value: int) -> []int {
+    let mut bytes = out
+    bytes = append(bytes, value & 255)
+    bytes = append(bytes, (value >> 8) & 255)
+    bytes = append(bytes, (value >> 16) & 255)
+    bytes = append(bytes, (value >> 24) & 255)
+    return bytes
+}
+
+fn elf_u64(out: []int, value: int) -> []int {
+    let mut bytes = elf_u32(out, value)
+    bytes = append(bytes, (value >> 32) & 255)
+    bytes = append(bytes, (value >> 40) & 255)
+    bytes = append(bytes, (value >> 48) & 255)
+    bytes = append(bytes, (value >> 56) & 255)
+    return bytes
+}
+
+fn elf_zeroes(out: []int, count: int) -> []int {
+    let mut bytes = out
+    let mut i = 0
+    while i < count {
+        bytes = append(bytes, 0)
+        i = i + 1
+    }
+    return bytes
+}
+
+fn elf64_exit_image(status: int) -> ElfImage {
+    let code = x86_emit_exit_int(status)
+    if code.status != X86_OK {
+        return elf_error(code.error)
+    }
+    let code_offset = 120
+    let image_size = code_offset + len(code.bytes)
+    let entry = 4194304 + code_offset
+    let mut bytes: []int = make([]int, 0, image_size)
+
+    // ELF identification.
+    bytes = append(bytes, 127)
+    bytes = append(bytes, 69)
+    bytes = append(bytes, 76)
+    bytes = append(bytes, 70)
+    bytes = append(bytes, 2)
+    bytes = append(bytes, 1)
+    bytes = append(bytes, 1)
+    bytes = elf_zeroes(bytes, 9)
+
+    // ELF64 header: executable, x86-64, one program header, no sections.
+    bytes = elf_u16(bytes, 2)
+    bytes = elf_u16(bytes, 62)
+    bytes = elf_u32(bytes, 1)
+    bytes = elf_u64(bytes, entry)
+    bytes = elf_u64(bytes, 64)
+    bytes = elf_u64(bytes, 0)
+    bytes = elf_u32(bytes, 0)
+    bytes = elf_u16(bytes, 64)
+    bytes = elf_u16(bytes, 56)
+    bytes = elf_u16(bytes, 1)
+    bytes = elf_u16(bytes, 0)
+    bytes = elf_u16(bytes, 0)
+    bytes = elf_u16(bytes, 0)
+
+    // PT_LOAD: read/execute segment beginning at file offset zero.
+    bytes = elf_u32(bytes, 1)
+    bytes = elf_u32(bytes, 5)
+    bytes = elf_u64(bytes, 0)
+    bytes = elf_u64(bytes, 4194304)
+    bytes = elf_u64(bytes, 4194304)
+    bytes = elf_u64(bytes, image_size)
+    bytes = elf_u64(bytes, image_size)
+    bytes = elf_u64(bytes, 4096)
+
+    let mut i = 0
+    while i < len(code.bytes) {
+        bytes = append(bytes, code.bytes[i])
+        i = i + 1
+    }
+    return ElfImage { bytes: bytes, status: ELF_OK, error: "" }
+}
+
+// Serialize arbitrary already-encoded code at the ELF entry point. Keeping
+// this boundary separate means instruction selection can grow without
+// duplicating executable-format layout logic.
+fn elf64_code_image(code: []int) -> ElfImage {
+    let code_offset = 120
+    let image_size = code_offset + len(code)
+    let entry = 4194304 + code_offset
+    let mut bytes: []int = make([]int, 0, image_size)
+    bytes = append(bytes, 127)
+    bytes = append(bytes, 69)
+    bytes = append(bytes, 76)
+    bytes = append(bytes, 70)
+    bytes = append(bytes, 2)
+    bytes = append(bytes, 1)
+    bytes = append(bytes, 1)
+    bytes = elf_zeroes(bytes, 9)
+    bytes = elf_u16(bytes, 2)
+    bytes = elf_u16(bytes, 62)
+    bytes = elf_u32(bytes, 1)
+    bytes = elf_u64(bytes, entry)
+    bytes = elf_u64(bytes, 64)
+    bytes = elf_u64(bytes, 0)
+    bytes = elf_u32(bytes, 0)
+    bytes = elf_u16(bytes, 64)
+    bytes = elf_u16(bytes, 56)
+    bytes = elf_u16(bytes, 1)
+    bytes = elf_u16(bytes, 0)
+    bytes = elf_u16(bytes, 0)
+    bytes = elf_u16(bytes, 0)
+    bytes = elf_u32(bytes, 1)
+    bytes = elf_u32(bytes, 5)
+    bytes = elf_u64(bytes, 0)
+    bytes = elf_u64(bytes, 4194304)
+    bytes = elf_u64(bytes, 4194304)
+    bytes = elf_u64(bytes, image_size)
+    bytes = elf_u64(bytes, image_size)
+    bytes = elf_u64(bytes, 4096)
+    let mut i = 0
+    while i < len(code) {
+        bytes = append(bytes, code[i])
+        i = i + 1
+    }
+    return ElfImage { bytes: bytes, status: ELF_OK, error: "" }
+}
+
+fn elf64_add_image(lhs: int, rhs: int) -> ElfImage {
+    let code = x86_emit_exit_add(lhs, rhs)
+    if code.status != X86_OK {
+        return elf_error(code.error)
+    }
+    return elf64_code_image(code.bytes)
+}
+
+// Bridge the verified IR package to the first executable image. This is
+// intentionally narrow: one function, either one block with an integer
+// constant (or constant add) return, or a verified branch shape (three or
+// four blocks) whose arms produce integer constants. The complete instruction
+// stream is validated by the x86 lowering before the image is produced; all
+// other IR shapes remain rejected.
+fn elf64_lower_typed_ir(ir: TypedIr) -> ElfImage {
+    if len(ir.functions) == 0 {
+        return elf_error("ELF lowering requires at least one function")
+    }
+    if len(ir.functions) > 1 {
+        let code = x86_lower_functions(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.string_literals, ir.constant_string_index)
+        if code.status != X86_OK {
+            return elf_error(code.error)
+        }
+        return elf64_code_image(code.bytes)
+    }
+    if len(ir.blocks) >= 4 and
+        x86_function_has_backedge(ir.instructions, ir.blocks, ir.successors, ir.functions[0]) {
+        let looped = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index)
+        if looped.code.status != X86_OK {
+            return elf_error(looped.code.error)
+        }
+        let code = x86_emit_argc_call_exit(looped.code.bytes)
+        if code.status != X86_OK {
+            return elf_error(code.error)
+        }
+        return elf64_code_image(code.bytes)
+    }
+    if len(ir.blocks) == 3 or len(ir.blocks) == 4 {
+        if len(ir.blocks) == 4 and
+            x86_function_has_backedge(ir.instructions, ir.blocks, ir.successors, ir.functions[0]) {
+            let looped = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index)
+            if looped.code.status != X86_OK {
+                return elf_error(looped.code.error)
+            }
+            let code = x86_emit_argc_call_exit(looped.code.bytes)
+            if code.status != X86_OK {
+                return elf_error(code.error)
+            }
+            return elf64_code_image(code.bytes)
+        }
+        // Three and four blocks route through the same general function
+        // encoder as every other count. It tries the narrow branch shapes
+        // first, so their images are unchanged, and then falls through to the
+        // shape-independent returning-CFG lowering instead of reporting the
+        // narrow shape's complaint for a body that was never that shape.
+        if ir.functions[0].parameter_count > 1 {
+            return elf_error("ELF root function takes at most one parameter")
+        }
+        let branch = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index)
+        if branch.code.status != X86_OK {
+            return elf_error(branch.code.error)
+        }
+        let code = x86_emit_argc_call_exit(branch.code.bytes)
+        if code.status != X86_OK {
+            return elf_error(code.error)
+        }
+        return elf64_code_image(code.bytes)
+    }
+    if len(ir.blocks) != 1 {
+        // Any other block count goes through the general function encoder,
+        // which ends in the shape-independent returning-CFG lowering, so a
+        // nested branch tree no longer needs a block count listed here.
+        if ir.functions[0].parameter_count > 1 {
+            return elf_error("ELF root function takes at most one parameter")
+        }
+        let general = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index)
+        if general.code.status != X86_OK {
+            return elf_error(general.code.error)
+        }
+        let general_code = x86_emit_argc_call_exit(general.code.bytes)
+        if general_code.status != X86_OK {
+            return elf_error(general_code.error)
+        }
+        return elf64_code_image(general_code.bytes)
+    }
+    let function = ir.functions[0]
+    let block = ir.blocks[0]
+    if block.function != 0 or block.instruction_start != function.value_start {
+        return elf_error("ELF lowering received inconsistent IR ranges")
+    }
+    let add_lowered = x86_lower_const_add_return(
+        ir.instructions, ir.constants,
+        block.instruction_start,
+        block.instruction_start + block.instruction_count
+    )
+    if add_lowered.status == X86_OK and len(ir.constants) == 2 {
+        let left = ir.instructions[block.instruction_start]
+        let right = ir.instructions[block.instruction_start + 1]
+        return elf64_add_image(ir.constants[left.aux].int_value, ir.constants[right.aux].int_value)
+    }
+    let lowered = x86_lower_const_return(
+        ir.instructions, ir.constants,
+        block.instruction_start,
+        block.instruction_start + block.instruction_count
+    )
+    if lowered.status == X86_OK and len(ir.constants) == 1 {
+        return elf64_exit_image(ir.constants[0].int_value)
+    }
+    if function.parameter_count > 1 {
+        return elf_error("ELF root function takes at most one parameter")
+    }
+    let scalar = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, function, ir.string_literals, ir.constant_string_index)
+    if scalar.code.status != X86_OK {
+        return elf_error(scalar.code.error)
+    }
+    let code = x86_emit_argc_call_exit(scalar.code.bytes)
+    if code.status != X86_OK {
+        return elf_error(code.error)
+    }
+    return elf64_code_image(code.bytes)
+}
+
+fn elf64_smoke_test() -> bool {
+    let image = elf64_exit_image(42)
+    if image.status != ELF_OK or len(image.bytes) != 132 {
+        return false
+    }
+    if image.bytes[0] != 127 or image.bytes[1] != 69 or image.bytes[2] != 76 or image.bytes[3] != 70 {
+        return false
+    }
+    if image.bytes[16] != 2 or image.bytes[17] != 0 or image.bytes[18] != 62 or image.bytes[19] != 0 {
+        return false
+    }
+    if image.bytes[120] != 184 or image.bytes[121] != 60 or image.bytes[125] != 191 or image.bytes[130] != 15 or image.bytes[131] != 5 {
+        return false
+    }
+    let mut instructions: []IrInstruction = make([]IrInstruction, 0, 2)
+    instructions = append(instructions, IrInstruction {
+        op: IR_CONST, result: 0, type_kind: SEM_INT,
+        left: -1, right: -1, aux: 0, token: 0,
+    })
+    instructions = append(instructions, IrInstruction {
+        op: IR_RETURN, result: -1, type_kind: SEM_INT,
+        left: 0, right: -1, aux: -1, token: 0,
+    })
+    let constants = append(make([]IrConstant, 0, 1), IrConstant {
+        type_kind: SEM_INT, int_value: 42, float_value: 0.0,
+        start: 0, end: 1,
+    })
+    let blocks = append(make([]IrBlock, 0, 1), IrBlock {
+        function: 0, instruction_start: 0, instruction_count: 2,
+        terminator: 1, successor_start: 0, successor_count: 0,
+    })
+    let functions = append(make([]IrFunction, 0, 1), IrFunction {
+        item: 0, entry_block: 0, block_count: 1, parameter_count: 0,
+        value_start: 0, value_count: 1,
+    })
+    let ir = TypedIr {
+        functions: functions, blocks: blocks, instructions: instructions,
+        constants: constants, successors: make([]int, 0, 0),
+        call_sites: make([]IrCallSite, 0, 0), call_arguments: make([]int, 0, 0),
+        jump_arguments: make([]int, 0, 0),
+        string_literals: make([]string, 0, 0), constant_string_index: make([]int, 0, 0),
+        expression_values: make([]int, 0, 0), value_count: 1,
+        skipped_functions: 0, ok: true, error: "",
+    }
+    let lowered = elf64_lower_typed_ir(ir)
+    if lowered.status != ELF_OK or len(lowered.bytes) != 132 {
+        return false
+    }
+    let mut branch_instructions: []IrInstruction = make([]IrInstruction, 0, 8)
+    branch_instructions = append(branch_instructions, IrInstruction { op: IR_PARAM, result: 0, type_kind: SEM_BOOL, left: -1, right: -1, aux: 0, token: 0 })
+    branch_instructions = append(branch_instructions, IrInstruction { op: IR_BRANCH, result: -1, type_kind: SEM_BOOL, left: 0, right: -1, aux: -1, token: 0 })
+    branch_instructions = append(branch_instructions, IrInstruction { op: IR_CONST, result: 1, type_kind: SEM_INT, left: -1, right: -1, aux: 0, token: 0 })
+    branch_instructions = append(branch_instructions, IrInstruction { op: IR_JUMP, result: -1, type_kind: SEM_INT, left: 1, right: -1, aux: -1, token: 0 })
+    branch_instructions = append(branch_instructions, IrInstruction { op: IR_CONST, result: 2, type_kind: SEM_INT, left: -1, right: -1, aux: 1, token: 0 })
+    branch_instructions = append(branch_instructions, IrInstruction { op: IR_JUMP, result: -1, type_kind: SEM_INT, left: 2, right: -1, aux: -1, token: 0 })
+    branch_instructions = append(branch_instructions, IrInstruction { op: IR_BLOCK_PARAM, result: 3, type_kind: SEM_INT, left: -1, right: -1, aux: 0, token: 0 })
+    branch_instructions = append(branch_instructions, IrInstruction { op: IR_RETURN, result: -1, type_kind: SEM_INT, left: 3, right: -1, aux: -1, token: 0 })
+    let mut branch_constants: []IrConstant = make([]IrConstant, 0, 2)
+    branch_constants = append(branch_constants, IrConstant { type_kind: SEM_INT, int_value: 42, float_value: 0.0, start: 0, end: 2 })
+    branch_constants = append(branch_constants, IrConstant { type_kind: SEM_INT, int_value: 7, float_value: 0.0, start: 0, end: 1 })
+    let mut branch_blocks: []IrBlock = make([]IrBlock, 0, 4)
+    branch_blocks = append(branch_blocks, IrBlock { function: 0, instruction_start: 0, instruction_count: 2, terminator: 1, successor_start: 0, successor_count: 2 })
+    branch_blocks = append(branch_blocks, IrBlock { function: 0, instruction_start: 2, instruction_count: 2, terminator: 3, successor_start: 2, successor_count: 1 })
+    branch_blocks = append(branch_blocks, IrBlock { function: 0, instruction_start: 4, instruction_count: 2, terminator: 5, successor_start: 3, successor_count: 1 })
+    branch_blocks = append(branch_blocks, IrBlock { function: 0, instruction_start: 6, instruction_count: 2, terminator: 7, successor_start: 4, successor_count: 0 })
+    let mut branch_successors: []int = make([]int, 0, 4)
+    branch_successors = append(branch_successors, 1)
+    branch_successors = append(branch_successors, 2)
+    branch_successors = append(branch_successors, 3)
+    branch_successors = append(branch_successors, 3)
+    let branch_functions = append(make([]IrFunction, 0, 1), IrFunction {
+        item: 0, entry_block: 0, block_count: 4, parameter_count: 1,
+        value_start: 0, value_count: 4,
+    })
+    let branch_ir = TypedIr {
+        functions: branch_functions, blocks: branch_blocks, instructions: branch_instructions,
+        constants: branch_constants, successors: branch_successors,
+        call_sites: make([]IrCallSite, 0, 0), call_arguments: make([]int, 0, 0),
+        jump_arguments: make([]int, 0, 0),
+        string_literals: make([]string, 0, 0), constant_string_index: make([]int, 0, 0),
+        expression_values: make([]int, 0, 0), value_count: 4,
+        skipped_functions: 0, ok: true, error: "",
+    }
+    let branch_image = elf64_lower_typed_ir(branch_ir)
+    return branch_image.status == ELF_OK and len(branch_image.bytes) == 153 and
+        branch_image.bytes[120] == 139 and branch_image.bytes[123] == 232 and
+        branch_image.bytes[137] == 133 and branch_image.bytes[142] == 42 and
+        branch_image.bytes[148] == 7
+}

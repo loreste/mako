@@ -112,9 +112,12 @@ docs/MESSAGING_GRAPHQL.md
 docs/NATIVE_COMPILER_PLAN.md
 docs/PAIN_POINTS.md
 docs/PERFORMANCE.md
+docs/PROJECT_STRUCTURE.md
+docs/README.md
 docs/RELEASE.md
 docs/ROADMAP.md
 docs/SECURITY.md
+docs/SECURITY_AUDIT_SCOPE.md
 docs/SELF_HOSTING.md
 docs/SOUNDNESS.md
 docs/SPEED.md
@@ -342,6 +345,7 @@ examples/bench/native_slice_small.mko
 examples/bench/native_string_slice.c
 examples/bench/native_string_slice.mko
 examples/bench/native_string_slice.rs
+examples/bench/slice_drop_soak.mko
 examples/bench_loop.mko
 examples/break_continue.mko
 examples/builder.mko
@@ -486,6 +490,7 @@ examples/native/native_strings.mko
 examples/native/native_structs.mko
 examples/native/native_tuples.mko
 examples/native/native_vector_sum_oob.mko
+examples/native/owned_handle_drop/native_owned_handle_drop_test.mko
 examples/nb_echo_server.mko
 examples/nested_struct.mko
 examples/on_methods.mko
@@ -570,6 +575,7 @@ examples/testing/append_move_test.mko
 examples/testing/arena_append_test.mko
 examples/testing/arena_struct_test.mko
 examples/testing/arena_test.mko
+examples/testing/array_lit_elem_type_test.mko
 examples/testing/asan_stress_test.mko
 examples/testing/authz_helpers_test.mko
 examples/testing/avro_graphql_tz_test.mko
@@ -845,6 +851,7 @@ examples/testing/router_seed_test.mko
 examples/testing/runtime_census_test.mko
 examples/testing/runtime_stats_test.mko
 examples/testing/rwmutex_test.mko
+examples/testing/sanitizer_stress_test.mko
 examples/testing/sched_pool_test.mko
 examples/testing/scram_test.mko
 examples/testing/sctp_api_test.c
@@ -987,6 +994,7 @@ packaging/RELEASE-CHECKSUMS-0.1.9.md
 packaging/RELEASE-CHECKSUMS-0.2.2.md
 packaging/RELEASE-CHECKSUMS-0.2.3.md
 packaging/RELEASE-CHECKSUMS-0.4.16.md
+packaging/RELEASE-CHECKSUMS-0.4.17.md
 packaging/RELEASE-CHECKSUMS-0.4.5.md
 packaging/RELEASE-NOTES-0.1.5.md
 packaging/RELEASE-NOTES-0.1.6.md
@@ -1099,11 +1107,15 @@ scripts/package-rpm.sh
 scripts/parse_bench_ns.py
 scripts/pgo-build.sh
 scripts/publish-homebrew-tap-seed.sh
+scripts/publish-registry.sh
 scripts/publish-winget-seed.sh
+scripts/sanitize-all.sh
 scripts/selfhost-gate.sh
 scripts/stdlib-gate.sh
+scripts/sync-linux.sh
 scripts/uninstall.ps1
 scripts/uninstall.sh
+scripts/update_structure.sh
 scripts/validate-matrix.sh
 scripts/verify-target-artifact.sh
 scripts/wasi-ci-build.sh

@@ -1,0 +1,7 @@
+fn scale(value: int) -> int {
+    return value * 21
+}
+
+fn compute() -> int {
+    return scale(2)
+}

@@ -1,0 +1,4 @@
+fn main() -> int {
+    let length = unsafe_argv_len()
+    return length
+}

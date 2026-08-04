@@ -1,0 +1,12 @@
+fn ready() -> bool {
+    return true
+}
+
+fn main() {
+    if not ready() {
+        print("not ready")
+        exit(41)
+    }
+    print("ready")
+    exit(0)
+}

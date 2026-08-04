@@ -1,0 +1,9 @@
+fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+fn compute(value: int) -> int {
+    let x = value + 40
+    let y = add(x, 1)
+    return y
+}

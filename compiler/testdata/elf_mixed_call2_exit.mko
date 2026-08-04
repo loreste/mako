@@ -1,0 +1,13 @@
+fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+fn add_one(v: int) -> int {
+    return v + 1
+}
+
+fn compute(value: int) -> int {
+    let y = add(19, 2)
+    let x = add_one(value)
+    return y * x
+}

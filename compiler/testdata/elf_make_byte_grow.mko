@@ -1,0 +1,5 @@
+fn main() -> int {
+    let values = make([]byte, 1)
+    let grown = append(values, byte(7))
+    return len(grown)
+}

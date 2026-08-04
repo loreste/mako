@@ -1,0 +1,4 @@
+fn main() -> int {
+    let result = unsafe_write_file("x")
+    return result
+}

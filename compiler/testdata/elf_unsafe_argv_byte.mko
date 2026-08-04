@@ -1,0 +1,6 @@
+fn main() -> byte {
+    let index = 0
+    let offset = 0
+    let value = unsafe_argv_byte(index, offset)
+    return value
+}

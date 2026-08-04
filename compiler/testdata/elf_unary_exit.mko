@@ -1,0 +1,4 @@
+fn compute(value: int) -> int {
+    let negated = -value
+    return ^negated
+}

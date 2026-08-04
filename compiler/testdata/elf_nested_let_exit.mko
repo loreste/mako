@@ -1,0 +1,13 @@
+fn main(v: int) -> int {
+    let doubled = v * 2
+    let bias = 5
+    if doubled > 6 {
+        let high = doubled + bias
+        if high > 12 {
+            return high + 1
+        }
+        return high
+    }
+    let low = doubled - bias
+    return low
+}

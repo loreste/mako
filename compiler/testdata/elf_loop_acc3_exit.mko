@@ -1,0 +1,11 @@
+fn compute(value: int) -> int {
+    let mut a = 1
+    let mut b = 2
+    let mut c = 3
+    while a < value * 4 {
+        a = a + 1
+        b = b * 2
+        c = c + 3
+    }
+    return a + b + c
+}

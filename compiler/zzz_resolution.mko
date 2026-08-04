@@ -39,9 +39,9 @@ fn resolution_smoke_test() -> bool {
     if not structure.ok { return false }
     let symbols = build_symbols(source, lexed.tokens, structure.items)
     if not symbols.ok { return false }
-    let known_call = parse_expression(source, lexed.tokens, 11, make([]ExprNode, 0, 4), 0)
+    let known_call = parse_expression(source, lexed.tokens, 11, make([]ExprNode, 0, 4), 0, false)
     if not known_call.ok { return false }
-    let missing_call = parse_expression(source, lexed.tokens, 14, known_call.nodes, 0)
+    let missing_call = parse_expression(source, lexed.tokens, 14, known_call.nodes, 0, false)
     if not missing_call.ok { return false }
     let resolved = resolve_global_expressions(source, lexed.tokens, missing_call.nodes, symbols.symbols, symbols.slots)
     return resolved.resolved == 1 and resolved.symbol_by_expr[0] >= 0 and resolved.symbol_by_expr[2] < 0

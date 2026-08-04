@@ -1,0 +1,7 @@
+fn compute(value: int) -> int {
+    let mut total = 0
+    while total < value * 5 {
+        total = total + 7
+    }
+    return total + 1
+}

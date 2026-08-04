@@ -1,0 +1,3 @@
+fn compute() -> int {
+    let value = 1
+}

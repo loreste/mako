@@ -1,0 +1,6 @@
+fn main() -> int {
+    let bytes: []byte = make([]byte, 4)
+    let text = unsafe_bytes_to_string(bytes)
+    print(text)
+    return 0
+}

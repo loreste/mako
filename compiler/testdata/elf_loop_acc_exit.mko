@@ -1,0 +1,9 @@
+fn compute(value: int) -> int {
+    let mut total = 0
+    let mut i = 1
+    while i <= value + 2 {
+        total = total + i * 2
+        i = i + 1
+    }
+    return total
+}

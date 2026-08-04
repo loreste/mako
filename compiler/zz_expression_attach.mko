@@ -8,16 +8,6 @@ struct ExprAttach {
     attached: int
 }
 
-fn clone_attached_statements(statements: []StmtNode) -> []StmtNode {
-    let mut out = make([]StmtNode, 0, len(statements))
-    let mut i = 0
-    while i < len(statements) {
-        out = append(out, statements[i])
-        i = i + 1
-    }
-    return out
-}
-
 fn trim_statement_end(tokens: []Token, start: int, end: int) -> int {
     let mut out = end
     while out > start and tokens[out - 1].kind == TK_SEMICOLON {
@@ -70,24 +60,44 @@ fn statement_expression_bounds(tokens: []Token, statement: StmtNode) -> []int {
 }
 
 fn attach_statement_expressions(source: string, tokens: []Token, statements: []StmtNode, expressions: []ExprNode) -> ExprAttach {
-    let mut out_statements = clone_attached_statements(statements)
-    let mut out_expressions = clone_expr_nodes(expressions)
+    // Take the statement and expression arenas by move. Callers hand them off
+    // permanently; cloning either on every attachment was O(n^2).
+    let mut out_statements = statements
+    let mut out_expressions = expressions
     let mut attached = 0
     let mut i = 0
     while i < len(out_statements) {
         let bounds = statement_expression_bounds(tokens, out_statements[i])
         if len(bounds) == 2 {
+            // Control-flow conditions mirror the stage-0 parser: a bare
+            // `ident {` there is the block, never a struct literal.
+            let suppress_struct = out_statements[i].kind == STMT_IF or out_statements[i].kind == STMT_WHILE
+            let saved_len = len(out_expressions)
             let parsed = if bounds[1] == bounds[0] + 1 {
                 parse_atom(source, tokens, bounds[0], out_expressions)
             } else {
-                parse_expression(source, tokens, bounds[0], out_expressions, 0)
+                parse_expression(source, tokens, bounds[0], out_expressions, 0, suppress_struct)
             }
             if parsed.ok and parsed.next == bounds[1] {
-                out_expressions = clone_expr_nodes(parsed.nodes)
+                let expr_root = parsed.root
+                out_expressions = parsed.nodes
                 let mut statement = out_statements[i]
-                statement.expr_root = parsed.root
+                statement.expr_root = expr_root
                 out_statements[i] = statement
                 attached = attached + 1
+            } else {
+                // Parse failed or did not consume the full span: drop any
+                // nodes the attempt appended so the arena stays exactly the
+                // successfully attached prefix. Leaving partials inflated
+                // every later pass that walks expressions.
+                let partial = parsed.nodes
+                let mut trimmed = make([]ExprNode, 0, saved_len)
+                let mut node_index = 0
+                while node_index < saved_len and node_index < len(partial) {
+                    trimmed = append(trimmed, partial[node_index])
+                    node_index = node_index + 1
+                }
+                out_expressions = trimmed
             }
         }
         i = i + 1
@@ -107,4 +117,51 @@ fn expression_attachment_smoke_test() -> bool {
     if not body.ok { return false }
     let attached = attach_statement_expressions(source, lexed.tokens, body.nodes, make([]ExprNode, 0, 16))
     return attached.attached == 4 and len(attached.expressions) == 10
+}
+
+// A condition ending in a bare identifier must parse as a comparison, not a
+// struct literal: stage-0 suppresses struct literals in control-flow headers.
+fn condition_ident_attachment_smoke_test() -> bool {
+    let source = "fn demo(n: int) -> int {\nlet i = 0\nwhile i < n {\ni = i + 1\n}\nreturn i\n}"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let open = find_kind(lexed.tokens, 0, TK_LBRACE)
+    if open < 0 { return false }
+    let close = find_matching(lexed.tokens, open)
+    if close < 0 { return false }
+    let body = parse_statement_block(lexed.tokens, open + 1, close, make([]StmtNode, 0, 8), make([]int, 0, 8))
+    if not body.ok { return false }
+    let attached = attach_statement_expressions(source, lexed.tokens, body.nodes, make([]ExprNode, 0, 16))
+    if attached.attached != 4 or len(attached.expressions) != 8 { return false }
+    let mut found_while = false
+    let mut i = 0
+    while i < len(attached.statements) {
+        let statement = attached.statements[i]
+        if statement.kind == STMT_WHILE {
+            found_while = statement.expr_root >= 0 and statement.expr_root < len(attached.expressions) and
+                attached.expressions[statement.expr_root].kind == EXPR_BINARY
+        }
+        i = i + 1
+    }
+    if not found_while { return false }
+    let if_source = "fn pick(a: int, b: int) -> int {\nif a < b {\nreturn 1\n}\nreturn 2\n}"
+    let if_lexed = lex_source(if_source)
+    if not if_lexed.ok { return false }
+    let if_open = find_kind(if_lexed.tokens, 0, TK_LBRACE)
+    if if_open < 0 { return false }
+    let if_close = find_matching(if_lexed.tokens, if_open)
+    if if_close < 0 { return false }
+    let if_body = parse_statement_block(if_lexed.tokens, if_open + 1, if_close, make([]StmtNode, 0, 8), make([]int, 0, 8))
+    if not if_body.ok { return false }
+    let if_attached = attach_statement_expressions(if_source, if_lexed.tokens, if_body.nodes, make([]ExprNode, 0, 16))
+    i = 0
+    while i < len(if_attached.statements) {
+        let statement = if_attached.statements[i]
+        if statement.kind == STMT_IF {
+            return statement.expr_root >= 0 and statement.expr_root < len(if_attached.expressions) and
+                if_attached.expressions[statement.expr_root].kind == EXPR_BINARY
+        }
+        i = i + 1
+    }
+    return false
 }

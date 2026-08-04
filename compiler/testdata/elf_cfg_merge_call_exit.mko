@@ -1,0 +1,11 @@
+fn identity(value: int) -> int {
+    return value
+}
+
+fn choose(limit: int) -> int {
+    if limit > 1 {
+        return identity(42)
+    } else {
+        return identity(7)
+    }
+}

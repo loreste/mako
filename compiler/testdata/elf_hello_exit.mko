@@ -1,0 +1,8 @@
+fn main() {
+    let greeting = "hello"
+    let tail = "world"
+    print(greeting)
+    print(" ")
+    print(tail)
+    exit(42)
+}

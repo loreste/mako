@@ -1,0 +1,5 @@
+fn main() -> int {
+    let fd = unsafe_open_string("x")
+    let keep = fd
+    return 0
+}

@@ -129,8 +129,9 @@ fn simple_statement_end(tokens: []Token, start: int, end: int) -> int {
 }
 
 fn parse_statement_block(tokens: []Token, start: int, end: int, nodes: []StmtNode, edges: []int) -> BodyParse {
-    let mut out_nodes = clone_stmt_nodes(nodes)
-    let mut out_edges = clone_stmt_edges(edges)
+    // Append-only arenas moved across recursive returns; see z_expression.mko.
+    let mut out_nodes = nodes
+    let mut out_edges = edges
     let mut roots: []int = []
     let mut next = start
     while next < end {
@@ -148,11 +149,13 @@ fn parse_statement_block(tokens: []Token, start: int, end: int, nodes: []StmtNod
             if close < 0 or close > end { return body_failure(out_nodes, out_edges, open, "unterminated statement block") }
             let body = parse_statement_block(tokens, open + 1, close, out_nodes, out_edges)
             if not body.ok { return body }
-            out_nodes = clone_stmt_nodes(body.nodes)
-            out_edges = clone_stmt_edges(body.edges)
+            let body_roots_start = body.roots_start
+            let body_roots_count = body.roots_count
+            out_nodes = body.nodes
+            out_edges = body.edges
             let mut c = 0
-            while c < body.roots_count {
-                child_roots = append(child_roots, out_edges[body.roots_start + c])
+            while c < body_roots_count {
+                child_roots = append(child_roots, out_edges[body_roots_start + c])
                 c = c + 1
             }
             next = close + 1
@@ -164,11 +167,13 @@ fn parse_statement_block(tokens: []Token, start: int, end: int, nodes: []StmtNod
                 if else_close < 0 or else_close > end { return body_failure(out_nodes, out_edges, else_open, "unterminated else block") }
                 let else_body = parse_statement_block(tokens, else_open + 1, else_close, out_nodes, out_edges)
                 if not else_body.ok { return else_body }
-                out_nodes = clone_stmt_nodes(else_body.nodes)
-                out_edges = clone_stmt_edges(else_body.edges)
+                let else_roots_start = else_body.roots_start
+                let else_roots_count = else_body.roots_count
+                out_nodes = else_body.nodes
+                out_edges = else_body.edges
                 c = 0
-                while c < else_body.roots_count {
-                    child_roots = append(child_roots, out_edges[else_body.roots_start + c])
+                while c < else_roots_count {
+                    child_roots = append(child_roots, out_edges[else_roots_start + c])
                     c = c + 1
                 }
                 next = else_close + 1

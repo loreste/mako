@@ -1,0 +1,7 @@
+fn choose(flag: bool) -> int {
+    if flag {
+        return 42
+    } else {
+        return 7
+    }
+}

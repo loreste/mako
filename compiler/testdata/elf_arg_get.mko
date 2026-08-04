@@ -1,0 +1,6 @@
+fn main() -> int {
+    let index = 0
+    let text = arg_get(index)
+    print(text)
+    return 0
+}

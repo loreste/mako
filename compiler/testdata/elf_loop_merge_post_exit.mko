@@ -1,0 +1,13 @@
+fn compute(value: int) -> int {
+    let mut total = 0
+    let mut i = 0
+    while i < value * 3 {
+        if i > 0 {
+            total = total + i
+        } else {
+        }
+        i = i + 1
+        total = total + 1
+    }
+    return total
+}

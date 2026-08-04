@@ -1,0 +1,9 @@
+fn combine(a: int, b: int) -> int {
+    let sum = a + b
+    let scaled = sum * 3
+    return scaled - 5
+}
+
+fn compute() -> int {
+    return combine(20, 9)
+}

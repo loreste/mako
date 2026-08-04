@@ -1,0 +1,10 @@
+fn compute(value: int) -> int {
+    let mut i = 0
+    while i < value * 10 {
+        if i == 12 {
+            break
+        }
+        i = i + 3
+    }
+    return i
+}

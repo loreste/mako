@@ -72,7 +72,11 @@ you need below.
 | [Long Running](LONG_RUNNING.md) | Designing services that stay up for months |
 | [Adaptive Opt](ADAPTIVE_OPT.md) | Profile-guided optimization (Anneal) |
 | [WASM](WASM.md) | WebAssembly target status |
-| [Self-Hosting](SELF_HOSTING.md) | Notes toward a self-hosted compiler |
+| [Self-Hosting](SELF_HOSTING.md) | Bring-up notes for the Mako-written compiler |
+| [Self-Hosting Progress](SELF_HOSTING_PROGRESS.md) | Evidence log (not a completion claim) |
+| [Self-Hosting Mandate](FULL_SELF_HOSTING_MANDATE.md) | Definition of done for full bootstrap |
+| [Self-Hosting Roadmap](SELF_HOSTING_ROADMAP.md) | Phased capability matrix and migration steps |
+| [Self-Hosting Execution Plan](FULL_SELF_HOSTING_EXECUTION_PLAN.md) | Milestone plan and dependency removal order |
 
 ## Design decisions
 

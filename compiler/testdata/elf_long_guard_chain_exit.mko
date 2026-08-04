@@ -1,0 +1,164 @@
+fn step1() -> int {
+    return 1
+}
+
+fn step2() -> int {
+    return 2
+}
+
+fn step3() -> int {
+    return 3
+}
+
+fn step4() -> int {
+    return 4
+}
+
+fn step5() -> int {
+    return 5
+}
+
+fn step6() -> int {
+    return 6
+}
+
+fn step7() -> int {
+    return 7
+}
+
+fn step8() -> int {
+    return 8
+}
+
+fn step9() -> int {
+    return 9
+}
+
+fn step10() -> int {
+    return 10
+}
+
+fn step11() -> int {
+    return 11
+}
+
+fn step12() -> int {
+    return 12
+}
+
+fn step13() -> int {
+    return 13
+}
+
+fn step14() -> int {
+    return 14
+}
+
+fn step15() -> int {
+    return 15
+}
+
+fn step16() -> int {
+    return 16
+}
+
+fn step17() -> int {
+    return 17
+}
+
+fn step18() -> int {
+    return 18
+}
+
+fn step19() -> int {
+    return 19
+}
+
+fn step20() -> int {
+    return 20
+}
+
+fn main() {
+    if step1() != 1 {
+        print("step1 failed")
+        exit(41)
+    }
+    if step2() != 2 {
+        print("step2 failed")
+        exit(42)
+    }
+    if step3() != 3 {
+        print("step3 failed")
+        exit(43)
+    }
+    if step4() != 4 {
+        print("step4 failed")
+        exit(44)
+    }
+    if step5() != 5 {
+        print("step5 failed")
+        exit(45)
+    }
+    if step6() != 6 {
+        print("step6 failed")
+        exit(46)
+    }
+    if step7() != 7 {
+        print("step7 failed")
+        exit(47)
+    }
+    if step8() != 8 {
+        print("step8 failed")
+        exit(48)
+    }
+    if step9() != 9 {
+        print("step9 failed")
+        exit(49)
+    }
+    if step10() != 10 {
+        print("step10 failed")
+        exit(50)
+    }
+    if step11() != 11 {
+        print("step11 failed")
+        exit(51)
+    }
+    if step12() != 12 {
+        print("step12 failed")
+        exit(52)
+    }
+    if step13() != 13 {
+        print("step13 failed")
+        exit(53)
+    }
+    if step14() != 14 {
+        print("step14 failed")
+        exit(54)
+    }
+    if step15() != 15 {
+        print("step15 failed")
+        exit(55)
+    }
+    if step16() != 16 {
+        print("step16 failed")
+        exit(56)
+    }
+    if step17() != 17 {
+        print("step17 failed")
+        exit(57)
+    }
+    if step18() != 18 {
+        print("step18 failed")
+        exit(58)
+    }
+    if step19() != 19 {
+        print("step19 failed")
+        exit(59)
+    }
+    if step20() != 20 {
+        print("step20 failed")
+        exit(60)
+    }
+    print("chain ok")
+    exit(9)
+}

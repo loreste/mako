@@ -1,0 +1,5 @@
+fn main() -> int {
+    let contents = unsafe_read_file()
+    print(contents)
+    return 0
+}

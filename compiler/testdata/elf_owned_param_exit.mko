@@ -1,0 +1,10 @@
+fn pick(flag: int, xs: []int) -> int {
+    if flag > 0 {
+        return len(xs)
+    }
+    return 0
+}
+fn main(v: int) -> int {
+    let data: []int = make([]int, 3)
+    return pick(v, data)
+}

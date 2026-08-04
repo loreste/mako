@@ -1,0 +1,7 @@
+fn main(v: int) -> int {
+    let xs: []int = make([]int, 2)
+    let grown = append(xs, v)
+    let more = append(grown, 5)
+    let last = 3
+    return more[last] + more[2] + len(more)
+}

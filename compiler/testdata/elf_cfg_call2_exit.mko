@@ -1,0 +1,10 @@
+fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+fn choose(limit: int) -> int {
+    if limit > 1 {
+        return add(40, 2)
+    }
+    return add(20, 1)
+}

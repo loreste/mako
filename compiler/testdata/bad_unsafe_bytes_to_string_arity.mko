@@ -1,0 +1,5 @@
+fn main() -> int {
+    let text = unsafe_bytes_to_string()
+    print(text)
+    return 0
+}

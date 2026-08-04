@@ -1,0 +1,13 @@
+fn id(v: int) -> int {
+    return v
+}
+
+fn compute(value: int) -> int {
+    let mut total = id(0)
+    let mut i = 1
+    while i <= value + 1 {
+        total = total + i
+        i = i + 1
+    }
+    return total
+}

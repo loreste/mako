@@ -1,0 +1,5 @@
+fn compute(value: int) -> int {
+    let doubled = value * 2
+    let shifted = doubled + 10
+    return shifted - 4
+}

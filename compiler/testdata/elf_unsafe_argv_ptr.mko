@@ -1,0 +1,6 @@
+fn main() -> int {
+    let index = 0
+    let pointer = unsafe_argv_ptr(index)
+    let keep = pointer
+    return 0
+}

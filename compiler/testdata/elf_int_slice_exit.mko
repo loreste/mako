@@ -1,0 +1,5 @@
+fn main(v: int) -> int {
+    let xs: []int = make([]int, 3)
+    let index = 2
+    return xs[index] + len(xs) + v
+}

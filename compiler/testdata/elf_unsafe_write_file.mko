@@ -1,0 +1,5 @@
+fn main() -> int {
+    let result = unsafe_write_file("x", "y")
+    let keep = result
+    return 0
+}

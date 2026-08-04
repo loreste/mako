@@ -1,0 +1,16 @@
+fn compute(value: int) -> int {
+    let mut a = 0
+    let mut b = 0
+    let mut i = 0
+    while i < value * 3 {
+        if i > 1 {
+            a = a + i
+            b = b + 2
+        } else {
+            a = a + 10
+            b = b + 20
+        }
+        i = i + 1
+    }
+    return a + b
+}

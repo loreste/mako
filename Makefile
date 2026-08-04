@@ -10,7 +10,7 @@ CARGO ?= cargo
 TARGET_DIR ?= $(shell $(CARGO) metadata --format-version 1 --no-deps 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])' 2>/dev/null || echo target)
 MAKO_BIN := $(TARGET_DIR)/release/mako
 
-.PHONY: all release build install uninstall test help clean version structure
+.PHONY: all release build install uninstall test selfhost help clean version structure
 
 all: release
 
@@ -59,11 +59,16 @@ uninstall:
 test:
 	$(CARGO) run --quiet --release -- test examples/testing
 
+# Stage-0 → stage-1 self-host gate (frontend pins, ELF hashes, negatives).
+# ELF image *execution* runs only on Linux x86-64; other hosts format-check.
+selfhost:
+	MAKO_RUNTIME="$(CURDIR)/runtime" bash scripts/selfhost-gate.sh
+
 version:
 	$(CARGO) run --quiet --release -- --version
 
 help:
-	@echo "Targets: release install uninstall test version help structure"
+	@echo "Targets: release install uninstall test selfhost version help structure"
 	@echo "PREFIX=$(PREFIX)  RUNTIME_DST=$(RUNTIME_DST)"
 
 clean:

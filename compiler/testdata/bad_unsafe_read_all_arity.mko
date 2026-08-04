@@ -1,0 +1,4 @@
+fn main() -> int {
+    let result = unsafe_read_all(1, 2)
+    return result
+}

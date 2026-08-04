@@ -1,0 +1,15 @@
+fn main(v: int) -> int {
+    if v > 2 {
+        if v > 3 {
+            return 7
+        } else {
+            return 6
+        }
+    } else {
+        if v > 1 {
+            return 5
+        } else {
+            return 4
+        }
+    }
+}

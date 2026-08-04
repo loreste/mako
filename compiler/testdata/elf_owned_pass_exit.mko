@@ -1,0 +1,13 @@
+fn total(xs: []int) -> int {
+    return len(xs)
+}
+fn describe(flag: int, xs: []int) -> int {
+    if flag > 1 {
+        return total(xs) + 100
+    }
+    return total(xs)
+}
+fn main(v: int) -> int {
+    let data: []int = make([]int, 4)
+    return describe(v, data)
+}

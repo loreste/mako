@@ -1,0 +1,9 @@
+fn identity(value: int) -> int {
+    return value
+}
+
+fn compute() -> int {
+    let x = identity(6)
+    let y = identity(7)
+    return x * y
+}

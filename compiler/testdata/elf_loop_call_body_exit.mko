@@ -1,0 +1,17 @@
+fn double(v: int) -> int {
+    return v * 2
+}
+
+fn bound(v: int) -> int {
+    return v * 5
+}
+
+fn compute(value: int) -> int {
+    let mut total = 0
+    let mut i = 1
+    while i < bound(value) {
+        total = total + double(i)
+        i = i + 1
+    }
+    return total
+}

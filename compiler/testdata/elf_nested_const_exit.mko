@@ -1,0 +1,12 @@
+const LOW = 2
+const HIGH = 4
+const OFFSET = -3
+fn main(v: int) -> int {
+    if v > LOW {
+        if v > HIGH {
+            return v + OFFSET
+        }
+        return HIGH
+    }
+    return LOW
+}

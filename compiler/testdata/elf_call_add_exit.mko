@@ -1,0 +1,7 @@
+fn add_one(value: int) -> int {
+    return value + 1
+}
+
+fn compute() -> int {
+    return add_one(40) + 1
+}

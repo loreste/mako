@@ -1,0 +1,16 @@
+fn double(x: int) -> int {
+    return x * 2
+}
+fn add(a: int, b: int) -> int {
+    return a + b
+}
+fn main(v: int) -> int {
+    let scaled = double(v)
+    if scaled > 4 {
+        if scaled > 8 {
+            return add(scaled, 1)
+        }
+        return double(scaled)
+    }
+    return add(scaled, 100)
+}

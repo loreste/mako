@@ -1,0 +1,11 @@
+fn id(v: int) -> int {
+    return v
+}
+
+fn compute(value: int) -> int {
+    let mut i = id(0)
+    while i < value * 4 {
+        i = i + 3
+    }
+    return id(i)
+}

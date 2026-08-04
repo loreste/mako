@@ -3,6 +3,14 @@
 // tests against the stage-0 compiler.
 
 fn main() {
+    if not x86_64_smoke_test() {
+        print("internal compiler error: x86-64 encoder smoke test failed")
+        exit(70)
+    }
+    if not elf64_smoke_test() {
+        print("internal compiler error: ELF64 writer smoke test failed")
+        exit(70)
+    }
     if not expression_smoke_test() {
         print("internal compiler error: expression parser smoke test failed")
         exit(70)
@@ -17,6 +25,10 @@ fn main() {
     }
     if not expression_attachment_smoke_test() {
         print("internal compiler error: statement expression attachment smoke test failed")
+        exit(70)
+    }
+    if not condition_ident_attachment_smoke_test() {
+        print("internal compiler error: condition identifier attachment smoke test failed")
         exit(70)
     }
     if not symbol_smoke_test() {
@@ -59,6 +71,50 @@ fn main() {
         print("internal compiler error: typed IR dominance verifier smoke test failed")
         exit(70)
     }
+    if not typed_ir_loop_smoke_test() {
+        print("internal compiler error: typed IR loop smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_loop_skip_smoke_test() {
+        print("internal compiler error: typed IR loop skip smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_loop_multi_smoke_test() {
+        print("internal compiler error: typed IR multi-carried loop smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_loop_cross_read_skip_smoke_test() {
+        print("internal compiler error: typed IR loop cross-read skip smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_loop_break_smoke_test() {
+        print("internal compiler error: typed IR loop break smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_loop_continue_smoke_test() {
+        print("internal compiler error: typed IR loop continue smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_loop_call_smoke_test() {
+        print("internal compiler error: typed IR loop call smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_loop_merge_if_smoke_test() {
+        print("internal compiler error: typed IR loop merge-if smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_loop_sequential_smoke_test() {
+        print("internal compiler error: typed IR sequential loop smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_loop_guarded_chain_smoke_test() {
+        print("internal compiler error: typed IR guarded chain smoke test failed")
+        exit(70)
+    }
+    if not typed_ir_pre_if_loop_smoke_test() {
+        print("internal compiler error: typed IR pre-if loop smoke test failed")
+        exit(70)
+    }
     if not typed_ir_statement_merge_ownership_smoke_test() {
         print("internal compiler error: typed IR statement-merge ownership smoke test failed")
         exit(70)
@@ -87,7 +143,7 @@ fn main() {
         print("usage: makoc <source.mko>")
         exit(2)
     }
-    let path = arg_get(1)
+ let path = arg_get(1)
     let source = read_file(path)
     let result = lex_source(source)
     if not result.ok {
@@ -110,11 +166,35 @@ fn main() {
     }
     let ir_verification = verify_typed_ir(
         ir.functions, ir.blocks, ir.instructions, ir.constants, ir.successors,
-        ir.call_sites, ir.call_arguments, ir.value_count
+        ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.value_count
     )
     if not ir_verification.ok {
         print(path + ": typed IR verification failed: " + ir_verification.error)
         exit(1)
+    }
+    let elf = elf64_lower_typed_ir(ir)
+    if elf.status == ELF_OK { print("elf_bytes " + format_int(len(elf.bytes))) }
+    if argc() >= 3 {
+        if ir.skipped_functions != 0 {
+            print(path + ": ELF lowering failed: source contains functions the typed IR cannot lower yet")
+            exit(1)
+        }
+        if elf.status != ELF_OK {
+            print(path + ": ELF lowering failed: " + elf.error)
+            exit(1)
+        }
+ let output_path = arg_get(2)
+        let mut raw: []byte = make([]byte, 0, len(elf.bytes))
+        let mut byte_index = 0
+        while byte_index < len(elf.bytes) {
+            raw = append(raw, byte(elf.bytes[byte_index]))
+            byte_index = byte_index + 1
+        }
+        let write_status = write_file(output_path, string(raw))
+        if write_status != 0 {
+            print(output_path + ": failed to write ELF image")
+            exit(1)
+        }
     }
     print(
         "tokens " + format_int(parsed.token_count) +

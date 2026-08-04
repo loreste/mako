@@ -1,0 +1,3 @@
+fn main() -> byte {
+    return byte("not an integer")
+}

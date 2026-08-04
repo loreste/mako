@@ -192,7 +192,7 @@ fn type_failure(nodes: []TypeNode, edges: []int, next: int, message: string) -> 
 }
 
 fn append_type_node(nodes: []TypeNode, kind: int, token: int, edge_start: int, edge_count: int) -> TypeParse {
-    let mut out = clone_type_nodes(nodes)
+    let mut out = nodes
     let root = len(out)
     out = append(out, TypeNode { kind: kind, token: token, edge_start: edge_start, edge_count: edge_count })
     return TypeParse { nodes: out, edges: make([]int, 0, 0), root: root, next: 0, ok: true, error: "" }
@@ -205,8 +205,8 @@ fn parse_type(source: string, tokens: []Token, pos: int, nodes: []TypeNode, edge
 
     // Tuple or grouped type.
     if tokens[pos].kind == TK_LPAREN {
-        let mut out_nodes = clone_type_nodes(nodes)
-        let mut out_edges = clone_type_edges(edges)
+        let mut out_nodes = nodes
+        let mut out_edges = edges
         let mut roots: []int = []
         let mut next = pos + 1
         if next < len(tokens) and tokens[next].kind == TK_RPAREN {
@@ -215,10 +215,11 @@ fn parse_type(source: string, tokens: []Token, pos: int, nodes: []TypeNode, edge
         while next < len(tokens) {
             let element = parse_type(source, tokens, next, out_nodes, out_edges)
             if not element.ok { return element }
-            out_nodes = clone_type_nodes(element.nodes)
-            out_edges = clone_type_edges(element.edges)
-            roots = append(roots, element.root)
+            let element_root = element.root
             next = element.next
+            out_nodes = element.nodes
+            out_edges = element.edges
+            roots = append(roots, element_root)
             if next < len(tokens) and tokens[next].kind == TK_COMMA {
                 next = next + 1
                 if next < len(tokens) and tokens[next].kind == TK_RPAREN { break }
@@ -249,17 +250,19 @@ fn parse_type(source: string, tokens: []Token, pos: int, nodes: []TypeNode, edge
         if go_style { inner_pos = inner_pos + 1 }
         let inner = parse_type(source, tokens, inner_pos, nodes, edges)
         if not inner.ok { return inner }
+        let inner_root = inner.root
         let mut next = inner.next
+        let mut out_nodes = inner.nodes
+        let mut out_edges = inner.edges
         if not go_style {
             if next >= len(tokens) or tokens[next].kind != TK_RBRACKET {
-                return type_failure(inner.nodes, inner.edges, next, "expected `]` after array type")
+                return type_failure(out_nodes, out_edges, next, "expected `]` after array type")
             }
             next = next + 1
         }
-        let mut out_edges = clone_type_edges(inner.edges)
         let edge_start = len(out_edges)
-        out_edges = append(out_edges, inner.root)
-        let made = append_type_node(inner.nodes, TYPE_ARRAY, pos, edge_start, 1)
+        out_edges = append(out_edges, inner_root)
+        let made = append_type_node(out_nodes, TYPE_ARRAY, pos, edge_start, 1)
         return TypeParse { nodes: made.nodes, edges: out_edges, root: made.root, next: next, ok: true, error: "" }
     }
 
@@ -268,17 +271,18 @@ fn parse_type(source: string, tokens: []Token, pos: int, nodes: []TypeNode, edge
         if pos + 1 >= len(tokens) or tokens[pos + 1].kind != TK_LPAREN {
             return type_failure(nodes, edges, pos + 1, "expected `(` after fn in function type")
         }
-        let mut out_nodes = clone_type_nodes(nodes)
-        let mut out_edges = clone_type_edges(edges)
+        let mut out_nodes = nodes
+        let mut out_edges = edges
         let mut roots: []int = []
         let mut next = pos + 2
         while next < len(tokens) and tokens[next].kind != TK_RPAREN {
             let param = parse_type(source, tokens, next, out_nodes, out_edges)
             if not param.ok { return param }
-            out_nodes = clone_type_nodes(param.nodes)
-            out_edges = clone_type_edges(param.edges)
-            roots = append(roots, param.root)
+            let param_root = param.root
             next = param.next
+            out_nodes = param.nodes
+            out_edges = param.edges
+            roots = append(roots, param_root)
             if next < len(tokens) and tokens[next].kind == TK_COMMA {
                 next = next + 1
                 continue
@@ -294,9 +298,11 @@ fn parse_type(source: string, tokens: []Token, pos: int, nodes: []TypeNode, edge
         }
         let result = parse_type(source, tokens, next + 1, out_nodes, out_edges)
         if not result.ok { return result }
-        out_nodes = clone_type_nodes(result.nodes)
-        out_edges = clone_type_edges(result.edges)
-        roots = append(roots, result.root)
+        let result_root = result.root
+        let result_next = result.next
+        out_nodes = result.nodes
+        out_edges = result.edges
+        roots = append(roots, result_root)
         let edge_start = len(out_edges)
         let mut r = 0
         while r < len(roots) {
@@ -304,7 +310,7 @@ fn parse_type(source: string, tokens: []Token, pos: int, nodes: []TypeNode, edge
             r = r + 1
         }
         let made = append_type_node(out_nodes, TYPE_FN, pos, edge_start, len(roots))
-        return TypeParse { nodes: made.nodes, edges: out_edges, root: made.root, next: result.next, ok: true, error: "" }
+        return TypeParse { nodes: made.nodes, edges: out_edges, root: made.root, next: result_next, ok: true, error: "" }
     }
 
     if tokens[pos].kind != TK_IDENT {
@@ -322,33 +328,41 @@ fn parse_type(source: string, tokens: []Token, pos: int, nodes: []TypeNode, edge
     if name == "map" and next < len(tokens) and tokens[next].kind == TK_LBRACKET {
         let key = parse_type(source, tokens, next + 1, nodes, edges)
         if not key.ok { return key }
-        if key.next >= len(tokens) or tokens[key.next].kind != TK_RBRACKET {
-            return type_failure(key.nodes, key.edges, key.next, "expected `]` after map key type")
+        let key_root = key.root
+        let key_next = key.next
+        let key_nodes = key.nodes
+        let key_edges = key.edges
+        if key_next >= len(tokens) or tokens[key_next].kind != TK_RBRACKET {
+            return type_failure(key_nodes, key_edges, key_next, "expected `]` after map key type")
         }
-        let value = parse_type(source, tokens, key.next + 1, key.nodes, key.edges)
+        let value = parse_type(source, tokens, key_next + 1, key_nodes, key_edges)
         if not value.ok { return value }
-        let mut out_edges = clone_type_edges(value.edges)
+        let value_root = value.root
+        let value_next = value.next
+        let mut out_nodes = value.nodes
+        let mut out_edges = value.edges
         let edge_start = len(out_edges)
-        out_edges = append(out_edges, key.root)
-        out_edges = append(out_edges, value.root)
-        let made = append_type_node(value.nodes, TYPE_MAP, name_token, edge_start, 2)
-        return TypeParse { nodes: made.nodes, edges: out_edges, root: made.root, next: value.next, ok: true, error: "" }
+        out_edges = append(out_edges, key_root)
+        out_edges = append(out_edges, value_root)
+        let made = append_type_node(out_nodes, TYPE_MAP, name_token, edge_start, 2)
+        return TypeParse { nodes: made.nodes, edges: out_edges, root: made.root, next: value_next, ok: true, error: "" }
     }
 
     // Dual generic syntax: Result[T, E] and Result<T, E>.
     if next < len(tokens) and (tokens[next].kind == TK_LBRACKET or tokens[next].kind == TK_LT) {
         let close = if tokens[next].kind == TK_LBRACKET { TK_RBRACKET } else { TK_GT }
-        let mut out_nodes = clone_type_nodes(nodes)
-        let mut out_edges = clone_type_edges(edges)
+        let mut out_nodes = nodes
+        let mut out_edges = edges
         let mut roots: []int = []
         next = next + 1
         while next < len(tokens) and tokens[next].kind != close {
             let argument = parse_type(source, tokens, next, out_nodes, out_edges)
             if not argument.ok { return argument }
-            out_nodes = clone_type_nodes(argument.nodes)
-            out_edges = clone_type_edges(argument.edges)
-            roots = append(roots, argument.root)
+            let argument_root = argument.root
             next = argument.next
+            out_nodes = argument.nodes
+            out_edges = argument.edges
+            roots = append(roots, argument_root)
             if next < len(tokens) and tokens[next].kind == TK_COMMA {
                 next = next + 1
                 continue
@@ -368,8 +382,9 @@ fn parse_type(source: string, tokens: []Token, pos: int, nodes: []TypeNode, edge
         return TypeParse { nodes: made.nodes, edges: out_edges, root: made.root, next: next + 1, ok: true, error: "" }
     }
 
-    let made = append_type_node(nodes, TYPE_NAMED, name_token, len(edges), 0)
-    return TypeParse { nodes: made.nodes, edges: clone_type_edges(edges), root: made.root, next: next, ok: true, error: "" }
+    let edge_len = len(edges)
+    let made = append_type_node(nodes, TYPE_NAMED, name_token, edge_len, 0)
+    return TypeParse { nodes: made.nodes, edges: edges, root: made.root, next: next, ok: true, error: "" }
 }
 
 fn skip_type_parameters(tokens: []Token, pos: int) -> int {
@@ -411,8 +426,8 @@ fn parse_function_signature(
         return signature_failure(nodes, edges, next, "expected `(` after function name")
     }
 
-    let mut out_nodes = clone_type_nodes(nodes)
-    let mut out_edges = clone_type_edges(edges)
+    let mut out_nodes = nodes
+    let mut out_edges = edges
     let mut params: []int = []
     let mut param_bindings: []ParamBinding = []
     next = next + 1
@@ -447,9 +462,11 @@ fn parse_function_signature(
         if not parameter.ok {
             return signature_failure(parameter.nodes, parameter.edges, parameter.next, parameter.error)
         }
-        out_nodes = clone_type_nodes(parameter.nodes)
-        out_edges = clone_type_edges(parameter.edges)
-        params = append(params, parameter.root)
+        let parameter_root = parameter.root
+        next = parameter.next
+        out_nodes = parameter.nodes
+        out_edges = parameter.edges
+        params = append(params, parameter_root)
         let name = tokens[name_token]
         let mut duplicate = false
         let mut existing_index = 0
@@ -465,9 +482,8 @@ fn parse_function_signature(
         }
         param_bindings = append(param_bindings, ParamBinding {
             item: item_index, name_start: name.start, name_end: name.end,
-            type_root: parameter.root, mutable: mutable,
+            type_root: parameter_root, mutable: mutable,
         })
-        next = parameter.next
         if next < len(tokens) and tokens[next].kind == TK_COMMA {
             next = next + 1
             continue
@@ -485,20 +501,20 @@ fn parse_function_signature(
         if not result.ok {
             return signature_failure(result.nodes, result.edges, result.next, result.error)
         }
-        out_nodes = clone_type_nodes(result.nodes)
-        out_edges = clone_type_edges(result.edges)
         result_type = result.root
         next = result.next
+        out_nodes = result.nodes
+        out_edges = result.edges
     } else if next < body_open {
         // Go-compatible bare return type.
         let result = parse_type(source, tokens, next, out_nodes, out_edges)
         if not result.ok {
             return signature_failure(result.nodes, result.edges, result.next, result.error)
         }
-        out_nodes = clone_type_nodes(result.nodes)
-        out_edges = clone_type_edges(result.edges)
         result_type = result.root
         next = result.next
+        out_nodes = result.nodes
+        out_edges = result.edges
     }
     if next != body_open {
         return signature_failure(out_nodes, out_edges, next, "unexpected token in function signature")
@@ -590,8 +606,8 @@ fn parse_frontend(source: string, tokens: []Token) -> FrontendParse {
                     error_line: token.line, error_col: token.col,
                 }
             }
-            nodes = clone_type_nodes(parsed.nodes)
-            edges = clone_type_edges(parsed.edges)
+            nodes = parsed.nodes
+            edges = parsed.edges
             signatures = append(signatures, parsed.signature)
             let mut parameter_index = 0
             while parameter_index < len(parsed.params) {
@@ -614,9 +630,11 @@ fn parse_frontend(source: string, tokens: []Token) -> FrontendParse {
                     error_line: token.line, error_col: token.col,
                 }
             }
-            statements = clone_stmt_nodes(body.nodes)
-            statement_edges = clone_stmt_edges(body.edges)
-            bodies = append(bodies, FnBody { item: item_index, stmt_start: body.roots_start, stmt_count: body.roots_count })
+            let body_roots_start = body.roots_start
+            let body_roots_count = body.roots_count
+            statements = body.nodes
+            statement_edges = body.edges
+            bodies = append(bodies, FnBody { item: item_index, stmt_start: body_roots_start, stmt_count: body_roots_count })
         }
         item_index = item_index + 1
     }
@@ -646,7 +664,7 @@ fn parse_frontend(source: string, tokens: []Token) -> FrontendParse {
         local_resolution.local_by_expr, local_resolution.locals
     )
     return FrontendParse {
-        items: clone_top_items(structure.items), types: nodes, type_edges: edges, signatures: signatures, parameters: parameters,
+        items: structure.items, types: nodes, type_edges: edges, signatures: signatures, parameters: parameters,
         statements: attached.statements, statement_edges: statement_edges, bodies: bodies,
         expressions: attached.expressions,
         symbols: symbol_result.symbols, symbol_slots: symbol_result.slots,

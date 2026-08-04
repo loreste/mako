@@ -1,0 +1,9 @@
+fn main() {
+    if argc() < 2 {
+        print("usage: prog <name>")
+        exit(2)
+    }
+    let name = arg_get(1)
+    print(name)
+    exit(4)
+}

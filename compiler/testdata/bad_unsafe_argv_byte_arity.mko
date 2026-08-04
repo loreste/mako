@@ -1,0 +1,4 @@
+fn main() -> int {
+    let value = unsafe_argv_byte(0)
+    return int(value)
+}

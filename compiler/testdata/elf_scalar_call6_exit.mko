@@ -1,0 +1,11 @@
+fn add6(a: int, b: int, c: int, d: int, e: int, f: int) -> int {
+    let x = a + b
+    let y = c + d
+    let z = e + f
+    let w = x + y
+    return w + z
+}
+
+fn compute() -> int {
+    return add6(1, 2, 3, 4, 5, 27)
+}

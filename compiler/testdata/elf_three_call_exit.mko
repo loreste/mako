@@ -1,0 +1,10 @@
+fn id(v: int) -> int {
+    return v
+}
+
+fn compute(value: int) -> int {
+    let x = id(value + 9)
+    let y = id(20)
+    let z = id(12)
+    return x + y + z
+}

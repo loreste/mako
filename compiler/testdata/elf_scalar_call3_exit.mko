@@ -1,0 +1,9 @@
+fn add3(a: int, b: int, c: int) -> int {
+    let s = a + b
+    return s + c
+}
+
+fn compute(value: int) -> int {
+    let x = value + 10
+    return add3(x, 20, 12)
+}

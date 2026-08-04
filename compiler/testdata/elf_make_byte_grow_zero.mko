@@ -1,0 +1,6 @@
+fn main() -> int {
+    let values = make([]byte, 0)
+    let once = append(values, byte(7))
+    let twice = append(once, byte(8))
+    return len(twice)
+}

@@ -1,0 +1,4 @@
+fn main(value: int) -> int {
+    let checked = byte(value)
+    return value
+}

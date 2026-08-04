@@ -1,0 +1,6 @@
+fn main() -> int {
+    let fd = 0
+    let result = unsafe_close(fd)
+    let keep = result
+    return 0
+}

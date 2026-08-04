@@ -1,0 +1,434 @@
+// Entry-only argv pointer primitive for the self-hosted x86-64 backend.
+fn x86_emit_argc(bytes: []int, result_slot: int) []int {
+ let mut out = bytes
+ // mov rax, [rbp + 16] (argc remains above the body frame)
+ out = append(out, 72); out = append(out, 139); out = append(out, 69); out = append(out, 16)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+fn x86_emit_argv_ptr(bytes: []int, index_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, index_slot)
+ // mov rdx, rax
+ out = append(out, 72)
+ out = append(out, 137)
+ out = append(out, 194)
+ // mov rcx, [rbp + 24]
+ out = append(out, 72)
+ out = append(out, 141)
+ out = append(out, 77)
+ out = append(out, 24)
+ // mov rcx, [rcx + rdx*8]
+ out = append(out, 72)
+ out = append(out, 139)
+ out = append(out, 12)
+ out = append(out, 209)
+ // mov rax, rcx
+ out = append(out, 72)
+ out = append(out, 137)
+ out = append(out, 200)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+// Return the NUL-terminated length of argv[index]. The caller owns the
+// pointer contract; repne scasb stops at the process-provided terminator.
+fn x86_emit_argv_len(bytes: []int, index_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, index_slot)
+ // mov rdx, rax; mov rcx, [rbp + 24]; mov rdi, [rcx + rdx*8]
+ out = append(out, 72); out = append(out, 137); out = append(out, 194)
+ out = append(out, 72); out = append(out, 141); out = append(out, 77); out = append(out, 24)
+ out = append(out, 72); out = append(out, 139); out = append(out, 60); out = append(out, 209)
+ // xor eax, eax; mov rcx, -1; repne scasb; not rcx; dec rcx; mov rax, rcx
+ out = append(out, 49); out = append(out, 192)
+ out = append(out, 72); out = append(out, 199); out = append(out, 193)
+ out = append(out, 255); out = append(out, 255); out = append(out, 255); out = append(out, 255)
+ out = append(out, 242); out = append(out, 174)
+ out = append(out, 72); out = append(out, 247); out = append(out, 209)
+ out = append(out, 72); out = append(out, 255); out = append(out, 201)
+ out = append(out, 72); out = append(out, 137); out = append(out, 200)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+// Return argv[index][offset] as a byte. Bounds and NUL handling are the
+// caller's responsibility, matching the other unsafe pointer primitives.
+fn x86_emit_argv_byte(bytes: []int, index_slot: int, offset_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, index_slot)
+ // mov rdx, rax; mov rcx, [rbp + 24]; mov rcx, [rcx + rdx*8]
+ out = append(out, 72); out = append(out, 137); out = append(out, 194)
+ out = append(out, 72); out = append(out, 141); out = append(out, 77); out = append(out, 24)
+ out = append(out, 72); out = append(out, 139); out = append(out, 12); out = append(out, 209)
+ // mov rdx, [rbp - 8*offset]; add rcx, rdx; movzx eax, byte [rcx]
+ out = x86_emit_load_syscall_arg(out, offset_slot, 3)
+ out = append(out, 72); out = append(out, 1); out = append(out, 209)
+ out = append(out, 15); out = append(out, 182); out = append(out, 1)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+// Copy argv[index] into an existing byte-slice, clamped to its capacity.
+// The slice header is [length, capacity, data_pointer].
+fn x86_emit_argv_copy(bytes: []int, index_slot: int, slice_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, index_slot)
+ // Locate argv[index] in rsi.
+ out = append(out, 72); out = append(out, 137); out = append(out, 194)
+ out = append(out, 72); out = append(out, 141); out = append(out, 77); out = append(out, 24)
+ out = append(out, 72); out = append(out, 139); out = append(out, 52); out = append(out, 209)
+ // Preserve slice header in r8.
+ out = x86_emit_load_rax(out, slice_slot)
+ out = append(out, 73); out = append(out, 137); out = append(out, 192)
+ // Scan argv bytes through the terminating NUL.
+ out = append(out, 72); out = append(out, 137); out = append(out, 247)
+ out = append(out, 49); out = append(out, 192)
+ out = append(out, 72); out = append(out, 199); out = append(out, 193)
+ out = append(out, 255); out = append(out, 255); out = append(out, 255); out = append(out, 255)
+ out = append(out, 242); out = append(out, 174)
+ out = append(out, 72); out = append(out, 247); out = append(out, 209)
+ out = append(out, 72); out = append(out, 255); out = append(out, 201)
+ // rdx = source length; rax = capacity; choose min(source length, capacity).
+ out = append(out, 72); out = append(out, 137); out = append(out, 202)
+ out = append(out, 73); out = append(out, 139); out = append(out, 64); out = append(out, 8)
+ out = append(out, 72); out = append(out, 57); out = append(out, 194)
+ out = append(out, 72); out = append(out, 15); out = append(out, 71); out = append(out, 208)
+ // Store length and copy exactly that many bytes into the slice payload.
+ out = append(out, 73); out = append(out, 137); out = append(out, 16)
+ out = append(out, 73); out = append(out, 139); out = append(out, 120); out = append(out, 16)
+ out = append(out, 72); out = append(out, 137); out = append(out, 209)
+ out = append(out, 243); out = append(out, 164)
+ out = append(out, 72); out = append(out, 137); out = append(out, 208)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+// Allocate an owned string object {length, bytes} from a byte slice. This is
+// explicitly unsafe until ownership/drop lowering is wired to the allocation.
+fn x86_emit_bytes_to_string(bytes: []int, slice_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, slice_slot)
+ // r8 = slice header; rcx = length; r9 = source payload.
+ out = append(out, 73); out = append(out, 137); out = append(out, 192)
+ out = append(out, 73); out = append(out, 139); out = append(out, 8)
+ out = append(out, 77); out = append(out, 139); out = append(out, 72); out = append(out, 16)
+ // Save length while mmap clobbers rcx, then mmap(length + 10): eight bytes
+ // of header plus the NUL and newline that close every string object.
+ out = append(out, 81)
+ out = append(out, 65); out = append(out, 81)
+ out = x86_emit_int_rax(out, 9)
+ out = x86_emit_syscall_const(out, 0, 1)
+ out = append(out, 72); out = append(out, 137); out = append(out, 206)
+ out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
+ out = x86_emit_syscall_const(out, 3, 3)
+ out = x86_emit_syscall_const(out, 34, 4)
+ out = x86_emit_syscall_const(out, -1, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 65); out = append(out, 89)
+ out = append(out, 89)
+ // Store length, copy source bytes to allocation + 8, return allocation.
+ // The source pointer comes from the saved r9; re-reading it through r8 would
+ // fault, because mmap's fifth argument already overwrote r8 with -1.
+ out = append(out, 72); out = append(out, 137); out = append(out, 8)
+ out = append(out, 72); out = append(out, 141); out = append(out, 120); out = append(out, 8)
+ out = append(out, 76); out = append(out, 137); out = append(out, 206)
+ out = append(out, 72); out = append(out, 137); out = append(out, 201)
+ out = append(out, 243); out = append(out, 164)
+ out = x86_emit_string_terminators(out)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+// Close an owned string payload after `rep movsb`: rdi points one past the
+// copied bytes, so the NUL terminator and the newline print appends land at
+// [rdi] and [rdi + 1]. Both are inside the allocation because the string
+// allocators reserve length + 10 bytes.
+fn x86_emit_string_terminators(bytes: []int) []int {
+ let mut out = bytes
+ out = append(out, 198); out = append(out, 7); out = append(out, 0)
+ out = append(out, 198); out = append(out, 71); out = append(out, 1); out = append(out, 10)
+ return out
+}
+
+// Native arg_get: scan argv[index], allocate {length, bytes}, and copy it.
+fn x86_emit_arg_get(bytes: []int, index_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, index_slot)
+ // rdx = index; rcx = argv; r9 = source pointer.
+ out = append(out, 72); out = append(out, 137); out = append(out, 194)
+ out = append(out, 72); out = append(out, 141); out = append(out, 77); out = append(out, 24)
+ // mov r9, [rcx + rdx*8]: REX must be 0x4C. 0x4D adds REX.B, which retargets
+ // the SIB base from rcx to r9 and indexes off an uninitialized register.
+ out = append(out, 76); out = append(out, 139); out = append(out, 12); out = append(out, 209)
+ // Scan source into length rcx, preserving source and length over syscall.
+ out = append(out, 76); out = append(out, 137); out = append(out, 207)
+ out = append(out, 49); out = append(out, 192)
+ out = append(out, 72); out = append(out, 199); out = append(out, 193)
+ out = append(out, 255); out = append(out, 255); out = append(out, 255); out = append(out, 255)
+ out = append(out, 242); out = append(out, 174)
+ out = append(out, 72); out = append(out, 247); out = append(out, 209)
+ out = append(out, 72); out = append(out, 255); out = append(out, 201)
+ out = append(out, 81)
+ out = append(out, 65); out = append(out, 81)
+ // mmap(length + 10): header, payload, NUL, newline.
+ out = x86_emit_int_rax(out, 9)
+ out = x86_emit_syscall_const(out, 0, 1)
+ out = append(out, 72); out = append(out, 137); out = append(out, 206)
+ out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
+ out = x86_emit_syscall_const(out, 3, 3)
+ out = x86_emit_syscall_const(out, 34, 4)
+ out = x86_emit_syscall_const(out, -1, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 65); out = append(out, 89)
+ out = append(out, 89)
+ // Store length and copy source bytes.
+ out = append(out, 72); out = append(out, 137); out = append(out, 8)
+ out = append(out, 72); out = append(out, 141); out = append(out, 120); out = append(out, 8)
+ out = append(out, 76); out = append(out, 137); out = append(out, 206)
+ out = append(out, 72); out = append(out, 137); out = append(out, 201)
+ out = append(out, 243); out = append(out, 164)
+ out = x86_emit_string_terminators(out)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+fn x86_emit_close(bytes: []int, fd_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_int_rax(bytes, 3)
+ out = x86_emit_load_syscall_arg(out, fd_slot, 1)
+ out = x86_emit_syscall_const(out, 0, 2)
+ out = x86_emit_syscall_const(out, 0, 3)
+ out = x86_emit_syscall_const(out, 0, 4)
+ out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+// Read an entire regular file into an owned {length, bytes} string. Linux
+// struct stat st_size is at offset 48 on x86-64; scratch storage is unmapped.
+fn x86_emit_read_file(bytes: []int, path_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, path_slot)
+ // openat(AT_FDCWD, path.data, O_RDONLY). The path bytes follow the length
+ // word, and openat takes them in rsi: staging them through rdi lost the
+ // pointer to the AT_FDCWD constant that immediately overwrites it.
+ out = append(out, 72); out = append(out, 141); out = append(out, 112); out = append(out, 8)
+ out = x86_emit_int_rax(out, 257)
+ out = x86_emit_syscall_const(out, -100, 1)
+ out = x86_emit_syscall_const(out, 0, 3)
+ out = x86_emit_syscall_const(out, 0, 4)
+ out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 73); out = append(out, 137); out = append(out, 196)
+ // mmap 144-byte stat scratch.
+ out = x86_emit_int_rax(out, 9)
+ out = x86_emit_syscall_const(out, 0, 1)
+ out = x86_emit_syscall_const(out, 144, 2)
+ out = x86_emit_syscall_const(out, 3, 3)
+ out = x86_emit_syscall_const(out, 34, 4)
+ out = x86_emit_syscall_const(out, -1, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 73); out = append(out, 137); out = append(out, 197)
+ // fstat(fd, scratch); load st_size.
+ out = x86_emit_int_rax(out, 5)
+ out = append(out, 76); out = append(out, 137); out = append(out, 231)
+ out = append(out, 76); out = append(out, 137); out = append(out, 238)
+ out = x86_emit_syscall_const(out, 0, 3)
+ out = x86_emit_syscall_const(out, 0, 4)
+ out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 77); out = append(out, 139); out = append(out, 117); out = append(out, 48)
+ // mmap(file_size + 10) for the string object: header, payload, NUL, newline.
+ out = x86_emit_int_rax(out, 9)
+ out = x86_emit_syscall_const(out, 0, 1)
+ out = append(out, 76); out = append(out, 137); out = append(out, 246)
+ out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
+ out = x86_emit_syscall_const(out, 3, 3)
+ out = x86_emit_syscall_const(out, 34, 4)
+ out = x86_emit_syscall_const(out, -1, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 73); out = append(out, 137); out = append(out, 199)
+ // read(fd, string.data, file_size); close(fd); munmap(stat scratch).
+ out = x86_emit_int_rax(out, 0)
+ out = append(out, 76); out = append(out, 137); out = append(out, 231)
+ out = append(out, 73); out = append(out, 141); out = append(out, 119); out = append(out, 8)
+ // read length goes in rdx; overwriting rsi here discarded the destination
+ // pointer and passed the stat scratch as the count.
+ out = append(out, 76); out = append(out, 137); out = append(out, 242)
+ out = x86_emit_syscall_const(out, 0, 4)
+ out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 73); out = append(out, 137); out = append(out, 198)
+ out = x86_emit_int_rax(out, 3)
+ out = append(out, 76); out = append(out, 137); out = append(out, 231)
+ out = x86_emit_syscall_const(out, 0, 2); out = x86_emit_syscall_const(out, 0, 3)
+ out = x86_emit_syscall_const(out, 0, 4); out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6); out = append(out, 15); out = append(out, 5)
+ out = x86_emit_int_rax(out, 11)
+ out = append(out, 76); out = append(out, 137); out = append(out, 239)
+ out = x86_emit_syscall_const(out, 144, 2); out = x86_emit_syscall_const(out, 0, 3)
+ out = x86_emit_syscall_const(out, 0, 4); out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6); out = append(out, 15); out = append(out, 5)
+ // Fail closed: a failed open or read leaves a negative count in r14, and
+ // storing that as an unsigned length would hand every later reader a
+ // multi-exabyte string. Clamp to an empty string instead.
+ out = append(out, 77); out = append(out, 133); out = append(out, 246)
+ out = append(out, 121); out = append(out, 3)
+ out = append(out, 69); out = append(out, 49); out = append(out, 246)
+ // Store read count as string length, close the payload with the NUL and
+ // newline, and return the buffer. r15 holds the allocation and r14 the
+ // count; rax still holds the munmap result, so it must be reloaded.
+ out = append(out, 77); out = append(out, 137); out = append(out, 55)
+ out = append(out, 67); out = append(out, 198); out = append(out, 68); out = append(out, 55); out = append(out, 8); out = append(out, 0)
+ out = append(out, 67); out = append(out, 198); out = append(out, 68); out = append(out, 55); out = append(out, 9); out = append(out, 10)
+ out = append(out, 76); out = append(out, 137); out = append(out, 248)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+fn x86_emit_write_all(bytes: []int, fd_slot: int, pointer_slot: int, length_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_syscall_arg(bytes, fd_slot, 1)
+ out = x86_emit_load_syscall_arg(out, pointer_slot, 2)
+ out = x86_emit_load_syscall_arg(out, length_slot, 3)
+ let loop_start = len(out)
+ out = append(out, 72); out = append(out, 133); out = append(out, 210)
+ let done_jump = len(out); out = append(out, 116); out = append(out, 0)
+ out = append(out, 184); out = x86_emit_u32(out, 1)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 72); out = append(out, 133); out = append(out, 192)
+ let error_jump = len(out); out = append(out, 120); out = append(out, 0)
+ out = append(out, 72); out = append(out, 41); out = append(out, 194)
+ out = append(out, 72); out = append(out, 1); out = append(out, 198)
+ let loop_jump = len(out); out = append(out, 235); out = append(out, 0)
+ let done = len(out)
+ out[done_jump + 1] = (done - (done_jump + 2)) & 255
+ out[loop_jump + 1] = (loop_start - (loop_jump + 2)) & 255
+ out = x86_emit_int_rax(out, 0)
+ let success_jump = len(out)
+ out = append(out, 235); out = append(out, 0)
+ let error = len(out)
+ out[error_jump + 1] = (error - (error_jump + 2)) & 255
+ let finish = len(out)
+ out[success_jump + 1] = (finish - (success_jump + 2)) & 255
+ return x86_emit_store_rax(out, result_slot)
+}
+
+fn x86_emit_write_file_retry(bytes: []int, path_slot: int, contents_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, path_slot)
+ // openat path points at inline string bytes, not the length word.
+ out = append(out, 72); out = append(out, 141); out = append(out, 112); out = append(out, 8)
+ out = x86_emit_load_rax(out, contents_slot)
+ out = append(out, 73); out = append(out, 137); out = append(out, 197)
+ out = x86_emit_int_rax(out, 257)
+ out = x86_emit_syscall_const(out, -100, 1)
+ out = x86_emit_syscall_const(out, 577, 3)
+ out = x86_emit_syscall_const(out, 420, 4)
+ out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 73); out = append(out, 137); out = append(out, 196)
+ out = append(out, 76); out = append(out, 137); out = append(out, 231)
+ // lea rsi, [r13+8] — the payload address. A mov here loaded the first eight
+ // payload bytes and passed them to write as a pointer.
+ out = append(out, 73); out = append(out, 141); out = append(out, 117); out = append(out, 8)
+ out = append(out, 73); out = append(out, 139); out = append(out, 85); out = append(out, 0)
+ let loop_start = len(out)
+ out = append(out, 72); out = append(out, 133); out = append(out, 210)
+ let done_jump = len(out); out = append(out, 116); out = append(out, 0)
+ out = append(out, 184); out = x86_emit_u32(out, 1); out = append(out, 15); out = append(out, 5)
+ out = append(out, 72); out = append(out, 133); out = append(out, 192)
+ let error_jump = len(out); out = append(out, 120); out = append(out, 0)
+ out = append(out, 72); out = append(out, 41); out = append(out, 194)
+ out = append(out, 72); out = append(out, 1); out = append(out, 198)
+ let loop_jump = len(out); out = append(out, 235); out = append(out, 0)
+ let done = len(out)
+ out[done_jump + 1] = (done - (done_jump + 2)) & 255
+ out[loop_jump + 1] = (loop_start - (loop_jump + 2)) & 255
+ out = x86_emit_int_rax(out, 0)
+ let success_jump = len(out); out = append(out, 235); out = append(out, 0)
+ let error = len(out); out[error_jump + 1] = (error - (error_jump + 2)) & 255
+ let finish = len(out); out[success_jump + 1] = (finish - (success_jump + 2)) & 255
+ out = append(out, 73); out = append(out, 137); out = append(out, 198)
+ // mov rdi, r12 is 4C 89 E7; the missing 0x89 decoded as a privileged OUT
+ // that also swallowed the following byte.
+ out = x86_emit_int_rax(out, 3); out = append(out, 76); out = append(out, 137); out = append(out, 231)
+ out = x86_emit_syscall_const(out, 0, 2); out = x86_emit_syscall_const(out, 0, 3)
+ out = x86_emit_syscall_const(out, 0, 4); out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6); out = append(out, 15); out = append(out, 5)
+ out = append(out, 76); out = append(out, 137); out = append(out, 240)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+fn x86_emit_read_all(bytes: []int, fd_slot: int, pointer_slot: int, length_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_syscall_arg(bytes, fd_slot, 1)
+ out = x86_emit_load_syscall_arg(out, pointer_slot, 2)
+ out = x86_emit_load_syscall_arg(out, length_slot, 3)
+ out = append(out, 69); out = append(out, 49); out = append(out, 228)
+ let loop_start = len(out)
+ out = append(out, 72); out = append(out, 133); out = append(out, 210)
+ let done_jump = len(out); out = append(out, 116); out = append(out, 0)
+ out = append(out, 49); out = append(out, 192); out = append(out, 15); out = append(out, 5)
+ out = append(out, 72); out = append(out, 133); out = append(out, 192)
+ let error_jump = len(out); out = append(out, 120); out = append(out, 0)
+ let eof_jump = len(out); out = append(out, 116); out = append(out, 0)
+ out = append(out, 73); out = append(out, 1); out = append(out, 196)
+ out = append(out, 72); out = append(out, 41); out = append(out, 194)
+ out = append(out, 72); out = append(out, 1); out = append(out, 198)
+ let loop_jump = len(out); out = append(out, 235); out = append(out, 0)
+ let done = len(out)
+ out[done_jump + 1] = (done - (done_jump + 2)) & 255
+ out[eof_jump + 1] = (done - (eof_jump + 2)) & 255
+ out[loop_jump + 1] = (loop_start - (loop_jump + 2)) & 255
+ out = append(out, 76); out = append(out, 137); out = append(out, 224)
+ let success_jump = len(out); out = append(out, 235); out = append(out, 0)
+ let error = len(out); out[error_jump + 1] = (error - (error_jump + 2)) & 255
+ let finish = len(out); out[success_jump + 1] = (finish - (success_jump + 2)) & 255
+ return x86_emit_store_rax(out, result_slot)
+}
+
+fn x86_emit_open_string(bytes: []int, path_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, path_slot)
+ // openat(AT_FDCWD, string bytes, O_RDONLY, 0)
+ out = append(out, 72); out = append(out, 141); out = append(out, 112); out = append(out, 8)
+ out = x86_emit_int_rax(out, 257)
+ out = x86_emit_syscall_const(out, -100, 1)
+ out = x86_emit_syscall_const(out, 0, 3)
+ out = x86_emit_syscall_const(out, 0, 4)
+ out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+fn x86_string_value_owned_at(instructions: []IrInstruction, call_sites: []IrCallSite, value: int, depth: int) bool {
+ if depth > len(instructions) { return false }
+ let mut i = 0
+ while i < len(instructions) {
+  if instructions[i].result == value {
+   if instructions[i].op == IR_CALL and instructions[i].aux >= 0 and instructions[i].aux < len(call_sites) and (call_sites[instructions[i].aux].callee_item == -19 or call_sites[instructions[i].aux].callee_item == -20 or call_sites[instructions[i].aux].callee_item == -22) {
+    return true
+   }
+   if instructions[i].op == IR_MOVE and x86_string_value_owned_at(instructions, call_sites, instructions[i].left, depth + 1) {
+    return true
+   }
+  }
+  i = i + 1
+ }
+ return false
+}
+
+fn x86_string_value_owned(instructions: []IrInstruction, call_sites: []IrCallSite, value: int) bool {
+ return x86_string_value_owned_at(instructions, call_sites, value, 0)
+}
+
+fn x86_emit_drop_owned_string(bytes: []int, slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, slot)
+ // munmap(string, string.length + 10). The producers map length + 10 — the
+ // header word, the payload, a NUL and a newline — so unmapping length + 8
+ // leaves the final page mapped whenever length + 8 lands exactly on a page
+ // boundary. The size here has to match what was mapped.
+ out = append(out, 72); out = append(out, 137); out = append(out, 199)
+ out = append(out, 72); out = append(out, 139); out = append(out, 48)
+ out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
+ out = x86_emit_int_rax(out, 11)
+ out = x86_emit_syscall_const(out, 0, 3)
+ out = x86_emit_syscall_const(out, 0, 4)
+ out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ return out
+}

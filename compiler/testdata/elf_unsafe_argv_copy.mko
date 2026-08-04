@@ -1,0 +1,6 @@
+fn main() -> int {
+    let index = 0
+    let mut bytes: []byte = make([]byte, 32)
+    let copied = unsafe_argv_copy(index, bytes)
+    return copied
+}

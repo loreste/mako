@@ -366,6 +366,26 @@ jobs:
         env:
           MAKO_RUNTIME: ${{ github.workspace }}/runtime
 
+  selfhost-linux:
+    name: Self-hosted backend gate (Linux x86-64, executes images)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # The gate only *executes* the ELF images it generates on a Linux
+      # x86-64 host; every other host validates format and hashes, then
+      # defers. Running it solely on macOS meant no job ever ran the
+      # self-hosted backend's output, so miscompiled register and syscall
+      # sequences passed the hash pins unnoticed.
+      - name: Self-host gate with ELF execution
+        run: ./scripts/selfhost-gate.sh
+        env:
+          MAKO_RUNTIME: ${{ github.workspace }}/runtime
+
   cross-smoke:
     name: Cross-compile artifacts (Windows + Linux musl + WASI)
     runs-on: ubuntu-latest

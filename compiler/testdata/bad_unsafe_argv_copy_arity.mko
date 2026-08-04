@@ -1,0 +1,4 @@
+fn main() -> int {
+    let copied = unsafe_argv_copy(0)
+    return copied
+}

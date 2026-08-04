@@ -1,0 +1,16 @@
+fn step(v: int) -> int {
+    return v + 3
+}
+
+fn compute(value: int) -> int {
+    let mut total = 0
+    let mut i = 0
+    while i < value * 8 {
+        i = step(i)
+        if total > 10 {
+            break
+        }
+        total = total + 2
+    }
+    return total
+}

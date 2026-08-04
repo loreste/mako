@@ -1,0 +1,5 @@
+fn main() -> int {
+    let text = arg_get()
+    print(text)
+    return 0
+}

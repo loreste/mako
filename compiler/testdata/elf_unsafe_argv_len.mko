@@ -1,0 +1,6 @@
+fn main() -> int {
+    let index = 0
+    let length = unsafe_argv_len(index)
+    let keep = length
+    return 0
+}

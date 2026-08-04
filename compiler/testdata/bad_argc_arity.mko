@@ -1,0 +1,4 @@
+fn main() -> int {
+    let count = argc(1)
+    return count
+}

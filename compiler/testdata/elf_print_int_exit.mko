@@ -1,0 +1,14 @@
+fn main() {
+    let a = 42
+    let b = 3 - 10
+    let big = 1000000 * 1000000
+    let min = (0 - 2147483648) * 2147483648 * 2
+    let max = (0 - 1) - min
+    print(a)
+    print(b)
+    print(0)
+    print(big)
+    print(min)
+    print(max)
+    exit(7)
+}

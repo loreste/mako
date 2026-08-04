@@ -1,0 +1,16 @@
+fn ready() -> bool {
+    return true
+}
+
+fn main() {
+    if not ready() {
+        print("not ready")
+        exit(70)
+    }
+    if argc() < 2 {
+        print("usage: prog <arg>")
+        exit(2)
+    }
+    print("have argument")
+    exit(3)
+}

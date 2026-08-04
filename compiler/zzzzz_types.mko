@@ -11,6 +11,9 @@ const SEM_ARRAY_FLOAT = 6
 const SEM_ARRAY_BOOL = 7
 const SEM_ARRAY_STRING = 8
 const SEM_MAP = 9
+const SEM_BYTE = 10
+const SEM_ARRAY_BYTE = 11
+
 
 fn semantic_declared_type(source: string, tokens: []Token, types: []TypeNode, type_edges: []int, root: int) -> int {
     if root < 0 or root >= len(types) { return SEM_UNKNOWN }
@@ -26,6 +29,7 @@ fn semantic_declared_type(source: string, tokens: []Token, types: []TypeNode, ty
         if element_name == "float" or element_name == "float64" { return SEM_ARRAY_FLOAT }
         if element_name == "bool" { return SEM_ARRAY_BOOL }
         if element_name == "string" { return SEM_ARRAY_STRING }
+        if element_name == "byte" or element_name == "uint8" { return SEM_ARRAY_BYTE }
         return SEM_UNKNOWN
     }
     if node.kind != TYPE_NAMED or node.token < 0 or node.token >= len(tokens) { return SEM_UNKNOWN }
@@ -34,6 +38,7 @@ fn semantic_declared_type(source: string, tokens: []Token, types: []TypeNode, ty
     if name == "float" or name == "float64" { return SEM_FLOAT }
     if name == "bool" { return SEM_BOOL }
     if name == "string" { return SEM_STRING }
+    if name == "byte" or name == "uint8" { return SEM_BYTE }
     return SEM_UNKNOWN
 }
 
@@ -42,6 +47,7 @@ fn semantic_array_of(element: int) -> int {
     if element == SEM_FLOAT { return SEM_ARRAY_FLOAT }
     if element == SEM_BOOL { return SEM_ARRAY_BOOL }
     if element == SEM_STRING { return SEM_ARRAY_STRING }
+    if element == SEM_BYTE { return SEM_ARRAY_BYTE }
     return SEM_UNKNOWN
 }
 
@@ -50,6 +56,7 @@ fn semantic_array_element(array: int) -> int {
     if array == SEM_ARRAY_FLOAT { return SEM_FLOAT }
     if array == SEM_ARRAY_BOOL { return SEM_BOOL }
     if array == SEM_ARRAY_STRING { return SEM_STRING }
+    if array == SEM_ARRAY_BYTE { return SEM_BYTE }
     return SEM_UNKNOWN
 }
 
@@ -98,6 +105,7 @@ fn semantic_type_reference(source: string, tokens: []Token, expression: ExprNode
     if name == "float" or name == "float64" { return SEM_ARRAY_FLOAT }
     if name == "bool" { return SEM_ARRAY_BOOL }
     if name == "string" { return SEM_ARRAY_STRING }
+    if name == "byte" or name == "uint8" { return SEM_ARRAY_BYTE }
     return SEM_UNKNOWN
 }
 
@@ -106,6 +114,7 @@ fn semantic_type_name(kind: int) -> string {
     if kind == SEM_FLOAT { return "float" }
     if kind == SEM_BOOL { return "bool" }
     if kind == SEM_STRING { return "string" }
+    if kind == SEM_BYTE { return "byte" }
     if kind == SEM_ARRAY_INT { return "[]int" }
     if kind == SEM_ARRAY_FLOAT { return "[]float" }
     if kind == SEM_ARRAY_BOOL { return "[]bool" }
@@ -164,6 +173,51 @@ fn semantic_function_signature(
     return -1
 }
 
+// Semantic type of the global `const` an identifier resolves to, or
+// SEM_UNKNOWN. A const item records no body range — the parser stops it at
+// end-of-line — so the initializer is the token run after its `=`. Only a
+// single literal is classified here; a computed initializer stays unknown and
+// therefore stays deferred rather than being guessed.
+fn semantic_const_reference_type(
+    source: string, tokens: []Token, items: []TopItem, symbols: []Symbol,
+    expression_symbols: []int, expression_index: int
+) -> int {
+    if expression_index < 0 or expression_index >= len(expression_symbols) { return SEM_UNKNOWN }
+    let symbol_index = expression_symbols[expression_index]
+    if symbol_index < 0 or symbol_index >= len(symbols) { return SEM_UNKNOWN }
+    let item_index = symbols[symbol_index].item
+    if item_index < 0 or item_index >= len(items) { return SEM_UNKNOWN }
+    let item = items[item_index]
+    if item.kind != ITEM_CONST { return SEM_UNKNOWN }
+    let mut scan = item.token_start
+    let mut assign = -1
+    while scan < item.token_end and scan < len(tokens) {
+        if tokens[scan].kind == TK_ASSIGN {
+            assign = scan
+            scan = item.token_end
+        } else {
+            scan = scan + 1
+        }
+    }
+    if assign < 0 { return SEM_UNKNOWN }
+    let mut value_index = assign + 1
+    if value_index < item.token_end and value_index < len(tokens) and tokens[value_index].kind == TK_MINUS {
+        value_index = value_index + 1
+    }
+    if value_index >= item.token_end or value_index >= len(tokens) { return SEM_UNKNOWN }
+    // Reject anything past the literal so `const A = B + 1` stays unknown.
+    if value_index + 1 < item.token_end and value_index + 1 < len(tokens) and
+        tokens[value_index + 1].kind != TK_SEMICOLON {
+        return SEM_UNKNOWN
+    }
+    let kind = tokens[value_index].kind
+    if kind == TK_INT { return SEM_INT }
+    if kind == TK_FLOAT { return SEM_FLOAT }
+    if kind == TK_STRING { return SEM_STRING }
+    if kind == TK_TRUE or kind == TK_FALSE { return SEM_BOOL }
+    return SEM_UNKNOWN
+}
+
 fn infer_semantic_types(
     source: string,
     tokens: []Token,
@@ -212,6 +266,12 @@ fn infer_semantic_types(
             if expression.kind == EXPR_STRING { inferred = SEM_STRING }
             if expression.kind == EXPR_IDENT and i < len(expression_locals) and expression_locals[i] >= 0 and expression_locals[i] < len(local_types) {
                 inferred = local_types[expression_locals[i]]
+            } else if expression.kind == EXPR_IDENT and inferred == SEM_UNKNOWN {
+                // A reference to a global `const` takes its initializer's type.
+                // Without this the reference stays unknown and every operator
+                // built on it stays unknown too, which reads downstream as an
+                // unsupported expression rather than a typed constant.
+                inferred = semantic_const_reference_type(source, tokens, items, symbols, expression_symbols, i)
             }
             if expression.kind == EXPR_UNARY and expression.left >= 0 {
                 let operand = expression_types[expression.left]
@@ -257,7 +317,42 @@ fn infer_semantic_types(
                     if semantic_is_unbound_identifier(expression_symbols, expression_locals, expression.left) {
                         let name = token_text(source, tokens[callee.token])
                         if name == "len" or name == "cap" { inferred = SEM_INT }
-                        if name == "format_int" { inferred = SEM_STRING }
+ if name == "format_int" { inferred = SEM_STRING }
+ if name == "arg_get" { inferred = SEM_STRING }
+                        if name == "byte" { inferred = SEM_BYTE }
+ if name == "argc" or name == "linux_syscall6" { inferred = SEM_INT }
+ if name == "unsafe_ptr_load8" or name == "unsafe_ptr_store8" or name == "unsafe_alloc" or name == "unsafe_free" or name == "unsafe_write" { inferred = SEM_INT }
+ if name == "unsafe_write_bytes" { inferred = SEM_INT }
+ if name == "unsafe_read_bytes" { inferred = SEM_INT }
+ if name == "unsafe_open_bytes" { inferred = SEM_INT }
+ if name == "unsafe_argv_ptr" or name == "unsafe_argv_len" { inferred = SEM_INT }
+ if name == "unsafe_argv_byte" { inferred = SEM_BYTE }
+ if name == "unsafe_argv_copy" { inferred = SEM_INT }
+ if name == "unsafe_bytes_to_string" { inferred = SEM_STRING }
+ if name == "unsafe_close" { inferred = SEM_INT }
+ if name == "unsafe_read_file" { inferred = SEM_STRING }
+ if name == "unsafe_write_file" { inferred = SEM_INT }
+ if name == "unsafe_write_all" { inferred = SEM_INT }
+ if name == "unsafe_read_all" { inferred = SEM_INT }
+if name == "unsafe_open_string" { inferred = SEM_INT }
+ if name == "append" {
+                            // `append` returns its first argument's slice type,
+                            // not always []byte. Hard-coding []byte typed every
+                            // `[]int` append as bytes, so indexing the result
+                            // produced a byte and `element + int` was rejected
+                            // as an arithmetic error on unrelated operands.
+                            let appended = if expression.right >= 0 and expression.right < len(expression_types) {
+                                expression_types[expression.right]
+                            } else {
+                                SEM_UNKNOWN
+                            }
+                            inferred = if semantic_array_element(appended) != SEM_UNKNOWN { appended } else { SEM_UNKNOWN }
+                        }
+                        // Statement intrinsics: print and exit produce no
+                        // value; the int marker keeps them out of the
+                        // unknown-type rejection while the IR lowering treats
+                        // them as statement operations.
+                        if name == "print" or name == "exit" { inferred = SEM_INT }
                     }
                     if inferred == SEM_UNKNOWN {
                         inferred = semantic_function_result(
@@ -574,8 +669,190 @@ fn infer_semantic_types(
             } else if cursor >= 0 and cursor < len(expressions) and expressions[cursor].kind == EXPR_IDENT and
                 semantic_is_unbound_identifier(expression_symbols, expression_locals, cursor) {
                 let name = token_text(source, tokens[expressions[cursor].token])
-                let intrinsic = name == "len" or name == "cap" or name == "format_int"
-                if intrinsic and argument_count != 1 {
+                        let intrinsic = name == "argc" or name == "arg_get" or name == "len" or name == "cap" or name == "format_int" or
+                            name == "print" or name == "exit" or name == "byte" or name == "linux_syscall6" or
+                            name == "unsafe_ptr_load8" or name == "unsafe_ptr_store8" or
+                            name == "unsafe_alloc" or name == "unsafe_free" or name == "unsafe_write" or name == "unsafe_write_bytes" or name == "unsafe_write_all" or name == "unsafe_read_all" or name == "unsafe_read_bytes" or name == "unsafe_open_bytes" or name == "unsafe_open_string" or name == "unsafe_close" or name == "unsafe_read_file" or name == "unsafe_write_file" or name == "unsafe_argv_ptr" or name == "unsafe_argv_len" or name == "unsafe_argv_byte" or name == "unsafe_argv_copy" or name == "unsafe_bytes_to_string" or name == "append"
+                        if name == "argc" and argument_count != 0 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "argc needs no arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "arg_get" and argument_count != 1 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "arg_get needs exactly one argument", error_line: line, error_col: col, }
+                        }
+                        if name == "linux_syscall6" and argument_count != 7 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference {
+                                expression_types: expression_types, local_types: local_types,
+                                typed_expressions: typed, ok: false,
+                                error: "linux_syscall6 needs exactly seven arguments",
+                                error_line: line, error_col: col,
+                            }
+                        }
+                        if name == "byte" and argument_count != 1 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference {
+                                expression_types: expression_types, local_types: local_types,
+                                typed_expressions: typed, ok: false,
+                                error: "byte needs exactly one argument",
+                                error_line: line, error_col: col,
+                            }
+                        }
+                        if name == "unsafe_ptr_store8" and argument_count != 2 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_ptr_store8 needs exactly two arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_alloc" and argument_count != 1 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_alloc needs exactly one argument", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_free" and argument_count != 2 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_free needs exactly two arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_write" and argument_count != 3 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_write needs exactly three arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_write_bytes" and argument_count != 2 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_write_bytes needs exactly two arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_read_bytes" and argument_count != 2 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_read_bytes needs exactly two arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_open_bytes" and argument_count != 1 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_open_bytes needs exactly one argument", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_argv_ptr" and argument_count != 1 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_argv_ptr needs exactly one argument", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_argv_len" and argument_count != 1 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_argv_len needs exactly one argument", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_argv_byte" and argument_count != 2 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_argv_byte needs exactly two arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_argv_copy" and argument_count != 2 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_argv_copy needs exactly two arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_bytes_to_string" and argument_count != 1 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_bytes_to_string needs exactly one argument", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_close" and argument_count != 1 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_close needs exactly one argument", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_read_file" and argument_count != 1 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_read_file needs exactly one argument", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_write_file" and argument_count != 2 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_write_file needs exactly two arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_write_all" and argument_count != 3 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_write_all needs exactly three arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_read_all" and argument_count != 3 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_read_all needs exactly three arguments", error_line: line, error_col: col, }
+                        }
+if name == "unsafe_open_string" and argument_count != 1 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_open_string needs exactly one argument", error_line: line, error_col: col, }
+                        }
+                        if name == "append" and argument_count != 2 {
+                            let error_token = expressions[i].token
+                            let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                            let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                            return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "append needs exactly two arguments", error_line: line, error_col: col, }
+                        }
+                        if name == "unsafe_write" and argument_count == 3 {
+                            let mut cursor_write = i
+                            let mut write_arg_index = 0
+                            let mut bad_write_argument = -1
+                            while write_arg_index < 3 and cursor_write >= 0 and cursor_write < len(expressions) {
+                                let write_argument = expressions[cursor_write].right
+                                if write_argument >= 0 and write_argument < len(expression_types) and expression_types[write_argument] != SEM_UNKNOWN and expression_types[write_argument] != SEM_INT { bad_write_argument = write_argument }
+                                cursor_write = expressions[cursor_write].left
+                                write_arg_index = write_arg_index + 1
+                            }
+                            if bad_write_argument >= 0 {
+                                let error_token = expressions[bad_write_argument].token
+                                let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                                let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                                return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_write needs int fd pointer and length, got " + semantic_type_name(expression_types[bad_write_argument]), error_line: line, error_col: col, }
+                            }
+                        }
+                        if name == "unsafe_ptr_store8" and argument_count == 2 {
+                            let value_argument = expressions[i].right
+                            let pointer_call = expressions[i].left
+                            let pointer_argument = if pointer_call >= 0 and pointer_call < len(expressions) { expressions[pointer_call].right } else { -1 }
+                            let mut bad_argument = -1
+                            if value_argument >= 0 and value_argument < len(expression_types) and expression_types[value_argument] != SEM_UNKNOWN and expression_types[value_argument] != SEM_INT { bad_argument = value_argument }
+                            if pointer_argument >= 0 and pointer_argument < len(expression_types) and expression_types[pointer_argument] != SEM_UNKNOWN and expression_types[pointer_argument] != SEM_INT { bad_argument = pointer_argument }
+                            if bad_argument >= 0 {
+                                let error_token = expressions[bad_argument].token
+                                let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
+                                let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
+                                return TypeInference { expression_types: expression_types, local_types: local_types, typed_expressions: typed, ok: false, error: "unsafe_ptr_store8 needs int pointer and int byte, got " + semantic_type_name(expression_types[bad_argument]), error_line: line, error_col: col, }
+                            }
+                        }
+ if intrinsic and name != "argc" and name != "arg_get" and name != "linux_syscall6" and name != "unsafe_ptr_store8" and name != "unsafe_free" and name != "unsafe_write" and name != "unsafe_write_bytes" and name != "unsafe_write_all" and name != "unsafe_read_all" and name != "unsafe_read_bytes" and name != "unsafe_open_bytes" and name != "unsafe_open_string" and name != "unsafe_close" and name != "unsafe_read_file" and name != "unsafe_write_file" and name != "unsafe_argv_ptr" and name != "unsafe_argv_len" and name != "unsafe_argv_byte" and name != "unsafe_argv_copy" and name != "unsafe_bytes_to_string" and name != "append" and argument_count != 1 {
                     let error_token = expressions[i].token
                     let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
                     let col = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].col } else { 0 }
@@ -604,6 +881,18 @@ fn infer_semantic_types(
                             valid = actual == SEM_UNKNOWN or actual == SEM_INT
                             message = "argument type mismatch: expected int, got " + semantic_type_name(actual)
                         }
+                        if name == "byte" or name == "unsafe_ptr_load8" {
+                            valid = actual == SEM_UNKNOWN or actual == SEM_INT
+                            message = if name == "byte" { "byte needs int, got " + semantic_type_name(actual) } else { "unsafe_ptr_load8 needs int pointer, got " + semantic_type_name(actual) }
+                        }
+                        if name == "print" {
+                            valid = actual == SEM_UNKNOWN or actual == SEM_STRING or actual == SEM_INT
+                            message = "print needs string or int, got " + semantic_type_name(actual)
+                        }
+                        if name == "exit" {
+                            valid = actual == SEM_UNKNOWN or actual == SEM_INT
+                            message = "exit needs int, got " + semantic_type_name(actual)
+                        }
                         if not valid {
                             let error_token = expressions[argument].token
                             let line = if error_token >= 0 and error_token < len(tokens) { tokens[error_token].line } else { 0 }
@@ -627,10 +916,12 @@ fn infer_semantic_types(
         if signature.item >= 0 and signature.item < len(items) {
             let item = items[signature.item]
             let expected = semantic_declared_type(source, tokens, types, type_edges, signature.result_type)
+            let mut found_return = false
             let mut statement_index = 0
             while statement_index < len(statements) {
                 let statement = statements[statement_index]
                 if statement.kind == STMT_RETURN and statement.token_start >= item.body_start and statement.token_start < item.body_end {
+                    found_return = true
                     let mut value_end = statement.token_end
                     while value_end > statement.token_start and tokens[value_end - 1].kind == TK_SEMICOLON {
                         value_end = value_end - 1
@@ -668,6 +959,32 @@ fn infer_semantic_types(
                     }
                 }
                 statement_index = statement_index + 1
+            }
+            // A declared result with no return anywhere in the body is an
+            // error in stage 0. Stage 1 used to lower such a body anyway and
+            // emit an executable that returned zero, which is how a body the
+            // statement splitter had not actually parsed (every statement on
+            // one line collapses into a single node) turned into a silently
+            // wrong program instead of a diagnostic.
+            if signature.result_type >= 0 and not found_return {
+                // name_start is a source byte offset, not a token index; find
+                // the declaration's name token so the location points at it.
+                let mut token_index = item.token_start
+                let mut name_scan = item.token_start
+                while name_scan < len(tokens) and name_scan < item.body_start {
+                    if tokens[name_scan].start == item.name_start {
+                        token_index = name_scan
+                        name_scan = item.body_start
+                    } else {
+                        name_scan = name_scan + 1
+                    }
+                }
+                let token = tokens[token_index]
+                return TypeInference {
+                    expression_types: expression_types, local_types: local_types, typed_expressions: typed,
+                    ok: false, error: "function must return a value declared by its result type",
+                    error_line: token.line, error_col: token.col,
+                }
             }
         }
         signature_index = signature_index + 1

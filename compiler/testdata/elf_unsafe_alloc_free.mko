@@ -1,0 +1,7 @@
+fn main() -> int {
+    let memory = unsafe_alloc(4096)
+    unsafe_ptr_store8(memory, 42)
+    let value = unsafe_ptr_load8(memory)
+    let released = unsafe_free(memory, 4096)
+    return value
+}

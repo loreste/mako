@@ -1,0 +1,6 @@
+fn compute(value: int) -> int {
+    let a = value + 5
+    let b = a * 14
+    let c = b / 2
+    return c
+}

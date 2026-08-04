@@ -1,0 +1,5 @@
+fn main() -> byte {
+    let values = make([]byte, 4)
+    let index = 0
+    return values[index]
+}

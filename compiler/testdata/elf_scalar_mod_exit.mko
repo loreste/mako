@@ -1,0 +1,6 @@
+fn compute(value: int) -> int {
+    let a = value * 7
+    let b = a + 107
+    let c = b % 43
+    return c
+}

@@ -31,11 +31,26 @@ fn resolve_function_locals(
         i = i + 1
     }
     let mut resolved = 0
+
+    // Map each body token to its body index so expression resolution is one
+    // linear pass over the arena, not O(bodies * expressions).
+    let mut token_body = make([]int, len(tokens), len(tokens))
+    i = 0
+    while i < len(token_body) {
+        token_body[i] = -1
+        i = i + 1
+    }
+    let mut body_local_start = make([]int, len(bodies), len(bodies))
     let mut body_index = 0
     while body_index < len(bodies) {
         let body = bodies[body_index]
         let item = items[body.item]
-        let local_start = len(locals)
+        body_local_start[body_index] = len(locals)
+        let mut token_index = item.body_start
+        while token_index < item.body_end and token_index < len(token_body) {
+            token_body[token_index] = body_index
+            token_index = token_index + 1
+        }
         let mut parameter_index = 0
         while parameter_index < len(parameters) {
             let parameter = parameters[parameter_index]
@@ -74,15 +89,29 @@ fn resolve_function_locals(
             }
             statement_index = statement_index + 1
         }
+        body_index = body_index + 1
+    }
+    let mut body_local_end = make([]int, len(bodies), len(bodies))
+    body_index = 0
+    while body_index < len(bodies) {
+        if body_index + 1 < len(bodies) {
+            body_local_end[body_index] = body_local_start[body_index + 1]
+        } else {
+            body_local_end[body_index] = len(locals)
+        }
+        body_index = body_index + 1
+    }
 
-        let mut expression_index = 0
-        while expression_index < len(expressions) {
-            let expression = expressions[expression_index]
-            if expression.kind == EXPR_IDENT and expression.token >= item.body_start and expression.token < item.body_end {
+    let mut expression_index = 0
+    while expression_index < len(expressions) {
+        let expression = expressions[expression_index]
+        if expression.kind == EXPR_IDENT and expression.token >= 0 and expression.token < len(token_body) {
+            let owner_body = token_body[expression.token]
+            if owner_body >= 0 {
                 let token = tokens[expression.token]
-                let mut local_index = local_start
+                let mut local_index = body_local_start[owner_body]
                 let mut selected = -1
-                while local_index < len(locals) {
+                while local_index < body_local_end[owner_body] {
                     let local = locals[local_index]
                     // A binding becomes visible only after its initializer's
                     // complete statement, preventing accidental self-capture.
@@ -108,9 +137,8 @@ fn resolve_function_locals(
                     resolved = resolved + 1
                 }
             }
-            expression_index = expression_index + 1
         }
-        body_index = body_index + 1
+        expression_index = expression_index + 1
     }
     return LocalResolution { locals: locals, local_by_expr: local_by_expr, resolved: resolved }
 }

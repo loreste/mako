@@ -1,0 +1,3 @@
+fn main() -> int {
+    return unsafe_write("stdout", 1, 1)
+}

@@ -1,0 +1,7 @@
+fn add7(a: int, b: int, c: int, d: int, e: int, f: int, g: int) -> int {
+    return a + b + c + d + e + f + g
+}
+
+fn compute(value: int) -> int {
+    return add7(10, 8, 6, 5, 4, 3, value * 6)
+}

@@ -1,0 +1,4 @@
+fn main() -> int {
+    let path = make([]byte, 1)
+    return unsafe_open_bytes(path)
+}

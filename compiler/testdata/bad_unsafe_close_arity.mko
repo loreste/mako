@@ -1,0 +1,4 @@
+fn main() -> int {
+    let result = unsafe_close()
+    return result
+}
