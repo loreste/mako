@@ -780,6 +780,38 @@ fn x86_emit_make_byte(bytes: []int, length: int, result_slot: int, element_size:
     return out
 }
 
+// Allocate a constructed struct: one block of `field_count` slots, filled from
+// the values already in their frame slots. The struct value is the block
+// pointer, so it is one slot and returns through the existing convention.
+//
+// No header. Unlike a slice, a struct's width is fixed by its type, and the
+// drop derives the size from the same kind — nothing has to read a length back
+// out of the block.
+fn x86_emit_struct_new(bytes: []int, field_slots: []int, result_slot: int) []int {
+    if len(field_slots) < 1 { return bytes }
+    let mut out = x86_emit_int_rax(bytes, 9)
+    out = x86_emit_syscall_const(out, 0, 1)
+    out = x86_emit_syscall_const(out, len(field_slots) * 8, 2)
+    out = x86_emit_syscall_const(out, 3, 3)
+    out = x86_emit_syscall_const(out, 34, 4)
+    out = x86_emit_syscall_const(out, -1, 5)
+    out = x86_emit_syscall_const(out, 0, 6)
+    out = append(out, 15); out = append(out, 5)
+    out = x86_emit_store_rax(out, result_slot)
+    // mov r9, rax — the block survives while each field is loaded through rax.
+    out = append(out, 73); out = append(out, 137); out = append(out, 193)
+    let mut field = 0
+    while field < len(field_slots) {
+        out = x86_emit_load_rax(out, field_slots[field])
+        // mov [r9 + 8*field], rax
+        out = append(out, 73); out = append(out, 137); out = append(out, 129)
+        out = x86_emit_u32(out, field * 8)
+        field = field + 1
+    }
+    out = x86_emit_load_rax(out, result_slot)
+    return out
+}
+
 // Load one field of one element of a slice of structs, bounds-checked, as a
 // single addressed read: data + index * stride + 8 * slot.
 //
@@ -1842,6 +1874,30 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 arg_get index not earlier"))
             }
             bytes = x86_emit_arg_get(bytes, index_slot, slot)
+        } else if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) and call_sites[instruction.aux].callee_item == IR_STRUCT_NEW_ITEM {
+            let site = call_sites[instruction.aux]
+            let struct_fields = struct_kind_fields(instruction.type_kind)
+            if not semantic_is_struct_value(instruction.type_kind) or struct_fields < 1 or
+                site.argument_count != struct_fields or site.argument_start < 0 or
+                site.argument_start + struct_fields > len(call_arguments) or
+                slot < 1 or slot > function.value_count {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 struct construction is invalid"))
+            }
+            let mut struct_field_slots: []int = make([]int, 0, struct_fields)
+            let mut struct_field = 0
+            while struct_field < struct_fields {
+                let field_slot = call_arguments[site.argument_start + struct_field] - function.value_start + 1
+                if field_slot < 1 or field_slot >= slot {
+                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 struct field is not an earlier value"))
+                }
+                struct_field_slots = append(struct_field_slots, field_slot)
+                struct_field = struct_field + 1
+            }
+            let struct_before = len(bytes)
+            bytes = x86_emit_struct_new(bytes, struct_field_slots, slot)
+            if len(bytes) == struct_before {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 struct construction is invalid"))
+            }
         } else if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) and call_sites[instruction.aux].callee_item == -28 {
             let site = call_sites[instruction.aux]
             if instruction.type_kind != SEM_INT or site.argument_count != 2 or site.argument_start < 0 or site.argument_start + 1 >= len(call_arguments) or slot < 1 or slot > function.value_count {
@@ -1927,6 +1983,14 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
                     return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 byte-slice drop invalid"))
                 }
  bytes = x86_emit_drop_byte_slice(bytes, drop_slot, x86_slice_element_size(instruction.type_kind))
+ } else if semantic_is_struct_value(instruction.type_kind) and
+  x86_struct_value_owned(instructions, call_sites, instruction.left) {
+ let struct_drop_slot = instruction.left - function.value_start + 1
+ if struct_drop_slot < 1 or struct_drop_slot > function.value_count or
+  struct_kind_fields(instruction.type_kind) < 1 {
+  return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 struct drop invalid"))
+ }
+ bytes = x86_emit_drop_struct(bytes, struct_drop_slot, struct_kind_fields(instruction.type_kind))
  } else if instruction.type_kind == SEM_STRING and
   (x86_string_value_owned(instructions, call_sites, instruction.left) or
    x86_string_parameter_owned(instructions, call_sites, call_arguments, function, instruction.left)) {

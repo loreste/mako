@@ -69,7 +69,7 @@ done
 # docs/SELF_HOSTING_PROGRESS.md, not re-run here (full-file stage-1 is minutes).
 
 literal_result="$("$stage1" "$repo_dir/compiler/testdata/literals.mko")"
-if [[ "$literal_result" != $'tokens 172 items 3 types 0 signatures 1 parameters 0 statements 13 bodies 1 expressions 79 symbols 3 resolved 3 locals 10 local_refs 10 typed 38 ir_functions 0 ir_blocks 0 ir_instructions 0 ir_constants 0 ir_values 0 ir_skipped 1 ir_verified 0' ]]; then
+if [[ "$literal_result" != $'tokens 172 items 3 types 0 signatures 1 parameters 0 statements 13 bodies 1 expressions 79 symbols 3 resolved 3 locals 10 local_refs 10 typed 53 ir_functions 0 ir_blocks 0 ir_instructions 0 ir_constants 0 ir_values 0 ir_skipped 1 ir_verified 0' ]]; then
   echo "selfhost frontend gate: literal arena shape changed: $literal_result" >&2
   exit 1
 fi
@@ -765,7 +765,7 @@ for package_member in z_expression z_statement z_type zz_expression_attach zz_sy
   selfhost_package="$selfhost_package,$repo_dir/compiler/$package_member.mko"
 done
 package_result="$("$stage1" "$selfhost_package")"
-if [[ "$package_result" != *"signatures 304"* ]]; then
+if [[ "$package_result" != *"signatures 310"* ]]; then
   echo "selfhost frontend gate: package signature count changed: $package_result" >&2
   exit 1
 fi
@@ -773,8 +773,8 @@ fi
 # gate re-pinned on every gain gets re-pinned without being read. It must never
 # silently fall.
 package_lowered="$(printf '%s' "$package_result" | sed -n 's/.*ir_functions \([0-9]*\).*/\1/p')"
-if [[ "${package_lowered:-0}" -lt 60 ]]; then
-  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 60" >&2
+if [[ "${package_lowered:-0}" -lt 63 ]]; then
+  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 63" >&2
   exit 1
 fi
 for bad_package in "$repo_dir/compiler/lexer.mko,$repo_dir/compiler/nope.mko" \
@@ -805,7 +805,8 @@ for cap_case in \
   "elf_general_len_exit:elf-general-len:723827287d5745c68a57940b633734589b4b5e51f930782b9dfeef53d9492438:850:34" \
   "elf_general_index_exit:elf-general-index:e3992985305e2943de4498924993b389a6f5e2cab9b81cc5e3efbceb29627bf3:1000:190" \
   "elf_straight_line_assign_exit:elf-sl-assign:fa96ae649b72f2cd5c793ecb7050a21efcb2a6ffcc69b49951b3d1d2c7d1ed2b:184:14" \
-  "elf_owned_rebind_exit:elf-owned-rebind:ed6d2ee7ba4fb8db9310d0ffc3078a78ce0647e8b3c857d1bd6c09816b2e16ce:1660:43"; do
+  "elf_owned_rebind_exit:elf-owned-rebind:ed6d2ee7ba4fb8db9310d0ffc3078a78ce0647e8b3c857d1bd6c09816b2e16ce:1660:43" \
+  "elf_struct_literal_exit:elf-struct-literal:7a8547d71a71839c093d26cac073b1c2f5d65d5d5a5cff7db1c954addefbd82b:402:34"; do
   cap_fixture="${cap_case%%:*}"; cap_rest="${cap_case#*:}"
   cap_name="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
   cap_sha="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
@@ -864,7 +865,7 @@ done
 # the backedge, 20000 times.
 if [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] && command -v strace >/dev/null 2>&1; then
   for balance_case in "elf-format-int:6" "elf-concat:7" "elf-string-clone:5" \
-    "elf-owned-rebind:6" "elf-while-soak:20000"; do
+    "elf-owned-rebind:6" "elf-struct-literal:1" "elf-while-soak:20000"; do
     balance_path="$work_dir/${balance_case%%:*}"
     balance_expect="${balance_case##*:}"
     chmod +x "$balance_path"

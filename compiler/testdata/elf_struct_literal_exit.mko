@@ -1,0 +1,20 @@
+// A constructed struct: one heap block of N slots, one slot holding the
+// pointer, dropped by the binding that holds it.
+//
+// The fields are written out of declaration order on purpose — each initialiser
+// is placed at its *declared* slot, not where it appears, and a literal that
+// got that wrong would still compile and return the wrong number.
+//
+// A constructed struct and a borrowed slice element share a semantic kind, so
+// ownership is read off the producing instruction the way it is for strings.
+// This one is constructed, so it is dropped: one mmap, one munmap.
+struct Pt { x: int  y: int }
+
+fn mk(a: int) -> int {
+    let p = Pt { y: a + 1, x: a }
+    return p.x * 10 + p.y
+}
+
+fn main() {
+    exit(mk(3))
+}

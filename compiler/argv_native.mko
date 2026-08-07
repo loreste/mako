@@ -173,6 +173,41 @@ fn x86_emit_str_byte_at(bytes: []int, string_slot: int, index_slot: int, result_
  return x86_emit_store_rax(out, result_slot)
 }
 
+// True when this struct value is one the program *constructed*, as opposed to a
+// borrowed pointer into a slice somebody else owns.
+//
+// Both share a semantic kind, deliberately — the type checker cares that it is
+// a Pt, not who owns it — so ownership is read off the producing instruction,
+// exactly as it is for strings. Getting this backwards frees a slice's storage
+// out from under it, so anything that is not a construction is a borrow.
+fn x86_struct_value_owned(instructions: []IrInstruction, call_sites: []IrCallSite, value: int) bool {
+ let mut i = 0
+ while i < len(instructions) {
+  if instructions[i].result == value and instructions[i].op == IR_CALL and
+   instructions[i].aux >= 0 and instructions[i].aux < len(call_sites) and
+   call_sites[instructions[i].aux].callee_item == IR_STRUCT_NEW_ITEM {
+   return true
+  }
+  i = i + 1
+ }
+ return false
+}
+
+// Release a constructed struct: munmap(block, fields * 8). The width comes from
+// the kind, so nothing has to be read back out of the block.
+fn x86_emit_drop_struct(bytes: []int, slot: int, field_count: int) []int {
+ let mut out = x86_emit_load_rax(bytes, slot)
+ out = append(out, 72); out = append(out, 137); out = append(out, 199)
+ out = x86_emit_syscall_const(out, field_count * 8, 2)
+ out = x86_emit_int_rax(out, 11)
+ out = x86_emit_syscall_const(out, 0, 3)
+ out = x86_emit_syscall_const(out, 0, 4)
+ out = x86_emit_syscall_const(out, 0, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ return out
+}
+
 // Duplicate a string into an independent owned {length, bytes} allocation.
 //
 // This always allocates, whatever the source was. An owned string is an mmap'd

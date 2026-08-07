@@ -63,6 +63,37 @@ fn semantic_scalar_named(name: string) -> int {
     return SEM_UNKNOWN
 }
 
+// Token naming the struct in a `Name { ... }` literal, or -1.
+//
+// The literal parses as a chain whose base holds the name as an identifier
+// expression and whose `token` is the `{`; each field adds another link.
+fn semantic_struct_literal_name_token(expressions: []ExprNode, node: int) -> int {
+    let mut cursor = node
+    let mut steps = 0
+    while cursor >= 0 and cursor < len(expressions) and
+        expressions[cursor].kind == EXPR_STRUCT and steps < len(expressions) {
+        cursor = expressions[cursor].left
+        steps = steps + 1
+    }
+    if cursor < 0 or cursor >= len(expressions) { return -1 }
+    if expressions[cursor].kind != EXPR_IDENT and expressions[cursor].kind != EXPR_TYPE_REF { return -1 }
+    return expressions[cursor].token
+}
+
+// True when this node is the name a struct literal is built on. It carries no
+// value, so it must not be checked for a semantic type — the same reason a
+// callee name is skipped.
+fn semantic_is_struct_literal_name(expressions: []ExprNode, node: int) -> bool {
+    if node < 0 or node >= len(expressions) { return false }
+    if expressions[node].kind == EXPR_STRUCT { return false }
+    let mut i = 0
+    while i < len(expressions) {
+        if expressions[i].kind == EXPR_STRUCT and expressions[i].left == node { return true }
+        i = i + 1
+    }
+    return false
+}
+
 fn semantic_is_struct_array(kind: int) -> bool {
     return kind >= SEM_ARRAY_STRUCT_BASE and kind < SEM_STRUCT_VALUE_BASE
 }
@@ -696,6 +727,22 @@ if name == "unsafe_open_string" { inferred = SEM_INT }
                     inferred = semantic_type_reference(source, tokens, layout, base)
                 } else {
                     inferred = expression_types[expression.left]
+                }
+            }
+            // `Name { ... }`. Deliberately the *same* kind a declared `Pt`
+            // resolves to, not a separate "owned struct" kind: the type checker
+            // cares that this is a Pt, and whether the value owns its storage is
+            // an IR-level property read off the producing instruction, exactly
+            // as owned strings already work. A separate kind made a constructed
+            // struct incompatible with every parameter and slice element
+            // declared with the same name.
+            if expression.kind == EXPR_STRUCT {
+                let name_token = semantic_struct_literal_name_token(expressions, i)
+                if name_token >= 0 and name_token < len(tokens) {
+                    let literal_struct = struct_layout_lookup(layout, source, token_text(source, tokens[name_token]))
+                    if literal_struct >= 0 {
+                        inferred = semantic_struct_value_of(semantic_struct_array_kind(layout, literal_struct))
+                    }
                 }
             }
             expression_types[i] = inferred

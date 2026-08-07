@@ -275,6 +275,11 @@ fn ir_type_is_owned(kind: int) -> bool {
     // its block — one mmap and no munmap, measured. It also made `[]byte`
     // unbindable in the general path, since that asks for a scalar or an owned
     // type and this was neither.
+    // A struct value is owned when the program constructed it and borrowed when
+    // it points into a slice. Both share a kind, so the IR emits a drop for
+    // either and the backend refuses to unmap a borrow — the same split that
+    // lets a string literal carry a drop that frees nothing.
+    if semantic_is_struct_value(kind) { return true }
     return kind == SEM_STRING or kind == SEM_ARRAY_INT or kind == SEM_ARRAY_BYTE or
         kind == SEM_ARRAY_FLOAT or
         kind == SEM_ARRAY_BOOL or kind == SEM_ARRAY_STRING or kind == SEM_MAP or
@@ -449,10 +454,15 @@ fn verify_owned_ir_paths(
 // against `signatures[..].item`).
 const IR_NOT_INTRINSIC = 1
 
+// Call-site sentinel for struct construction. It is an intrinsic so the
+// bodiless-callee cascade leaves it alone, and it carries its field values in
+// the call-argument arena.
+const IR_STRUCT_NEW_ITEM = -29
+
 // Lowest and highest intrinsic sentinel. A call site whose callee_item falls in
 // this range names a builtin the backend emits inline, not a Mako function, so
 // arity and parameter checks against a callee body do not apply to it.
-const IR_INTRINSIC_ITEM_MIN = -28
+const IR_INTRINSIC_ITEM_MIN = -29
 const IR_INTRINSIC_ITEM_MAX = -2
 
 // The single mapping from an intrinsic's source name to its call-site sentinel.
@@ -753,6 +763,18 @@ fn ir_expression_kind_name(kind: int) -> string {
     return "expression"
 }
 
+// True when this `EXPR_STRUCT` node is an inner link of a literal chain rather
+// than the terminal construction. Each field adds a link; only the last one
+// allocates.
+fn ir_expression_is_continued_struct(expressions: []ExprNode, node: int) -> bool {
+    let mut i = 0
+    while i < len(expressions) {
+        if expressions[i].kind == EXPR_STRUCT and expressions[i].left == node { return true }
+        i = i + 1
+    }
+    return false
+}
+
 // Base of a call chain: the callee name node, reached by walking the chain's
 // left edges. One argument per link, so the base is what names the function.
 // True when this `make` node is an inner link of a `make` chain rather than the
@@ -943,7 +965,7 @@ fn ir_string_operand_is_temporary(expressions: []ExprNode, expression_types: []i
 
 fn ir_cfg_lower_range(
     source: string, tokens: []Token, items: []TopItem, symbols: []Symbol,
-    expression_symbols: []int, signatures: []FnSignature,
+    expression_symbols: []int, signatures: []FnSignature, layout: StructLayout,
     expressions: []ExprNode, expression_types: []int, expression_locals: []int,
     locals: []LocalBinding, local_values: []int,
     instructions: []IrInstruction, constants: []IrConstant,
@@ -972,6 +994,16 @@ fn ir_cfg_lower_range(
             if ir_expression_is_call_target(expressions, i) {
                 // The callee name, or an earlier link of a call chain. Neither
                 // produces a value; the terminal call node emits for the chain.
+            } else if semantic_is_struct_literal_name(expressions, i) {
+                // The `Pt` in `Pt { x: 1 }` names the struct, not a value.
+            } else if expression.kind == EXPR_FIELD_INIT {
+                // `a: x` inside a literal. It is a label on a value, not a value
+                // of its own, so it carries no semantic type; the construction
+                // reads it by field name.
+            } else if expression.kind == EXPR_STRUCT and
+                ir_expression_is_continued_struct(expressions, i) {
+                // An inner link of the literal chain. Only the terminal node
+                // constructs, and it reads every initialiser itself.
             } else if expression.kind == EXPR_TYPE_REF {
                 // `[]int` inside `make([]int, n)` names a type, not a value, so
                 // it carries no semantic type and belongs to the `make` around
@@ -1163,6 +1195,86 @@ fn ir_cfg_lower_range(
                 } else {
                     out_values[i] = local_values[binding]
                 }
+            } else if expression.kind == EXPR_STRUCT and
+                not ir_expression_is_continued_struct(expressions, i) {
+                // `Name { a: x, b: y }`. One allocation of N slots, filled from
+                // the field initialisers. Construction reuses the call
+                // machinery: an `IrInstruction` has only `left`/`right` and a
+                // literal has N fields, while a call site already carries an
+                // operand arena.
+                //
+                // Initialisers may be written in any order, so each is placed at
+                // its *declared* slot rather than where it appears. A literal
+                // that names a field twice, omits one, or names one the struct
+                // does not have is refused: a missing field would leave a slot
+                // holding whatever the fresh block happened to contain.
+                let owner = struct_kind_index(expression_types[i])
+                let field_count = struct_kind_fields(expression_types[i])
+                if owner < 0 or field_count < 1 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering constructs only eligible structs")
+                }
+                let mut slot_values: []int = make([]int, field_count, field_count)
+                let mut clear = 0
+                while clear < field_count {
+                    slot_values[clear] = -1
+                    clear = clear + 1
+                }
+                let mut link = i
+                let mut link_steps = 0
+                while link >= 0 and link < len(expressions) and
+                    expressions[link].kind == EXPR_STRUCT and link_steps < len(expressions) {
+                    let init = expressions[link].right
+                    if init >= 0 and init < len(expressions) {
+                        if expressions[init].kind != EXPR_FIELD_INIT {
+                            return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                "CFG lowering requires named struct fields")
+                        }
+                        let field_slot = struct_field_slot(layout, source, owner,
+                            token_text(source, tokens[expressions[init].token]))
+                        let init_value = expressions[init].right
+                        if field_slot < 0 or field_slot >= field_count or
+                            init_value < 0 or init_value >= len(out_values) or
+                            out_values[init_value] < 0 {
+                            return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                "CFG lowering could not resolve a struct field initializer")
+                        }
+                        if slot_values[field_slot] >= 0 {
+                            return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                "CFG lowering struct literal sets a field twice")
+                        }
+                        slot_values[field_slot] = out_values[init_value]
+                    }
+                    link = expressions[link].left
+                    link_steps = link_steps + 1
+                }
+                let mut check_slot = 0
+                while check_slot < field_count {
+                    if slot_values[check_slot] < 0 {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering struct literal leaves a field unset")
+                    }
+                    check_slot = check_slot + 1
+                }
+                let struct_argument_start = len(out_call_arguments)
+                let mut emit_slot = 0
+                while emit_slot < field_count {
+                    out_call_arguments = append(out_call_arguments, slot_values[emit_slot])
+                    emit_slot = emit_slot + 1
+                }
+                let struct_site = len(out_call_sites)
+                out_call_sites = append(out_call_sites, IrCallSite {
+                    callee_item: IR_STRUCT_NEW_ITEM,
+                    argument_start: struct_argument_start,
+                    argument_count: field_count,
+                })
+                let struct_result = value_cursor
+                value_cursor = value_cursor + 1
+                out_values[i] = struct_result
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_CALL, result: struct_result, type_kind: expression_types[i],
+                    left: -1, right: -1, aux: struct_site, token: expression.token,
+                })
             } else if expression.kind == EXPR_MAKE {
                 // One allocation. The element stride comes from the result
                 // type, and the length is the literal after the type — the same
@@ -1194,6 +1306,40 @@ fn ir_cfg_lower_range(
                 out_instructions = append(out_instructions, IrInstruction {
                     op: IR_MAKE, result: make_result, type_kind: expression_types[i],
                     left: -1, right: -1, aux: make_length, token: expression.token,
+                })
+            } else if expression.kind == EXPR_FIELD {
+                // `p.field` where the object is one slot holding a pointer —
+                // either a constructed struct or a borrowed slice element. Both
+                // read the same way: an offset load, no index to scale and no
+                // length to check, because the pointer names the value.
+                let object_kind = if expression.left >= 0 and expression.left < len(expression_types) {
+                    expression_types[expression.left]
+                } else {
+                    SEM_UNKNOWN
+                }
+                if not semantic_is_struct_value(object_kind) {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering reads a field only of a struct value")
+                }
+                let field_owner = struct_kind_index(object_kind)
+                let field_width = struct_kind_fields(object_kind)
+                let read_slot = struct_field_slot(layout, source, field_owner,
+                    token_text(source, tokens[expression.token]))
+                if field_owner < 0 or field_width < 1 or read_slot < 0 or read_slot >= field_width {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering could not resolve a struct field")
+                }
+                if expression.left >= len(out_values) or out_values[expression.left] < 0 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering struct object is not available")
+                }
+                let read_result = value_cursor
+                value_cursor = value_cursor + 1
+                out_values[i] = read_result
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_FIELD, result: read_result, type_kind: expression_types[i],
+                    left: out_values[expression.left], right: -1,
+                    aux: field_width * IR_FIELD_AUX_UNIT + read_slot, token: expression.token,
                 })
             } else if expression.kind == EXPR_INDEX {
                 // `xs[i]` on a slice of scalars: one bounds-checked load whose
@@ -1350,7 +1496,7 @@ fn ir_cfg_lower_range(
 // is what makes a guard clause fall out of the same rule as an explicit else.
 fn ir_lower_returning_if_tree(
     source: string, tokens: []Token, items: []TopItem, symbols: []Symbol,
-    expression_symbols: []int, signatures: []FnSignature,
+    expression_symbols: []int, signatures: []FnSignature, layout: StructLayout,
     statements: []StmtNode, statement_edges: []int,
     expressions: []ExprNode, expression_types: []int, expression_locals: []int,
     locals: []LocalBinding, local_types: []int, local_values: []int,
@@ -1547,7 +1693,7 @@ fn ir_lower_returning_if_tree(
             }
             let header_condition_end = ir_condition_end(tokens, header_statement.token_start + 1, header_statement.token_end)
             let lowered = ir_cfg_lower_range(
-                source, tokens, items, symbols, expression_symbols, signatures,
+                source, tokens, items, symbols, expression_symbols, signatures, layout,
                 expressions, expression_types, expression_locals,
                 locals, owned_locals, out_instructions, out_constants,
                 out_call_sites, out_call_arguments,
@@ -1638,7 +1784,7 @@ fn ir_lower_returning_if_tree(
                         "CFG lowering cannot return a value from a result-less function")
                 }
                 let lowered = ir_cfg_lower_range(
-                    source, tokens, items, symbols, expression_symbols, signatures,
+                    source, tokens, items, symbols, expression_symbols, signatures, layout,
                     expressions, expression_types, expression_locals,
                     locals, owned_locals, out_instructions, out_constants,
                     out_call_sites, out_call_arguments,
@@ -1710,7 +1856,7 @@ fn ir_lower_returning_if_tree(
                         "CFG lowering requires a let initializer")
                 }
                 let lowered = ir_cfg_lower_range(
-                    source, tokens, items, symbols, expression_symbols, signatures,
+                    source, tokens, items, symbols, expression_symbols, signatures, layout,
                     expressions, expression_types, expression_locals,
                     locals, owned_locals, out_instructions, out_constants,
                     out_call_sites, out_call_arguments,
@@ -1763,7 +1909,7 @@ fn ir_lower_returning_if_tree(
                         "CFG lowering could not find an if condition")
                 }
                 let lowered = ir_cfg_lower_range(
-                    source, tokens, items, symbols, expression_symbols, signatures,
+                    source, tokens, items, symbols, expression_symbols, signatures, layout,
                     expressions, expression_types, expression_locals,
                     locals, owned_locals, out_instructions, out_constants,
                     out_call_sites, out_call_arguments,
@@ -2085,7 +2231,7 @@ fn ir_lower_returning_if_tree(
                 // The range starts after `target =` so the target identifier is
                 // not lowered as a read of the value being replaced.
                 let lowered = ir_cfg_lower_range(
-                    source, tokens, items, symbols, expression_symbols, signatures,
+                    source, tokens, items, symbols, expression_symbols, signatures, layout,
                     expressions, expression_types, expression_locals,
                     locals, owned_locals, out_instructions, out_constants,
                     out_call_sites, out_call_arguments,
@@ -2162,7 +2308,7 @@ fn ir_lower_returning_if_tree(
                         "CFG lowering requires one intrinsic argument")
                 }
                 let lowered = ir_cfg_lower_range(
-                    source, tokens, items, symbols, expression_symbols, signatures,
+                    source, tokens, items, symbols, expression_symbols, signatures, layout,
                     expressions, expression_types, expression_locals,
                     locals, owned_locals, out_instructions, out_constants,
                     out_call_sites, out_call_arguments,
@@ -3859,7 +4005,7 @@ fn lower_typed_ir_once(
             // whose every path returns. Tried only after the matched shapes
             // decline, so their IR (and every pinned fixture) is unchanged.
             let general = ir_lower_returning_if_tree(
-                source, tokens, items, symbols, expression_symbols, signatures,
+                source, tokens, items, symbols, expression_symbols, signatures, struct_layout,
                 statements, statement_edges, expressions,
                 expression_types, expression_locals, locals, local_types, local_values,
                 item, signature, len(functions),
