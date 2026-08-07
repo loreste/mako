@@ -2462,6 +2462,60 @@ fn x86_op_ends_with_plain_store(op: int) -> bool {
     return op == IR_CONST or op == IR_BINARY or op == IR_UNARY or op == IR_MOVE or op == IR_LEN
 }
 
+// Occurrences of a short byte run in an encoded body. The run is passed as
+// scalars rather than a slice: building a pattern slice with `append` and then
+// handing it to a call is the shape that trips the stage-0 slice defect this
+// roadmap records, and these helpers run inside the compiler's own self-check.
+//
+// Used so the encoder's self-checks can assert what an encoding contains rather
+// than where it sits. An absolute offset breaks on any layout change, including
+// a correct one, and recomputing a wall of them by inference is how a
+// self-check quietly stops checking.
+fn x86_bytes_count3(bytes: []int, b0: int, b1: int, b2: int) -> int {
+    let mut found = 0
+    let mut at = 0
+    while at + 2 < len(bytes) {
+        if bytes[at] == b0 and bytes[at + 1] == b1 and bytes[at + 2] == b2 {
+            found = found + 1
+        }
+        at = at + 1
+    }
+    return found
+}
+
+fn x86_bytes_count2(bytes: []int, b0: int, b1: int) -> int {
+    let mut found = 0
+    let mut at = 0
+    while at + 1 < len(bytes) {
+        if bytes[at] == b0 and bytes[at + 1] == b1 { found = found + 1 }
+        at = at + 1
+    }
+    return found
+}
+
+fn x86_bytes_count1(bytes: []int, b0: int) -> int {
+    let mut found = 0
+    let mut at = 0
+    while at < len(bytes) {
+        if bytes[at] == b0 { found = found + 1 }
+        at = at + 1
+    }
+    return found
+}
+
+// Near `jmp rel32` instructions whose displacement is negative — a backedge.
+// The top displacement byte is 0xFF for every backward jump this encoder emits,
+// since no body approaches 16 MB.
+fn x86_backward_jump_count(bytes: []int) -> int {
+    let mut found = 0
+    let mut at = 0
+    while at + 4 < len(bytes) {
+        if bytes[at] == 233 and bytes[at + 4] == 255 { found = found + 1 }
+        at = at + 1
+    }
+    return found
+}
+
 // Leading block parameters of a block. They emit no code — the slot model gives
 // every value a frame slot, so a block parameter is a slot the incoming jump
 // writes before it transfers. Only a leading run counts; a block parameter
@@ -5772,14 +5826,37 @@ fn x86_64_smoke_test() -> bool {
     if loop_body.code.status != X86_OK or len(loop_body.code.bytes) != 97 or len(loop_body.edge_callees) != 0 {
         return false
     }
-    if loop_body.code.bytes[0] != 85 or loop_body.code.bytes[7] != 64 or
-        loop_body.code.bytes[29] != 233 or loop_body.code.bytes[30] != 0 or loop_body.code.bytes[33] != 0 or
-        loop_body.code.bytes[34] != 184 or loop_body.code.bytes[35] != 5 or
-        loop_body.code.bytes[51] != 15 or loop_body.code.bytes[52] != 141 or
-        loop_body.code.bytes[53] != 34 or loop_body.code.bytes[56] != 0 or
-        loop_body.code.bytes[86] != 233 or loop_body.code.bytes[87] != 199 or
-        loop_body.code.bytes[88] != 255 or loop_body.code.bytes[89] != 255 or loop_body.code.bytes[90] != 255 or
-        loop_body.code.bytes[95] != 201 or loop_body.code.bytes[96] != 195 {
+    // What the encoding must contain, asserted by shape rather than by offset.
+    // These were eighteen absolute positions, which every layout change
+    // invalidates — including a correct one, such as folding a literal into an
+    // ALU immediate. Stated this way they survive the layout and are stronger:
+    // the jump *counts* were not checked before at all.
+    if loop_body.code.bytes[0] != 85 {
+        return false
+    }
+    if loop_body.code.bytes[len(loop_body.code.bytes) - 2] != 201 or
+        loop_body.code.bytes[len(loop_body.code.bytes) - 1] != 195 {
+        return false
+    }
+    // sub rsp, 64 — seven values rounded up to a sixteen-byte frame. The
+    // displacement byte is checked separately so the run stays three long.
+    if x86_bytes_count3(loop_body.code.bytes, 72, 131, 236) != 1 {
+        return false
+    }
+    // The loop limit is materialised once: mov eax, 5.
+    if x86_bytes_count3(loop_body.code.bytes, 184, 5, 0) != 1 {
+        return false
+    }
+    // One conditional exit (jge rel32) and exactly one backedge. Two near jumps
+    // in total: the entry edge into the header and the backedge out of the
+    // body. A body that fell out instead of looping would have neither.
+    if x86_bytes_count2(loop_body.code.bytes, 15, 141) != 1 {
+        return false
+    }
+    if x86_backward_jump_count(loop_body.code.bytes) != 1 {
+        return false
+    }
+    if x86_bytes_count1(loop_body.code.bytes, 233) != 2 {
         return false
     }
     // The general returning-CFG encoder accepts this same loop arena. That is

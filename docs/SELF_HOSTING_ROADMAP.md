@@ -102,7 +102,7 @@ subset works and everything outside it is refused, never miscompiled.
 | Tooling | Mako-native bootstrap and product commands | unsupported | stage 1 is a single-purpose driver: source in, ELF out | — |
 
 The two rows that decide the fixed point are **Tooling** and **Backend**: stage 1
-lowers 54 of 297 of its own functions, so it cannot yet compile itself, and it
+lowers 59 of 302 of its own functions, so it cannot yet compile itself, and it
 has no bootstrap driver.
 
 ## Known stage-0 defects found by this work
@@ -119,6 +119,21 @@ has no bootstrap driver.
   0, and aborts on the out-of-range form. Stage 1 compiles both correctly:
   zero-initialised element, and exit 70 from its bounds trap. This removes the
   differential oracle for every struct-slice fixture until it is fixed.
+
+- **Stage-0 builds of the compiler package are not reproducible.** Three builds
+  from byte-identical sources produced three different stage-1 binaries. The
+  behaviour is unaffected — two such binaries compiled all 125 testdata fixtures
+  to byte-identical images — so this is nondeterminism in stage-0 codegen
+  output, not in what it computes. It still matters: "reproducible" is a
+  definition-of-done item, and a differential that compares stage-1 binaries
+  rather than their output would report false differences.
+
+- **The stage-0 slice defect bites the compiler's own source.** Building a
+  pattern slice with `append` and passing it to a call made the *built compiler*
+  abort on most inputs, intermittently, and rebuilding changed which inputs.
+  This is the use-after-move defect below, seen from the other side: it is not
+  confined to contrived fixtures. The self-check helpers were rewritten to take
+  their bytes as scalars rather than a slice, which removed it.
 
 - **The C backend cannot build the compiler package.** `--backend c` fails with
   ~20 "use of undeclared identifier" errors for `const`s defined in one file and
@@ -600,14 +615,18 @@ The remaining steps, in dependency order:
     is the one already satisfied out of rax; counting it was why the first
     version removed no stores at all.
 
-    **Immediate folding is the next step and was attempted and backed out.**
-    A literal whose only reader is the following ALU op should fold into an
-    `add rax, imm32` rather than being materialised into a slot — `i + 1` and
-    `i < n` are most of the arithmetic in a loop. It works, but it shifts the
-    layout that `x86_64_smoke_test` pins as eighteen absolute byte offsets, and
-    recomputing those by inference would either weaken the self-check or block a
-    correct change on a wrong guess. It wants those assertions expressed
-    structurally first.
+    **Immediate folding is unblocked but not yet landed.** A literal whose only
+    reader is the following ALU op should fold into an `add rax, imm32` rather
+    than being materialised into a slot — `i + 1` and `i < n` are most of the
+    arithmetic in a loop. It was attempted, backed out because it shifts the
+    layout that `x86_64_smoke_test` pinned as eighteen absolute byte offsets,
+    and the prerequisite has since been done: those assertions are now
+    structural — prologue, epilogue, frame size, one materialised limit, one
+    conditional exit, exactly one backedge, exactly two near jumps — so they
+    survive a layout change and check strictly more than before, since the jump
+    *counts* were never checked. Only the body's length pin still moves, and
+    that is one number derived by measurement rather than eighteen by
+    inference.
 
     What remains after that is the real thing: a linear-scan allocator over the
     general CFG, so an operand that is not the immediately preceding result
@@ -695,7 +714,7 @@ compiler" are different distances.
 - [x] **Stage 0 builds stage 1 from Mako sources.** Every build in this work
       does it; `scripts/selfhost-gate.sh` does it first.
 - [ ] **Stage 1 builds stage 2 from the same sources.** The binding item.
-      Stage 1 lowers 54 of 297 of its own functions and emits an image only when
+      Stage 1 lowers 59 of 302 of its own functions and emits an image only when
       a source has no declined function, so it currently compiles none of its
       own files.
 - [ ] Stage 2 builds stage 3 or the agreed corpus reproducibly.

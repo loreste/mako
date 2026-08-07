@@ -765,7 +765,7 @@ for package_member in z_expression z_statement z_type zz_expression_attach zz_sy
   selfhost_package="$selfhost_package,$repo_dir/compiler/$package_member.mko"
 done
 package_result="$("$stage1" "$selfhost_package")"
-if [[ "$package_result" != *"signatures 298"* ]]; then
+if [[ "$package_result" != *"signatures 302"* ]]; then
   echo "selfhost frontend gate: package signature count changed: $package_result" >&2
   exit 1
 fi
@@ -773,8 +773,8 @@ fi
 # gate re-pinned on every gain gets re-pinned without being read. It must never
 # silently fall.
 package_lowered="$(printf '%s' "$package_result" | sed -n 's/.*ir_functions \([0-9]*\).*/\1/p')"
-if [[ "${package_lowered:-0}" -lt 55 ]]; then
-  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 55" >&2
+if [[ "${package_lowered:-0}" -lt 59 ]]; then
+  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 59" >&2
   exit 1
 fi
 for bad_package in "$repo_dir/compiler/lexer.mko,$repo_dir/compiler/nope.mko" \
