@@ -688,7 +688,10 @@ fn x86_emit_syscall_const(bytes: []int, value: int, position: int) []int {
 // destroys rax, rcx and r11, and mmap's own arguments cover rdi/rsi/rdx/r10/
 // r8/r9.
 fn x86_emit_clone_slice(bytes: []int, source_slot: int, result_slot: int, element_size: int) []int {
-    if element_size != 1 and element_size != 8 { return bytes }
+    // Byte slices are packed; every other element is slot-based, so its stride
+    // is a whole number of slots. The arithmetic here is stride-generic, so a
+    // struct element only has to pass this shape check.
+    if element_size != 1 and (element_size < 8 or element_size - (element_size / 8) * 8 != 0) { return bytes }
     let mut out = x86_emit_load_rax(bytes, source_slot)
     out = append(out, 73); out = append(out, 137); out = append(out, 196)
     out = append(out, 77); out = append(out, 139); out = append(out, 44); out = append(out, 36)
@@ -730,13 +733,18 @@ fn x86_one_slot_type(kind: int) -> bool {
     return kind == SEM_INT or kind == SEM_BOOL or kind == SEM_BYTE or
         kind == SEM_STRING or kind == SEM_ARRAY_INT or kind == SEM_ARRAY_FLOAT or
         kind == SEM_ARRAY_BOOL or kind == SEM_ARRAY_STRING or kind == SEM_ARRAY_BYTE or
-        kind == SEM_MAP
+        kind == SEM_MAP or semantic_is_struct_array(kind) or semantic_is_struct_value(kind)
 }
 
 // Byte stride of one element for a supported slice type, or 0.
 fn x86_slice_element_size(type_kind: int) -> int {
     if type_kind == SEM_ARRAY_BYTE { return 1 }
     if type_kind == SEM_ARRAY_INT { return 8 }
+    // Every field of an eligible struct is one slot, so the stride is the
+    // field count in slots. This one function governs make, index, append,
+    // clone and drop for slices, so the struct case reaches all of them here
+    // rather than at five separate sites.
+    if semantic_is_struct_array(type_kind) { return 8 * struct_kind_fields(type_kind) }
     return 0
 }
 
@@ -749,7 +757,10 @@ fn x86_emit_make_byte(bytes: []int, length: int, result_slot: int, element_size:
     // 24-byte header + length*stride must fit a non-wrapping mmap size.
     if length < 0 or element_size < 1 { return bytes }
     if length > (9223372036854775807 - 24) / element_size { return bytes }
-    if element_size != 1 and element_size != 8 { return bytes }
+    // Byte slices are packed; every other element is slot-based, so its stride
+    // is a whole number of slots. The arithmetic here is stride-generic, so a
+    // struct element only has to pass this shape check.
+    if element_size != 1 and (element_size < 8 or element_size - (element_size / 8) * 8 != 0) { return bytes }
     let mut out = x86_emit_int_rax(bytes, 9)
     out = x86_emit_syscall_const(out, 0, 1)
     out = x86_emit_syscall_const(out, length * element_size + 24, 2)
@@ -766,6 +777,103 @@ fn x86_emit_make_byte(bytes: []int, length: int, result_slot: int, element_size:
     out = x86_emit_u32(out, length)
     out = append(out, 72); out = append(out, 141); out = append(out, 80); out = append(out, 24)
     out = append(out, 72); out = append(out, 137); out = append(out, 80); out = append(out, 16)
+    return out
+}
+
+// Load one field of one element of a slice of structs, bounds-checked, as a
+// single addressed read: data + index * stride + 8 * slot.
+//
+// `x86_emit_index_byte` cannot serve here: it scales only by 1 or 8 and adds
+// no field offset, so it would read field zero whatever field was named.
+// Read one field of an already-borrowed element: the slot holds a pointer to
+// the element itself, so there is no length to check and no index to scale.
+// Address of one element, bounds-checked. Same arithmetic as the fused field
+// read without the final load, so a borrowed element can be passed on.
+fn x86_emit_element_addr(bytes: []int, slice_slot: int, index_slot: int, result_slot: int, stride: int) []int {
+    if stride < 8 { return bytes }
+    let mut out = x86_emit_load_rax(bytes, slice_slot)
+    out = append(out, 73); out = append(out, 137); out = append(out, 192)
+    out = append(out, 72); out = append(out, 139); out = append(out, 8)
+    out = x86_emit_load_rax(out, index_slot)
+    out = append(out, 72); out = append(out, 137); out = append(out, 194)
+    out = append(out, 72); out = append(out, 133); out = append(out, 210)
+    out = append(out, 15); out = append(out, 136)
+    let negative_disp = len(out)
+    out = x86_emit_u32(out, 0)
+    out = append(out, 72); out = append(out, 57); out = append(out, 202)
+    out = append(out, 15); out = append(out, 131)
+    let bounds_disp = len(out)
+    out = x86_emit_u32(out, 0)
+    out = append(out, 72); out = append(out, 105); out = append(out, 210)
+    out = x86_emit_u32(out, stride)
+    out = append(out, 73); out = append(out, 139); out = append(out, 64); out = append(out, 16)
+    out = append(out, 72); out = append(out, 1); out = append(out, 208)
+    out = x86_emit_store_rax(out, result_slot)
+    out = append(out, 233)
+    let skip_disp = len(out)
+    out = x86_emit_u32(out, 0)
+    let failure = len(out)
+    out = append(out, 184); out = x86_emit_u32(out, 60)
+    out = append(out, 191); out = x86_emit_u32(out, 70)
+    out = append(out, 15); out = append(out, 5)
+    out = x86_patch_u32(out, skip_disp, len(out) - (skip_disp + 4))
+    out = x86_patch_u32(out, negative_disp, failure - (negative_disp + 4))
+    out = x86_patch_u32(out, bounds_disp, failure - (bounds_disp + 4))
+    return out
+}
+
+fn x86_emit_field_at(bytes: []int, pointer_slot: int, result_slot: int, field_slot: int) []int {
+    if field_slot < 0 { return bytes }
+    let mut out = x86_emit_load_rax(bytes, pointer_slot)
+    if field_slot > 0 {
+        out = append(out, 72); out = append(out, 5)
+        out = x86_emit_u32(out, 8 * field_slot)
+    }
+    out = append(out, 72); out = append(out, 139); out = append(out, 0)
+    return x86_emit_store_rax(out, result_slot)
+}
+
+fn x86_emit_index_field(bytes: []int, slice_slot: int, index_slot: int, result_slot: int, stride: int, field_slot: int) []int {
+    if stride < 8 or field_slot < 0 or 8 * field_slot >= stride { return bytes }
+    let mut out = x86_emit_load_rax(bytes, slice_slot)
+    // r8 = header, rcx = header.length
+    out = append(out, 73); out = append(out, 137); out = append(out, 192)
+    out = append(out, 72); out = append(out, 139); out = append(out, 8)
+    out = x86_emit_load_rax(out, index_slot)
+    out = append(out, 72); out = append(out, 137); out = append(out, 194)
+    // Reject a negative index before it is scaled.
+    out = append(out, 72); out = append(out, 133); out = append(out, 210)
+    out = append(out, 15); out = append(out, 136)
+    let negative_disp = len(out)
+    out = x86_emit_u32(out, 0)
+    // Compare against the length in elements, before scaling to bytes.
+    out = append(out, 72); out = append(out, 57); out = append(out, 202)
+    out = append(out, 15); out = append(out, 131)
+    let bounds_disp = len(out)
+    out = x86_emit_u32(out, 0)
+    // imul rdx, rdx, stride
+    out = append(out, 72); out = append(out, 105); out = append(out, 210)
+    out = x86_emit_u32(out, stride)
+    // rax = header.data; rax += rdx; rax += 8 * field_slot
+    out = append(out, 73); out = append(out, 139); out = append(out, 64); out = append(out, 16)
+    out = append(out, 72); out = append(out, 1); out = append(out, 208)
+    if field_slot > 0 {
+        out = append(out, 72); out = append(out, 5)
+        out = x86_emit_u32(out, 8 * field_slot)
+    }
+    out = append(out, 72); out = append(out, 139); out = append(out, 0)
+    out = x86_emit_store_rax(out, result_slot)
+    // Jump past the trap that the two failed checks branch into.
+    out = append(out, 233)
+    let skip_disp = len(out)
+    out = x86_emit_u32(out, 0)
+    let trap_at = len(out)
+    out = x86_patch_u32(out, negative_disp, trap_at - (negative_disp + 4))
+    out = x86_patch_u32(out, bounds_disp, trap_at - (bounds_disp + 4))
+    out = append(out, 184); out = x86_emit_u32(out, 60)
+    out = append(out, 191); out = x86_emit_u32(out, 70)
+    out = append(out, 15); out = append(out, 5)
+    out = x86_patch_u32(out, skip_disp, len(out) - (skip_disp + 4))
     return out
 }
 
@@ -1186,7 +1294,7 @@ fn x86_emit_load_stack_param(bytes: []int, slot: int, position: int) -> []int {
 // slot arguments — register tier first, the remainder spilled to a 16-byte
 // padded outgoing area — and their displacement fields are patched after
 // layout through the returned edges.
-fn x86_lower_scalar_body(instructions: []IrInstruction, constants: []IrConstant, block: IrBlock, call_sites: []IrCallSite, call_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_scalar_body(instructions: []IrInstruction, constants: []IrConstant, block: IrBlock, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
     let start = block.instruction_start
     if start < 0 or block.terminator != start + block.instruction_count - 1 or
         block.terminator >= len(instructions) or block.successor_count != 0 {
@@ -1200,7 +1308,7 @@ fn x86_lower_scalar_body(instructions: []IrInstruction, constants: []IrConstant,
     bytes = x86_emit_frame_prologue_sized(bytes, (8 * function.value_count + 15) & 4294967280)
     let prologue_len = len(bytes)
     let segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         start, start + block.instruction_count, true
     , string_literals, constant_string_index)
     if segment.code.status != X86_OK {
@@ -1224,14 +1332,28 @@ fn x86_lower_scalar_body(instructions: []IrInstruction, constants: []IrConstant,
 // allow_return is set and the instruction is the last in the range. Shared by
 // the straight-line body lowering and the branch entry prefix. Call
 // displacement fields are patched after layout through the returned edges.
-fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstant, call_sites: []IrCallSite, call_arguments: []int, functions: []IrFunction, function: IrFunction, start: int, end: int, allow_return: bool, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstant, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, start: int, end: int, allow_return: bool, string_literals: []string, constant_string_index: []int) -> X86Body {
     let mut bytes: []int = make([]int, 0, 64)
     let mut edge_callees: []int = make([]int, 0, 2)
     let mut edge_fields: []int = make([]int, 0, 2)
+    // Slot whose value rax still holds, set when an instruction ends by storing
+    // rax and cleared otherwise. The slot model gives every SSA value a frame
+    // slot, so a value produced and immediately consumed makes a round trip
+    // through memory it does not need: 15 of 38 loads across the pinned images
+    // were a store followed straight away by a load of the same slot.
+    let mut rax_holds_slot = -1
+    // Where the previous instruction's trailing store begins, and whether that
+    // store is removable: its emitter is straight-line and nothing else in the
+    // function reads the value. Set to -1 when either does not hold.
+    let mut removable_store_at = -1
+    let mut removable_store_producer = -1
+    let mut removable_store_value = -1
     let mut i = 0
     while i < end - start {
         let instruction = instructions[start + i]
         let slot = instruction.result - function.value_start + 1
+        let instruction_byte_start = len(bytes)
+        let instruction_edge_start = len(edge_fields)
         if instruction.op == IR_PARAM {
             // Every supported parameter type occupies exactly one slot and
             // arrives the same way, so the load does not depend on the type;
@@ -1307,6 +1429,40 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
             bytes = x86_emit_make_byte(bytes, instruction.aux, slot, make_stride)
             if len(bytes) == make_before {
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 slice make invalid"))
+            }
+        } else if instruction.op == IR_ELEM_ADDR {
+            let addr_slice = instruction.left - function.value_start + 1
+            let addr_index = instruction.right - function.value_start + 1
+            if instruction.aux < 8 or addr_slice < 1 or addr_slice >= slot or
+                addr_index < 1 or addr_index >= slot or slot < 1 or slot > function.value_count {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 element address is invalid"))
+            }
+            let addr_before = len(bytes)
+            bytes = x86_emit_element_addr(bytes, addr_slice, addr_index, slot, instruction.aux)
+            if len(bytes) == addr_before {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 element address is invalid"))
+            }
+        } else if instruction.op == IR_FIELD {
+            // aux packs the element width in slots with the field's slot, so
+            // no struct table is needed here.
+            let field_slot = instruction.aux - (instruction.aux / IR_FIELD_AUX_UNIT) * IR_FIELD_AUX_UNIT
+            let field_stride = 8 * (instruction.aux / IR_FIELD_AUX_UNIT)
+            let slice_slot = instruction.left - function.value_start + 1
+            let index_slot = instruction.right - function.value_start + 1
+            let field_index_ok = if instruction.right < 0 { true } else { index_slot >= 1 and index_slot < slot }
+            if instruction.aux < 0 or not x86_one_slot_type(instruction.type_kind) or
+                slice_slot < 1 or slice_slot >= slot or not field_index_ok or
+                slot < 1 or slot > function.value_count {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 struct field read is invalid"))
+            }
+            let field_before = len(bytes)
+            if instruction.right < 0 {
+                bytes = x86_emit_field_at(bytes, slice_slot, slot, field_slot)
+            } else {
+                bytes = x86_emit_index_field(bytes, slice_slot, index_slot, slot, field_stride, field_slot)
+            }
+            if len(bytes) == field_before {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 struct field read is invalid"))
             }
         } else if instruction.op == IR_PRINT {
             let arg_slot = instruction.left - function.value_start + 1
@@ -1645,6 +1801,27 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 arg_get index not earlier"))
             }
             bytes = x86_emit_arg_get(bytes, index_slot, slot)
+        } else if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) and call_sites[instruction.aux].callee_item == -28 {
+            let site = call_sites[instruction.aux]
+            if instruction.type_kind != SEM_INT or site.argument_count != 2 or site.argument_start < 0 or site.argument_start + 1 >= len(call_arguments) or slot < 1 or slot > function.value_count {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 str_byte_at call invalid"))
+            }
+            let string_slot = call_arguments[site.argument_start] - function.value_start + 1
+            let byte_index_slot = call_arguments[site.argument_start + 1] - function.value_start + 1
+            if string_slot < 1 or string_slot >= slot or byte_index_slot < 1 or byte_index_slot >= slot {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 str_byte_at operands not earlier"))
+            }
+            bytes = x86_emit_str_byte_at(bytes, string_slot, byte_index_slot, slot)
+        } else if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) and call_sites[instruction.aux].callee_item == -27 {
+            let site = call_sites[instruction.aux]
+            if instruction.type_kind != SEM_STRING or site.argument_count != 1 or site.argument_start < 0 or site.argument_start >= len(call_arguments) or slot < 1 or slot > function.value_count {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 format_int call invalid"))
+            }
+            let value_slot = call_arguments[site.argument_start] - function.value_start + 1
+            if value_slot < 1 or value_slot >= slot {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 format_int operand not earlier"))
+            }
+            bytes = x86_emit_format_int(bytes, value_slot, slot)
         } else if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) and call_sites[instruction.aux].callee_item == -19 {
             let site = call_sites[instruction.aux]
             if instruction.type_kind != SEM_STRING or site.argument_count != 1 or site.argument_start < 0 or site.argument_start >= len(call_arguments) or slot < 1 or slot > function.value_count {
@@ -1690,6 +1867,12 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
             }
             bytes = x86_emit_load_rax(bytes, move_slot)
             bytes = x86_emit_store_rax(bytes, slot)
+        } else if instruction.op == IR_CLONE and instruction.type_kind == SEM_STRING {
+            let string_clone_slot = instruction.left - function.value_start + 1
+            if string_clone_slot < 1 or string_clone_slot >= slot or slot < 1 or slot > function.value_count {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 string clone operands not earlier values"))
+            }
+            bytes = x86_emit_clone_string(bytes, string_clone_slot, slot)
         } else if instruction.op == IR_CLONE and x86_slice_element_size(instruction.type_kind) != 0 {
             let clone_slot = instruction.left - function.value_start + 1
             if clone_slot < 1 or clone_slot >= slot or slot < 1 or slot > function.value_count {
@@ -1703,7 +1886,9 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
                     return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 byte-slice drop invalid"))
                 }
  bytes = x86_emit_drop_byte_slice(bytes, drop_slot, x86_slice_element_size(instruction.type_kind))
- } else if instruction.type_kind == SEM_STRING and x86_string_value_owned(instructions, call_sites, instruction.left) {
+ } else if instruction.type_kind == SEM_STRING and
+  (x86_string_value_owned(instructions, call_sites, instruction.left) or
+   x86_string_parameter_owned(instructions, call_sites, call_arguments, function, instruction.left)) {
  let drop_slot = instruction.left - function.value_start + 1
  if drop_slot < 1 or drop_slot > function.value_count {
   return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 owned string drop invalid"))
@@ -1733,6 +1918,20 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
             bytes = x86_emit_unary_rax(bytes, instruction.aux)
         }
         bytes = x86_emit_store_rax(bytes, slot)
+    } else if instruction.op == IR_BINARY and instruction.type_kind == SEM_STRING {
+            // `+` on strings is the only string-typed binary the typer admits,
+            // so anything else reaching here is a lowering bug rather than a
+            // program error, and must fail closed rather than emit integer
+            // arithmetic over two object pointers.
+            if instruction.aux != TK_PLUS or slot < 1 or slot > function.value_count {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 string body operator is invalid"))
+            }
+            let concat_left = instruction.left - function.value_start + 1
+            let concat_right = instruction.right - function.value_start + 1
+            if concat_left < 1 or concat_left >= slot or concat_right < 1 or concat_right >= slot {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 string operand is not an earlier value"))
+            }
+            bytes = x86_emit_concat_string(bytes, concat_left, concat_right, slot)
     } else if instruction.op == IR_BINARY {
             if instruction.type_kind != SEM_INT or
                 (not x86_alu_supported(instruction.aux) and not x86_div_supported(instruction.aux)) or
@@ -1945,6 +2144,75 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
         } else {
             return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 scalar body instruction is not implemented"))
         }
+        // If the previous instruction left rax holding this slot and this one
+        // opens by loading that same slot, the load reads back what rax already
+        // has. Dropping it is safe *only* at the head of an instruction: an
+        // emitter's internal jumps are self-contained, so none of them can
+        // target bytes emitted before this instruction began, and every
+        // displacement inside it keeps its distance when the leading four bytes
+        // go. A jump target is always a block start, never mid-segment.
+        if rax_holds_slot >= 0 and len(bytes) >= instruction_byte_start + 4 and
+            bytes[instruction_byte_start] == 72 and bytes[instruction_byte_start + 1] == 139 and
+            bytes[instruction_byte_start + 2] == 69 and
+            bytes[instruction_byte_start + 3] == x86_slot_byte(rax_holds_slot) {
+            // Drop the redundant load, and with it the store that fed it when
+            // that value has no other reader anywhere — a single-use temporary
+            // then never reaches the frame at all. Both spans are cut in one
+            // pass so the surviving offsets are computed once.
+            // The store goes only if nothing else in the function reads the
+            // value; the consumer here is the instruction whose load was just
+            // dropped, so its own read does not count against it.
+            let drop_store = removable_store_at >= 0 and
+                x86_value_dead_after(instructions, call_sites, call_arguments, jump_arguments,
+                    removable_store_producer, start + i, removable_store_value)
+            let leading_cut = if drop_store { 4 } else { 0 }
+            let mut trimmed: []int = make([]int, 0, len(bytes))
+            let mut copy_index = 0
+            while copy_index < len(bytes) {
+                let in_store = drop_store and copy_index >= removable_store_at and
+                    copy_index < removable_store_at + 4
+                let in_load = copy_index >= instruction_byte_start and
+                    copy_index < instruction_byte_start + 4
+                if not in_store and not in_load {
+                    trimmed = append(trimmed, bytes[copy_index])
+                }
+                copy_index = copy_index + 1
+            }
+            bytes = trimmed
+            let mut edge_index = instruction_edge_start
+            while edge_index < len(edge_fields) {
+                edge_fields[edge_index] = edge_fields[edge_index] - 4 - leading_cut
+                edge_index = edge_index + 1
+            }
+        }
+        // What rax holds after this instruction: the slot it stored last, or
+        // nothing. Only the disp8 store form is recognised, so a wide frame
+        // simply keeps the round trip rather than risking a wrong match.
+        rax_holds_slot = -1
+        removable_store_at = -1
+        removable_store_producer = -1
+        removable_store_value = -1
+        if len(bytes) >= instruction_byte_start + 4 and
+            bytes[len(bytes) - 4] == 72 and bytes[len(bytes) - 3] == 137 and
+            bytes[len(bytes) - 2] == 69 {
+            // Recover the slot from the disp8 the store just emitted, and only
+            // trust it when it round-trips — anything else is not this form.
+            let disp = bytes[len(bytes) - 1]
+            let candidate = (256 - disp) / 8
+            if candidate >= 1 and candidate <= 15 and x86_slot_byte(candidate) == disp {
+                rax_holds_slot = candidate
+                // The store may go too, but only for an emitter that is
+                // straight-line — one with an internal jump can target the
+                // bytes after its store — and only when no other instruction,
+                // call or jump anywhere in the function reads the value.
+                if x86_op_ends_with_plain_store(instruction.op) and
+                    len(edge_fields) == instruction_edge_start {
+                    removable_store_at = len(bytes) - 4
+                    removable_store_producer = start + i
+                    removable_store_value = instruction.result
+                }
+            }
+        }
         i = i + 1
     }
     return X86Body { code: X86Code { bytes: bytes, status: X86_OK, error: "" }, edge_callees: edge_callees, edge_fields: edge_fields }
@@ -1957,7 +2225,7 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
 // bodies, and — as the general fallback — straight-line scalar bodies with
 // locals through the slot-per-value lowering. Anything else is an explicit
 // error. `callee` carries the called function's arena index (or -1) so the caller can patch displacements after layout.
-fn x86_encode_function_body(instructions: []IrInstruction, constants: []IrConstant, block: IrBlock, call_sites: []IrCallSite, call_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_encode_function_body(instructions: []IrInstruction, constants: []IrConstant, block: IrBlock, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
     let start = block.instruction_start
     if start < 0 or block.terminator != start + block.instruction_count - 1 or
         block.terminator >= len(instructions) or block.successor_count != 0 {
@@ -2130,7 +2398,7 @@ fn x86_encode_function_body(instructions: []IrInstruction, constants: []IrConsta
             }
         }
     }
-    return x86_lower_scalar_body(instructions, constants, block, call_sites, call_arguments, functions, function, string_literals, constant_string_index)
+    return x86_lower_scalar_body(instructions, constants, block, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
 }
 
 // Encode a function whose every block ends in IR_RETURN or IR_BRANCH: an
@@ -2147,7 +2415,68 @@ fn x86_encode_function_body(instructions: []IrInstruction, constants: []IrConsta
 // Each branch emits `jcc false_target` followed by `jmp true_target` rather
 // than relying on one arm falling through. That costs five bytes per branch
 // and makes correctness independent of block layout order.
-fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+// True when nothing outside `producer` reads this value anywhere in the
+// function: no other instruction names it as an operand, no call or jump passes
+// it, and it is not carried by a block parameter.
+//
+// This is what makes a store removable. It is deliberately whole-function and
+// conservative — a use in any block, reachable or not, counts — because the
+// cost of missing one is a slot that never got written and a later read of
+// whatever the frame happened to hold.
+fn x86_value_dead_after(instructions: []IrInstruction, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, producer: int, consumer: int, value: int) -> bool {
+    if value < 0 { return false }
+    let mut i = 0
+    while i < len(instructions) {
+        // The consumer is excluded: its read of the value is the one already
+        // satisfied out of rax, which is exactly why the store can go.
+        if i != producer and i != consumer {
+            let other = instructions[i]
+            if other.left == value or other.right == value { return false }
+            // A jump carries its single argument in `left`, which the check
+            // above already covers, and wider ones through the arena below.
+            if other.op == IR_CALL and other.aux >= 0 and other.aux < len(call_sites) {
+                let site = call_sites[other.aux]
+                let mut argument = site.argument_start
+                while argument < site.argument_start + site.argument_count {
+                    if argument >= 0 and argument < len(call_arguments) and
+                        call_arguments[argument] == value { return false }
+                    argument = argument + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+    let mut jump_index = 0
+    while jump_index < len(jump_arguments) {
+        if jump_arguments[jump_index] == value { return false }
+        jump_index = jump_index + 1
+    }
+    return true
+}
+
+// Opcodes whose emitters are straight-line and finish by storing rax. Only
+// these may have that store removed: an emitter with an internal jump — the
+// bounds trap in an indexed load, say — can target the bytes after its store,
+// so dropping it would retarget the jump into the middle of something else.
+fn x86_op_ends_with_plain_store(op: int) -> bool {
+    return op == IR_CONST or op == IR_BINARY or op == IR_UNARY or op == IR_MOVE or op == IR_LEN
+}
+
+// Leading block parameters of a block. They emit no code — the slot model gives
+// every value a frame slot, so a block parameter is a slot the incoming jump
+// writes before it transfers. Only a leading run counts; a block parameter
+// anywhere else is not this shape and the caller rejects the function.
+fn x86_block_parameter_count(instructions: []IrInstruction, block: IrBlock) -> int {
+    let mut count = 0
+    while count < block.instruction_count and
+        block.instruction_start + count < len(instructions) and
+        instructions[block.instruction_start + count].op == IR_BLOCK_PARAM {
+        count = count + 1
+    }
+    return count
+}
+
+fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
     // Slots past the fifteenth address through disp32 and the prologue takes
     // an imm32 frame, so this path is not held to the 127-value ceiling the
     // fixed shapes above document. The bound that remains keeps one frame
@@ -2169,13 +2498,64 @@ fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstan
             block.terminator >= len(instructions) {
             return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG block shape is invalid"))
         }
-        if instructions[block.instruction_start].op == IR_BLOCK_PARAM {
-            return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG cannot take block parameters"))
+        // Block parameters must be a leading run: the incoming jump writes
+        // their slots, so one appearing after real work would be written after
+        // the code that reads it.
+        let leading_parameters = x86_block_parameter_count(instructions, block)
+        let mut stray = leading_parameters
+        while stray < block.instruction_count {
+            if instructions[block.instruction_start + stray].op == IR_BLOCK_PARAM {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG block parameter is not leading"))
+            }
+            stray = stray + 1
+        }
+        if leading_parameters >= block.instruction_count {
+            return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG block is only parameters"))
+        }
+        if leading_parameters > 0 {
+            // Nothing writes a parameter slot except an incoming jump, so a
+            // block with parameters reached by a branch — or by the call, as
+            // the entry block is — would read whatever the frame held. Every
+            // predecessor edge has to be a jump, and there has to be one.
+            if function.entry_block + check == function.entry_block {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG entry block cannot take parameters"))
+            }
+            let mut predecessors = 0
+            let mut source = 0
+            while source < function.block_count {
+                let candidate = blocks[function.entry_block + source]
+                let mut edge = candidate.successor_start
+                while edge < candidate.successor_start + candidate.successor_count {
+                    if edge >= 0 and edge < len(successors) and
+                        successors[edge] == function.entry_block + check {
+                        if candidate.terminator < 0 or candidate.terminator >= len(instructions) or
+                            instructions[candidate.terminator].op != IR_JUMP {
+                            return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG block parameter is reached without arguments"))
+                        }
+                        predecessors = predecessors + 1
+                    }
+                    edge = edge + 1
+                }
+                source = source + 1
+            }
+            if predecessors == 0 {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG block parameter has no incoming jump"))
+            }
         }
         let terminator = instructions[block.terminator]
         if terminator.op == IR_RETURN {
             if block.successor_count != 0 {
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG return block has successors"))
+            }
+        } else if terminator.op == IR_JUMP {
+            if block.successor_count != 1 or block.successor_start < 0 or
+                block.successor_start >= len(successors) {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG jump needs one successor"))
+            }
+            let jump_target = successors[block.successor_start]
+            if jump_target < function.entry_block or
+                jump_target >= function.entry_block + function.block_count {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG successor leaves the function"))
             }
         } else if terminator.op == IR_BRANCH {
             if block.successor_count != 2 or block.successor_start < 0 or
@@ -2206,14 +2586,16 @@ fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstan
         block_offsets = append(block_offsets, len(bytes))
         let terminator = instructions[block.terminator]
         let returns = terminator.op == IR_RETURN
+        let jumps = terminator.op == IR_JUMP
         // A comparison never materializes into a slot, so when the condition
         // is the compare immediately before the branch it stays out of the
-        // segment and fuses into the jcc instead.
+        // segment and fuses into the jcc instead. A jump has no condition, so
+        // nothing fuses into it.
         let mut fused = false
         let mut left_slot = 0
         let mut right_slot = 0
         let mut false_jump = 116
-        if not returns {
+        if not returns and not jumps {
             let previous = block.terminator - 1
             if previous >= block.instruction_start and
                 instructions[previous].op == IR_BINARY and
@@ -2239,9 +2621,11 @@ fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstan
         } else {
             block.terminator
         }
+        // Block parameters are slots the incoming jump already wrote, so the
+        // segment starts after them.
         let segment = x86_emit_scalar_segment(
-            instructions, constants, call_sites, call_arguments, functions, function,
-            block.instruction_start, body_end, returns,
+            instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
+            block.instruction_start + x86_block_parameter_count(instructions, block), body_end, returns,
             string_literals, constant_string_index
         )
         if segment.code.status != X86_OK {
@@ -2255,7 +2639,77 @@ fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstan
             edge_fields = append(edge_fields, segment.edge_fields[field_index] + segment_offset)
             field_index = field_index + 1
         }
-        if not returns {
+        if jumps {
+            // Transfer to a join: copy each argument into the target's
+            // parameter slot, then jump. This is what a phi is in the slot
+            // model — no register allocation, because every value already owns
+            // a frame slot.
+            let jump_target = successors[block.successor_start]
+            let target_parameters = x86_block_parameter_count(instructions, blocks[jump_target])
+            let mut argument_values: []int = make([]int, 0, 4)
+            if target_parameters == 0 {
+                if terminator.left >= 0 {
+                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG jump passes an argument to a parameterless block"))
+                }
+            } else if target_parameters == 1 and terminator.left >= 0 {
+                // Single-argument jumps carry the value in `left`; wider ones
+                // index `jump_arguments` from `aux`. Both forms are produced by
+                // the IR, so both are accepted here.
+                argument_values = append(argument_values, terminator.left)
+            } else if terminator.left < 0 and terminator.aux >= 0 and
+                terminator.aux + target_parameters <= len(jump_arguments) {
+                let mut take = 0
+                while take < target_parameters {
+                    argument_values = append(argument_values, jump_arguments[terminator.aux + take])
+                    take = take + 1
+                }
+            } else {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG jump arguments do not match the target parameters"))
+            }
+            let target_block = blocks[jump_target]
+            let mut parameter_slots: []int = make([]int, 0, 4)
+            let mut argument_slots: []int = make([]int, 0, 4)
+            let mut resolve = 0
+            while resolve < target_parameters {
+                let parameter_slot = instructions[target_block.instruction_start + resolve].result - function.value_start + 1
+                let argument_slot = argument_values[resolve] - function.value_start + 1
+                if parameter_slot < 1 or parameter_slot > function.value_count or
+                    argument_slot < 1 or argument_slot > function.value_count {
+                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG jump slot is out of range"))
+                }
+                parameter_slots = append(parameter_slots, parameter_slot)
+                argument_slots = append(argument_slots, argument_slot)
+                resolve = resolve + 1
+            }
+            // The copies run in sequence, so an argument that names a *different*
+            // parameter's slot would read a value the previous copy already
+            // overwrote. A carried value passing through itself is the common
+            // case and is safe; a genuine permutation needs a temporary this
+            // path does not allocate, so it is refused rather than miscompiled.
+            let mut check_from = 0
+            while check_from < target_parameters {
+                let mut check_to = 0
+                while check_to < target_parameters {
+                    if check_from != check_to and argument_slots[check_from] == parameter_slots[check_to] {
+                        return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 returning CFG jump arguments permute their parameter slots"))
+                    }
+                    check_to = check_to + 1
+                }
+                check_from = check_from + 1
+            }
+            let mut copy = 0
+            while copy < target_parameters {
+                if argument_slots[copy] != parameter_slots[copy] {
+                    bytes = x86_emit_load_rax(bytes, argument_slots[copy])
+                    bytes = x86_emit_store_rax(bytes, parameter_slots[copy])
+                }
+                copy = copy + 1
+            }
+            bytes = append(bytes, 233)
+            patch_fields = append(patch_fields, len(bytes))
+            patch_targets = append(patch_targets, jump_target)
+            bytes = x86_emit_u32(bytes, 0)
+        } else if not returns {
             if fused {
                 bytes = x86_emit_load_rax(bytes, left_slot)
                 bytes = x86_emit_cmp_mem(bytes, right_slot)
@@ -2304,7 +2758,7 @@ fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstan
 // is an explicit error.
 fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
     if function.block_count == 1 {
-        return x86_encode_function_body(instructions, constants, blocks[function.entry_block], call_sites, call_arguments, functions, function, string_literals, constant_string_index)
+        return x86_encode_function_body(instructions, constants, blocks[function.entry_block], call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
     }
     if function.block_count >= 7 and
         x86_function_has_backedge(instructions, blocks, successors, function) and
@@ -2321,7 +2775,15 @@ fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, b
     }
     if function.block_count == 4 and
         x86_function_has_backedge(instructions, blocks, successors, function) {
-        return x86_lower_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, 0, false, string_literals, constant_string_index)
+        let matched_loop = x86_lower_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, 0, false, string_literals, constant_string_index)
+        if matched_loop.code.status == X86_OK {
+            return matched_loop
+        }
+        // The matched four-block loop wants its own layout — an exit block that
+        // just returns, among others. A loop the general lowering built may
+        // have anything after it, so fall through to the shape-independent
+        // encoder rather than reporting this shape's complaint as the reason
+        // the function cannot be encoded.
     }
     if function.block_count >= 10 and
         ((function.block_count - 4) % 3 == 0 or (function.block_count - 5) % 3 == 0) and
@@ -2351,7 +2813,13 @@ fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, b
         instructions[blocks[function.entry_block + 3].terminator].op == IR_JUMP {
         // A chain of sequential plain loops: the fourth block is a junction
         // (a jump), never a branch.
-        return x86_lower_loop_chain(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, -1, 0, false, string_literals, constant_string_index)
+        let matched_chain = x86_lower_loop_chain(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, -1, 0, false, string_literals, constant_string_index)
+        if matched_chain.code.status == X86_OK {
+            return matched_chain
+        }
+        // As with the single loop: this shape's layout is not the only one a
+        // chain of loops can have, so fall through instead of reporting its
+        // complaint as the function's reason.
     }
     if (function.block_count == 7 or function.block_count == 8) and
         x86_function_has_backedge(instructions, blocks, successors, function) {
@@ -2365,7 +2833,10 @@ fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, b
             successors[blocks[function.entry_block + 5].successor_start] == function.entry_block + 6 {
             return x86_lower_merge_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
         }
-        return x86_lower_guarded_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, 0, false, string_literals, constant_string_index)
+        let matched_guarded = x86_lower_guarded_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, 0, false, string_literals, constant_string_index)
+        if matched_guarded.code.status == X86_OK {
+            return matched_guarded
+        }
     }
     if function.block_count == 3 or function.block_count == 4 {
         let branch = x86_lower_branch_return(instructions, constants, blocks, successors, function)
@@ -2383,34 +2854,45 @@ fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, b
     // Shape-independent fallback: any all-paths-return branch tree. Tried last
     // so every shape above keeps its existing encoding, which is what lets the
     // pinned fixture images stay byte-identical.
-    return x86_lower_returning_cfg(instructions, constants, blocks, successors, call_sites, call_arguments, functions, function, string_literals, constant_string_index)
+    return x86_lower_returning_cfg(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
 }
 
 // Lower a multi-function package into one code stream: the entry bridge, then
-// every function body in arena order. The root is the unique function no call
-// site references; the bridge calls it. Call displacements are patched after
-// layout, so encoding order never affects the result.
-fn x86_lower_functions(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, string_literals: []string, constant_string_index: []int) -> X86Code {
+// every function body in arena order. The bridge calls the root. Call
+// displacements are patched after layout, so encoding order never affects the
+// result.
+//
+// The root is the function owning `entry_item` — `fn main`. Selecting it as
+// "the function no call site references" instead only works when the file
+// declares nothing else uncalled, which no real source does; a single unused
+// helper made the whole image unbuildable. `entry_item` may be -1 when the
+// caller has no item arena to name one, in which case the uncalled rule is
+// still the best available answer.
+fn x86_lower_functions(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, string_literals: []string, constant_string_index: []int, entry_item: int) -> X86Code {
     let count = len(functions)
     let mut root = -1
     let mut i = 0
     while i < count {
-        let mut is_callee = false
-        let mut site_index = 0
-        while site_index < len(call_sites) {
-            if call_sites[site_index].callee_item == functions[i].item { is_callee = true }
-            site_index = site_index + 1
-        }
-        if not is_callee {
-            if root >= 0 {
-                return x86_error(X86_UNSUPPORTED, "x86 image requires one uncalled root function")
+        if entry_item >= 0 {
+            if functions[i].item == entry_item { root = i }
+        } else {
+            let mut is_callee = false
+            let mut site_index = 0
+            while site_index < len(call_sites) {
+                if call_sites[site_index].callee_item == functions[i].item { is_callee = true }
+                site_index = site_index + 1
             }
-            root = i
+            if not is_callee {
+                if root >= 0 {
+                    return x86_error(X86_UNSUPPORTED, "x86 image requires one uncalled root function")
+                }
+                root = i
+            }
         }
         i = i + 1
     }
     if root < 0 {
-        return x86_error(X86_UNSUPPORTED, "x86 image requires one uncalled root function")
+        return x86_error(X86_UNSUPPORTED, "x86 image has no entry function")
     }
     if functions[root].parameter_count > 1 {
         return x86_error(X86_UNSUPPORTED, "x86 root function takes at most one parameter")
@@ -2942,7 +3424,7 @@ fn x86_lower_branch_call_return(instructions: []IrInstruction, constants: []IrCo
 // boolean value. Arms are the usual four kinds, framed with leave; ret
 // (three-block form) or a merge jump and a shared leave; ret (four-block
 // form). This is the general form behind the tighter parameter-only entries.
-fn x86_lower_branch_scalar_entry(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_branch_scalar_entry(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
     if function.parameter_count < 0 or function.parameter_count > 15 or
         (function.block_count != 3 and function.block_count != 4) or
         function.value_start < 0 or function.value_count < 1 or function.value_count > 127 {
@@ -3006,7 +3488,7 @@ fn x86_lower_branch_scalar_entry(instructions: []IrInstruction, constants: []IrC
         prefix_end = entry.terminator - 1
     }
     let segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start, prefix_end, false
     , string_literals, constant_string_index)
     if segment.code.status != X86_OK {
@@ -3280,7 +3762,7 @@ fn x86_lower_loop(instructions: []IrInstruction, constants: []IrConstant, blocks
         entry_param_index = entry_param_index + 1
     }
     let entry_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start + entry_params, entry.terminator, false
     , string_literals, constant_string_index)
     if entry_segment.code.status != X86_OK {
@@ -3318,7 +3800,7 @@ fn x86_lower_loop(instructions: []IrInstruction, constants: []IrConstant, blocks
     bytes = x86_emit_u32(bytes, 0)
     let header_offset = len(bytes)
     let header_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         header.instruction_start + parameter_count, prefix_end, false
     , string_literals, constant_string_index)
     if header_segment.code.status != X86_OK {
@@ -3352,7 +3834,7 @@ fn x86_lower_loop(instructions: []IrInstruction, constants: []IrConstant, blocks
     let exit_jcc_field = len(bytes)
     bytes = x86_emit_u32(bytes, 0)
     let body_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         body.instruction_start, body.terminator, false
     , string_literals, constant_string_index)
     if body_segment.code.status != X86_OK {
@@ -3391,7 +3873,7 @@ fn x86_lower_loop(instructions: []IrInstruction, constants: []IrConstant, blocks
     bytes = x86_patch_u32(bytes, entry_jump_field, header_offset - (entry_jump_field + 4))
     bytes = x86_patch_u32(bytes, exit_jcc_field, exit_offset - (exit_jcc_field + 4))
     let exit_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         exit.instruction_start, exit.instruction_start + exit.instruction_count, true
     , string_literals, constant_string_index)
     if exit_segment.code.status != X86_OK {
@@ -3650,7 +4132,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
     }
     // Entry block: scalar prefix, argument copies, jump into the header.
     let entry_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start + entry_params, entry.terminator, false
     , string_literals, constant_string_index)
     if entry_segment.code.status != X86_OK {
@@ -3685,7 +4167,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
     // Header: block parameters, condition, false edge to the exit.
     let header_prefix_end = if fused_header { header.terminator - 1 } else { header.terminator }
     let header_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         header.instruction_start + parameter_count, header_prefix_end, false
     , string_literals, constant_string_index)
     if header_segment.code.status != X86_OK {
@@ -3716,7 +4198,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
     bytes = x86_emit_u32(bytes, 0)
     // Pre-guard updates, then a plain jump into the guard.
     let pre_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         pre.instruction_start, pre.terminator, false
     , string_literals, constant_string_index)
     if pre_segment.code.status != X86_OK {
@@ -3735,7 +4217,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
     // post-guard updates.
     let guard_prefix_end = if fused_guard { guard.terminator - 1 } else { guard.terminator }
     let guard_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         guard.instruction_start, guard_prefix_end, false
     , string_literals, constant_string_index)
     if guard_segment.code.status != X86_OK {
@@ -3766,7 +4248,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
     bytes = x86_emit_u32(bytes, 0)
     // Post-guard updates, copies, and the backedge.
     let post_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         post.instruction_start, post.terminator, false
     , string_literals, constant_string_index)
     if post_segment.code.status != X86_OK {
@@ -3853,7 +4335,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
         bytes = x86_patch_u32(bytes, exit_jcc_field, exit_offset - (exit_jcc_field + 4))
     }
     let exit_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         exit.instruction_start + (if breaking { parameter_count } else { 0 }),
         exit.instruction_start + exit.instruction_count, true
     , string_literals, constant_string_index)
@@ -4073,7 +4555,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     let mut edge_fields: []int = make([]int, 0, 2)
     // Entry: scalar prefix, argument copies into the header parameters, jump.
     let entry_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start, entry.terminator, false
     , string_literals, constant_string_index)
     if entry_segment.code.status != X86_OK {
@@ -4108,7 +4590,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     // Header: block parameters, while condition, false edge to the exit.
     let header_prefix_end = if fused_header { header.terminator - 1 } else { header.terminator }
     let header_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         header.instruction_start + parameter_count, header_prefix_end, false
     , string_literals, constant_string_index)
     if header_segment.code.status != X86_OK {
@@ -4139,7 +4621,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     bytes = x86_emit_u32(bytes, 0)
     // Pre-if updates, plain jump into the if condition.
     let pre_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         pre.instruction_start, pre.terminator, false
     , string_literals, constant_string_index)
     if pre_segment.code.status != X86_OK {
@@ -4157,7 +4639,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     // If condition: true edge falls into the then arm, false edge to the else.
     let cond_prefix_end = if fused_cond { cond.terminator - 1 } else { cond.terminator }
     let cond_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         cond.instruction_start, cond_prefix_end, false
     , string_literals, constant_string_index)
     if cond_segment.code.status != X86_OK {
@@ -4193,7 +4675,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     while arm_index < 2 {
         let arm_block = if arm_index == 0 { then_block } else { else_block }
         let arm_segment = x86_emit_scalar_segment(
-            instructions, constants, call_sites, call_arguments, functions, function,
+            instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
             arm_block.instruction_start, arm_block.terminator, false
         , string_literals, constant_string_index)
         if arm_segment.code.status != X86_OK {
@@ -4239,7 +4721,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     // Merge: skip the block parameters, post-if updates, backedge copies, and
     // the jump back to the header.
     let merge_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         merge.instruction_start + merge_count, merge.terminator, false
     , string_literals, constant_string_index)
     if merge_segment.code.status != X86_OK {
@@ -4273,7 +4755,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     let exit_offset = len(bytes)
     bytes = x86_patch_u32(bytes, exit_jcc_field, exit_offset - (exit_jcc_field + 4))
     let exit_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         exit.instruction_start, exit.instruction_start + exit.instruction_count, true
     , string_literals, constant_string_index)
     if exit_segment.code.status != X86_OK {
@@ -4419,7 +4901,7 @@ fn x86_lower_pre_if_chain(instructions: []IrInstruction, constants: []IrConstant
     // If entry: leading instructions, condition, false edge to the else arm.
     let entry_prefix_end = if fused { entry.terminator - 1 } else { entry.terminator }
     let entry_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start, entry_prefix_end, false
     , string_literals, constant_string_index)
     if entry_segment.code.status != X86_OK {
@@ -4455,7 +4937,7 @@ fn x86_lower_pre_if_chain(instructions: []IrInstruction, constants: []IrConstant
     while arm_index < 2 {
         let arm_block = if arm_index == 0 { then_block } else { else_block }
         let arm_segment = x86_emit_scalar_segment(
-            instructions, constants, call_sites, call_arguments, functions, function,
+            instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
             arm_block.instruction_start, arm_block.terminator, false
         , string_literals, constant_string_index)
         if arm_segment.code.status != X86_OK {
@@ -4706,7 +5188,7 @@ fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, 
         entry_param_index = entry_param_index + 1
     }
     let entry_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start + entry_params, entry.terminator, false
     , string_literals, constant_string_index)
     if entry_segment.code.status != X86_OK {
@@ -4779,7 +5261,7 @@ fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, 
         }
         let header_prefix_end = if fused { header.terminator - 1 } else { header.terminator }
         let header_segment = x86_emit_scalar_segment(
-            instructions, constants, call_sites, call_arguments, functions, function,
+            instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
             header.instruction_start + parameter_count, header_prefix_end, false
         , string_literals, constant_string_index)
         if header_segment.code.status != X86_OK {
@@ -4809,7 +5291,7 @@ fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, 
         let next_jcc_field = len(bytes)
         bytes = x86_emit_u32(bytes, 0)
         let body_segment = x86_emit_scalar_segment(
-            instructions, constants, call_sites, call_arguments, functions, function,
+            instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
             body.instruction_start, body.terminator, false
         , string_literals, constant_string_index)
         if body_segment.code.status != X86_OK {
@@ -4916,7 +5398,7 @@ fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, 
         }
     }
     let exit_segment = x86_emit_scalar_segment(
-        instructions, constants, call_sites, call_arguments, functions, function,
+        instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         exit.instruction_start, exit.instruction_start + exit.instruction_count, true
     , string_literals, constant_string_index)
     if exit_segment.code.status != X86_OK {
@@ -5300,6 +5782,90 @@ fn x86_64_smoke_test() -> bool {
         loop_body.code.bytes[95] != 201 or loop_body.code.bytes[96] != 195 {
         return false
     }
+    // The general returning-CFG encoder accepts this same loop arena. That is
+    // the block-parameter and jump-argument support rather than the matched
+    // four-block shape above; reusing one arena keeps the two paths honest
+    // about the same program.
+    let general_loop = x86_lower_returning_cfg(
+        loop_instructions, loop_constants, loop_blocks, loop_successors,
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0),
+        make([]IrFunction, 0, 0), loop_function,
+        make([]string, 0, 0), make([]int, 0, 0)
+    )
+    if general_loop.code.status != X86_OK {
+        return false
+    }
+    // The backedge must be a *backward* near jmp — E9 with a negative
+    // displacement, so its top displacement byte is 0xFF. Encoding every jump
+    // forward would run the body once and fall out.
+    let mut backedge_jump = false
+    let mut jump_scan = 0
+    while jump_scan + 4 < len(general_loop.code.bytes) {
+        if general_loop.code.bytes[jump_scan] == 233 and general_loop.code.bytes[jump_scan + 4] == 255 {
+            backedge_jump = true
+        }
+        jump_scan = jump_scan + 1
+    }
+    if not backedge_jump {
+        return false
+    }
+    // The backedge must also *copy* the carried value into the header's
+    // parameter slot. Status and a backward jump do not prove that: without the
+    // copy the header re-tests its initial value and the loop never advances.
+    // The carried value is 6 (slot 7) and the header parameter is 2 (slot 3).
+    let carried_copy = x86_emit_store_rax(x86_emit_load_rax(make([]int, 0, 8), 7), 3)
+    let mut copy_found = false
+    let mut copy_at = 0
+    while copy_at + len(carried_copy) <= len(general_loop.code.bytes) {
+        let mut copy_matched = true
+        let mut copy_byte = 0
+        while copy_byte < len(carried_copy) {
+            if general_loop.code.bytes[copy_at + copy_byte] != carried_copy[copy_byte] {
+                copy_matched = false
+            }
+            copy_byte = copy_byte + 1
+        }
+        if copy_matched { copy_found = true }
+        copy_at = copy_at + 1
+    }
+    if not copy_found {
+        return false
+    }
+    // A backedge whose arguments permute the header's parameter slots cannot be
+    // emitted as sequential copies — the second copy would read a slot the
+    // first already overwrote. It must be refused, not silently mis-encoded.
+    let mut swap_instructions: []IrInstruction = make([]IrInstruction, 0, 13)
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_PARAM, result: 0, type_kind: SEM_INT, left: -1, right: -1, aux: 0, token: 0 })
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_CONST, result: 1, type_kind: SEM_INT, left: -1, right: -1, aux: 0, token: 0 })
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_JUMP, result: -1, type_kind: SEM_UNKNOWN, left: -1, right: -1, aux: 0, token: 0 })
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_BLOCK_PARAM, result: 2, type_kind: SEM_INT, left: -1, right: -1, aux: 0, token: 0 })
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_BLOCK_PARAM, result: 3, type_kind: SEM_INT, left: -1, right: -1, aux: 0, token: 0 })
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_CONST, result: 4, type_kind: SEM_INT, left: -1, right: -1, aux: 1, token: 0 })
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_BINARY, result: 5, type_kind: SEM_BOOL, left: 2, right: 4, aux: TK_LT, token: 0 })
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_BRANCH, result: -1, type_kind: SEM_BOOL, left: 5, right: -1, aux: -1, token: 0 })
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_CONST, result: 6, type_kind: SEM_INT, left: -1, right: -1, aux: 2, token: 0 })
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_JUMP, result: -1, type_kind: SEM_UNKNOWN, left: -1, right: -1, aux: 2, token: 0 })
+    swap_instructions = append(swap_instructions, IrInstruction { op: IR_RETURN, result: -1, type_kind: SEM_INT, left: 2, right: -1, aux: -1, token: 0 })
+    let mut swap_blocks: []IrBlock = make([]IrBlock, 0, 4)
+    swap_blocks = append(swap_blocks, IrBlock { function: 0, instruction_start: 0, instruction_count: 3, terminator: 2, successor_start: 0, successor_count: 1 })
+    swap_blocks = append(swap_blocks, IrBlock { function: 0, instruction_start: 3, instruction_count: 5, terminator: 7, successor_start: 1, successor_count: 2 })
+    swap_blocks = append(swap_blocks, IrBlock { function: 0, instruction_start: 8, instruction_count: 2, terminator: 9, successor_start: 3, successor_count: 1 })
+    swap_blocks = append(swap_blocks, IrBlock { function: 0, instruction_start: 10, instruction_count: 1, terminator: 10, successor_start: 4, successor_count: 0 })
+    // Entry passes (v1, v1); the backedge passes (param b, param a) — a swap.
+    let mut swap_jump_arguments: []int = make([]int, 0, 4)
+    swap_jump_arguments = append(swap_jump_arguments, 1)
+    swap_jump_arguments = append(swap_jump_arguments, 1)
+    swap_jump_arguments = append(swap_jump_arguments, 3)
+    swap_jump_arguments = append(swap_jump_arguments, 2)
+    let swap_function = IrFunction { item: 0, entry_block: 0, block_count: 4, parameter_count: 1, value_start: 0, value_count: 7 }
+    if x86_lower_returning_cfg(
+        swap_instructions, loop_constants, swap_blocks, loop_successors,
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), swap_jump_arguments,
+        make([]IrFunction, 0, 0), swap_function,
+        make([]string, 0, 0), make([]int, 0, 0)
+    ).code.status != X86_UNSUPPORTED {
+        return false
+    }
     let mut forward_successors: []int = make([]int, 0, 4)
     forward_successors = append(forward_successors, 1)
     forward_successors = append(forward_successors, 2)
@@ -5357,7 +5923,7 @@ fn x86_returning_cfg_smoke_test() -> bool {
     let cfg_function = IrFunction { item: 0, entry_block: 0, block_count: 5, parameter_count: 1, value_start: 0, value_count: 8 }
     let body = x86_lower_returning_cfg(
         ir, pool, cfg_blocks, cfg_successors,
-        make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), cfg_function,
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), cfg_function,
         make([]string, 0, 0), make([]int, 0, 0)
     )
     if body.code.status != X86_OK {
@@ -5390,8 +5956,10 @@ fn x86_returning_cfg_smoke_test() -> bool {
     if body.code.bytes[len(body.code.bytes) - 1] != 195 {
         return false
     }
-    // A block parameter, a jump terminator, and an out-of-function successor
-    // must each be refused rather than silently mis-encoded.
+    // A block parameter on a block the *branches* reach, and an out-of-function
+    // successor, must each be refused rather than silently mis-encoded. Nothing
+    // writes a parameter slot except an incoming jump, so a parameter here
+    // would read whatever the frame happened to hold.
     let mut param_blocks: []IrBlock = make([]IrBlock, 0, 5)
     param_blocks = append(param_blocks, cfg_blocks[0])
     param_blocks = append(param_blocks, cfg_blocks[1])
@@ -5410,7 +5978,7 @@ fn x86_returning_cfg_smoke_test() -> bool {
     }
     if x86_lower_returning_cfg(
         param_ir, pool, param_blocks, cfg_successors,
-        make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), cfg_function,
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), cfg_function,
         make([]string, 0, 0), make([]int, 0, 0)
     ).code.status != X86_UNSUPPORTED {
         return false
@@ -5422,7 +5990,7 @@ fn x86_returning_cfg_smoke_test() -> bool {
     escaping = append(escaping, 3)
     if x86_lower_returning_cfg(
         ir, pool, cfg_blocks, escaping,
-        make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), cfg_function,
+        make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), cfg_function,
         make([]string, 0, 0), make([]int, 0, 0)
     ).code.status != X86_UNSUPPORTED {
         return false

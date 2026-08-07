@@ -2,6 +2,56 @@
 // The frontend is being brought up component-by-component under differential
 // tests against the stage-0 compiler.
 
+// Read one or more sources as a single translation unit.
+//
+// Stage 1 has no module system: a type declared in one file is invisible in the
+// next, so `zzzzzz_ir.mko` alone cannot see `Token` or `ExprNode` and every
+// parameter of such a type is unknown. Concatenating the members gives one span
+// space and one symbol table, which is what lets the compiler's own fourteen
+// files be compiled together at all.
+//
+// The members are separated by a newline so the last token of one cannot merge
+// with the first of the next. Spans then index the combined buffer, so a
+// diagnostic's offset is package-relative rather than file-relative — the
+// tradeoff of doing this by concatenation rather than by merging arenas.
+//
+// A path with no comma is one file and behaves exactly as before, so every
+// pinned single-file invocation is unaffected.
+// Returns "" when any member could not be read, which the caller reports. Each
+// member is checked on its own: `read_file` yields "" for a missing path, so
+// summing the members and testing the total would let a mistyped member vanish
+// into a package that still compiled — silently missing whatever it declared.
+fn read_package(path_list: string) -> string {
+    let mut combined = ""
+    let mut start = 0
+    let mut i = 0
+    let mut members = 0
+    while i <= len(path_list) {
+        let mut boundary = false
+        if i == len(path_list) {
+            boundary = true
+        } else if str_byte_at(path_list, i) == 44 {
+            boundary = true
+        }
+        if boundary {
+            if i > start {
+                let piece = read_file(path_list[start:i])
+                if len(piece) == 0 {
+                    return ""
+                }
+                combined = combined + piece + "\n"
+                members = members + 1
+            }
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if members == 0 {
+        return ""
+    }
+    return combined
+}
+
 fn main() {
     if not x86_64_smoke_test() {
         print("internal compiler error: x86-64 encoder smoke test failed")
@@ -45,6 +95,18 @@ fn main() {
     }
     if not branch_scope_smoke_test() {
         print("internal compiler error: branch scope smoke test failed")
+        exit(70)
+    }
+    if not struct_layout_smoke_test() {
+        print("internal compiler error: struct layout smoke test failed")
+        exit(70)
+    }
+    if not struct_kind_distinct_smoke_test() {
+        print("internal compiler error: struct kind distinctness smoke test failed")
+        exit(70)
+    }
+    if not ir_entry_item_smoke_test() {
+        print("internal compiler error: entry item smoke test failed")
         exit(70)
     }
     if not semantic_type_smoke_test() {
@@ -144,7 +206,15 @@ fn main() {
         exit(2)
     }
  let path = arg_get(1)
-    let source = read_file(path)
+    let source = read_package(path)
+    if len(source) == 0 {
+        // `read_file` yields "" for a missing path, a directory and a broken
+        // symlink alike, and an empty source lexes to an empty arena and
+        // reports success. Refusing here is what stops a mistyped package
+        // member from looking like a clean compile of nothing.
+        print(path + ": no source read")
+        exit(1)
+    }
     let result = lex_source(source)
     if not result.ok {
         print(path + ":" + format_int(result.error_line) + ":" + format_int(result.error_col) + ": " + result.error)
@@ -172,7 +242,13 @@ fn main() {
         print(path + ": typed IR verification failed: " + ir_verification.error)
         exit(1)
     }
-    let elf = elf64_lower_typed_ir(ir)
+    // A fourth argument asks the driver to say why each function declined,
+    // which turns the skip count into a work list. The gate never passes one,
+    // so pinned output is unaffected.
+    if argc() >= 4 {
+        print(ir.skip_reason)
+    }
+    let elf = elf64_lower_typed_ir(ir, ir_entry_item(source, parsed.items))
     if elf.status == ELF_OK { print("elf_bytes " + format_int(len(elf.bytes))) }
     if argc() >= 3 {
         if ir.skipped_functions != 0 {

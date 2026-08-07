@@ -1,0 +1,13 @@
+// An owned allocation per iteration. The backedge drops what the iteration
+// made — nothing else can, since carried values are non-owned scalars and the
+// header cannot hold a string. Run under a leak checker the mmap and munmap
+// counts must both equal the iteration count and peak RSS must not grow with
+// it; without the drop this maps 20000 pages and never returns them.
+fn main() {
+    let mut i = 0
+    while i < 20000 {
+        let s = format_int(i)
+        i = i + 1
+    }
+    exit(3)
+}

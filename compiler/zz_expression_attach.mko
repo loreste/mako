@@ -72,33 +72,52 @@ fn attach_statement_expressions(source: string, tokens: []Token, statements: []S
             // Control-flow conditions mirror the stage-0 parser: a bare
             // `ident {` there is the block, never a struct literal.
             let suppress_struct = out_statements[i].kind == STMT_IF or out_statements[i].kind == STMT_WHILE
-            let saved_len = len(out_expressions)
+            // Parse into a fresh scratch arena rather than the growing one.
+            // A parse function has to own the arena it appends to, so passing
+            // the whole arena in copied every node already parsed, once per
+            // statement and again at every nested call — the quadratic that
+            // made stage 1 need gigabytes for its own sources. A statement's
+            // expression tree is small, so the copy is bounded by that tree
+            // instead of by the file.
+            let base = len(out_expressions)
+            let scratch = make([]ExprNode, 0, 8)
             let parsed = if bounds[1] == bounds[0] + 1 {
-                parse_atom(source, tokens, bounds[0], out_expressions)
+                parse_atom(source, tokens, bounds[0], scratch)
             } else {
-                parse_expression(source, tokens, bounds[0], out_expressions, 0, suppress_struct)
+                parse_expression(source, tokens, bounds[0], scratch, 0, suppress_struct)
             }
             if parsed.ok and parsed.next == bounds[1] {
-                let expr_root = parsed.root
-                out_expressions = parsed.nodes
-                let mut statement = out_statements[i]
-                statement.expr_root = expr_root
-                out_statements[i] = statement
-                attached = attached + 1
-            } else {
-                // Parse failed or did not consume the full span: drop any
-                // nodes the attempt appended so the arena stays exactly the
-                // successfully attached prefix. Leaving partials inflated
-                // every later pass that walks expressions.
-                let partial = parsed.nodes
-                let mut trimmed = make([]ExprNode, 0, saved_len)
+                // Merge with a uniform shift. Nodes arrive in the same order
+                // they would have been appended in, so every index moves by
+                // the same base and the resulting arena is identical.
+                //
+                // `left` is an expression index for every kind except
+                // EXPR_TYPE_REF, where it holds a token index and must not be
+                // shifted. `right` is an expression index or -1 everywhere.
+                let merged = parsed.nodes
                 let mut node_index = 0
-                while node_index < saved_len and node_index < len(partial) {
-                    trimmed = append(trimmed, partial[node_index])
+                while node_index < len(merged) {
+                    let node = merged[node_index]
+                    let shifted_left = if node.kind == EXPR_TYPE_REF or node.left < 0 {
+                        node.left
+                    } else {
+                        node.left + base
+                    }
+                    let shifted_right = if node.right < 0 { node.right } else { node.right + base }
+                    out_expressions = append(out_expressions, ExprNode {
+                        kind: node.kind, token: node.token,
+                        left: shifted_left, right: shifted_right,
+                    })
                     node_index = node_index + 1
                 }
-                out_expressions = trimmed
+                let mut statement = out_statements[i]
+                statement.expr_root = parsed.root + base
+                out_statements[i] = statement
+                attached = attached + 1
             }
+            // A failed parse, or one that did not consume the full span, is
+            // simply not merged. The scratch arena is discarded, so the shared
+            // arena never has to be trimmed back.
         }
         i = i + 1
     }

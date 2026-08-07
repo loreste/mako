@@ -1,0 +1,15 @@
+// An `if` inside a loop body. Falling off the end of an arm is falling off the
+// end of the body, so the arms have to inherit the backedge — without that the
+// arm returns instead of looping and this exits 0 rather than 10.
+fn main() {
+    let mut i = 0
+    let mut total = 0
+    while i < 5 {
+        if total > 100 {
+            exit(9)
+        }
+        total = total + i
+        i = i + 1
+    }
+    exit(total)
+}

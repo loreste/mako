@@ -1,0 +1,24 @@
+// `format_int` allocates an owned string per call. Every boundary the decimal
+// renderer can get wrong is here: zero (the loop must still emit one digit),
+// a negative, INT_MIN (whose magnitude does not fit a positive int, so the
+// renderer has to treat the negation as unsigned), and INT_MAX.
+//
+// Each result is bound to a local, so each one is dropped at scope exit; a
+// producer missing from the backend's owned set leaks all six allocations.
+fn main() {
+    let min = (0 - 2147483648) * 2147483648 * 2
+    let max = (0 - 1) - min
+    let a = format_int(42)
+    let b = format_int(0 - 7)
+    let c = format_int(0)
+    let d = format_int(1000000000000)
+    let e = format_int(min)
+    let f = format_int(max)
+    print(a)
+    print(b)
+    print(c)
+    print(d)
+    print(e)
+    print(f)
+    exit(7)
+}

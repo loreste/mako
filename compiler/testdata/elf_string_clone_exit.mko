@@ -1,0 +1,21 @@
+// A string parameter is always an allocation the callee owns and drops, so
+// every call site clones its string argument whatever it held.
+//
+// The case that makes the unconditional clone necessary is `shout("literal")`:
+// a literal is a static view into the code image, and handing it to a callee
+// that drops its parameter would unmap read-only code. The other two check that
+// an owned binding survives being passed, and that a concat temporary passed
+// directly is not freed twice.
+fn shout(text: string) -> int {
+    print(text)
+    return 1
+}
+
+fn main() {
+    let owned = format_int(11)
+    let a = shout(owned)
+    let b = shout("literal")
+    let c = shout(owned + "-tail")
+    print(owned)
+    exit(a + b + c + 3)
+}

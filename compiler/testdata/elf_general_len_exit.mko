@@ -1,0 +1,22 @@
+// `len` through the shape-independent path. A nested guard tree is not one of
+// the matched shapes, so this reaches `ir_cfg_lower_range` — where `len` used to
+// be looked up in the intrinsic table, found missing, and declined. It is one
+// load of the header word, not a call, and a slice header and a string object
+// both carry their length first, so both forms are exercised.
+fn check(xs: []int, name: string) -> int {
+    if len(xs) < 1 {
+        return 21
+    }
+    if len(name) < 1 {
+        return 22
+    }
+    if len(xs) + len(name) > 100 {
+        return 23
+    }
+    return len(xs) * 10 + len(name)
+}
+
+fn main() {
+    let xs: []int = make([]int, 3, 8)
+    exit(check(xs, "mako"))
+}

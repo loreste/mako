@@ -1,0 +1,15 @@
+// An uncalled helper alongside `main`. Selecting the root as "the function no
+// call site references" gives two candidates here and refuses the image, which
+// is what every real source looks like. The exit status distinguishes the two:
+// `main` exits 4, and rooting the image at `spare` would exit 9 or more.
+fn spare(value: int) -> int {
+    return value + 9
+}
+
+fn leaf(value: int) -> int {
+    return value + 1
+}
+
+fn main() {
+    exit(leaf(3))
+}

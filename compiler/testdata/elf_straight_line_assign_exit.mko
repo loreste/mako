@@ -1,0 +1,10 @@
+// Regression: a straight-line body with no branch and no loop used to fall
+// through every shape to the single-block path, which emits the statement
+// intrinsics and the return but nothing for an assignment. This exited 3.
+fn main() {
+    let mut i = 3
+    i = 7
+    let mut total = i
+    total = total + i
+    exit(total)
+}

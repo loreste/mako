@@ -1,0 +1,22 @@
+// The builder shape, which is what every arena in this compiler is written as:
+// make an owned slice, then rebind it from an expression that consumed it.
+//
+// `xs = append(xs, v)` hands the old allocation to the call, which consumes it
+// and returns the replacement — dropping it again here would be a double free.
+// A rebind whose right-hand side did *not* take the old value needs the opposite,
+// an explicit drop, or it leaks; which happened is read off the instructions the
+// right-hand side emitted rather than guessed from the shape of the expression.
+fn build(n: int) -> int {
+    let mut xs: []int = make([]int, 0, 2)
+    if n < 0 {
+        return 0
+    }
+    xs = append(xs, 10)
+    xs = append(xs, 20)
+    xs = append(xs, 30)
+    return xs[0] + xs[2] + len(xs)
+}
+
+fn main() {
+    exit(build(1))
+}

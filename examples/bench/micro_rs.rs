@@ -35,6 +35,11 @@ fn bench_slice() -> i64 {
     black_box(a.len() as i64)
 }
 
+// Rust's default HashMap hashes with SipHash-1-3, which buys DoS resistance
+// Mako's integer map does not attempt. Comparing against it measures that
+// choice, not the compiler: with an identity hasher on both sides the gap on
+// this kernel is about 1.4x, not 8x. Kept as the default-vs-default number,
+// which is what a user actually gets, but it is not a like-for-like hash.
 fn bench_map() -> i64 {
     let n = opaque_add(50_000, 0);
     let mut m: HashMap<i64, i64> = HashMap::with_capacity(n as usize);

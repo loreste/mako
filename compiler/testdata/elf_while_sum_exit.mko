@@ -1,0 +1,16 @@
+// Two carried locals through two sequential loops. The header's block
+// parameters are exactly the locals a body assigns, so both `i` and `total`
+// get one; a loop that carried only the counter would lose the running sum.
+fn main() {
+    let mut i = 0
+    let mut total = 0
+    while i < 5 {
+        total = total + i
+        i = i + 1
+    }
+    while i < 9 {
+        total = total + 2
+        i = i + 1
+    }
+    exit(total)
+}

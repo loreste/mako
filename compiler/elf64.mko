@@ -161,12 +161,12 @@ fn elf64_add_image(lhs: int, rhs: int) -> ElfImage {
 // four blocks) whose arms produce integer constants. The complete instruction
 // stream is validated by the x86 lowering before the image is produced; all
 // other IR shapes remain rejected.
-fn elf64_lower_typed_ir(ir: TypedIr) -> ElfImage {
+fn elf64_lower_typed_ir(ir: TypedIr, entry_item: int) -> ElfImage {
     if len(ir.functions) == 0 {
         return elf_error("ELF lowering requires at least one function")
     }
     if len(ir.functions) > 1 {
-        let code = x86_lower_functions(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.string_literals, ir.constant_string_index)
+        let code = x86_lower_functions(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.string_literals, ir.constant_string_index, entry_item)
         if code.status != X86_OK {
             return elf_error(code.error)
         }
@@ -311,9 +311,9 @@ fn elf64_smoke_test() -> bool {
         jump_arguments: make([]int, 0, 0),
         string_literals: make([]string, 0, 0), constant_string_index: make([]int, 0, 0),
         expression_values: make([]int, 0, 0), value_count: 1,
-        skipped_functions: 0, ok: true, error: "",
+        skipped_functions: 0, skip_reason: "", ok: true, error: "",
     }
-    let lowered = elf64_lower_typed_ir(ir)
+    let lowered = elf64_lower_typed_ir(ir, -1)
     if lowered.status != ELF_OK or len(lowered.bytes) != 132 {
         return false
     }
@@ -350,9 +350,9 @@ fn elf64_smoke_test() -> bool {
         jump_arguments: make([]int, 0, 0),
         string_literals: make([]string, 0, 0), constant_string_index: make([]int, 0, 0),
         expression_values: make([]int, 0, 0), value_count: 4,
-        skipped_functions: 0, ok: true, error: "",
+        skipped_functions: 0, skip_reason: "", ok: true, error: "",
     }
-    let branch_image = elf64_lower_typed_ir(branch_ir)
+    let branch_image = elf64_lower_typed_ir(branch_ir, -1)
     return branch_image.status == ELF_OK and len(branch_image.bytes) == 153 and
         branch_image.bytes[120] == 139 and branch_image.bytes[123] == 232 and
         branch_image.bytes[137] == 133 and branch_image.bytes[142] == 42 and

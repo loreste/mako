@@ -9,18 +9,29 @@ also summarized in `SELF_HOSTING.md` and the staged roadmap in
 
 ## Current truth
 
-Stage 0 is the Rust compiler in `src/`. It can compile the Mako sources in
-`compiler/*.mko` through the existing C/native development backends. The
-Mako-written compiler currently provides a lexer, structural parser, type
-parser, symbol table, name/local resolution, primitive semantic typing, and a
-verified typed-IR bring-up. Its executable entry point is still a frontend and
-IR smoke-test driver: it prints arena statistics and does not compile a source
-program into stage 2.
+Stage 0 is the Rust compiler in `src/`. It compiles the Mako sources in
+`compiler/*.mko` through the native backend. (The C backend cannot build this
+package: it fails on `const`s defined in one file and used in another. It builds
+ordinary programs fine, and the native backend is the default.)
+
+The Mako-written compiler provides a lexer, structural parser, type parser,
+symbol table, name/local resolution, semantic typing including POD user
+structs, and a verified typed IR. Its executable entry point is a frontend and
+IR driver that also emits an ELF image for the subset it can lower: it prints
+arena statistics, and given an output path writes a static executable. It does
+not compile itself, so it does not produce stage 2.
+
+Given a fourth argument it also prints why each function declined to lower,
+which is what turned the remaining work from guesswork into a ranked list.
 
 The self-host gate proves stage-0 → stage-1 generation plus stage-1 frontend,
 IR, ELF reproducibility, and stage-0 differential checks for the supported
 subset. It does not yet prove stage-1 → stage-2 bootstrap, a Mako-native
 mandatory runtime, or a forbidden-tool dependency audit for stage 1+.
+
+Stage 1 lowers 46 of the 279 functions in its own sources. Every unsupported
+input is rejected rather than miscompiled, and the whole corpus is processed in
+about three seconds after the compile-speed fix recorded in the roadmap.
 
 The current direct-backend slice covers scalar values, calls, branches, loops,
 printing, integer arithmetic, checked byte conversion, unary integer
@@ -49,10 +60,11 @@ primitives, so the compiler's I/O no longer routes through stage-0 builtins.
 | Symbols/resolution | Partial | `zz_symbols.mko`, `zzz_resolution.mko`, `zzzz_locals.mko` | Packages, visibility, generic/interface resolution |
 | Type checking | Partial | `zzzzz_types.mko` | Full aggregates, conversions, constants, interfaces |
 | Ownership/NLL | Partial | frontend checks plus IR ownership verifier | CFG-wide borrow/escape/definite-init/send analysis |
-| Typed IR | Partial | `zzzzzz_ir.mko` | General loops, break/continue, match/select/defer, closures, aggregates |
+| Typed IR | Partial | `zzzzzz_ir.mko` | General loops, break/continue, match/select/defer, closures, struct literals and returns. POD struct slices, elements and fields lower; cascade-skip keeps one unsupported callee from failing a whole file |
 | Optimization | Unsupported | none in `compiler/*.mko` | Deterministic verifier-preserving pass pipeline |
+| Compile speed | Linear enough to bootstrap | 279 functions across `compiler/*.mko` sweep in ~3 s | Was quadratic (162 s, 5.8 GB on one file); fixed by parsing each statement into a scratch arena. A borrowed parameter form would remove the class |
 | x86-64 encoding | Partial bring-up | `compiler/x86_64.mko` encodes scalar CFGs, calls, loops, print, and integer arithmetic | complete ABI, register allocation, relocations, floats, aggregates |
-| Register allocation | Unsupported | no Mako implementation | Linear scan, spills, stack slots |
+| Register allocation | Unsupported | one 64-bit slot per SSA value, up to 4096 per frame in the general encoder | Linear scan, spills, stack slots |
 | ELF/object writer | Partial bring-up | `compiler/elf64.mko` writes deterministic one-segment ELF64 images | sections, symbols, relocations, static layout, malformed-object rejection |
 | Linker | Unsupported | host linker used by stage 0 | Mako static symbol resolution and executable layout |
 | Runtime | C/Rust boundary | `runtime/`, Rust native bridges, stage-0 builtins | Mako-native syscalls, allocator, strings, collections, tasks, I/O |
@@ -118,6 +130,40 @@ they cannot trade safety for throughput. The Mako release backend must beat or
 tie the main-branch C/Rust baselines per published workload, while the debug
 backend must minimize compile latency. No benchmark result is accepted without
 reproducible flags, hardware, sample count, variance, and binary size.
+
+## Status against the milestones below
+
+Recorded 2026-08-04, so the milestone text that follows is read against
+something measured rather than assumed.
+
+- **Milestone 1 (executable IR subset)** — partial. General CFG construction
+  from arbitrary if/else trees, sequential guard chains, result-less functions
+  with `exit` as a path terminator, intrinsic calls, POD struct slices and
+  borrowed struct elements all lower. Loops in the general path, struct
+  literals and returns, and string concatenation do not.
+- **Milestone 2 (direct Linux x86-64 backend)** — partial. Dominator sets are
+  packed multi-word bitsets, so a function is no longer limited to 32 blocks,
+  and the general encoder allows 4096 slots rather than 127. No register
+  allocator.
+- **Milestone 3 (ELF64 and static linking)** — partial. Deterministic
+  single-segment images with `call rel32` linking, pinned by hash and executed
+  on Linux. No sections, symbols or relocations.
+- **Milestone 4 (Mako-native Linux runtime)** — partial, as inventoried above.
+- **Milestone 5 (bootstrap fixed point)** — not started. Stage 1 lowers 46 of
+  279 functions in its own sources, so it cannot yet build stage 2.
+
+Two properties are worth stating separately from the milestones, because they
+are what the gates defend:
+
+- **The full gate passes on Linux x86-64 with every pinned ELF executed and
+  none deferred.** This became possible only after the compile-speed fix; the
+  gate previously died in its frontend sweep on an 8 GB host before any backend
+  check ran.
+- **Unsupported input is rejected, not miscompiled.** That is not free. A
+  fail-open path in the matched lowering emitted nothing for any expression kind
+  it did not model, which made two different field reads compile to identical
+  images. It now declines before emission. Any new addressed load should be
+  checked the same way: compile two variants and compare.
 
 ## Milestones
 

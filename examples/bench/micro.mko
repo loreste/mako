@@ -15,7 +15,13 @@ fn bench_fib() -> int {
     let mut i = 0
     let iters = black_box(5)
     while i < iters {
-        acc = acc + fib(n)
+        // Inside the loop, matching the Rust reference. Blocking the argument
+        // once outside lets the optimiser hoist the whole call out of a loop
+        // over a pure function and compute it once, so the two programs were
+        // not running the same amount of work: Rust did five calls to fib(30)
+        // and Mako did one. That asymmetry, not a compiler difference, is what
+        // produced the 0.17x ratio this gate used to report.
+        acc = acc + fib(black_box(n))
         i = i + 1
     }
     return black_box(acc)

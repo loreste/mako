@@ -1,0 +1,7 @@
+// An indexed store is not modelled anywhere. It used to be dropped in silence —
+// this program exited 0 instead of 40 — so it must now be refused outright.
+fn main() {
+    let mut xs: []int = make([]int, 3, 8)
+    xs[1] = 40
+    exit(xs[1])
+}

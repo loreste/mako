@@ -142,6 +142,189 @@ fn x86_emit_string_terminators(bytes: []int) []int {
  return out
 }
 
+// Byte at an index of a string object, or -1 when the index is out of range.
+//
+// The sentinel is the contract, not a trap: `mako_str_byte_at` returns -1 for a
+// negative index or one at or past the length, and the lexer reads that as end
+// of input. Trapping here instead would diverge from the stage-0 oracle on
+// every scan that walks off the end deliberately.
+fn x86_emit_str_byte_at(bytes: []int, string_slot: int, index_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, string_slot)
+ // mov r9, rax (object); mov rdx, [r9] (length)
+ out = append(out, 73); out = append(out, 137); out = append(out, 193)
+ out = append(out, 73); out = append(out, 139); out = append(out, 17)
+ out = x86_emit_load_rax(out, index_slot)
+ // mov rcx, rax (index); mov r8, -1 (the out-of-range result)
+ out = append(out, 72); out = append(out, 137); out = append(out, 193)
+ out = x86_emit_syscall_const(out, -1, 5)
+ // test rcx, rcx; js +16 — a negative index keeps the sentinel. The skip
+ // covers cmp (3) + jge (2) + the load sequence (11).
+ out = append(out, 72); out = append(out, 133); out = append(out, 201)
+ out = append(out, 120); out = append(out, 16)
+ // cmp rcx, rdx; jge +11 — at or past the length keeps the sentinel too.
+ out = append(out, 72); out = append(out, 57); out = append(out, 209)
+ out = append(out, 125); out = append(out, 11)
+ // lea rsi, [r9 + 8]; add rsi, rcx; movzx r8d, byte [rsi]
+ out = append(out, 73); out = append(out, 141); out = append(out, 113); out = append(out, 8)
+ out = append(out, 72); out = append(out, 1); out = append(out, 206)
+ out = append(out, 68); out = append(out, 15); out = append(out, 182); out = append(out, 6)
+ // mov rax, r8
+ out = append(out, 76); out = append(out, 137); out = append(out, 192)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+// Duplicate a string into an independent owned {length, bytes} allocation.
+//
+// This always allocates, whatever the source was. An owned string is an mmap'd
+// block while a literal is a static view into the code image, and a clone that
+// tried to preserve which is which would hand a later `IR_DROP` a value whose
+// nature depends on a producer several instructions away — get it wrong and the
+// drop unmaps read-only code. Allocating unconditionally removes the
+// distinction: the result is always droppable and the source keeps its own
+// nature. Cloning a literal costs one page it did not strictly need, which is
+// the cheap side of that trade.
+fn x86_emit_clone_string(bytes: []int, source_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, source_slot)
+ // mov r12, rax (source object); mov r13, [r12] (length). Both survive the
+ // mmap, which destroys only rax, rcx and r11 beyond its own arguments.
+ out = append(out, 73); out = append(out, 137); out = append(out, 196)
+ out = append(out, 77); out = append(out, 139); out = append(out, 44); out = append(out, 36)
+ // mmap(0, length + 10, PROT_READ|WRITE, PRIVATE|ANON, -1, 0).
+ out = x86_emit_int_rax(out, 9)
+ out = x86_emit_syscall_const(out, 0, 1)
+ out = append(out, 76); out = append(out, 137); out = append(out, 238)
+ out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
+ out = x86_emit_syscall_const(out, 3, 3)
+ out = x86_emit_syscall_const(out, 34, 4)
+ out = x86_emit_syscall_const(out, -1, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ // mov [rax], r13; lea rdi, [rax + 8]; lea rsi, [r12 + 8]; mov rcx, r13; rep movsb
+ out = append(out, 76); out = append(out, 137); out = append(out, 40)
+ out = append(out, 72); out = append(out, 141); out = append(out, 120); out = append(out, 8)
+ out = append(out, 73); out = append(out, 141); out = append(out, 116); out = append(out, 36); out = append(out, 8)
+ out = append(out, 76); out = append(out, 137); out = append(out, 233)
+ out = append(out, 243); out = append(out, 164)
+ out = x86_emit_string_terminators(out)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+// Concatenate two string objects into a fresh owned {length, bytes}.
+//
+// Neither operand is consumed: this reads both payloads and allocates its own,
+// so each operand stays owned by whatever binding holds it and keeps its own
+// drop. That is why no move or clone is emitted here, and why the ownership
+// verifier does not count `+` as a use.
+//
+// Both object pointers and both lengths have to survive the mmap, so they live
+// in r12/r13/r14/r15; `syscall` destroys rax, rcx and r11, and mmap's own
+// arguments cover rdi/rsi/rdx/r10/r8/r9. A zero-length operand is not a special
+// case — `rep movsb` with rcx = 0 copies nothing and leaves rdi where it was.
+fn x86_emit_concat_string(bytes: []int, left_slot: int, right_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, left_slot)
+ // mov r12, rax; then the right object into r13.
+ out = append(out, 73); out = append(out, 137); out = append(out, 196)
+ out = x86_emit_load_rax(out, right_slot)
+ out = append(out, 73); out = append(out, 137); out = append(out, 197)
+ // mov r14, [r12] (left length); mov r15, [r13] (right length). r13 as a base
+ // needs the disp8 form, the same encoding quirk rbp has.
+ out = append(out, 77); out = append(out, 139); out = append(out, 52); out = append(out, 36)
+ out = append(out, 77); out = append(out, 139); out = append(out, 125); out = append(out, 0)
+ // mmap(0, left + right + 10, PROT_READ|WRITE, PRIVATE|ANON, -1, 0).
+ out = x86_emit_int_rax(out, 9)
+ out = x86_emit_syscall_const(out, 0, 1)
+ out = append(out, 76); out = append(out, 137); out = append(out, 246)
+ out = append(out, 76); out = append(out, 1); out = append(out, 254)
+ out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
+ out = x86_emit_syscall_const(out, 3, 3)
+ out = x86_emit_syscall_const(out, 34, 4)
+ out = x86_emit_syscall_const(out, -1, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ // mov rcx, r14; add rcx, r15; mov [rax], rcx — the combined length header.
+ out = append(out, 76); out = append(out, 137); out = append(out, 241)
+ out = append(out, 76); out = append(out, 1); out = append(out, 249)
+ out = append(out, 72); out = append(out, 137); out = append(out, 8)
+ // lea rdi, [rax + 8]; copy the left payload, then the right, leaving rdi one
+ // past the last byte for the terminators.
+ out = append(out, 72); out = append(out, 141); out = append(out, 120); out = append(out, 8)
+ out = append(out, 73); out = append(out, 141); out = append(out, 116); out = append(out, 36); out = append(out, 8)
+ out = append(out, 76); out = append(out, 137); out = append(out, 241)
+ out = append(out, 243); out = append(out, 164)
+ out = append(out, 73); out = append(out, 141); out = append(out, 117); out = append(out, 8)
+ out = append(out, 76); out = append(out, 137); out = append(out, 249)
+ out = append(out, 243); out = append(out, 164)
+ out = x86_emit_string_terminators(out)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+// Native format_int: decimal-render an int into a fresh owned {length, bytes}
+// string. The digits are built backward in the red zone first, because the
+// length is not known until they are, and the allocation has to be exact —
+// `x86_emit_drop_owned_string` unmaps `length + 10`, so a padded allocation
+// would leave the tail mapped.
+//
+// r12 walks backward over the digits and r13 holds the end, so both survive the
+// mmap; `syscall` destroys only rax, rcx and r11, and the six argument
+// registers cover rdi/rsi/rdx/r10/r8/r9. Nothing is pushed between the digits
+// and the copy, so the red zone below rsp stays intact — the same assumption
+// `print(int)` already runs on.
+fn x86_emit_format_int(bytes: []int, value_slot: int, result_slot: int) []int {
+ let mut out = x86_emit_load_rax(bytes, value_slot)
+ // lea r12, [rsp - 24]; mov r13, r12. Twenty characters is the widest result
+ // (`-9223372036854775808`), so the digits never reach past [rsp - 44].
+ out = append(out, 76); out = append(out, 141); out = append(out, 100); out = append(out, 36); out = append(out, 232)
+ out = append(out, 77); out = append(out, 137); out = append(out, 229)
+ // mov r8, 10 (divisor); xor r9d, r9d (sign flag)
+ out = append(out, 73); out = append(out, 199); out = append(out, 192)
+ out = append(out, 10); out = append(out, 0); out = append(out, 0); out = append(out, 0)
+ out = append(out, 69); out = append(out, 49); out = append(out, 201)
+ // test rax, rax; jns +9 — skip the sign branch for a non-negative value.
+ out = append(out, 72); out = append(out, 133); out = append(out, 192)
+ out = append(out, 121); out = append(out, 9)
+ // mov r9d, 1; neg rax. Negating INT_MIN yields INT_MIN, whose unsigned value
+ // is exactly the magnitude, and `div` is unsigned — so INT_MIN renders.
+ out = append(out, 65); out = append(out, 185)
+ out = append(out, 1); out = append(out, 0); out = append(out, 0); out = append(out, 0)
+ out = append(out, 72); out = append(out, 247); out = append(out, 216)
+ // Digit loop: xor edx, edx; div r8; add dl, 48; dec r12; mov [r12], dl;
+ // test rax, rax; jnz -20. Emits one digit for zero, since the test is at the
+ // bottom.
+ out = append(out, 49); out = append(out, 210)
+ out = append(out, 73); out = append(out, 247); out = append(out, 240)
+ out = append(out, 128); out = append(out, 194); out = append(out, 48)
+ out = append(out, 73); out = append(out, 255); out = append(out, 204)
+ out = append(out, 65); out = append(out, 136); out = append(out, 20); out = append(out, 36)
+ out = append(out, 72); out = append(out, 133); out = append(out, 192)
+ out = append(out, 117); out = append(out, 236)
+ // test r9d, r9d; jz +8; dec r12; mov byte [r12], 45
+ out = append(out, 69); out = append(out, 133); out = append(out, 201)
+ out = append(out, 116); out = append(out, 8)
+ out = append(out, 73); out = append(out, 255); out = append(out, 204)
+ out = append(out, 65); out = append(out, 198); out = append(out, 4); out = append(out, 36); out = append(out, 45)
+ // sub r13, r12 — r13 becomes the character count.
+ out = append(out, 77); out = append(out, 41); out = append(out, 229)
+ // mmap(0, length + 10, PROT_READ|WRITE, PRIVATE|ANON, -1, 0): header, payload,
+ // NUL, newline.
+ out = x86_emit_int_rax(out, 9)
+ out = x86_emit_syscall_const(out, 0, 1)
+ out = append(out, 76); out = append(out, 137); out = append(out, 238)
+ out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
+ out = x86_emit_syscall_const(out, 3, 3)
+ out = x86_emit_syscall_const(out, 34, 4)
+ out = x86_emit_syscall_const(out, -1, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ // mov [rax], r13; lea rdi, [rax + 8]; mov rsi, r12; mov rcx, r13; rep movsb
+ out = append(out, 76); out = append(out, 137); out = append(out, 40)
+ out = append(out, 72); out = append(out, 141); out = append(out, 120); out = append(out, 8)
+ out = append(out, 76); out = append(out, 137); out = append(out, 230)
+ out = append(out, 76); out = append(out, 137); out = append(out, 233)
+ out = append(out, 243); out = append(out, 164)
+ out = x86_emit_string_terminators(out)
+ return x86_emit_store_rax(out, result_slot)
+}
+
 // Native arg_get: scan argv[index], allocate {length, bytes}, and copy it.
 fn x86_emit_arg_get(bytes: []int, index_slot: int, result_slot: int) []int {
  let mut out = x86_emit_load_rax(bytes, index_slot)
@@ -399,7 +582,18 @@ fn x86_string_value_owned_at(instructions: []IrInstruction, call_sites: []IrCall
  let mut i = 0
  while i < len(instructions) {
   if instructions[i].result == value {
-   if instructions[i].op == IR_CALL and instructions[i].aux >= 0 and instructions[i].aux < len(call_sites) and (call_sites[instructions[i].aux].callee_item == -19 or call_sites[instructions[i].aux].callee_item == -20 or call_sites[instructions[i].aux].callee_item == -22) {
+   // Every producer that mmaps a string object belongs here. One missing leaks
+   // the whole buffer per call; one added that returns a borrow or a static
+   // unmaps memory it does not own.
+   if instructions[i].op == IR_CALL and instructions[i].aux >= 0 and instructions[i].aux < len(call_sites) and (call_sites[instructions[i].aux].callee_item == -19 or call_sites[instructions[i].aux].callee_item == -20 or call_sites[instructions[i].aux].callee_item == -22 or call_sites[instructions[i].aux].callee_item == -27) {
+    return true
+   }
+   // Concatenation and clone always allocate, so their results are owned
+   // whatever the operands were — including `"a" + "b"`, where both are static
+   // views into the code image and neither is itself droppable. Neither needs
+   // the recursive walk below for that reason.
+   if (instructions[i].op == IR_BINARY or instructions[i].op == IR_CLONE) and
+    instructions[i].type_kind == SEM_STRING {
     return true
    }
    if instructions[i].op == IR_MOVE and x86_string_value_owned_at(instructions, call_sites, instructions[i].left, depth + 1) {
@@ -413,6 +607,43 @@ fn x86_string_value_owned_at(instructions: []IrInstruction, call_sites: []IrCall
 
 fn x86_string_value_owned(instructions: []IrInstruction, call_sites: []IrCallSite, value: int) bool {
  return x86_string_value_owned_at(instructions, call_sites, value, 0)
+}
+
+// True when `value` is a string parameter of `function` that every reachable
+// call site fills with an owned allocation.
+//
+// A string parameter's nature is invisible from the signature: one caller may
+// clone (an allocation), another may move a literal (a static view into the
+// code image). Dropping the second unmaps read-only code. So the callee may
+// only drop when *every* call site is proven to pass the first — one
+// unprovable site, or no call site at all, and the parameter stays borrowed.
+// That direction leaks rather than crashes, which is the way this has to fail
+// when the proof is missing.
+fn x86_string_parameter_owned(instructions: []IrInstruction, call_sites: []IrCallSite, call_arguments: []int, function: IrFunction, value: int) bool {
+ // Locate the IR_PARAM that defines this value and read its position.
+ let mut parameter_index = -1
+ let mut scan = 0
+ while scan < len(instructions) {
+  if instructions[scan].result == value and instructions[scan].op == IR_PARAM and
+   instructions[scan].type_kind == SEM_STRING {
+   parameter_index = instructions[scan].aux
+  }
+  scan = scan + 1
+ }
+ if parameter_index < 0 { return false }
+ let mut proven = false
+ let mut i = 0
+ while i < len(call_sites) {
+  if call_sites[i].callee_item == function.item {
+   if parameter_index >= call_sites[i].argument_count { return false }
+   let at = call_sites[i].argument_start + parameter_index
+   if at < 0 or at >= len(call_arguments) { return false }
+   if not x86_string_value_owned(instructions, call_sites, call_arguments[at]) { return false }
+   proven = true
+  }
+  i = i + 1
+ }
+ return proven
 }
 
 fn x86_emit_drop_owned_string(bytes: []int, slot: int) []int {

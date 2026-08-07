@@ -1,0 +1,21 @@
+// String concatenation allocates; neither operand is consumed.
+//
+// The cases that separate a working emitter from a plausible one: two static
+// literals (neither operand is itself droppable, but the result is), an owned
+// left operand reused afterwards (`greeting` must still be printable after
+// feeding a concat), an empty operand on each side, and a concat of concats.
+fn main() {
+    let greeting = format_int(7)
+    let literal = "ab" + "cd"
+    let owned_left = greeting + "!"
+    let empty_right = literal + ""
+    let empty_left = "" + literal
+    let nested = (literal + "-") + greeting
+    print(literal)
+    print(owned_left)
+    print(empty_right)
+    print(empty_left)
+    print(nested)
+    print(greeting)
+    exit(5)
+}

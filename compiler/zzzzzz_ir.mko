@@ -22,6 +22,18 @@ const IR_CLONE = 16
 const IR_PRINT = 17
 const IR_EXIT = 18
 const IR_LEN = 19
+// A field of an element of a slice of structs, read as one addressed load.
+// `left` is the slice, `right` the index, and `aux` packs the element width in
+// slots with the field's slot so the encoder needs no struct table:
+//     aux = field_count * IR_FIELD_AUX_UNIT + field_slot
+const IR_FIELD = 20
+const IR_FIELD_AUX_UNIT = 64
+
+// Address of one element of a slice of structs, bounds-checked. It exists so a
+// borrowed element can be handed to a struct parameter: `left` is the slice,
+// `right` the index, `aux` the stride in bytes. The result is a pointer the
+// callee may read fields through and must never free.
+const IR_ELEM_ADDR = 21
 
 struct IrInstruction {
     op: int
@@ -79,6 +91,9 @@ struct TypedIr {
     expression_values: []int
     value_count: int
     skipped_functions: int
+    // Why each declined function declined, joined for diagnostics only.
+    // Never read on the success path, so it cannot affect lowering.
+    skip_reason: string
     ok: bool
     error: string
 }
@@ -87,6 +102,154 @@ struct IrVerification {
     ok: bool
     error: string
     checked_values: int
+}
+
+// True when an expression kind is allowed to emit no instruction of its own.
+// An identifier aliases a binding, a type reference is part of the `make` it
+// belongs to, and a call chain's inner links are consumed by the terminal
+// call. Every other kind must produce an instruction, or lowering has silently
+// dropped part of the program.
+// Packed aux for a fused `slice[i].field`, or -1 when the expression is not
+// that shape or names a field the struct does not have.
+// The struct-slice index expression a field read reaches, following one hop
+// through an immutable local bound directly to an element:
+//
+//     let node = types[root]
+//     ... node.kind ...
+//
+// Forwarding the (slice, index) pair means no struct value is ever
+// materialised, so each field read is the same fused load as the direct form.
+// A `mut` local is refused: it could be rebound after the read's operands were
+// captured, and the read would then answer for the wrong element.
+fn ir_field_object_index(
+    source: string, tokens: []Token, expressions: []ExprNode, expression_types: []int,
+    expression_locals: []int, locals: []LocalBinding, object_expression: int
+) -> int {
+    if object_expression < 0 or object_expression >= len(expressions) { return -1 }
+    let object = expressions[object_expression]
+    if object.kind == EXPR_INDEX { return object_expression }
+    if object.kind != EXPR_IDENT { return -1 }
+    let binding = if object_expression < len(expression_locals) { expression_locals[object_expression] } else { -1 }
+    if binding < 0 or binding >= len(locals) { return -1 }
+    let local = locals[binding]
+    if local.is_parameter { return -1 }
+    let initializer = local.initializer_root
+    if initializer < 0 or initializer >= len(expressions) { return -1 }
+    if expressions[initializer].kind != EXPR_INDEX { return -1 }
+    // The declaration must not be `let mut`: find the name token and look at
+    // the one before it.
+    let mut name_token = -1
+    let mut scan = 0
+    while scan < len(tokens) {
+        if tokens[scan].start == local.name_start and tokens[scan].end == local.name_end {
+            name_token = scan
+            scan = len(tokens)
+        } else {
+            scan = scan + 1
+        }
+    }
+    if name_token <= 0 or tokens[name_token - 1].kind == TK_MUT { return -1 }
+    return initializer
+}
+
+fn ir_struct_field_aux(
+    source: string, tokens: []Token, expressions: []ExprNode, expression_types: []int,
+    expression_locals: []int, locals: []LocalBinding,
+    layout: StructLayout, field_expression: int
+) -> int {
+    if field_expression < 0 or field_expression >= len(expressions) { return -1 }
+    let node = expressions[field_expression]
+    if node.kind != EXPR_FIELD or node.left < 0 or node.left >= len(expressions) { return -1 }
+    if node.token < 0 or node.token >= len(tokens) { return -1 }
+    let object_index = ir_field_object_index(source, tokens, expressions, expression_types, expression_locals, locals, node.left)
+    if object_index < 0 {
+        // No index underneath: the object is itself one borrowed element, so
+        // its own type names the struct and the read is a plain offset load.
+        let object_kind = if node.left < len(expression_types) { expression_types[node.left] } else { SEM_UNKNOWN }
+        if not semantic_is_struct_value(object_kind) { return -1 }
+        let borrowed_fields = struct_kind_fields(object_kind)
+        if borrowed_fields < 1 or borrowed_fields >= IR_FIELD_AUX_UNIT { return -1 }
+        let borrowed_slot = struct_field_slot(layout, source, struct_kind_index(object_kind), token_text(source, tokens[node.token]))
+        if borrowed_slot < 0 or borrowed_slot >= borrowed_fields { return -1 }
+        return borrowed_fields * IR_FIELD_AUX_UNIT + borrowed_slot
+    }
+    let object = expressions[object_index]
+    if object.kind != EXPR_INDEX or object.left < 0 or object.left >= len(expression_types) { return -1 }
+    let slice_kind = expression_types[object.left]
+    if not semantic_is_struct_array(slice_kind) { return -1 }
+    let fields = struct_kind_fields(slice_kind)
+    if fields < 1 or fields >= IR_FIELD_AUX_UNIT { return -1 }
+    let slot = struct_field_slot(layout, source, struct_kind_index(slice_kind), token_text(source, tokens[node.token]))
+    if slot < 0 or slot >= fields { return -1 }
+    return fields * IR_FIELD_AUX_UNIT + slot
+}
+
+// True when this index expression is the object of some field read, which is
+// the only position a struct-slice index is allowed to appear in.
+fn ir_index_is_field_object(
+    expressions: []ExprNode, expression_locals: []int, locals: []LocalBinding, index_expression: int
+) -> bool {
+    let mut i = 0
+    while i < len(expressions) {
+        if expressions[i].kind == EXPR_FIELD and expressions[i].left == index_expression { return true }
+        i = i + 1
+    }
+    // Or it initialises a local, in which case every reference to that local
+    // has to be a field object too. One reference used any other way would need
+    // a materialised struct value, which this path does not model.
+    let mut binding = -1
+    let mut local_index = 0
+    while local_index < len(locals) {
+        if locals[local_index].initializer_root == index_expression and not locals[local_index].is_parameter {
+            binding = local_index
+        }
+        local_index = local_index + 1
+    }
+    if binding < 0 { return false }
+    let mut reference = 0
+    let mut seen = false
+    while reference < len(expressions) {
+        if expressions[reference].kind == EXPR_IDENT and reference < len(expression_locals) and
+            expression_locals[reference] == binding {
+            seen = true
+            // A reference may be a field object, or a call argument, where the
+            // element's address is materialised and passed as a borrow.
+            if not ir_index_is_field_object_of(expressions, reference) and
+                not ir_expression_is_call_argument(expressions, reference) { return false }
+        }
+        reference = reference + 1
+    }
+    return seen
+}
+
+// True when some call names this node as an argument. Arguments hang off a
+// chain link's right edge, one per link.
+//
+// A string argument is cloned at the call site and that clone always allocates,
+// so a literal in argument position has a reader that turns it into something
+// the callee can own — which is what lets one lower even though it is not the
+// range's `owned_root`.
+fn ir_expression_is_call_argument(expressions: []ExprNode, candidate: int) -> bool {
+    if candidate < 0 { return false }
+    let mut i = 0
+    while i < len(expressions) {
+        if expressions[i].kind == EXPR_CALL and expressions[i].right == candidate { return true }
+        i = i + 1
+    }
+    return false
+}
+
+fn ir_index_is_field_object_of(expressions: []ExprNode, object_expression: int) -> bool {
+    let mut i = 0
+    while i < len(expressions) {
+        if expressions[i].kind == EXPR_FIELD and expressions[i].left == object_expression { return true }
+        i = i + 1
+    }
+    return false
+}
+
+fn ir_expression_emits_nothing(kind: int) -> bool {
+    return kind == EXPR_IDENT or kind == EXPR_TYPE_REF
 }
 
 fn ir_expression_opcode(kind: int) -> int {
@@ -98,12 +261,24 @@ fn ir_expression_opcode(kind: int) -> int {
     if kind == EXPR_INDEX { return IR_INDEX }
     if kind == EXPR_SLICE { return IR_SLICE }
     if kind == EXPR_MAKE { return IR_MAKE }
+    if kind == EXPR_FIELD { return IR_FIELD }
     return 0
 }
 
 fn ir_type_is_owned(kind: int) -> bool {
-    return kind == SEM_STRING or kind == SEM_ARRAY_INT or kind == SEM_ARRAY_FLOAT or
-        kind == SEM_ARRAY_BOOL or kind == SEM_ARRAY_STRING or kind == SEM_MAP
+    // A slice of an eligible struct is a plain heap block: every element is
+    // scalar, so it drops as one allocation and no element needs a drop of its
+    // own. It is owned for the same reason []int is.
+    // `[]byte` belongs here for the same reason `[]int` does: `make` and
+    // `append` are its only producers and both allocate. Leaving it out meant
+    // no `IR_DROP` was ever emitted for one, so every `make([]byte, n)` leaked
+    // its block — one mmap and no munmap, measured. It also made `[]byte`
+    // unbindable in the general path, since that asks for a scalar or an owned
+    // type and this was neither.
+    return kind == SEM_STRING or kind == SEM_ARRAY_INT or kind == SEM_ARRAY_BYTE or
+        kind == SEM_ARRAY_FLOAT or
+        kind == SEM_ARRAY_BOOL or kind == SEM_ARRAY_STRING or kind == SEM_MAP or
+        semantic_is_struct_array(kind)
 }
 
 fn ir_instruction_consumes_left(instruction: IrInstruction, instructions: []IrInstruction, definitions: []int) -> bool {
@@ -148,7 +323,9 @@ fn ir_instruction_range_consumes_value(
             return true
         }
         if instruction.right == value and instruction.op == IR_ARRAY { return true }
-        if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) {
+        if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) and
+            ir_call_consumes_arguments(call_sites[instruction.aux].callee_item,
+                ir_cfg_value_type(instructions, value)) {
             let call_site = call_sites[instruction.aux]
             let mut argument_index = call_site.argument_start
             while argument_index < call_site.argument_start + call_site.argument_count {
@@ -194,7 +371,14 @@ fn verify_owned_ir_paths(
                 while instruction_index < block.instruction_start + block.instruction_count {
                     let instruction = instructions[instruction_index]
                     if instruction.result == value {
-                        if state != 0 and instructions[definition].op != IR_CONST {
+                        // Reaching a definition again is only an error while the
+                        // previous value is still *live* (state 1) — that would
+                        // lose an allocation nothing ever frees. Reaching it
+                        // with the previous value already consumed (state 2) is
+                        // a loop body re-entered through its backedge, which
+                        // allocates afresh each iteration after dropping what
+                        // the last one made.
+                        if state == 1 and instructions[definition].op != IR_CONST {
                             return IrVerification { ok: false, error: "IR owned value is defined more than once on a path", checked_values: 0 }
                         }
                         // A constant re-materializes on every loop iteration;
@@ -223,7 +407,13 @@ fn verify_owned_ir_paths(
                                 if state == 2 {
                                     return IrVerification { ok: false, error: "IR call uses consumed owned value", checked_values: 0 }
                                 }
-                                state = 2
+                                // A borrowing intrinsic reads through the value
+                                // and leaves it with its owner, so the caller
+                                // still has to drop it and may still use it.
+                                if ir_call_consumes_arguments(call_site.callee_item,
+                                    instructions[definition].type_kind) {
+                                    state = 2
+                                }
                             }
                             argument_index = argument_index + 1
                         }
@@ -262,7 +452,7 @@ const IR_NOT_INTRINSIC = 1
 // Lowest and highest intrinsic sentinel. A call site whose callee_item falls in
 // this range names a builtin the backend emits inline, not a Mako function, so
 // arity and parameter checks against a callee body do not apply to it.
-const IR_INTRINSIC_ITEM_MIN = -26
+const IR_INTRINSIC_ITEM_MIN = -28
 const IR_INTRINSIC_ITEM_MAX = -2
 
 // The single mapping from an intrinsic's source name to its call-site sentinel.
@@ -294,12 +484,43 @@ fn ir_intrinsic_callee_item(name: string) -> int {
     if name == "unsafe_write_all" { return -24 }
     if name == "unsafe_read_all" { return -25 }
     if name == "unsafe_open_string" { return -26 }
+    // Allocates and returns an owned string, so it belongs in the backend's
+    // owned-producer set as well as here; a producer in one and not the other
+    // either leaks the buffer per call or drops a borrow.
+    if name == "format_int" { return -27 }
+    // Reads a byte out of a string object; allocates nothing, so it is not an
+    // owned producer. Out of range it yields -1, matching the runtime — the
+    // lexer relies on that sentinel to detect end of input.
+    if name == "str_byte_at" { return -28 }
     return IR_NOT_INTRINSIC
 }
 
 // True when a call site names an intrinsic rather than a Mako function.
 fn ir_is_intrinsic_callee(item: int) -> bool {
     return item >= IR_INTRINSIC_ITEM_MIN and item <= IR_INTRINSIC_ITEM_MAX
+}
+
+// True when a call takes ownership of the owned values it is passed.
+//
+// A declared Mako function does: it drops its owned parameters. `append` does:
+// it may move the block and hands back the replacement. Every other intrinsic
+// **borrows** — the `unsafe_*` family reads through a slice and returns, and
+// the caller still owns it afterwards.
+//
+// Treating a borrow as a consume is wrong in both directions: the value is
+// never dropped, so `make([]byte, n)` passed to `unsafe_argv_copy` leaked its
+// block, and reusing the slice afterwards was rejected as a use-after-move when
+// it is perfectly valid.
+// `argument_type` matters: the rule is deliberately confined to slices. A
+// string argument keeps the old consuming behaviour, because a string parameter
+// is borrowed from its caller and treating it as live here would demand a drop
+// the callee must never emit — `str_byte_at(s, i)` on a string parameter is the
+// case that showed it.
+fn ir_call_consumes_arguments(callee_item: int, argument_type: int) -> bool {
+    if not ir_is_intrinsic_callee(callee_item) { return true }
+    if callee_item == -10 { return true }
+    if argument_type == SEM_STRING { return true }
+    return false
 }
 
 // Dominator sets are bitsets over function-local block indices, packed into
@@ -379,6 +600,9 @@ struct IrCfgLowering {
     // would make it address the wrong literal.
     string_literals: []string
     constant_string_index: []int
+    // Arguments for every parameterised `IR_JUMP`, indexed from the jump's
+    // `aux`. A loop header's block parameters are filled from here.
+    jump_arguments: []int
     expression_values: []int
     next_value: int
     block_count: int
@@ -458,7 +682,10 @@ fn ir_cfg_scalar_type(kind: int) -> bool {
 // `ir_type_is_owned` does not classify as owned, so this path cannot tell
 // whether to drop it and declines instead of guessing.
 fn ir_cfg_bindable_type(kind: int) -> bool {
-    return ir_cfg_scalar_type(kind) or ir_type_is_owned(kind)
+    // A struct value is one slot holding a borrowed element pointer. It is
+    // bindable but never owned: the slice it points into owns the storage, so
+    // dropping it would free another value's memory.
+    return ir_cfg_scalar_type(kind) or ir_type_is_owned(kind) or semantic_is_struct_value(kind)
 }
 
 // Number of parameters declared by one item's locals.
@@ -493,6 +720,7 @@ fn ir_cfg_failure(instructions: []IrInstruction, constants: []IrConstant, expres
         blocks: make([]IrBlock, 0, 0), successors: make([]int, 0, 0),
         call_sites: make([]IrCallSite, 0, 0), call_arguments: make([]int, 0, 0),
         string_literals: make([]string, 0, 0), constant_string_index: make([]int, 0, 0),
+        jump_arguments: make([]int, 0, 0),
         expression_values: expression_values, next_value: next_value,
         block_count: 0, ok: false, error: message,
     }
@@ -501,6 +729,55 @@ fn ir_cfg_failure(instructions: []IrInstruction, constants: []IrConstant, expres
 // True when some call node consumes this expression as its callee or as an
 // earlier link of the same call chain. Such a node is never lowered on its own:
 // only the terminal call emits, and the chain base is the callee name.
+// Expression kind as a word, for diagnostics only. A bare number turns the
+// largest decline bucket into something nobody reads.
+fn ir_expression_kind_name(kind: int) -> string {
+    if kind == EXPR_INT { return "integer literal" }
+    if kind == EXPR_FLOAT { return "float literal" }
+    if kind == EXPR_STRING { return "string literal" }
+    if kind == EXPR_BOOL { return "boolean literal" }
+    if kind == EXPR_IDENT { return "identifier" }
+    if kind == EXPR_UNARY { return "unary operator" }
+    if kind == EXPR_BINARY { return "binary operator" }
+    if kind == EXPR_CALL { return "call" }
+    if kind == EXPR_INDEX { return "index" }
+    if kind == EXPR_FIELD { return "field read" }
+    if kind == EXPR_ARRAY { return "array literal" }
+    if kind == EXPR_STRUCT { return "struct literal" }
+    if kind == EXPR_FIELD_INIT { return "field initializer" }
+    if kind == EXPR_TUPLE { return "tuple" }
+    if kind == EXPR_SLICE { return "slice expression" }
+    if kind == EXPR_STRUCT_UPDATE { return "struct update" }
+    if kind == EXPR_TYPE_REF { return "type reference" }
+    if kind == EXPR_MAKE { return "make" }
+    return "expression"
+}
+
+// Base of a call chain: the callee name node, reached by walking the chain's
+// left edges. One argument per link, so the base is what names the function.
+// True when this `make` node is an inner link of a `make` chain rather than the
+// terminal construction. `make(T, n)` parses as a base node holding the type
+// and one node per argument; only the last is the allocation.
+fn ir_expression_is_continued_make(expressions: []ExprNode, node: int) -> bool {
+    let mut i = 0
+    while i < len(expressions) {
+        if expressions[i].kind == EXPR_MAKE and expressions[i].left == node { return true }
+        i = i + 1
+    }
+    return false
+}
+
+fn ir_call_chain_base(expressions: []ExprNode, call: int) -> int {
+    let mut cursor = call
+    let mut steps = 0
+    while cursor >= 0 and cursor < len(expressions) and
+        expressions[cursor].kind == EXPR_CALL and steps < len(expressions) {
+        cursor = expressions[cursor].left
+        steps = steps + 1
+    }
+    return cursor
+}
+
 fn ir_expression_is_call_target(expressions: []ExprNode, index: int) -> bool {
     let mut i = 0
     while i < len(expressions) {
@@ -523,6 +800,67 @@ fn ir_if_else_token(tokens: []Token, statement: StmtNode) -> int {
         scan = scan + 1
     }
     return -1
+}
+
+// True when this statement is an assignment to a bare name — `target = expr`.
+//
+// There is no `STMT_ASSIGN`: the parser records both assignments and statement
+// intrinsics as `STMT_EXPR`, and they are told apart by their first two tokens.
+// A call has `ident (`; an assignment has `ident =`. Compound forms (`+=`) carry
+// a different token and are refused, so they cannot be read as a plain store.
+fn ir_statement_is_assignment(tokens: []Token, statement: StmtNode) -> bool {
+    if statement.kind != STMT_EXPR { return false }
+    if statement.token_start + 1 >= statement.token_end or
+        statement.token_start + 1 >= len(tokens) { return false }
+    return tokens[statement.token_start].kind == TK_IDENT and
+        tokens[statement.token_start + 1].kind == TK_ASSIGN
+}
+
+// The local a `target = expr` statement stores into, or -1.
+fn ir_assignment_target_local(
+    source: string, tokens: []Token, statements: []StmtNode, locals: []LocalBinding,
+    signature: FnSignature, statement: StmtNode
+) -> int {
+    let target = tokens[statement.token_start]
+    let mut found = -1
+    let mut i = 0
+    while i < len(locals) {
+        if locals[i].item == signature.item and
+            span_equal(source, locals[i].name_start, locals[i].name_end, target.start, target.end) and
+            locals[i].scope_start <= statement.token_start and
+            statement.token_start < locals[i].scope_end {
+            found = i
+        }
+        i = i + 1
+    }
+    return found
+}
+
+// True when some assignment inside [body_start, body_end) stores into `local`.
+//
+// This is what decides a loop's carried set: a local the body writes has a
+// different value on the backedge than on entry, so the header needs a block
+// parameter for it. A local the body only reads keeps one definition that
+// dominates the whole loop and needs nothing.
+fn ir_local_assigned_in_range(
+    source: string, tokens: []Token, statements: []StmtNode, locals: []LocalBinding,
+    signature: FnSignature, local: int, body_start: int, body_end: int
+) -> bool {
+    if local < 0 or local >= len(locals) { return false }
+    let mut i = 0
+    while i < len(statements) {
+        let statement = statements[i]
+        if statement.token_start >= body_start and statement.token_start < body_end and
+            ir_statement_is_assignment(tokens, statement) {
+            let target = tokens[statement.token_start]
+            if span_equal(source, locals[local].name_start, locals[local].name_end,
+                target.start, target.end) {
+                return true
+            }
+        }
+        i = i + 1
+    }
+    return false
 }
 
 // First `{` at or after `from` within the statement, which closes an if
@@ -561,6 +899,48 @@ fn ir_condition_end(tokens: []Token, from: int, limit: int) -> int {
 // tracked local, or a returned value. An owned value anywhere else would be
 // defined and never consumed, which the ownership verifier rejects, so it
 // fails closed here with a reason instead of producing IR that cannot verify.
+// True when some string-typed binary reads this node as an operand.
+//
+// Concatenation copies both payloads into a fresh allocation and consumes
+// neither, so an owned value in an operand position has a reader even though it
+// is not the range's `owned_root`. Without this the only admissible string
+// operand would be an already-bound local, which rules out every literal and
+// every inline `format_int` — that is, nearly every concatenation written.
+fn ir_expression_feeds_string_concat(expressions: []ExprNode, expression_types: []int, node: int) -> bool {
+    if node < 0 { return false }
+    let mut i = 0
+    while i < len(expressions) {
+        if expressions[i].kind == EXPR_BINARY and i < len(expression_types) and
+            expression_types[i] == SEM_STRING and
+            (expressions[i].left == node or expressions[i].right == node) {
+            return true
+        }
+        i = i + 1
+    }
+    return false
+}
+
+// True when a concat operand is a temporary rather than a binding.
+//
+// A concat consumes neither operand, so a temporary would be defined and never
+// consumed and the ownership verifier rejects the function. It gets an
+// `IR_DROP` after the concat has copied it — the same convention `print` uses
+// for a printed temporary.
+//
+// A literal counts. It is a static view into the code image rather than an
+// allocation, and the backend's owned-producer check is what stops the drop
+// from unmapping read-only code; the drop exists here to close linearity, not
+// to free anything. That split already governs `print("literal")`.
+//
+// An identifier does not count: it names a binding that is dropped at scope
+// exit, so dropping it here would be a double free.
+fn ir_string_operand_is_temporary(expressions: []ExprNode, expression_types: []int, node: int) -> bool {
+    if node < 0 or node >= len(expressions) or node >= len(expression_types) { return false }
+    if expression_types[node] != SEM_STRING { return false }
+    return expressions[node].kind == EXPR_BINARY or expressions[node].kind == EXPR_CALL or
+        expressions[node].kind == EXPR_STRING
+}
+
 fn ir_cfg_lower_range(
     source: string, tokens: []Token, items: []TopItem, symbols: []Symbol,
     expression_symbols: []int, signatures: []FnSignature,
@@ -592,12 +972,54 @@ fn ir_cfg_lower_range(
             if ir_expression_is_call_target(expressions, i) {
                 // The callee name, or an earlier link of a call chain. Neither
                 // produces a value; the terminal call node emits for the chain.
+            } else if expression.kind == EXPR_TYPE_REF {
+                // `[]int` inside `make([]int, n)` names a type, not a value, so
+                // it carries no semantic type and belongs to the `make` around
+                // it. Checking it for one would decline every `make`.
+            } else if expression.kind == EXPR_MAKE and
+                ir_expression_is_continued_make(expressions, i) {
+                // `make(T, n)` parses as a chain; only the terminal node is the
+                // construction. Lowering a prefix link too would allocate a
+                // second buffer nothing reads or frees.
             } else if i >= len(expression_types) or expression_types[i] == SEM_UNKNOWN {
-                return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering needs a known type for every expression")
+                // Naming the kind is what turns the largest decline bucket into
+                // a list of things to fix, the way naming the callee showed
+                // every "no intrinsic" decline was `len`.
+                return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                    "CFG lowering needs a known type for this " +
+                    ir_expression_kind_name(expression.kind))
             } else if expression.kind == EXPR_CALL {
                 // Arguments hang off each chain link's right edge, innermost
                 // last, so the walk collects them in reverse and the call site
                 // records them in source order.
+                // `len` is not a call the backend makes — it is one load of the
+                // header word, which `IR_LEN` already encodes. Routing it
+                // through the intrinsic table instead would have declined it as
+                // an unknown callee, which is what kept every `len` in the
+                // compiler's own sources out of this path. A slice header and a
+                // string object both carry their length first, so one form
+                // serves both.
+                let len_callee = ir_call_chain_base(expressions, i)
+                if len_callee >= 0 and expressions[len_callee].kind == EXPR_IDENT and
+                    token_text(source, tokens[expressions[len_callee].token]) == "len" and
+                    expression_types[i] == SEM_INT and expressions[i].left == len_callee {
+                    let len_argument = expressions[i].right
+                    if len_argument < 0 or len_argument >= len(out_values) or
+                        out_values[len_argument] < 0 {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering could not resolve a len argument")
+                    }
+                    let len_result = value_cursor
+                    value_cursor = value_cursor + 1
+                    out_values[i] = len_result
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_LEN, result: len_result, type_kind: SEM_INT,
+                        left: out_values[len_argument], right: -1, aux: -1,
+                        token: expression.token,
+                    })
+                    i = i + 1
+                    continue
+                }
                 let mut reversed: []int = make([]int, 0, 4)
                 let mut cursor = i
                 let mut steps = 0
@@ -615,16 +1037,38 @@ fn ir_cfg_lower_range(
                         // verifier would reject the function.
                         let mut passed = out_values[argument]
                         let argument_binding = if argument < len(expression_locals) { expression_locals[argument] } else { -1 }
-                        if expressions[argument].kind == EXPR_IDENT and
-                            argument_binding >= 0 and argument_binding < len(locals) and
-                            argument < len(expression_types) and
-                            ir_type_is_owned(expression_types[argument]) {
+                        let argument_is_binding = expressions[argument].kind == EXPR_IDENT and
+                            argument_binding >= 0 and argument_binding < len(locals)
+                        let argument_owned = argument < len(expression_types) and
+                            ir_type_is_owned(expression_types[argument])
+                        // A string argument is cloned whatever it was, not only
+                        // when it names a binding. The callee drops its owned
+                        // parameter, and a string's nature is not visible from
+                        // the signature: a literal is a static view into the
+                        // code image, and a Mako function returning one hands
+                        // back that same view. Cloning unconditionally is what
+                        // makes "a string parameter is always an allocation"
+                        // true at every call site, so the callee's drop can
+                        // never unmap read-only code. The clone itself always
+                        // allocates, so a literal source is fine.
+                        let clone_argument = argument_owned and
+                            (argument_is_binding or expression_types[argument] == SEM_STRING)
+                        if clone_argument {
                             let cloned = value_cursor
                             value_cursor = value_cursor + 1
                             out_instructions = append(out_instructions, IrInstruction {
                                 op: IR_CLONE, result: cloned, type_kind: expression_types[argument],
                                 left: passed, right: -1, aux: -1, token: expressions[argument].token,
                             })
+                            // Cloning a temporary leaves the original with no
+                            // reader. A binding keeps its scope-exit drop, so
+                            // dropping one here would be a double free.
+                            if not argument_is_binding {
+                                out_instructions = append(out_instructions, IrInstruction {
+                                    op: IR_DROP, result: -1, type_kind: expression_types[argument],
+                                    left: passed, right: -1, aux: -1, token: expressions[argument].token,
+                                })
+                            }
                             passed = cloned
                         }
                         reversed = append(reversed, passed)
@@ -643,7 +1087,11 @@ fn ir_cfg_lower_range(
                 } else if cursor >= 0 and cursor < len(expressions) {
                     callee_item = ir_intrinsic_callee_item(token_text(source, tokens[expressions[cursor].token]))
                     if callee_item == IR_NOT_INTRINSIC {
-                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering supports only calls to declared functions and intrinsics")
+                        // Naming the callee is the difference between "some
+                        // builtin is missing" and a list of what to add.
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering has no intrinsic for call to " +
+                            token_text(source, tokens[expressions[cursor].token]))
                     }
                 } else {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering supports only calls to declared functions")
@@ -655,7 +1103,9 @@ fn ir_cfg_lower_range(
                 // a call temporary, so admitting one would leave a value the
                 // ownership verifier cannot see consumed.
                 if expression_types[i] != SEM_INT and expression_types[i] != SEM_BOOL and
-                    not (ir_type_is_owned(expression_types[i]) and i == owned_root) {
+                    not (ir_type_is_owned(expression_types[i]) and i == owned_root) and
+                    not (expression_types[i] == SEM_STRING and
+                        ir_expression_feeds_string_concat(expressions, expression_types, i)) {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering supports only integer- and boolean-returning calls")
                 }
                 let argument_start = len(out_call_arguments)
@@ -713,6 +1163,76 @@ fn ir_cfg_lower_range(
                 } else {
                     out_values[i] = local_values[binding]
                 }
+            } else if expression.kind == EXPR_MAKE {
+                // One allocation. The element stride comes from the result
+                // type, and the length is the literal after the type — the same
+                // reading the matched path uses, so the two cannot disagree
+                // about how big a `make` is.
+                if not ir_type_is_owned(expression_types[i]) {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering makes only owned slices")
+                }
+                let mut make_scan = expression.token + 1
+                while make_scan < len(tokens) and tokens[make_scan].kind != TK_COMMA and
+                    tokens[make_scan].kind != TK_RPAREN {
+                    make_scan = make_scan + 1
+                }
+                let mut make_length = -1
+                if make_scan < len(tokens) and tokens[make_scan].kind == TK_COMMA {
+                    make_scan = make_scan + 1
+                    if make_scan < len(tokens) and tokens[make_scan].kind == TK_INT {
+                        make_length = ir_parse_decimal_int(source, tokens[make_scan])
+                    }
+                }
+                if make_length < 0 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering requires a literal make length")
+                }
+                let make_result = value_cursor
+                value_cursor = value_cursor + 1
+                out_values[i] = make_result
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_MAKE, result: make_result, type_kind: expression_types[i],
+                    left: -1, right: -1, aux: make_length, token: expression.token,
+                })
+            } else if expression.kind == EXPR_INDEX {
+                // `xs[i]` on a slice of scalars: one bounds-checked load whose
+                // stride the backend reads off the element type.
+                //
+                // A slice of structs is deliberately excluded. Its element is a
+                // borrowed pointer, not a loaded word, so admitting it here
+                // would hand the encoder an index it would load at the wrong
+                // width — the same fail-open that made `pts[0].x` and `pts[0].y`
+                // compile to identical images. The matched path fuses those into
+                // the field read instead.
+                let base = if expression.left >= 0 and expression.left < len(expression_types) {
+                    expression_types[expression.left]
+                } else {
+                    SEM_UNKNOWN
+                }
+                if semantic_is_struct_array(base) {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering cannot index a slice of structs")
+                }
+                if (base != SEM_ARRAY_INT and base != SEM_ARRAY_BYTE) or
+                    (expression_types[i] != SEM_INT and expression_types[i] != SEM_BYTE) {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering indexes only slices of int or byte")
+                }
+                if expression.left >= len(out_values) or out_values[expression.left] < 0 or
+                    expression.right < 0 or expression.right >= len(out_values) or
+                    out_values[expression.right] < 0 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering index operand is not available")
+                }
+                let index_result = value_cursor
+                value_cursor = value_cursor + 1
+                out_values[i] = index_result
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_INDEX, result: index_result, type_kind: expression_types[i],
+                    left: out_values[expression.left], right: out_values[expression.right],
+                    aux: -1, token: expression.token,
+                })
             } else {
                 let op = ir_expression_opcode(expression.kind)
                 if op != IR_CONST and op != IR_UNARY and op != IR_BINARY {
@@ -722,7 +1242,9 @@ fn ir_cfg_lower_range(
                     expression.kind != EXPR_STRING {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering supports only integer, boolean, and string literals")
                 }
-                if op == IR_CONST and expression.kind == EXPR_STRING and i != owned_root {
+                if op == IR_CONST and expression.kind == EXPR_STRING and i != owned_root and
+                    not ir_expression_feeds_string_concat(expressions, expression_types, i) and
+                    not ir_expression_is_call_argument(expressions, i) {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering string literal has no owner on this path")
                 }
                 let mut left = -1
@@ -777,6 +1299,25 @@ fn ir_cfg_lower_range(
                     op: op, result: result, type_kind: expression_types[i],
                     left: left, right: right, aux: aux, token: expression.token,
                 })
+                // A concat copies both payloads and consumes neither, so an
+                // operand that was itself an unnamed allocation has no other
+                // reader and would leak once per evaluation. Dropping it here,
+                // after the copy, is what keeps a chain like `a + b + c` to one
+                // surviving allocation instead of one per link.
+                if op == IR_BINARY and expression_types[i] == SEM_STRING {
+                    if ir_string_operand_is_temporary(expressions, expression_types, expression.left) {
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: SEM_STRING,
+                            left: left, right: -1, aux: -1, token: expression.token,
+                        })
+                    }
+                    if ir_string_operand_is_temporary(expressions, expression_types, expression.right) {
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: SEM_STRING,
+                            left: right, right: -1, aux: -1, token: expression.token,
+                        })
+                    }
+                }
             }
         }
         i = i + 1
@@ -786,6 +1327,7 @@ fn ir_cfg_lower_range(
         blocks: make([]IrBlock, 0, 0), successors: make([]int, 0, 0),
         call_sites: out_call_sites, call_arguments: out_call_arguments,
         string_literals: out_strings, constant_string_index: out_string_index,
+        jump_arguments: make([]int, 0, 0),
         expression_values: out_values,
         next_value: value_cursor, block_count: 0, ok: true, error: "",
     }
@@ -815,7 +1357,7 @@ fn ir_lower_returning_if_tree(
     item: TopItem, signature: FnSignature, function_index: int,
     instructions: []IrInstruction, constants: []IrConstant,
     blocks: []IrBlock, successors: []int,
-    call_sites: []IrCallSite, call_arguments: []int,
+    call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int,
     string_literals: []string, constant_string_index: []int,
     expression_values: []int, next_value: int
 ) -> IrCfgLowering {
@@ -825,6 +1367,7 @@ fn ir_lower_returning_if_tree(
     let mut out_successors = successors
     let mut out_call_sites = call_sites
     let mut out_call_arguments = call_arguments
+    let mut out_jump_arguments = jump_arguments
     let mut out_strings = string_literals
     let mut out_string_index = constant_string_index
     let mut out_values = expression_values
@@ -875,6 +1418,38 @@ fn ir_lower_returning_if_tree(
     let mut scope_items: []int = make([]int, 0, 8)
     let mut scope_start: []int = make([]int, 0, 4)
     let mut scope_count: []int = make([]int, 0, 4)
+    // Loop roles, one entry per pending list. A `while` pushes three lists —
+    // header, body, continuation — and these say which is which. Everything
+    // else is -1, so a function with no loop behaves exactly as before.
+    // Which SSA value each local names, snapshotted per pending list. Bindings
+    // are block-scoped: a store in one `if` arm must not be visible in its
+    // sibling, which is reached by a different edge. Threading one array
+    // through the whole function instead let an arm's rebinding leak sideways,
+    // and the sibling then referenced a value defined in a block that does not
+    // dominate it — `IR left value does not dominate its use`, from
+    // `x86_emit_int_rax`, whose `out = append(out, ...)` appears in three arms.
+    let mut list_bindings: []int = make([]int, 0, len(locals) * 4)
+    let mut list_bindings_start: []int = make([]int, 0, 4)
+    let mut list_loop_header: []int = make([]int, 0, 4)
+    let mut list_loop_back: []int = make([]int, 0, 4)
+    let mut list_loop_exit: []int = make([]int, 0, 4)
+    // One entry per loop. `carried` names the locals the body assigns, which
+    // are exactly the header's block parameters; `params` holds the value each
+    // parameter defines, filled when the header is emitted.
+    let mut loop_statement: []int = make([]int, 0, 2)
+    let mut loop_carried_start: []int = make([]int, 0, 2)
+    let mut loop_carried_count: []int = make([]int, 0, 2)
+    let mut loop_carried: []int = make([]int, 0, 4)
+    let mut loop_params: []int = make([]int, 0, 4)
+    let mut loop_header_block: []int = make([]int, 0, 2)
+    let mut loop_body_block: []int = make([]int, 0, 2)
+    let mut loop_exit_block: []int = make([]int, 0, 2)
+    // Owned values already live where the loop starts. The backedge drops
+    // everything an iteration added *above* this mark; below it are values from
+    // outside the loop, which survive every iteration and are dropped by the
+    // path that leaves. Measured at the loop, not at the block that happens to
+    // carry the backedge, which may be an if arm nested inside the body.
+    let mut loop_entry_live: []int = make([]int, 0, 2)
     let top_start = len(list_items)
     let mut top_scan = 0
     while top_scan < len(statements) {
@@ -891,6 +1466,15 @@ fn ir_lower_returning_if_tree(
     }
     list_start = append(list_start, top_start)
     list_count = append(list_count, len(list_items) - top_start)
+    list_bindings_start = append(list_bindings_start, len(list_bindings))
+    let mut snap_0 = 0
+    while snap_0 < len(owned_locals) {
+        list_bindings = append(list_bindings, owned_locals[snap_0])
+        snap_0 = snap_0 + 1
+    }
+    list_loop_header = append(list_loop_header, -1)
+    list_loop_back = append(list_loop_back, -1)
+    list_loop_exit = append(list_loop_exit, -1)
     let entry_scope = len(scope_items)
     let mut owned_param = 0
     while owned_param < len(locals) {
@@ -916,7 +1500,104 @@ fn ir_lower_returning_if_tree(
             live = append(live, scope_items[scope_start[list_index] + inherit])
             inherit = inherit + 1
         }
+        // Restore the bindings this block was reached with. A store in a
+        // sibling arm is invisible here, which is what keeps every referenced
+        // value defined in a block that dominates this one.
+        let mut restore_binding = 0
+        while restore_binding < len(owned_locals) and
+            list_bindings_start[list_index] + restore_binding < len(list_bindings) {
+            owned_locals[restore_binding] = list_bindings[list_bindings_start[list_index] + restore_binding]
+            restore_binding = restore_binding + 1
+        }
         let mut closed = false
+        // Falling off the end of an if arm inside a loop body is falling off
+        // the end of the body, so the arms this block spawns inherit its
+        // backedge. Without this an `if` anywhere in a body silently drops the
+        // loop: the arm runs once and returns.
+        let inherited_back = list_loop_back[list_index]
+        if list_loop_header[list_index] >= 0 {
+            // A loop header carries no statements. It defines one block
+            // parameter per carried local — binding each so the condition and
+            // the whole body read the joined value, not the entry value — then
+            // tests the condition and branches to the body or past the loop.
+            let header_loop = list_loop_header[list_index]
+            let header_statement = statements[loop_statement[header_loop]]
+            let mut header_param = 0
+            while header_param < loop_carried_count[header_loop] {
+                let carried_local = loop_carried[loop_carried_start[header_loop] + header_param]
+                let param_value = value_cursor
+                value_cursor = value_cursor + 1
+                loop_params[loop_carried_start[header_loop] + header_param] = param_value
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_BLOCK_PARAM, result: param_value, type_kind: local_types[carried_local],
+                    left: -1, right: -1, aux: 0, token: header_statement.token_start,
+                })
+                owned_locals[carried_local] = param_value
+                // The body's snapshot was taken at the `while`, before these
+                // parameters existed, so it still names the pre-loop values.
+                // The body has to read the joined value or the loop tests the
+                // same thing forever. Header, body and continuation are pushed
+                // consecutively, so the body is the next list.
+                let body_list = list_index + 1
+                if body_list < len(list_bindings_start) and
+                    list_bindings_start[body_list] + carried_local < len(list_bindings) {
+                    list_bindings[list_bindings_start[body_list] + carried_local] = param_value
+                }
+                header_param = header_param + 1
+            }
+            let header_condition_end = ir_condition_end(tokens, header_statement.token_start + 1, header_statement.token_end)
+            let lowered = ir_cfg_lower_range(
+                source, tokens, items, symbols, expression_symbols, signatures,
+                expressions, expression_types, expression_locals,
+                locals, owned_locals, out_instructions, out_constants,
+                out_call_sites, out_call_arguments,
+                out_strings, out_string_index, out_values,
+                value_cursor, header_statement.token_start + 1, header_condition_end, -1, -1
+            )
+            if not lowered.ok { return lowered }
+            out_instructions = lowered.instructions
+            out_constants = lowered.constants
+            out_call_sites = lowered.call_sites
+            out_call_arguments = lowered.call_arguments
+            out_strings = lowered.string_literals
+            out_string_index = lowered.constant_string_index
+            out_values = lowered.expression_values
+            value_cursor = lowered.next_value
+            if header_statement.expr_root < 0 or header_statement.expr_root >= len(out_values) or
+                out_values[header_statement.expr_root] < 0 or
+                header_statement.expr_root >= len(expression_types) or
+                expression_types[header_statement.expr_root] != SEM_BOOL {
+                return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                    "CFG lowering requires a boolean while condition")
+            }
+            out_instructions = append(out_instructions, IrInstruction {
+                op: IR_BRANCH, result: -1, type_kind: SEM_BOOL,
+                left: out_values[header_statement.expr_root], right: -1, aux: -1,
+                token: header_statement.token_start,
+            })
+            let header_successor_start = len(out_successors)
+            out_successors = append(out_successors, loop_body_block[header_loop])
+            out_successors = append(out_successors, loop_exit_block[header_loop])
+            out_blocks = append(out_blocks, IrBlock {
+                function: function_index, instruction_start: block_instruction_start,
+                instruction_count: len(out_instructions) - block_instruction_start,
+                terminator: len(out_instructions) - 1,
+                successor_start: header_successor_start, successor_count: 2,
+            })
+            closed = true
+        }
+        if list_loop_exit[list_index] >= 0 {
+            // The loop is left from the header, so past the loop every carried
+            // local holds the header's parameter — not whatever the body last
+            // computed, which is what `owned_locals` still points at.
+            let exit_loop = list_loop_exit[list_index]
+            let mut restore = 0
+            while restore < loop_carried_count[exit_loop] {
+                owned_locals[loop_carried[loop_carried_start[exit_loop] + restore]] =
+                    loop_params[loop_carried_start[exit_loop] + restore]
+                restore = restore + 1
+            }
+        }
         let mut position = 0
         while position < list_count[list_index] and not closed {
             let statement_index = list_items[list_start[list_index] + position]
@@ -1184,11 +1865,283 @@ fn ir_lower_returning_if_tree(
                 list_count = append(list_count, then_count)
                 scope_start = append(scope_start, arm_scope)
                 scope_count = append(scope_count, arm_scope_count)
+                list_bindings_start = append(list_bindings_start, len(list_bindings))
+                let mut snap_1 = 0
+                while snap_1 < len(owned_locals) {
+                    list_bindings = append(list_bindings, owned_locals[snap_1])
+                    snap_1 = snap_1 + 1
+                }
+                list_loop_header = append(list_loop_header, -1)
+                list_loop_back = append(list_loop_back, inherited_back)
+                list_loop_exit = append(list_loop_exit, -1)
                 list_start = append(list_start, else_start)
                 list_count = append(list_count, else_count)
                 scope_start = append(scope_start, else_scope)
                 scope_count = append(scope_count, len(scope_items) - else_scope)
+                list_bindings_start = append(list_bindings_start, len(list_bindings))
+                let mut snap_2 = 0
+                while snap_2 < len(owned_locals) {
+                    list_bindings = append(list_bindings, owned_locals[snap_2])
+                    snap_2 = snap_2 + 1
+                }
+                list_loop_header = append(list_loop_header, -1)
+                list_loop_back = append(list_loop_back, inherited_back)
+                list_loop_exit = append(list_loop_exit, -1)
                 closed = true
+            } else if statement.kind == STMT_WHILE {
+                // A loop is three blocks: a header that joins the entry edge
+                // with the backedge, a body, and the continuation. The header's
+                // block parameters are exactly the locals the body assigns —
+                // those hold a different value on each edge. A local the body
+                // only reads keeps one definition that dominates the loop and
+                // needs no parameter.
+                let body_open = ir_condition_end(tokens, statement.token_start + 1, statement.token_end)
+                if body_open < 0 or body_open <= statement.token_start + 1 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering could not find a while condition")
+                }
+                let mut carried_here: []int = make([]int, 0, 4)
+                let mut carried_scan = 0
+                while carried_scan < len(locals) {
+                    if locals[carried_scan].item == signature.item and
+                        owned_locals[carried_scan] >= 0 and
+                        ir_local_assigned_in_range(source, tokens, statements, locals, signature,
+                            carried_scan, body_open, statement.token_end) {
+                        // An owned carried value would need its drop and clone
+                        // worked out across the backedge — the previous
+                        // iteration's allocation has to go somewhere. Refused
+                        // rather than leaked.
+                        if carried_scan >= len(local_types) or
+                            not ir_cfg_bindable_type(local_types[carried_scan]) or
+                            ir_type_is_owned(local_types[carried_scan]) {
+                            return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                "CFG lowering carries only non-owned scalars through a loop")
+                        }
+                        carried_here = append(carried_here, carried_scan)
+                    }
+                    carried_scan = carried_scan + 1
+                }
+                let loop_index = len(loop_statement)
+                let header_list = len(list_start)
+                loop_statement = append(loop_statement, statement_index)
+                loop_carried_start = append(loop_carried_start, len(loop_carried))
+                loop_carried_count = append(loop_carried_count, len(carried_here))
+                loop_header_block = append(loop_header_block, entry_block + header_list)
+                loop_body_block = append(loop_body_block, entry_block + header_list + 1)
+                loop_exit_block = append(loop_exit_block, entry_block + header_list + 2)
+                loop_entry_live = append(loop_entry_live, len(live))
+                let mut carried_push = 0
+                while carried_push < len(carried_here) {
+                    loop_carried = append(loop_carried, carried_here[carried_push])
+                    // Filled in when the header emits its parameters; the value
+                    // is not known until then.
+                    loop_params = append(loop_params, -1)
+                    carried_push = carried_push + 1
+                }
+                // Close the current block with the entry edge, handing the
+                // header each carried local's value as it stands here.
+                //
+                // A single argument travels in `left` with the parameter's own
+                // type; anything wider goes through the `jump_arguments` arena
+                // from `aux`. Both forms are what the verifier requires, and it
+                // rejects the wide form for a one-parameter target.
+                if len(carried_here) == 1 {
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_JUMP, result: -1, type_kind: local_types[carried_here[0]],
+                        left: owned_locals[carried_here[0]], right: -1, aux: -1,
+                        token: statement.token_start,
+                    })
+                } else {
+                    let entry_argument_start = len(out_jump_arguments)
+                    carried_push = 0
+                    while carried_push < len(carried_here) {
+                        out_jump_arguments = append(out_jump_arguments, owned_locals[carried_here[carried_push]])
+                        carried_push = carried_push + 1
+                    }
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_JUMP, result: -1, type_kind: SEM_UNKNOWN,
+                        left: -1, right: -1, aux: entry_argument_start,
+                        token: statement.token_start,
+                    })
+                }
+                let while_successor_start = len(out_successors)
+                out_successors = append(out_successors, entry_block + header_list)
+                out_blocks = append(out_blocks, IrBlock {
+                    function: function_index, instruction_start: block_instruction_start,
+                    instruction_count: len(out_instructions) - block_instruction_start,
+                    terminator: len(out_instructions) - 1,
+                    successor_start: while_successor_start, successor_count: 1,
+                })
+                // Body statements, then whatever followed the loop.
+                let body_items_start = len(list_items)
+                let mut body_child = 0
+                while body_child < statement.child_count {
+                    let edge = statement.child_start + body_child
+                    if edge >= 0 and edge < len(statement_edges) {
+                        let child = statement_edges[edge]
+                        if child >= 0 and child < len(statements) {
+                            list_items = append(list_items, child)
+                        }
+                    }
+                    body_child = body_child + 1
+                }
+                let body_items_count = len(list_items) - body_items_start
+                if body_items_count < 1 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering requires a while body to hold statements")
+                }
+                let exit_items_start = len(list_items)
+                let mut exit_tail = position + 1
+                while exit_tail < list_count[list_index] {
+                    list_items = append(list_items, list_items[list_start[list_index] + exit_tail])
+                    exit_tail = exit_tail + 1
+                }
+                let exit_items_count = len(list_items) - exit_items_start
+                // The header carries no statements of its own; its condition
+                // and branch are emitted from the loop table.
+                let loop_scope = len(scope_items)
+                let mut loop_carry = 0
+                while loop_carry < len(live) {
+                    scope_items = append(scope_items, live[loop_carry])
+                    loop_carry = loop_carry + 1
+                }
+                let loop_scope_count = len(scope_items) - loop_scope
+                list_start = append(list_start, len(list_items))
+                list_count = append(list_count, 0)
+                scope_start = append(scope_start, loop_scope)
+                scope_count = append(scope_count, loop_scope_count)
+                list_bindings_start = append(list_bindings_start, len(list_bindings))
+                let mut snap_3 = 0
+                while snap_3 < len(owned_locals) {
+                    list_bindings = append(list_bindings, owned_locals[snap_3])
+                    snap_3 = snap_3 + 1
+                }
+                list_loop_header = append(list_loop_header, loop_index)
+                list_loop_back = append(list_loop_back, -1)
+                list_loop_exit = append(list_loop_exit, -1)
+                let body_scope = len(scope_items)
+                loop_carry = 0
+                while loop_carry < len(live) {
+                    scope_items = append(scope_items, live[loop_carry])
+                    loop_carry = loop_carry + 1
+                }
+                list_start = append(list_start, body_items_start)
+                list_count = append(list_count, body_items_count)
+                scope_start = append(scope_start, body_scope)
+                scope_count = append(scope_count, len(scope_items) - body_scope)
+                list_bindings_start = append(list_bindings_start, len(list_bindings))
+                let mut snap_4 = 0
+                while snap_4 < len(owned_locals) {
+                    list_bindings = append(list_bindings, owned_locals[snap_4])
+                    snap_4 = snap_4 + 1
+                }
+                list_loop_header = append(list_loop_header, -1)
+                list_loop_back = append(list_loop_back, loop_index)
+                list_loop_exit = append(list_loop_exit, -1)
+                let after_scope = len(scope_items)
+                loop_carry = 0
+                while loop_carry < len(live) {
+                    scope_items = append(scope_items, live[loop_carry])
+                    loop_carry = loop_carry + 1
+                }
+                list_start = append(list_start, exit_items_start)
+                list_count = append(list_count, exit_items_count)
+                scope_start = append(scope_start, after_scope)
+                scope_count = append(scope_count, len(scope_items) - after_scope)
+                list_bindings_start = append(list_bindings_start, len(list_bindings))
+                let mut snap_5 = 0
+                while snap_5 < len(owned_locals) {
+                    list_bindings = append(list_bindings, owned_locals[snap_5])
+                    snap_5 = snap_5 + 1
+                }
+                list_loop_header = append(list_loop_header, -1)
+                list_loop_back = append(list_loop_back, inherited_back)
+                list_loop_exit = append(list_loop_exit, loop_index)
+                closed = true
+            } else if ir_statement_is_assignment(tokens, statement) {
+                // `target = expr`. The store is an SSA rebinding: the local
+                // simply names the new value from here on. No instruction is
+                // emitted for the store itself.
+                let assigned = ir_assignment_target_local(source, tokens, statements, locals, signature, statement)
+                if assigned < 0 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering could not resolve an assignment target")
+                }
+                if assigned >= len(local_types) or not ir_cfg_bindable_type(local_types[assigned]) {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering assigns only bindable locals")
+                }
+                if statement.expr_root < 0 or statement.expr_root >= len(expressions) {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering requires an assignment value")
+                }
+                // What the local held before the store, and where the
+                // right-hand side's instructions begin — both needed to decide
+                // whether the old allocation was handed to the expression that
+                // replaces it, as in `out = append(out, x)`, or is being
+                // dropped on the floor, as in `out = make(...)`.
+                let replaced_value = owned_locals[assigned]
+                let assign_rhs_start = len(out_instructions)
+                // The range starts after `target =` so the target identifier is
+                // not lowered as a read of the value being replaced.
+                let lowered = ir_cfg_lower_range(
+                    source, tokens, items, symbols, expression_symbols, signatures,
+                    expressions, expression_types, expression_locals,
+                    locals, owned_locals, out_instructions, out_constants,
+                    out_call_sites, out_call_arguments,
+                    out_strings, out_string_index, out_values,
+                    value_cursor, statement.token_start + 2, statement.token_end, -1,
+                    statement.expr_root
+                )
+                if not lowered.ok { return lowered }
+                out_instructions = lowered.instructions
+                out_constants = lowered.constants
+                out_call_sites = lowered.call_sites
+                out_call_arguments = lowered.call_arguments
+                out_strings = lowered.string_literals
+                out_string_index = lowered.constant_string_index
+                out_values = lowered.expression_values
+                value_cursor = lowered.next_value
+                if out_values[statement.expr_root] < 0 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering could not resolve an assignment value")
+                }
+                let assigned_value = out_values[statement.expr_root]
+                if ir_type_is_owned(local_types[assigned]) and replaced_value >= 0 and
+                    replaced_value != assigned_value {
+                    // Storing over an owned local retires the allocation it
+                    // held. `out = append(out, x)` hands it to the call, which
+                    // consumes it and returns the replacement — dropping it
+                    // again here would be a double free. `out = make(...)`
+                    // hands it to nobody, so without a drop it leaks. Which of
+                    // the two happened is read off the instructions the
+                    // right-hand side just emitted rather than assumed from the
+                    // shape of the expression.
+                    if not ir_instruction_range_consumes_value(
+                        out_instructions, out_call_sites, out_call_arguments,
+                        assign_rhs_start, len(out_instructions), replaced_value
+                    ) {
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: local_types[assigned],
+                            left: replaced_value, right: -1, aux: -1,
+                            token: statement.token_start,
+                        })
+                    }
+                    // The retired value must leave the live set either way: it
+                    // has been consumed exactly once already, and a scope-exit
+                    // drop would consume it twice.
+                    let mut kept: []int = make([]int, 0, len(live))
+                    let mut live_scan = 0
+                    while live_scan < len(live) {
+                        if live[live_scan] != replaced_value {
+                            kept = append(kept, live[live_scan])
+                        }
+                        live_scan = live_scan + 1
+                    }
+                    live = kept
+                    live = append(live, assigned_value)
+                }
+                owned_locals[assigned] = assigned_value
             } else if statement.kind == STMT_EXPR {
                 // The only statement expressions this path models are the two
                 // statement intrinsics. Both take exactly one argument, which
@@ -1298,9 +2251,83 @@ fn ir_lower_returning_if_tree(
                 }
             } else {
                 return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                    "CFG lowering supports only if, let, print, exit, and return statements")
+                    "CFG lowering supports only if, while, let, assignment, print, exit, and return statements")
             }
             position = position + 1
+        }
+        if not closed and list_loop_back[list_index] >= 0 {
+            // The body ran to its end, so it loops: hand the header each
+            // carried local's value as the body left it. A body that returned
+            // or exited is already closed and needs no backedge.
+            let back_loop = list_loop_back[list_index]
+            // A backedge argument that names a *different* carried parameter is
+            // a permutation — `a = b` followed by `b = a + 1` hands back
+            // (b, a'). The header's parameters are slots the jump writes in
+            // sequence, so the second write would clobber a value the first
+            // still had to read. Breaking the cycle needs a scratch copy, and
+            // the only copy instruction here is `IR_MOVE`, which the verifier
+            // reserves for owned values. Declined rather than mis-ordered; an
+            // ordinary counter loop never reaches this.
+            let mut back_argument = 0
+            while back_argument < loop_carried_count[back_loop] {
+                let carried_local = loop_carried[loop_carried_start[back_loop] + back_argument]
+                let mut other = 0
+                while other < loop_carried_count[back_loop] {
+                    if other != back_argument and
+                        owned_locals[carried_local] == loop_params[loop_carried_start[back_loop] + other] {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering cannot carry a loop value that permutes another carried value")
+                    }
+                    other = other + 1
+                }
+                back_argument = back_argument + 1
+            }
+            // Anything the body allocated dies here. An owned value created in
+            // an iteration has no reader on the next one, and the header cannot
+            // carry it — carried values are non-owned scalars — so it must be
+            // dropped before the backedge or the loop leaks one per iteration.
+            // Only what this iteration added: entries below the loop's entry
+            // mark come from outside the loop, are still live on the next
+            // iteration and after it, and are dropped by the path that leaves.
+            let mut body_drop = len(live) - 1
+            while body_drop >= loop_entry_live[back_loop] {
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_DROP, result: -1, type_kind: ir_cfg_value_type(out_instructions, live[body_drop]),
+                    left: live[body_drop], right: -1, aux: -1,
+                    token: statements[loop_statement[back_loop]].token_start,
+                })
+                body_drop = body_drop - 1
+            }
+            if loop_carried_count[back_loop] == 1 {
+                let only_carried = loop_carried[loop_carried_start[back_loop]]
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_JUMP, result: -1, type_kind: local_types[only_carried],
+                    left: owned_locals[only_carried], right: -1, aux: -1,
+                    token: statements[loop_statement[back_loop]].token_start,
+                })
+            } else {
+                let back_argument_start = len(out_jump_arguments)
+                back_argument = 0
+                while back_argument < loop_carried_count[back_loop] {
+                    out_jump_arguments = append(out_jump_arguments,
+                        owned_locals[loop_carried[loop_carried_start[back_loop] + back_argument]])
+                    back_argument = back_argument + 1
+                }
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_JUMP, result: -1, type_kind: SEM_UNKNOWN,
+                    left: -1, right: -1, aux: back_argument_start,
+                    token: statements[loop_statement[back_loop]].token_start,
+                })
+            }
+            let back_successor_start = len(out_successors)
+            out_successors = append(out_successors, loop_header_block[back_loop])
+            out_blocks = append(out_blocks, IrBlock {
+                function: function_index, instruction_start: block_instruction_start,
+                instruction_count: len(out_instructions) - block_instruction_start,
+                terminator: len(out_instructions) - 1,
+                successor_start: back_successor_start, successor_count: 1,
+            })
+            closed = true
         }
         if not closed {
             if returns_value {
@@ -1334,12 +2361,85 @@ fn ir_lower_returning_if_tree(
         blocks: out_blocks, successors: out_successors,
         call_sites: out_call_sites, call_arguments: out_call_arguments,
         string_literals: out_strings, constant_string_index: out_string_index,
+        jump_arguments: out_jump_arguments,
         expression_values: out_values, next_value: value_cursor,
         block_count: len(list_start), ok: true, error: "",
     }
 }
 
+fn ir_item_is_banned(banned: []int, item: int) -> bool {
+    let mut i = 0
+    while i < len(banned) {
+        if banned[i] == item { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// Source text of an item's name, for diagnostics only. Never read on a success
+// path, so it cannot affect lowering.
+fn ir_item_name(source: string, items: []TopItem, item: int) -> string {
+    if item < 0 or item >= len(items) { return "?" }
+    return source[items[item].name_start:items[item].name_end]
+}
+
+fn ir_item_has_body(functions: []IrFunction, item: int) -> bool {
+    let mut i = 0
+    while i < len(functions) {
+        if functions[i].item == item { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// The item index of `fn main`, or -1 when the source declares none.
+//
+// The image entry point is a named function, not "the one nothing calls": a
+// file may declare any number of functions no other function calls, and each is
+// an equally good candidate, so the uncalled rule fails on every real source.
+fn ir_entry_item(source: string, items: []TopItem) -> int {
+    let mut i = 0
+    while i < len(items) {
+        let item = items[i]
+        if item.kind == ITEM_FN and source[item.name_start:item.name_end] == "main" {
+            return i
+        }
+        i = i + 1
+    }
+    return -1
+}
+
+fn ir_entry_item_smoke_test() -> bool {
+    let source = "fn helper() {}\nfn main() {}\n"
+    let mut items: []TopItem = make([]TopItem, 0, 2)
+    items = append(items, TopItem {
+        kind: ITEM_FN, token_start: 0, token_end: 0,
+        name_start: 3, name_end: 9, body_start: 0, body_end: 0, exported: false,
+    })
+    items = append(items, TopItem {
+        kind: ITEM_FN, token_start: 0, token_end: 0,
+        name_start: 18, name_end: 22, body_start: 0, body_end: 0, exported: false,
+    })
+    if ir_entry_item(source, items) != 1 { return false }
+    // A struct named `main` is not an entry point, and a source with no `main`
+    // must report that rather than defaulting to the first item.
+    let mut structs: []TopItem = make([]TopItem, 0, 1)
+    structs = append(structs, TopItem {
+        kind: ITEM_STRUCT, token_start: 0, token_end: 0,
+        name_start: 18, name_end: 22, body_start: 0, body_end: 0, exported: false,
+    })
+    return ir_entry_item(source, structs) == -1
+}
+
+// Lower every function, then ban any function whose call reaches a callee that
+// did not lower, and repeat until the set stops growing.
+//
+// Without this, one unsupported callee poisons a whole file: the caller lowers,
+// its call site names an item with no IR body, and the verifier rejects the
+// entire package rather than that one function. The loop is bounded by the
+// signature count because each round bans at least one more function or stops.
 fn lower_typed_ir(
+
     source: string,
     tokens: []Token,
     items: []TopItem,
@@ -1354,6 +2454,60 @@ fn lower_typed_ir(
     symbols: []Symbol,
     expression_symbols: []int
 ) -> TypedIr {
+    let mut banned: []int = make([]int, 0, 4)
+    let mut round = 0
+    let mut result = lower_typed_ir_once(source, tokens, items, signatures, statements, statement_edges, expressions, expression_types, locals, local_types, expression_locals, symbols, expression_symbols, banned)
+    while round <= len(signatures) {
+        if not result.ok { return result }
+        let mut grew = false
+        let mut function_index = 0
+        while function_index < len(result.functions) {
+            let lowered = result.functions[function_index]
+            let mut block_index = lowered.entry_block
+            while block_index < lowered.entry_block + lowered.block_count and block_index < len(result.blocks) {
+                let block = result.blocks[block_index]
+                let mut at = block.instruction_start
+                while at < block.instruction_start + block.instruction_count and at < len(result.instructions) {
+                    let instruction = result.instructions[at]
+                    if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(result.call_sites) {
+                        let callee = result.call_sites[instruction.aux].callee_item
+                        // Intrinsics are emitted inline and never have a body.
+                        if not ir_is_intrinsic_callee(callee) and
+                            not ir_item_has_body(result.functions, callee) and
+                            not ir_item_is_banned(banned, lowered.item) {
+                            banned = append(banned, lowered.item)
+                            grew = true
+                        }
+                    }
+                    at = at + 1
+                }
+                block_index = block_index + 1
+            }
+            function_index = function_index + 1
+        }
+        if not grew { return result }
+        result = lower_typed_ir_once(source, tokens, items, signatures, statements, statement_edges, expressions, expression_types, locals, local_types, expression_locals, symbols, expression_symbols, banned)
+        round = round + 1
+    }
+    return result
+}
+
+fn lower_typed_ir_once(
+    source: string,
+    tokens: []Token,
+    items: []TopItem,
+    signatures: []FnSignature,
+    statements: []StmtNode,
+    statement_edges: []int,
+    expressions: []ExprNode,
+    expression_types: []int,
+    locals: []LocalBinding,
+    local_types: []int,
+    expression_locals: []int,
+    symbols: []Symbol,
+    expression_symbols: []int
+,
+    banned: []int) -> TypedIr {
     let mut functions: []IrFunction = []
     let mut blocks: []IrBlock = []
     let mut instructions: []IrInstruction = []
@@ -1521,15 +2675,71 @@ fn lower_typed_ir(
 
     let mut next_value = 0
     let mut skipped = 0
+    // Rebuilt here rather than threaded through five result structs; it is
+    // one pass over the items and the inputs are already parameters.
+    let struct_layout = build_struct_layout(source, tokens, items)
+    let mut skip_reasons = ""
     let mut signature_index = 0
     while signature_index < len(signatures) {
         let signature = signatures[signature_index]
-        let mut supported = signature.item >= 0 and signature.item < len(items)
+        // A function banned by an earlier round calls one that could not be
+        // lowered. Lowering it anyway would leave a call site pointing at a
+        // callee with no body, which the verifier rejects for the whole
+        // package — so one unsupported callee would fail an entire file
+        // instead of skipping one function.
+        // A banned function is not unsupported — it may well lower on its own.
+        // It is held back only until its callee does. Substituting `items[0]`
+        // below (which the arena indexing needs) makes every later check look
+        // at the wrong item, so a banned function used to report whatever that
+        // item's body happened to say, most often "found no statements in the
+        // body". Recorded honestly and skipped here instead.
+        let item_in_range = signature.item >= 0 and signature.item < len(items)
+        if item_in_range and ir_item_is_banned(banned, signature.item) {
+            skipped = skipped + 1
+            skip_reasons = skip_reasons + ir_item_name(source, items, signature.item) +
+                ": calls a function that could not be lowered\n"
+            signature_index = signature_index + 1
+            continue
+        }
+        let mut supported = item_in_range
         let item = if supported { items[signature.item] } else { items[0] }
         let fn_expr_start = if supported { expr_item_start[signature.item] } else { 0 }
         let fn_expr_count = if supported { expr_item_count[signature.item] } else { 0 }
         let fn_stmt_start = if supported { stmt_item_start[signature.item] } else { 0 }
         let fn_stmt_count = if supported { stmt_item_count[signature.item] } else { 0 }
+        // Fail closed on an expression kind this path has no opcode for. Such
+        // a kind used to reach the emitter and produce nothing at all, which
+        // silently dropped part of the program: a `slice[i].field` read
+        // lowered to the same image whichever field it named. Declining the
+        // function sends it to the general path, which rejects it with a
+        // reason instead.
+        let mut expr_scan = 0
+        while supported and expr_scan < fn_expr_count {
+            let scanned_index = item_expressions[fn_expr_start + expr_scan]
+            let scanned = expressions[scanned_index]
+            if ir_expression_opcode(scanned.kind) == 0 and not ir_expression_emits_nothing(scanned.kind) {
+                supported = false
+            }
+            // A field read is only modelled as the fused form
+            // `slice[i].field` over a slice of an eligible struct, with a field
+            // this struct actually has. Anything else — a field of a struct
+            // value, an unknown name — is declined rather than lowered to a
+            // read of the wrong slot.
+            if scanned.kind == EXPR_FIELD {
+                if ir_struct_field_aux(source, tokens, expressions, expression_types, expression_locals, locals, struct_layout, scanned_index) < 0 {
+                    supported = false
+                }
+            }
+            // An index into a struct slice carries a struct value, which is not
+            // modelled. It may exist only as the object of a fused field read,
+            // where it never emits on its own.
+            if scanned.kind == EXPR_INDEX and scanned.left >= 0 and scanned.left < len(expression_types) and
+                semantic_is_struct_array(expression_types[scanned.left]) and
+                not ir_index_is_field_object(expressions, expression_locals, locals, scanned_index) {
+                supported = false
+            }
+            expr_scan = expr_scan + 1
+        }
         let fn_local_start = if supported { local_item_start[signature.item] } else { 0 }
         let fn_local_count = if supported { local_item_count[signature.item] } else { 0 }
         // Reused by ownership cleanup walks later in this function body.
@@ -1555,6 +2765,8 @@ fn lower_typed_ir(
         let mut second_if_statement = -1
         let mut while_count = 0
         let mut assignment_count = 0
+        // Assignments only, excluding void intrinsic call statements.
+        let mut store_count = 0
         let mut return_count = 0
         let mut assignment_statements: []int = []
         let mut assignment_locals: []int = []
@@ -1592,6 +2804,12 @@ fn lower_typed_ir(
                     }
                 } else {
                     assignment_count = assignment_count + 1
+                    // A *store* specifically, told apart from a void intrinsic
+                    // call by its second token. The distinction matters because
+                    // a call statement's effect happens while its expression is
+                    // lowered, whereas a store has no expression to carry it —
+                    // the single-block path emits nothing for one.
+                    store_count = store_count + 1
                 }
             } else if statement.kind == STMT_BREAK or statement.kind == STMT_CONTINUE {
                 // Only valid as the single child of a loop guard if; the
@@ -1612,6 +2830,20 @@ fn lower_typed_ir(
         let mut simple_seq = false
         let mut loop_return = -1
         let mut seq_assignment_loop: []int = []
+        // A straight-line body with no branch and no loop falls through every
+        // shape to the single-block path, which lowers expressions and then
+        // emits only the statement intrinsics and the return. An assignment
+        // there emitted *nothing at all* — `let mut i = 3; i = 7; exit(i)`
+        // exited 3, and `xs[1] = 40; exit(xs[1])` exited 0. Both were silent
+        // wrong answers, not diagnostics.
+        //
+        // Declining sends them to the general path, which rebinds an assigned
+        // local to its new SSA value. The loop and merge-if shapes validate
+        // their own assignments and already fail closed on an indexed target,
+        // so only this case was open.
+        if supported and if_count == 0 and while_count == 0 and store_count > 0 {
+            supported = false
+        }
         if supported and if_count == 0 and return_count > 1 { supported = false }
         if supported and if_count > 2 { supported = false }
         if supported and if_count == 2 and while_count < 1 { supported = false }
@@ -2632,7 +3864,7 @@ fn lower_typed_ir(
                 expression_types, expression_locals, locals, local_types, local_values,
                 item, signature, len(functions),
                 instructions, constants, blocks, successors,
-                call_sites, call_arguments,
+                call_sites, call_arguments, jump_arguments,
                 string_literals, constant_string_index,
                 expression_values, next_value
             )
@@ -2644,6 +3876,7 @@ fn lower_typed_ir(
                 successors = general.successors
                 call_sites = general.call_sites
                 call_arguments = general.call_arguments
+                jump_arguments = general.jump_arguments
                 string_literals = general.string_literals
                 constant_string_index = general.constant_string_index
                 expression_values = general.expression_values
@@ -2657,6 +3890,10 @@ fn lower_typed_ir(
                 next_value = general.next_value
             } else {
                 skipped = skipped + 1
+                // Naming the function turns the reason list into a work list:
+                // a bare count says how much is left, not what to fix.
+                skip_reasons = skip_reasons + ir_item_name(source, items, signature.item) +
+                    ": " + general.error + "\n"
             }
             signature_index = signature_index + 1
             continue
@@ -3023,9 +4260,31 @@ fn lower_typed_ir(
                     } else {
                         ir_expression_opcode(expression.kind)
                     }
-                    if op > 0 {
+                    // An index into a struct slice is fused into the field
+                    // read above it and emits nothing of its own. The pre-scan
+                    // proved every such index has a field read to consume it.
+                    let fused_index = op == IR_INDEX and expression.left >= 0 and
+                        expression.left < len(expression_types) and
+                        semantic_is_struct_array(expression_types[expression.left])
+                    if op > 0 and not fused_index {
                         let mut left = if expression.left >= 0 and expression.left < len(expression_values) { expression_values[expression.left] } else { -1 }
                         let mut right = if expression.right >= 0 and expression.right < len(expression_values) { expression_values[expression.right] } else { -1 }
+                        if op == IR_FIELD {
+                            // slice[i].field: the operands come from the index
+                            // expression underneath, which emits nothing of its
+                            // own. The pre-scan already proved this shape.
+                            let field_object_index = ir_field_object_index(source, tokens, expressions, expression_types, expression_locals, locals, expression.left)
+                            if field_object_index < 0 {
+                                // Borrowed element: the object already holds the
+                                // pointer, so there is no index to check.
+                                left = if expression.left < len(expression_values) { expression_values[expression.left] } else { -1 }
+                                right = -1
+                            } else {
+                                let field_object = expressions[field_object_index]
+                                left = if field_object.left >= 0 and field_object.left < len(expression_values) { expression_values[field_object.left] } else { -1 }
+                                right = if field_object.right >= 0 and field_object.right < len(expression_values) { expression_values[field_object.right] } else { -1 }
+                            }
+                        }
                         if op == IR_LEN {
                             // len(x): the argument is the call's right child;
                             // the callee chain plays no role.
@@ -3045,7 +4304,13 @@ fn lower_typed_ir(
                                 let argument = expressions[cursor].right
                                 if argument >= 0 {
                                     let argument_value = if argument < len(expression_values) { expression_values[argument] } else { -1 }
-                                    if argument_value < 0 { call_ready = false }
+                                    // A borrowed element has no value of its own until its
+                                            // address is materialised below, so its absence is not a
+                                            // reason to decline the call.
+                                            let addressable = argument < len(expression_types) and
+                                                semantic_is_struct_value(expression_types[argument]) and
+                                                ir_field_object_index(source, tokens, expressions, expression_types, expression_locals, locals, argument) >= 0
+                                            if argument_value < 0 and not addressable { call_ready = false }
                                     reversed_arguments = append(reversed_arguments, argument_value)
                                     reversed_argument_expressions = append(reversed_argument_expressions, argument)
                                 }
@@ -3061,7 +4326,9 @@ fn lower_typed_ir(
                         if (op == IR_BINARY or op == IR_INDEX) and right < 0 { ready = false }
                         if op == IR_CALL and not call_ready { ready = false }
                         if ready {
-                let mut aux = if op == IR_UNARY or op == IR_BINARY { tokens[expression.token].kind } else { expression.left }
+                let mut aux = if op == IR_FIELD {
+                    ir_struct_field_aux(source, tokens, expressions, expression_types, expression_locals, locals, struct_layout, i)
+                } else if op == IR_UNARY or op == IR_BINARY { tokens[expression.token].kind } else { expression.left }
                 // Preserve literal make lengths in the IR. The make parser uses
                 // a type-reference node as its left edge, so the generic
                 // expression-value lookup cannot recover this operand later.
@@ -3088,7 +4355,18 @@ fn lower_typed_ir(
                                         expressions[argument_expression].kind == EXPR_IDENT and
                                         argument_expression < len(expression_locals) {
                                         let argument_local = expression_locals[argument_expression]
-                                        if argument_local >= 0 and argument_local < len(locals) and
+                                        // Only a declared Mako function takes
+                                        // ownership of what it is passed, so
+                                        // only it needs a clone. An intrinsic
+                                        // either borrows the slice — every
+                                        // `unsafe_*` reads through it and
+                                        // returns — or consumes it and hands
+                                        // back the replacement, as `append`
+                                        // does. Cloning for one of those leaks
+                                        // the copy: nothing on the other side
+                                        // ever drops it.
+                                        if call_signature >= 0 and
+                                            argument_local >= 0 and argument_local < len(locals) and
                                             argument_expression < len(expression_types) and
                                             ir_type_is_owned(expression_types[argument_expression]) and
                                             locals[argument_local].ownership != LOCAL_OWN_HOLD {
@@ -3101,6 +4379,30 @@ fn lower_typed_ir(
                                                 token: expressions[argument_expression].token,
                                             })
                                             argument_value = cloned_value
+                                        }
+                                    }
+                                    if argument_value < 0 and argument_expression >= 0 and
+                                        argument_expression < len(expression_types) and
+                                        semantic_is_struct_value(expression_types[argument_expression]) {
+                                        // Hand the callee a pointer to the element. The slice keeps
+                                        // ownership, so nothing is cloned and nothing is dropped.
+                                        let element_index = ir_field_object_index(source, tokens, expressions, expression_types, expression_locals, locals, argument_expression)
+                                        if element_index >= 0 {
+                                            let element_node = expressions[element_index]
+                                            let element_slice = if element_node.left >= 0 and element_node.left < len(expression_values) { expression_values[element_node.left] } else { -1 }
+                                            let element_offset = if element_node.right >= 0 and element_node.right < len(expression_values) { expression_values[element_node.right] } else { -1 }
+                                            if element_slice >= 0 and element_offset >= 0 {
+                                                let address_value = next_value
+                                                next_value = next_value + 1
+                                                call_prefix = append(call_prefix, IrInstruction {
+                                                    op: IR_ELEM_ADDR, result: address_value,
+                                                    type_kind: expression_types[argument_expression],
+                                                    left: element_slice, right: element_offset,
+                                                    aux: 8 * struct_kind_fields(expression_types[argument_expression]),
+                                                    token: expressions[argument_expression].token,
+                                                })
+                                                argument_value = address_value
+                                            }
                                         }
                                     }
                                     call_arguments = append(call_arguments, argument_value)
@@ -3137,7 +4439,7 @@ fn lower_typed_ir(
                                             string_literals: string_literals,
                                             constant_string_index: constant_string_index,
                                             expression_values: expression_values,
-                                            value_count: next_value, skipped_functions: skipped,
+                                            value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                                             ok: false, error: "integer constant is out of range",
                                         }
                                     }
@@ -3465,7 +4767,7 @@ fn lower_typed_ir(
                     string_literals: string_literals,
                     constant_string_index: constant_string_index,
                     expression_values: expression_values,
-                    value_count: next_value, skipped_functions: skipped,
+                    value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                     ok: false, error: "typed if condition has no expression",
                 }
             }
@@ -3479,7 +4781,7 @@ fn lower_typed_ir(
                     string_literals: string_literals,
                     constant_string_index: constant_string_index,
                     expression_values: expression_values,
-                    value_count: next_value, skipped_functions: skipped,
+                    value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                     ok: false, error: "typed if condition did not lower to an SSA value",
                 }
             }
@@ -3520,7 +4822,7 @@ fn lower_typed_ir(
                         string_literals: string_literals,
                         constant_string_index: constant_string_index,
                         expression_values: expression_values,
-                        value_count: next_value, skipped_functions: skipped,
+                        value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                         ok: false, error: "typed branch values cannot form a block parameter",
                     }
                 }
@@ -3705,7 +5007,7 @@ fn lower_typed_ir(
                     string_literals: string_literals,
                     constant_string_index: constant_string_index,
                     expression_values: expression_values,
-                    value_count: next_value, skipped_functions: skipped,
+                    value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                     ok: false, error: "typed merge condition has no expression",
                 }
             }
@@ -3719,7 +5021,7 @@ fn lower_typed_ir(
                     string_literals: string_literals,
                     constant_string_index: constant_string_index,
                     expression_values: expression_values,
-                    value_count: next_value, skipped_functions: skipped,
+                    value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                     ok: false, error: "typed merge condition did not lower to an SSA value",
                 }
             }
@@ -3905,7 +5207,7 @@ fn lower_typed_ir(
                     string_literals: string_literals,
                     constant_string_index: constant_string_index,
                     expression_values: expression_values,
-                    value_count: next_value, skipped_functions: skipped,
+                    value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                     ok: false, error: "typed sequential loops did not lower to SSA values",
                 }
             }
@@ -3924,7 +5226,7 @@ fn lower_typed_ir(
                         string_literals: string_literals,
                         constant_string_index: constant_string_index,
                         expression_values: expression_values,
-                        value_count: next_value, skipped_functions: skipped,
+                        value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                         ok: false, error: "typed pre-loop merge condition did not lower to an SSA value",
                     }
                 }
@@ -4131,7 +5433,7 @@ fn lower_typed_ir(
                             string_literals: string_literals,
                             constant_string_index: constant_string_index,
                             expression_values: expression_values,
-                            value_count: next_value, skipped_functions: skipped,
+                            value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                             ok: false, error: "typed loop guard did not lower to an SSA value",
                         }
                     }
@@ -4460,7 +5762,7 @@ fn lower_typed_ir(
                     string_literals: string_literals,
                     constant_string_index: constant_string_index,
                     expression_values: expression_values,
-                    value_count: next_value, skipped_functions: skipped,
+                    value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                     ok: false, error: "typed while loop did not lower to SSA values",
                 }
             }
@@ -4531,7 +5833,7 @@ fn lower_typed_ir(
                         string_literals: string_literals,
                         constant_string_index: constant_string_index,
                         expression_values: expression_values,
-                        value_count: next_value, skipped_functions: skipped,
+                        value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                         ok: false, error: "typed loop merge-if did not lower to an SSA value",
                     }
                 }
@@ -4729,7 +6031,7 @@ fn lower_typed_ir(
                         string_literals: string_literals,
                         constant_string_index: constant_string_index,
                         expression_values: expression_values,
-                        value_count: next_value, skipped_functions: skipped,
+                        value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
                         ok: false, error: "typed loop guard did not lower to an SSA value",
                     }
                 }
@@ -5073,6 +6375,11 @@ fn lower_typed_ir(
                 owned_live[owned_instruction.right] == 1 {
                 owned_live[owned_instruction.right] = 0
             }
+            // Only a call that takes ownership ends the value's life here. A
+            // borrowing intrinsic reads through it and returns, so the caller
+            // still owns it and still owes it a drop — clearing liveness for
+            // one of those is why `make([]byte, n)` passed to `unsafe_argv_copy`
+            // leaked its block.
             if owned_instruction.op == IR_CALL and owned_instruction.aux >= 0 and
                 owned_instruction.aux < len(call_sites) {
                 let owned_call = call_sites[owned_instruction.aux]
@@ -5080,7 +6387,9 @@ fn lower_typed_ir(
                 while owned_argument < owned_call.argument_start + owned_call.argument_count {
                     let argument_value = call_arguments[owned_argument]
                     if argument_value >= 0 and argument_value < len(owned_live) and
-                        owned_live[argument_value] == 1 {
+                        owned_live[argument_value] == 1 and
+                        ir_call_consumes_arguments(owned_call.callee_item,
+                            owned_types[argument_value]) {
                         owned_live[argument_value] = 0
                     }
                     owned_argument = owned_argument + 1
@@ -5134,7 +6443,7 @@ fn lower_typed_ir(
         string_literals: string_literals,
         constant_string_index: constant_string_index,
         expression_values: expression_values,
-        value_count: next_value, skipped_functions: skipped, ok: true, error: "",
+        value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons, ok: true, error: "",
     }
 }
 
@@ -5982,6 +7291,11 @@ fn typed_ir_loop_multi_smoke_test() -> bool {
 // A body right-hand side that reads a carried local assigned by an earlier
 // body statement is rejected: the expression arena is not in source order, so
 // only header-parameter reads are allowed.
+// `a = b` then `b = a + 1` reads the *new* `a` in the same iteration, so the
+// backedge hands the header (b, a') — a permutation of its own parameters. The
+// matched loop shapes refuse this, and so does the general path: breaking the
+// cycle needs a scratch copy, and `IR_MOVE` is reserved for owned values. It
+// must stay skipped rather than emit the two writes in an order that loses one.
 fn typed_ir_loop_cross_read_skip_smoke_test() -> bool {
     let source = "fn compute(value: int) -> int {\nlet mut a = 3\nlet mut b = 5\nwhile a < b {\na = b\nb = a + 1\n}\nreturn a\n}"
     let lexed = lex_source(source)

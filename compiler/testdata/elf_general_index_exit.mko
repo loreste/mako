@@ -1,0 +1,23 @@
+// Indexing through the shape-independent path. A nested guard tree is not one
+// of the matched shapes, so `xs[i]` reaches `ir_cfg_lower_range` — which had no
+// index expression at all and declined every function containing one.
+//
+// The elements of a `make`d slice are zero, so the returned value cannot show
+// which element was read. The bounds guards return distinct statuses instead,
+// and the offset itself is checked by compiling two reads of different indices
+// and requiring different images — the same check that caught `pts[0].x` and
+// `pts[0].y` compiling identically.
+fn at(xs: []int, i: int) -> int {
+    if i < 0 {
+        return 91
+    }
+    if i >= len(xs) {
+        return 92
+    }
+    return xs[i] + 7
+}
+
+fn main() {
+    let xs: []int = make([]int, 3, 8)
+    exit(at(xs, 1) + at(xs, 0 - 1) + at(xs, 99))
+}

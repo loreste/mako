@@ -1,0 +1,16 @@
+// `str_byte_at` returns -1 out of range rather than trapping — that sentinel is
+// the contract the lexer reads as end of input, so a bounds trap here would
+// diverge from the stage-0 oracle on every scan that walks off the end.
+//
+// 77 + 1 - 1 + 1 = 78: the first byte of "Mako", one past the end, and a
+// negative index, so both sentinel paths are exercised alongside a real read.
+fn probe(s: string) -> int {
+    let first = str_byte_at(s, 0)
+    let past = str_byte_at(s, 4)
+    let under = str_byte_at(s, 0 - 1)
+    return first - past - under
+}
+
+fn main() {
+    exit(probe("Mako"))
+}
