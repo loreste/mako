@@ -1,5 +1,6 @@
 # Mako — local install helpers
-#   make install   → PREFIX=$(HOME)/.local (binary + share/mako/runtime headers)
+#   make install   → PREFIX=$(HOME)/.local (binary + share/mako/runtime headers
+#                    and native_runtime.c / native_bridge.c for --backend native)
 #   make test      → examples/testing
 
 PREFIX ?= $(HOME)/.local
@@ -26,6 +27,11 @@ install: release
 	mkdir -p "$(BIN_DIR)" "$(RUNTIME_DST)/certs" "$(RUNTIME_DST)/third_party" "$(SHARE_DIR)"
 	install -m 755 "$(MAKO_BIN)" "$(BIN_DIR)/mako"
 	install -m 644 runtime/*.h "$(RUNTIME_DST)/"
+	# Native link compiles these with the host C compiler; they must match the
+	# installed binary’s IR (stale bridge → undefined symbols on multi-module apps).
+	@for f in native_runtime.c native_bridge.c; do \
+	  if [ -f "runtime/$$f" ]; then install -m 644 "runtime/$$f" "$(RUNTIME_DST)/"; fi; \
+	done
 	@if [ -d runtime/certs ]; then cp -R runtime/certs/. "$(RUNTIME_DST)/certs/"; fi
 	@if [ -f runtime/third_party/README.md ]; then \
 	  install -m 644 runtime/third_party/README.md "$(RUNTIME_DST)/third_party/"; \
