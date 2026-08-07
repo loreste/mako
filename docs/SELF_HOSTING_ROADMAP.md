@@ -615,18 +615,30 @@ The remaining steps, in dependency order:
     is the one already satisfied out of rax; counting it was why the first
     version removed no stores at all.
 
-    **Immediate folding is unblocked but not yet landed.** A literal whose only
-    reader is the following ALU op should fold into an `add rax, imm32` rather
-    than being materialised into a slot — `i + 1` and `i < n` are most of the
-    arithmetic in a loop. It was attempted, backed out because it shifts the
-    layout that `x86_64_smoke_test` pinned as eighteen absolute byte offsets,
-    and the prerequisite has since been done: those assertions are now
-    structural — prologue, epilogue, frame size, one materialised limit, one
-    conditional exit, exactly one backedge, exactly two near jumps — so they
-    survive a layout change and check strictly more than before, since the jump
-    *counts* were never checked. Only the body's length pin still moves, and
-    that is one number derived by measurement rather than eighteen by
-    inference.
+    **Immediate folding landed.** A literal whose only reader is the following
+    ALU op now folds into that instruction's immediate field — `add rax, imm32`,
+    `sub rax, imm32`, `imul rax, rax, imm32` — so it never reaches a register or
+    the frame. `i + 1` and `i * 8` are the shapes this covers, which is most
+    arithmetic in a loop.
+
+    It had been backed out once because it shifts the layout that
+    `x86_64_smoke_test` pinned as eighteen absolute byte offsets. With those
+    assertions restated structurally only the body's length pin moved, from 97
+    to 90 — one number, and the derivation (a nine-byte materialisation
+    replaced by a two-byte-wider immediate) predicted it exactly, so the test
+    itself confirmed the measurement rather than being re-pinned to whatever
+    came out.
+
+    Cumulative across the three peepholes, against the original slot model:
+
+    | | before | after |
+    |---|---|---|
+    | frame loads | 870 | 753 |
+    | frame stores | 1013 | 843 |
+    | **total frame traffic** | **1883** | **1596 (15.2% removed)** |
+
+    Each step was proven by compiling all 125 fixtures with and without it and
+    executing both on Linux: 248 of 248 runs identical every time.
 
     What remains after that is the real thing: a linear-scan allocator over the
     general CFG, so an operand that is not the immediately preceding result

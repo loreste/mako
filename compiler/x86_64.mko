@@ -1215,6 +1215,26 @@ fn x86_emit_alu_mem(bytes: []int, op: int, slot: int) -> []int {
     return out
 }
 
+// The same ALU op against a sign-extended imm32 instead of a frame slot, so a
+// literal operand never has to be materialised into the frame at all:
+// `add rax, imm32`, `sub rax, imm32`, `imul rax, rax, imm32`.
+fn x86_emit_alu_imm32(bytes: []int, op: int, value: int) -> []int {
+    let mut out = bytes
+    if op == TK_STAR {
+        out = append(out, 72); out = append(out, 105); out = append(out, 192)
+    } else if op == TK_PLUS {
+        out = append(out, 72); out = append(out, 5)
+    } else {
+        out = append(out, 72); out = append(out, 45)
+    }
+    return x86_emit_u32(out, value)
+}
+
+// A literal small enough for the sign-extended imm32 forms above.
+fn x86_alu_imm32_fits(value: int) -> bool {
+    return value >= -2147483648 and value <= 2147483647
+}
+
 // cmp rax, [rbp - 8*slot]
 fn x86_emit_cmp_mem(bytes: []int, slot: int) -> []int {
     let mut out = bytes
@@ -1345,6 +1365,10 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
     // Where the previous instruction's trailing store begins, and whether that
     // store is removable: its emitter is straight-line and nothing else in the
     // function reads the value. Set to -1 when either does not hold.
+    // A literal suppressed at its `IR_CONST` because the next ALU op will carry
+    // it as an immediate, and the value it stands for.
+    let mut folded_const_value = -1
+    let mut folded_const_int = 0
     let mut removable_store_at = -1
     let mut removable_store_producer = -1
     let mut removable_store_value = -1
@@ -1414,8 +1438,25 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
                     return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 scalar body constant is invalid"))
                 }
                 let value = constants[instruction.aux].int_value
-                bytes = x86_emit_int_rax(bytes, value)
-                bytes = x86_emit_store_rax(bytes, slot)
+                // A literal whose only reader is the ALU op right after it
+                // folds into that instruction's immediate field, so it never
+                // reaches a register or the frame. `i + 1` and `i * 8` are the
+                // shapes this covers, which is most arithmetic in a loop.
+                if i + 1 < end - start and x86_alu_imm32_fits(value) and
+                    instruction.type_kind == SEM_INT and
+                    instructions[start + i + 1].op == IR_BINARY and
+                    instructions[start + i + 1].type_kind == SEM_INT and
+                    instructions[start + i + 1].right == instruction.result and
+                    instructions[start + i + 1].left != instruction.result and
+                    x86_alu_supported(instructions[start + i + 1].aux) and
+                    x86_value_dead_after(instructions, call_sites, call_arguments, jump_arguments,
+                        start + i, start + i + 1, instruction.result) {
+                    folded_const_value = instruction.result
+                    folded_const_int = value
+                } else {
+                    bytes = x86_emit_int_rax(bytes, value)
+                    bytes = x86_emit_store_rax(bytes, slot)
+                }
             }
         } else if instruction.op == IR_MAKE {
             let make_stride = x86_slice_element_size(instruction.type_kind)
@@ -1942,6 +1983,19 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
             let right_slot = instruction.right - function.value_start + 1
             if left_slot < 1 or left_slot >= slot or right_slot < 1 or right_slot >= slot {
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 scalar body operand is not an earlier value"))
+            }
+            if folded_const_value >= 0 and folded_const_value == instruction.right and
+                not x86_div_supported(instruction.aux) {
+                bytes = x86_emit_load_rax(bytes, left_slot)
+                bytes = x86_emit_alu_imm32(bytes, instruction.aux, folded_const_int)
+                bytes = x86_emit_store_rax(bytes, slot)
+                folded_const_value = -1
+                rax_holds_slot = slot
+                removable_store_at = -1
+                removable_store_producer = -1
+                removable_store_value = -1
+                i = i + 1
+                continue
             }
             bytes = x86_emit_load_rax(bytes, left_slot)
             if x86_div_supported(instruction.aux) {
@@ -5823,7 +5877,7 @@ fn x86_64_smoke_test() -> bool {
         loop_instructions, loop_constants, loop_blocks, loop_successors,
         make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), loop_function
     , make([]string, 0, 0), make([]int, 0, 0))
-    if loop_body.code.status != X86_OK or len(loop_body.code.bytes) != 97 or len(loop_body.edge_callees) != 0 {
+    if loop_body.code.status != X86_OK or len(loop_body.code.bytes) != 90 or len(loop_body.edge_callees) != 0 {
         return false
     }
     // What the encoding must contain, asserted by shape rather than by offset.
