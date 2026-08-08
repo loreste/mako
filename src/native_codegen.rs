@@ -1889,13 +1889,11 @@ fn emit_struct_drop(
             }
             IrType::FloatSlice
             | IrType::ByteSlice
-            | IrType::BoolSlice
-            | IrType::Builder => {
+            | IrType::BoolSlice => {
                 let name = match fty {
                     IrType::FloatSlice => "mako_native_float_slice_drop_ptr",
                     IrType::ByteSlice => "mako_native_byte_slice_drop_ptr",
                     IrType::BoolSlice => "mako_native_bool_slice_drop_ptr",
-                    IrType::Builder => "mako_native_str_builder_free_ptr",
                     _ => unreachable!(),
                 };
                 let mut sig = module.make_signature();

@@ -4253,6 +4253,7 @@ impl<'a> FunctionLowerer<'a> {
                 // Free arm-local heap values (share let / temps) before join.
                 if self.block().terminator.is_none() {
                     self.drop_loop_body_scope(&owned_before, &locals_before);
+                    self.null_moved_slots(&owned_before);
                     self.terminate(Terminator::Jump(merge_id))?;
                 }
                 // Fallthrough to merge = Jump(merge) (or none before we add it).
@@ -4268,6 +4269,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 if self.block().terminator.is_none() {
                     self.drop_loop_body_scope(&owned_before, &locals_before);
+                    self.null_moved_slots(&owned_before);
                     self.terminate(Terminator::Jump(merge_id))?;
                 }
                 let else_falls = matches!(
@@ -15828,18 +15830,6 @@ impl<'a> FunctionLowerer<'a> {
                 return false;
             }
             self.heap_owned.insert(name.clone(), false);
-            // Null the slot so that any later drop is a runtime no-op.
-            // This is critical when ownership is transferred inside an
-            // if-branch: the merge restores the pre-if ownership snapshot
-            // (marking the local as owned again), but the runtime slot was
-            // already given away.  A null slot makes the restored drop safe.
-            if let Some(&(slot, _ty)) = self.locals.get(name) {
-                let null = self.const_int(0, Type::I64);
-                self.emit(Inst::Store {
-                    ptr: slot,
-                    value: null,
-                });
-            }
             true
         } else {
             already_owned
@@ -15870,6 +15860,24 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     /// True when both expressions name the same local (field-assign consume).
+
+    /// Null the slot of any local that was owned before a branch but moved
+    /// during it.  Called at the end of an if/match arm before jumping to the
+    /// merge block.  The merge restores the pre-branch ownership snapshot, so
+    /// without this null the restored drop would free an already-moved value.
+    fn null_moved_slots(&mut self, owned_before: &HashMap<String, bool>) {
+        for (name, &was_owned) in owned_before {
+            if !was_owned {
+                continue;
+            }
+            if self.heap_owned.get(name) == Some(&false) {
+                if let Some(&(slot, _ty)) = self.locals.get(name) {
+                    let null = self.const_int(0, Type::I64);
+                    self.emit(Inst::Store { ptr: slot, value: null });
+                }
+            }
+        }
+    }
 
     fn drop_owned_locals(&mut self) {
         let owned = self
