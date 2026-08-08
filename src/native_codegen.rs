@@ -1766,6 +1766,23 @@ fn emit_struct_clone(
                 ss_clone,
                 struct_make,
             )?,
+            IrType::FloatSlice | IrType::ByteSlice | IrType::BoolSlice => {
+                let name = match fty {
+                    IrType::FloatSlice => "mako_native_float_slice_clone_ptr",
+                    IrType::ByteSlice => "mako_native_byte_slice_clone_ptr",
+                    IrType::BoolSlice => "mako_native_bool_slice_clone_ptr",
+                    _ => unreachable!(),
+                };
+                let mut sig = module.make_signature();
+                sig.params.push(AbiParam::new(types::I64));
+                sig.returns.push(AbiParam::new(types::I64));
+                let id = module
+                    .declare_function(name, Linkage::Import, &sig)
+                    .map_err(|e| NativeError::new(e.to_string()))?;
+                let f = module.declare_func_in_func(id, &mut fb.func);
+                let call = fb.ins().call(f, &[loaded]);
+                fb.inst_results(call)[0]
+            }
             _ => loaded,
         };
         fb.ins()
@@ -1869,6 +1886,25 @@ fn emit_struct_drop(
                     ss_drop,
                     struct_drop,
                 )?;
+            }
+            IrType::FloatSlice
+            | IrType::ByteSlice
+            | IrType::BoolSlice
+            | IrType::Builder => {
+                let name = match fty {
+                    IrType::FloatSlice => "mako_native_float_slice_drop_ptr",
+                    IrType::ByteSlice => "mako_native_byte_slice_drop_ptr",
+                    IrType::BoolSlice => "mako_native_bool_slice_drop_ptr",
+                    IrType::Builder => "mako_native_str_builder_free_ptr",
+                    _ => unreachable!(),
+                };
+                let mut sig = module.make_signature();
+                sig.params.push(AbiParam::new(types::I64));
+                let id = module
+                    .declare_function(name, Linkage::Import, &sig)
+                    .map_err(|e| NativeError::new(e.to_string()))?;
+                let f = module.declare_func_in_func(id, &mut fb.func);
+                fb.ins().call(f, &[loaded]);
             }
             _ => {}
         }

@@ -15828,6 +15828,18 @@ impl<'a> FunctionLowerer<'a> {
                 return false;
             }
             self.heap_owned.insert(name.clone(), false);
+            // Null the slot so that any later drop is a runtime no-op.
+            // This is critical when ownership is transferred inside an
+            // if-branch: the merge restores the pre-if ownership snapshot
+            // (marking the local as owned again), but the runtime slot was
+            // already given away.  A null slot makes the restored drop safe.
+            if let Some(&(slot, _ty)) = self.locals.get(name) {
+                let null = self.const_int(0, Type::I64);
+                self.emit(Inst::Store {
+                    ptr: slot,
+                    value: null,
+                });
+            }
             true
         } else {
             already_owned
@@ -31531,6 +31543,38 @@ mod tests {
             2,
             "both owned Bags dropped once at scope exit"
         );
+    }
+
+    #[test]
+    fn conditional_string_move_nulls_source_slot() {
+        // Regression: transferring a string local inside an `if` body left the
+        // source slot live. After the if-merge restored ownership from the
+        // else-path snapshot, the scope-exit drop freed the string that had
+        // already been given to the destination — a use-after-free (#30/#31).
+        let source = r#"
+            struct Cfg { name: string }
+            fn build(flag: bool) -> Cfg {
+                var name = "default"
+                let cand = "override"
+                if flag {
+                    name = cand
+                }
+                return Cfg { name: name }
+            }
+            fn main() {
+                let c = build(true)
+                print(c.name)
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let build = module.functions.iter().find(|f| f.name == "build").unwrap();
+        let insts: Vec<_> = build.blocks.iter().flat_map(|b| &b.instructions).collect();
+        // After the move `name = cand`, cand's slot must be nulled (Store of 0)
+        // so the scope-exit drop is safe regardless of the if-merge ownership.
+        let has_null_store = insts.iter().any(|i| matches!(i, Inst::ConstInt { value: 0, .. }));
+        assert!(has_null_store, "conditional move must null the source slot");
     }
 
     #[test]
