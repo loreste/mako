@@ -942,6 +942,28 @@ fn ir_expression_feeds_string_concat(expressions: []ExprNode, expression_types: 
     return false
 }
 
+// True when a field initialiser inside a struct literal names this node as its
+// value. The construction stores it into the block, which is what gives an
+// owned value there a reader — the same reason a call argument counts.
+fn ir_expression_is_field_initializer(expressions: []ExprNode, node: int) -> bool {
+    if node < 0 { return false }
+    let mut i = 0
+    while i < len(expressions) {
+        if expressions[i].kind == EXPR_FIELD_INIT and expressions[i].right == node { return true }
+        i = i + 1
+    }
+    return false
+}
+
+// `IR_DROP.aux` for a value of this type: for a struct value, the bitmask of
+// its owned field slots, so the backend can release them without the struct
+// table. Minus one for everything else, which is what the field has always
+// meant for a drop.
+fn ir_drop_aux(layout: StructLayout, source: string, type_kind: int) -> int {
+    if not semantic_is_struct_value(type_kind) { return -1 }
+    return struct_owned_slot_mask(layout, struct_kind_index(type_kind))
+}
+
 // True when a concat operand is a temporary rather than a binding.
 //
 // A concat consumes neither operand, so a temporary would be defined and never
@@ -1256,8 +1278,34 @@ fn ir_cfg_lower_range(
                     }
                     check_slot = check_slot + 1
                 }
-                let struct_argument_start = len(out_call_arguments)
+                // An owned field is cloned into the block. Without it the
+                // struct can hold a *static* string — the view a literal is —
+                // and its drop would try to unmap the code image. Cloning makes
+                // "a struct owns its owned fields" true however it was built,
+                // which is what lets the drop be unconditional. Same invariant,
+                // and same reason, as cloning a string argument at a call site.
                 let mut emit_slot = 0
+                while emit_slot < field_count {
+                    let field_type = struct_field_type(layout, owner, emit_slot)
+                    if ir_type_is_owned(field_type) {
+                        let field_clone = value_cursor
+                        value_cursor = value_cursor + 1
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_CLONE, result: field_clone, type_kind: field_type,
+                            left: slot_values[emit_slot], right: -1, aux: -1,
+                            token: expression.token,
+                        })
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: field_type,
+                            left: slot_values[emit_slot], right: -1, aux: -1,
+                            token: expression.token,
+                        })
+                        slot_values[emit_slot] = field_clone
+                    }
+                    emit_slot = emit_slot + 1
+                }
+                let struct_argument_start = len(out_call_arguments)
+                emit_slot = 0
                 while emit_slot < field_count {
                     out_call_arguments = append(out_call_arguments, slot_values[emit_slot])
                     emit_slot = emit_slot + 1
@@ -1341,6 +1389,39 @@ fn ir_cfg_lower_range(
                     left: out_values[expression.left], right: -1,
                     aux: field_width * IR_FIELD_AUX_UNIT + read_slot, token: expression.token,
                 })
+                // Reading an *owned* field yields a borrow into the struct's
+                // block, which the struct still owns and will free. Cloning it
+                // is what dissolves the partial-move problem: the struct keeps
+                // everything it ever owned, so its drop is unconditional and
+                // there is no per-field moved-out state to get right on every
+                // path. It costs a copy, the same trade as clone-on-pass.
+                if ir_type_is_owned(expression_types[i]) and i != owned_root {
+                    // An owned field read produces a value somebody has to own.
+                    // This path gives one owner per range — the node the
+                    // statement consumes — so a read anywhere else is refused
+                    // rather than leaked. `let host = hp.host` works; the same
+                    // read buried inside a larger expression does not yet.
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering owned field read has no owner on this path")
+                }
+                if ir_type_is_owned(expression_types[i]) {
+                    let cloned_field = value_cursor
+                    value_cursor = value_cursor + 1
+                    out_values[i] = cloned_field
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_CLONE, result: cloned_field, type_kind: expression_types[i],
+                        left: read_result, right: -1, aux: -1, token: expression.token,
+                    })
+                    // The borrow is consumed here so the path leaves it defined
+                    // and used exactly once. The backend emits nothing for it:
+                    // its producer is a field read, which is not in the owned
+                    // set, so no munmap is generated — the same split that lets
+                    // a string literal carry a drop that frees nothing.
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_DROP, result: -1, type_kind: expression_types[i],
+                        left: read_result, right: -1, aux: -1, token: expression.token,
+                    })
+                }
             } else if expression.kind == EXPR_INDEX {
                 // `xs[i]` on a slice of scalars: one bounds-checked load whose
                 // stride the backend reads off the element type.
@@ -1390,7 +1471,8 @@ fn ir_cfg_lower_range(
                 }
                 if op == IR_CONST and expression.kind == EXPR_STRING and i != owned_root and
                     not ir_expression_feeds_string_concat(expressions, expression_types, i) and
-                    not ir_expression_is_call_argument(expressions, i) {
+                    not ir_expression_is_call_argument(expressions, i) and
+                    not ir_expression_is_field_initializer(expressions, i) {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering string literal has no owner on this path")
                 }
                 let mut left = -1
@@ -1761,7 +1843,7 @@ fn ir_lower_returning_if_tree(
                     while bare_drop >= 0 {
                         out_instructions = append(out_instructions, IrInstruction {
                             op: IR_DROP, result: -1, type_kind: ir_cfg_value_type(out_instructions, live[bare_drop]),
-                            left: live[bare_drop], right: -1, aux: -1, token: statement.token_start,
+                            left: live[bare_drop], right: -1, aux: ir_drop_aux(layout, source, ir_cfg_value_type(out_instructions, live[bare_drop])), token: statement.token_start,
                         })
                         bare_drop = bare_drop - 1
                     }
@@ -1829,7 +1911,7 @@ fn ir_lower_returning_if_tree(
                     if live[drop_index] != moved_from {
                         out_instructions = append(out_instructions, IrInstruction {
                             op: IR_DROP, result: -1, type_kind: ir_cfg_value_type(out_instructions, live[drop_index]),
-                            left: live[drop_index], right: -1, aux: -1, token: statement.token_start,
+                            left: live[drop_index], right: -1, aux: ir_drop_aux(layout, source, ir_cfg_value_type(out_instructions, live[drop_index])), token: statement.token_start,
                         })
                     }
                     drop_index = drop_index - 1
@@ -2374,7 +2456,7 @@ fn ir_lower_returning_if_tree(
                     while exit_drop >= 0 {
                         out_instructions = append(out_instructions, IrInstruction {
                             op: IR_DROP, result: -1, type_kind: ir_cfg_value_type(out_instructions, live[exit_drop]),
-                            left: live[exit_drop], right: -1, aux: -1, token: statement.token_start,
+                            left: live[exit_drop], right: -1, aux: ir_drop_aux(layout, source, ir_cfg_value_type(out_instructions, live[exit_drop])), token: statement.token_start,
                         })
                         exit_drop = exit_drop - 1
                     }
@@ -2439,7 +2521,7 @@ fn ir_lower_returning_if_tree(
             while body_drop >= loop_entry_live[back_loop] {
                 out_instructions = append(out_instructions, IrInstruction {
                     op: IR_DROP, result: -1, type_kind: ir_cfg_value_type(out_instructions, live[body_drop]),
-                    left: live[body_drop], right: -1, aux: -1,
+                    left: live[body_drop], right: -1, aux: ir_drop_aux(layout, source, ir_cfg_value_type(out_instructions, live[body_drop])),
                     token: statements[loop_statement[back_loop]].token_start,
                 })
                 body_drop = body_drop - 1
@@ -2485,7 +2567,7 @@ fn ir_lower_returning_if_tree(
             while tail_drop >= 0 {
                 out_instructions = append(out_instructions, IrInstruction {
                     op: IR_DROP, result: -1, type_kind: ir_cfg_value_type(out_instructions, live[tail_drop]),
-                    left: live[tail_drop], right: -1, aux: -1, token: item.body_end,
+                    left: live[tail_drop], right: -1, aux: ir_drop_aux(layout, source, ir_cfg_value_type(out_instructions, live[tail_drop])), token: item.body_end,
                 })
                 tail_drop = tail_drop - 1
             }

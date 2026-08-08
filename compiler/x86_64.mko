@@ -1990,6 +1990,7 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
   struct_kind_fields(instruction.type_kind) < 1 {
   return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 struct drop invalid"))
  }
+ bytes = x86_emit_drop_struct_fields(bytes, struct_drop_slot, struct_kind_fields(instruction.type_kind), instruction.aux)
  bytes = x86_emit_drop_struct(bytes, struct_drop_slot, struct_kind_fields(instruction.type_kind))
  } else if instruction.type_kind == SEM_STRING and
   (x86_string_value_owned(instructions, call_sites, instruction.left) or

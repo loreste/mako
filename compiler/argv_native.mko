@@ -195,6 +195,37 @@ fn x86_struct_value_owned(instructions: []IrInstruction, call_sites: []IrCallSit
 
 // Release a constructed struct: munmap(block, fields * 8). The width comes from
 // the kind, so nothing has to be read back out of the block.
+// Free every owned field of a constructed struct. `owned_mask` has one bit per
+// field slot; a set bit is a string object the struct holds, released before the
+// block so the reads of its own fields still have a block to read from.
+fn x86_emit_drop_struct_fields(bytes: []int, slot: int, field_count: int, owned_mask: int) []int {
+ let mut out = bytes
+ if owned_mask <= 0 { return out }
+ let mut i = 0
+ let mut bit = 1
+ while i < field_count {
+  if (owned_mask / bit) - ((owned_mask / bit) / 2) * 2 == 1 {
+   out = x86_emit_load_rax(out, slot)
+   // rax = [block + 8*i]
+   out = append(out, 72); out = append(out, 139); out = append(out, 128)
+   out = x86_emit_u32(out, i * 8)
+   // munmap(field, field.length + 10) — the size every string producer maps.
+   out = append(out, 72); out = append(out, 137); out = append(out, 199)
+   out = append(out, 72); out = append(out, 139); out = append(out, 48)
+   out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
+   out = x86_emit_int_rax(out, 11)
+   out = x86_emit_syscall_const(out, 0, 3)
+   out = x86_emit_syscall_const(out, 0, 4)
+   out = x86_emit_syscall_const(out, 0, 5)
+   out = x86_emit_syscall_const(out, 0, 6)
+   out = append(out, 15); out = append(out, 5)
+  }
+  bit = bit * 2
+  i = i + 1
+ }
+ return out
+}
+
 fn x86_emit_drop_struct(bytes: []int, slot: int, field_count: int) []int {
  let mut out = x86_emit_load_rax(bytes, slot)
  out = append(out, 72); out = append(out, 137); out = append(out, 199)

@@ -1,0 +1,27 @@
+// A struct with a `string` field — one slot each, but one of them owns storage.
+// Such a struct is *constructible* without being slice-eligible: `[]HostPort`
+// would drop the block and leak every element's string, so it stays refused.
+//
+// Two rules keep this sound, and both were found by running it rather than
+// reading it:
+//
+//   - Construction clones into the block. Without that the struct can hold the
+//     static view a literal is, and its drop tries to unmap the code image —
+//     which showed up as a failing munmap.
+//   - Reading an owned field clones out of the block, so the struct keeps
+//     everything it ever owned and its drop stays unconditional. There is no
+//     partially-moved struct to track.
+//
+// Three allocations, three releases: the block, the field's copy inside it, and
+// the copy handed to `name`.
+struct HostPort { host: string  port: int }
+
+fn mk(p: int) -> int {
+    let hp = HostPort { host: "example.com", port: p }
+    let name = hp.host
+    return len(name) + hp.port
+}
+
+fn main() {
+    exit(mk(3))
+}

@@ -51,7 +51,15 @@ struct StructLayout {
     field_name_start: []int
     field_name_end: []int
     field_type: []int
+    // Every field is a one-slot scalar: a slice of this struct is a plain heap
+    // block with a fixed stride and drops as one allocation.
     eligible: []bool
+    // Every field occupies one slot, but some may own storage — a `string`
+    // field, say. Such a struct can be constructed and dropped as a value,
+    // because the drop can free each owned field before the block. It is *not*
+    // slice-eligible: `[]HostPort` would drop the block and leak every
+    // element's string.
+    constructible: []bool
 }
 
 // The semantic kind of a one-slot scalar type name, or SEM_UNKNOWN.
@@ -130,6 +138,17 @@ fn struct_kind_fields(kind: int) -> int {
     return (normalized - SEM_ARRAY_STRUCT_BASE) - struct_kind_index(normalized) * SEM_STRUCT_WIDTH_UNIT
 }
 
+// The value kind for a constructible struct, built directly rather than via the
+// slice kind: a struct with an owned field has no slice kind, because a slice of
+// it could not be dropped as one allocation.
+fn semantic_struct_value_kind(layout: StructLayout, struct_index: int) -> int {
+    if struct_index < 0 or struct_index >= len(layout.field_count) { return SEM_UNKNOWN }
+    if not layout.constructible[struct_index] { return SEM_UNKNOWN }
+    let fields = layout.field_count[struct_index]
+    if fields < 1 or fields >= SEM_STRUCT_WIDTH_UNIT { return SEM_UNKNOWN }
+    return SEM_STRUCT_VALUE_BASE + struct_index * SEM_STRUCT_WIDTH_UNIT + fields
+}
+
 // Build the slice kind for a struct, or SEM_UNKNOWN when it is ineligible or
 // too wide to encode.
 fn semantic_struct_array_kind(layout: StructLayout, struct_index: int) -> int {
@@ -153,6 +172,7 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
     let mut field_name_end: []int = make([]int, 0, 32)
     let mut field_type: []int = make([]int, 0, 32)
     let mut eligible: []bool = make([]bool, 0, 8)
+    let mut constructible: []bool = make([]bool, 0, 8)
     let mut item_index = 0
     while item_index < len(items) {
         let item = items[item_index]
@@ -160,17 +180,31 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
             let start = len(field_name_start)
             let mut count = 0
             let mut ok = true
+            let mut one_slot = true
             let mut scan = item.body_start
-            while ok and scan + 2 < item.body_end and scan + 2 < len(tokens) {
+            while one_slot and scan + 2 < item.body_end and scan + 2 < len(tokens) {
                 if tokens[scan].kind == TK_IDENT and tokens[scan + 1].kind == TK_COLON {
                     let type_token = scan + 2
-                    let kind = if tokens[type_token].kind == TK_IDENT {
-                        semantic_scalar_named(token_text(source, tokens[type_token]))
+                    let field_name = if tokens[type_token].kind == TK_IDENT {
+                        token_text(source, tokens[type_token])
+                    } else {
+                        ""
+                    }
+                    let scalar = semantic_scalar_named(field_name)
+                    // A `string` field is one slot — a pointer to a string
+                    // object — but it owns what it points at, so it makes the
+                    // struct constructible without making it POD.
+                    let kind = if scalar != SEM_UNKNOWN {
+                        scalar
+                    } else if field_name == "string" {
+                        SEM_STRING
                     } else {
                         SEM_UNKNOWN
                     }
+                    if scalar == SEM_UNKNOWN { ok = false }
                     if kind == SEM_UNKNOWN {
-                        ok = false
+                        one_slot = false
+                        scan = scan + 3
                     } else {
                         field_name_start = append(field_name_start, tokens[scan].start)
                         field_name_end = append(field_name_end, tokens[scan].end)
@@ -183,11 +217,13 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
                 }
             }
             if count == 0 { ok = false }
+            if count == 0 { one_slot = false }
             name_start = append(name_start, item.name_start)
             name_end = append(name_end, item.name_end)
             field_start = append(field_start, start)
             field_count = append(field_count, count)
-            eligible = append(eligible, ok)
+            eligible = append(eligible, ok and one_slot)
+            constructible = append(constructible, one_slot)
         }
         item_index = item_index + 1
     }
@@ -196,7 +232,58 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
         field_start: field_start, field_count: field_count,
         field_name_start: field_name_start, field_name_end: field_name_end,
         field_type: field_type, eligible: eligible,
+        constructible: constructible,
     }
+}
+
+// Bitmask of the field slots of a struct that own storage, or 0.
+//
+// Carried in `IR_DROP.aux` so the backend can free a struct's owned fields
+// without being handed the struct table — the same reason the element stride
+// travels in the kind. One bit per slot; a struct wider than 30 fields is
+// refused rather than silently truncated.
+fn struct_owned_slot_mask(layout: StructLayout, struct_index: int) -> int {
+    if struct_index < 0 or struct_index >= len(layout.field_start) { return 0 }
+    if layout.field_count[struct_index] > 30 { return -1 }
+    let mut mask = 0
+    let mut bit = 1
+    let mut i = 0
+    while i < layout.field_count[struct_index] {
+        if layout.field_type[layout.field_start[struct_index] + i] == SEM_STRING {
+            mask = mask + bit
+        }
+        bit = bit * 2
+        i = i + 1
+    }
+    return mask
+}
+
+// Index of a *constructible* struct by source name, or -1. Wider than
+// `struct_layout_lookup`: it admits a struct with an owned field, which can be
+// built and dropped as a value but cannot be the element of a slice.
+fn struct_layout_constructible(layout: StructLayout, source: string, name: string) -> int {
+    let mut i = 0
+    while i < len(layout.name_start) {
+        if layout.constructible[i] and source[layout.name_start[i]:layout.name_end[i]] == name {
+            return i
+        }
+        i = i + 1
+    }
+    return -1
+}
+
+// Slots of a struct that own storage and therefore need their own drop.
+fn struct_owned_field_count(layout: StructLayout, struct_index: int) -> int {
+    if struct_index < 0 or struct_index >= len(layout.field_start) { return 0 }
+    let mut owned = 0
+    let mut i = 0
+    while i < layout.field_count[struct_index] {
+        if layout.field_type[layout.field_start[struct_index] + i] == SEM_STRING {
+            owned = owned + 1
+        }
+        i = i + 1
+    }
+    return owned
 }
 
 // Index of an eligible struct by source name, or -1.
@@ -739,9 +826,9 @@ if name == "unsafe_open_string" { inferred = SEM_INT }
             if expression.kind == EXPR_STRUCT {
                 let name_token = semantic_struct_literal_name_token(expressions, i)
                 if name_token >= 0 and name_token < len(tokens) {
-                    let literal_struct = struct_layout_lookup(layout, source, token_text(source, tokens[name_token]))
+                    let literal_struct = struct_layout_constructible(layout, source, token_text(source, tokens[name_token]))
                     if literal_struct >= 0 {
-                        inferred = semantic_struct_value_of(semantic_struct_array_kind(layout, literal_struct))
+                        inferred = semantic_struct_value_kind(layout, literal_struct)
                     }
                 }
             }
