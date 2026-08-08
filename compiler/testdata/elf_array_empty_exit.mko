@@ -1,0 +1,5 @@
+// Annotated empty array literal: make(0) seed, no elements.
+fn main() {
+    let a: []int = []
+    exit(len(a))
+}

@@ -815,6 +815,7 @@ for cap_case in \
   "elf_array_rebind_exit:elf-array-rebind:2a1b1db0a44f6c7204ea427aeb4478541cb17236b478258ae75df504c492ea49:1885:15" \
   "elf_array_call_exit:elf-array-call:fb9437c961f0e8f798a185ddf18af27c81ea451f8a0feb6fa82300a66a73eb43:1267:6" \
   "elf_array_append_exit:elf-array-append:5c3cdb894c32339a145d2b13151e5a87b474f6e924aeb86b7e008a9345cb8f48:1562:9" \
+  "elf_array_empty_exit:elf-array-empty:74238da84d8c7c6f5b89cc85ba63a206be3f33a3a195a721833619f665165911:290:0" \
   "elf_loop_owned_slice_exit:elf-loop-owned-slice:9262e904f314e1ffe2661d80731a887f1cbbd5b332cb838efe88c4b9044b105f:1036:6" \
   "elf_loop_owned_array_exit:elf-loop-owned-array:24e7a216fdbbe278dd6bf9ebeb280ab2ed04cf91810c93e772dc5d6621286c05:1298:56" \
   "elf_loop_owned_dual_exit:elf-loop-owned-dual:09bd968f0d51b39314887d03c3884580a216be571196221cec67ffbd38db97dd:1065:6" \

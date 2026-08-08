@@ -629,6 +629,71 @@ fn semantic_const_reference_type(
     return SEM_UNKNOWN
 }
 
+// Type of a `let name: T = ...` annotation, or SEM_UNKNOWN. Locals do not
+// store a type_root today (only parameters do), so empty `[]` seeds and other
+// untyped initializers still need the annotation read off the token span.
+fn semantic_let_annotation_type(
+    source: string,
+    tokens: []Token,
+    layout: StructLayout,
+    name_start: int,
+    name_end: int,
+    declaration_end: int
+) -> int {
+    // Find the name token by source span, then require `:` before `=` / `:=`.
+    let mut name_token = -1
+    let mut scan = 0
+    while scan < len(tokens) and tokens[scan].start <= name_start {
+        if tokens[scan].start == name_start and tokens[scan].end == name_end {
+            name_token = scan
+        }
+        scan = scan + 1
+    }
+    if name_token < 0 { return SEM_UNKNOWN }
+    let mut pos = name_token + 1
+    if pos >= declaration_end or pos >= len(tokens) or tokens[pos].kind != TK_COLON {
+        return SEM_UNKNOWN
+    }
+    pos = pos + 1
+    if pos >= declaration_end or pos >= len(tokens) { return SEM_UNKNOWN }
+    // `[]T` (Go) and `[T]` (Mako) array forms.
+    if tokens[pos].kind == TK_LBRACKET {
+        pos = pos + 1
+        let mut element_token = -1
+        if pos < declaration_end and pos < len(tokens) and tokens[pos].kind == TK_RBRACKET {
+            // `[]T`
+            pos = pos + 1
+            if pos < declaration_end and pos < len(tokens) and tokens[pos].kind == TK_IDENT {
+                element_token = pos
+            }
+        } else if pos < declaration_end and pos < len(tokens) and tokens[pos].kind == TK_IDENT {
+            // `[T]`
+            element_token = pos
+        }
+        if element_token < 0 { return SEM_UNKNOWN }
+        let element_name = token_text(source, tokens[element_token])
+        if element_name == "int" or element_name == "int64" { return SEM_ARRAY_INT }
+        if element_name == "float" or element_name == "float64" { return SEM_ARRAY_FLOAT }
+        if element_name == "bool" { return SEM_ARRAY_BOOL }
+        if element_name == "string" { return SEM_ARRAY_STRING }
+        if element_name == "byte" or element_name == "uint8" { return SEM_ARRAY_BYTE }
+        return semantic_struct_array_kind(layout, struct_layout_lookup(layout, source, element_name))
+    }
+    if tokens[pos].kind == TK_IDENT {
+        let name = token_text(source, tokens[pos])
+        if name == "int" or name == "int64" { return SEM_INT }
+        if name == "float" or name == "float64" { return SEM_FLOAT }
+        if name == "bool" { return SEM_BOOL }
+        if name == "string" { return SEM_STRING }
+        if name == "byte" or name == "uint8" { return SEM_BYTE }
+        let constructible = struct_layout_constructible(layout, source, name)
+        if constructible >= 0 {
+            return semantic_struct_value_kind(layout, constructible)
+        }
+    }
+    return SEM_UNKNOWN
+}
+
 fn infer_semantic_types(
     source: string,
     tokens: []Token,
@@ -657,6 +722,11 @@ fn infer_semantic_types(
         let local = locals[i]
         if local.is_parameter {
             local_types[i] = semantic_declared_type(source, tokens, types, type_edges, layout, local.type_root)
+        } else {
+            // `let name: T = ...` — needed so empty `[]` seeds are typed.
+            local_types[i] = semantic_let_annotation_type(
+                source, tokens, layout, local.name_start, local.name_end, local.declaration_end
+            )
         }
         if local.initializer_root >= 0 and local.initializer_root < len(expressions) {
             initializer_owner[local.initializer_root] = i
@@ -715,6 +785,11 @@ fn infer_semantic_types(
                     if inferred == SEM_UNKNOWN and expression.left >= 0 {
                         inferred = expression_types[expression.left]
                     }
+                } else if initializer_owner[i] >= 0 and initializer_owner[i] < len(local_types) and
+                    local_types[initializer_owner[i]] != SEM_UNKNOWN {
+                    // Empty `[]` seed of `let xs: []T = []` — no element to
+                    // infer from, so the annotation is the only source.
+                    inferred = local_types[initializer_owner[i]]
                 }
             }
             if expression.kind == EXPR_INDEX and expression.left >= 0 {

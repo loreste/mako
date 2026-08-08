@@ -600,7 +600,10 @@ fn ir_call_consumes_arguments(callee_item: int, argument_type: int) -> bool {
     // scalar by value, a struct by a stride-wide memcpy — so treating the
     // element as consumed leaked every `append(out, Pt { ... })`.
     if callee_item == -10 { return semantic_is_slice(argument_type) }
-    if argument_type == SEM_STRING { return true }
+    // Intrinsics borrow strings (`str_byte_at`, `print` via IR_PRINT, …).
+    // Declared functions above still consume string parameters. Treating a
+    // borrow as a consume left the clone from `str_byte_at(mk(), i)` with no
+    // drop, and pairing it with a pending drop double-freed.
     return false
 }
 
@@ -1181,12 +1184,37 @@ fn ir_cfg_lower_range(
                     i = i + 1
                     continue
                 }
-                let mut reversed: []int = make([]int, 0, 4)
+                // Resolve the callee before walking arguments so clone/consume
+                // decisions can name it.
                 let mut cursor = i
                 let mut steps = 0
                 while cursor >= 0 and cursor < len(expressions) and
                     expressions[cursor].kind == EXPR_CALL and steps < len(expressions) {
-                    let argument = expressions[cursor].right
+                    cursor = expressions[cursor].left
+                    steps = steps + 1
+                }
+                let call_signature = semantic_function_signature(signatures, symbols, expression_symbols, cursor)
+                let mut callee_item = -1
+                if call_signature >= 0 {
+                    callee_item = signatures[call_signature].item
+                } else if cursor >= 0 and cursor < len(expressions) and
+                    expressions[cursor].kind == EXPR_IDENT {
+                    callee_item = ir_intrinsic_callee_item(token_text(source, tokens[expressions[cursor].token]))
+                    if callee_item == IR_NOT_INTRINSIC {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering has no intrinsic for call to " +
+                            token_text(source, tokens[expressions[cursor].token]))
+                    }
+                } else {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering supports only calls to declared functions")
+                }
+                let mut reversed: []int = make([]int, 0, 4)
+                let mut arg_cursor = i
+                steps = 0
+                while arg_cursor >= 0 and arg_cursor < len(expressions) and
+                    expressions[arg_cursor].kind == EXPR_CALL and steps < len(expressions) {
+                    let argument = expressions[arg_cursor].right
                     if argument >= 0 {
                         if argument >= len(out_values) or out_values[argument] < 0 {
                             return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering call argument is not available")
@@ -1204,11 +1232,14 @@ fn ir_cfg_lower_range(
                         let argument_owned = ir_type_is_owned(argument_type)
                         // Struct values are always borrowed at call sites — there
                         // is no clone emitter for one, and parameters of struct
-                        // type are element pointers. Strings and slices still
-                        // clone so the callee can own what it is handed.
+                        // type are element pointers. Bindings of strings/slices
+                        // clone only for a *consuming* callee so the binding
+                        // survives. Temps: consuming call takes them; borrowing
+                        // one relies on a pending drop after the call.
                         let clone_argument = argument_owned and
                             not semantic_is_struct_value(argument_type) and
-                            (argument_is_binding or argument_type == SEM_STRING)
+                            argument_is_binding and
+                            ir_call_consumes_arguments(callee_item, argument_type)
                         if clone_argument {
                             let cloned = value_cursor
                             value_cursor = value_cursor + 1
@@ -1216,25 +1247,14 @@ fn ir_cfg_lower_range(
                                 op: IR_CLONE, result: cloned, type_kind: argument_type,
                                 left: passed, right: -1, aux: -1, token: expressions[argument].token,
                             })
-                            // Cloning a temporary leaves the original with no
-                            // reader. A binding keeps its scope-exit drop, so
-                            // dropping one here would be a double free.
-                            if not argument_is_binding {
-                                out_instructions = append(out_instructions, IrInstruction {
-                                    op: IR_DROP, result: -1, type_kind: argument_type,
-                                    left: passed, right: -1, aux: -1, token: expressions[argument].token,
-                                })
-                            }
                             passed = cloned
                         }
-                        // The call either clones (and drops the temp above) or
-                        // consumes the temp as an owned argument. In both cases
-                        // a pending drop of the same value — scheduled by an
-                        // owned field read — would free it twice.
-                        // `take(code.error)` and `pass_img(code.bytes)` both hit
-                        // this.
-                        if argument_owned and not argument_is_binding and
-                            not semantic_is_struct_value(argument_type) {
+                        // A consuming call takes the temp (or the clone of a
+                        // binding). Cancel any pending drop of that value —
+                        // field reads and mid-expression calls schedule one
+                        // after this site, which would free it twice.
+                        if argument_owned and not semantic_is_struct_value(argument_type) and
+                            ir_call_consumes_arguments(callee_item, argument_type) {
                             let mut pend = 0
                             while pend < len(pending_drop_after) {
                                 if pending_drop_value[pend] == out_values[argument] or
@@ -1255,39 +1275,28 @@ fn ir_cfg_lower_range(
                         }
                         reversed = append(reversed, passed)
                     }
-                    cursor = expressions[cursor].left
+                    arg_cursor = expressions[arg_cursor].left
                     steps = steps + 1
                 }
-                let call_signature = semantic_function_signature(signatures, symbols, expression_symbols, cursor)
-                // A callee with no signature is either an intrinsic the backend
-                // emits inline, or a name this path cannot lower. The intrinsic
-                // table is shared with the matched-shape lowering so the two
-                // cannot disagree about what a sentinel means.
-                let mut callee_item = -1
-                if call_signature >= 0 {
-                    callee_item = signatures[call_signature].item
-                } else if cursor >= 0 and cursor < len(expressions) {
-                    callee_item = ir_intrinsic_callee_item(token_text(source, tokens[expressions[cursor].token]))
-                    if callee_item == IR_NOT_INTRINSIC {
-                        // Naming the callee is the difference between "some
-                        // builtin is missing" and a list of what to add.
-                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                            "CFG lowering has no intrinsic for call to " +
-                            token_text(source, tokens[expressions[cursor].token]))
-                    }
-                } else {
-                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering supports only calls to declared functions")
-                }
-                // Both result types occupy one slot and come back in rax, so
-                // the call sequence is identical; only the tag differs, and it
-                // is what lets a bool result feed a branch. An owned result
-                // (a string, a slice) is excluded: this path has no owner for
-                // a call temporary, so admitting one would leave a value the
-                // ownership verifier cannot see consumed.
-                if expression_types[i] != SEM_INT and expression_types[i] != SEM_BOOL and
-                    not (ir_type_is_owned(expression_types[i]) and i == owned_root) and
-                    not (expression_types[i] == SEM_STRING and
-                        ir_expression_feeds_string_concat(expressions, expression_types, i)) {
+                // Int/bool results occupy one slot and come back in rax. An
+                // owned result is allowed as the range's owned_root, a concat
+                // operand, or the argument of `len` (which only loads the
+                // header). Broader mid-expression owned calls need a sealed
+                // pending-drop story across consuming vs borrowing callees.
+                let call_type = expression_types[i]
+                let call_owned = ir_type_is_owned(call_type)
+                let len_reader = ir_expression_consumer(expressions, i)
+                let feeds_len = len_reader >= 0 and expressions[len_reader].kind == EXPR_CALL and
+                    ir_call_chain_base(expressions, len_reader) >= 0 and
+                    expressions[ir_call_chain_base(expressions, len_reader)].kind == EXPR_IDENT and
+                    token_text(source, tokens[expressions[ir_call_chain_base(expressions, len_reader)].token]) == "len"
+                let call_owned_ok = call_owned and (
+                    i == owned_root or
+                    (call_type == SEM_STRING and
+                        ir_expression_feeds_string_concat(expressions, expression_types, i)) or
+                    feeds_len
+                )
+                if call_type != SEM_INT and call_type != SEM_BOOL and not call_owned_ok {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering supports only integer- and boolean-returning calls")
                 }
                 let argument_start = len(out_call_arguments)
@@ -1306,9 +1315,15 @@ fn ir_cfg_lower_range(
                 value_cursor = value_cursor + 1
                 out_values[i] = call_result
                 out_instructions = append(out_instructions, IrInstruction {
-                    op: IR_CALL, result: call_result, type_kind: expression_types[i],
+                    op: IR_CALL, result: call_result, type_kind: call_type,
                     left: -1, right: -1, aux: site_index, token: expression.token,
                 })
+                // `len(mk())`: drop the owned temp after the length load.
+                if call_owned and feeds_len and len_reader >= 0 {
+                    pending_drop_after = append(pending_drop_after, len_reader)
+                    pending_drop_value = append(pending_drop_value, call_result)
+                    pending_drop_type = append(pending_drop_type, call_type)
+                }
             } else if expression.kind == EXPR_IDENT {
                 // An identifier aliases whatever SSA value its binding already
                 // holds — a parameter, or a local bound earlier in a block that
