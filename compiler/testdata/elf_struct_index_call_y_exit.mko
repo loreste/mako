@@ -1,0 +1,11 @@
+// Twin of elf_struct_index_call_exit that names `.y` instead of `.x`. Same
+// exit status against zero-init storage; different image if the field offset
+// reaches the load.
+struct Pt { x: int  y: int }
+
+fn take(p: Pt) -> int { return p.y }
+
+fn main() {
+    let pts: []Pt = make([]Pt, 1, 2)
+    exit(take(pts[0]) + 3)
+}

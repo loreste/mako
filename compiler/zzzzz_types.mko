@@ -734,12 +734,16 @@ if name == "unsafe_open_string" { inferred = SEM_INT }
                             // `[]int` append as bytes, so indexing the result
                             // produced a byte and `element + int` was rejected
                             // as an arithmetic error on unrelated operands.
+                            // A slice of an eligible struct is a slice too:
+                            // `semantic_array_element` still returns unknown for
+                            // those (the element is a borrowed pointer, not a
+                            // scalar), so the test is `semantic_is_slice`.
                             let appended = if expression.right >= 0 and expression.right < len(expression_types) {
                                 expression_types[expression.right]
                             } else {
                                 SEM_UNKNOWN
                             }
-                            inferred = if semantic_array_element(appended) != SEM_UNKNOWN { appended } else { SEM_UNKNOWN }
+                            inferred = if semantic_is_slice(appended) { appended } else { SEM_UNKNOWN }
                         }
                         // Statement intrinsics: print and exit produce no
                         // value; the int marker keeps them out of the

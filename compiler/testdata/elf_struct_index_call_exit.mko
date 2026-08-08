@@ -1,0 +1,18 @@
+// Bare `take(pts[0])` — the index is a call argument, not a field object and
+// not a bound local. It must materialise as a bounds-checked element address,
+// not as a word load at the wrong width.
+//
+// Adversarial twin of elf_struct_index_call_y_exit: both read zero-initialised
+// make storage so the exit status alone cannot tell the fields apart; the
+// images must differ, and only the `.y` form may contain `add rax, 8`.
+//
+// Stage-0 segfaults on field reads of a make'd struct slice, so the oracle is
+// the zero-init arithmetic below, checked by executing the image on Linux.
+struct Pt { x: int  y: int }
+
+fn take(p: Pt) -> int { return p.x }
+
+fn main() {
+    let pts: []Pt = make([]Pt, 1, 2)
+    exit(take(pts[0]) + 3)
+}

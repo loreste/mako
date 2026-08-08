@@ -1,0 +1,14 @@
+// append(out, src[0]) must copy the whole element stride, not one word.
+// Zero-init source makes every field 0, so the exit status is len-based; the
+// image still has to lower a multi-slot store. A follow-up growth fixture
+// forces the reallocate path.
+//
+// Expected exit: len(out) + 7 = 8 against zero-init storage.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let src: []Pt = make([]Pt, 1, 2)
+    let mut out: []Pt = make([]Pt, 0, 2)
+    out = append(out, src[0])
+    exit(len(out) + 7)
+}

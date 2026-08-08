@@ -1,0 +1,9 @@
+// Direct fused field read `pts[0].y` with no intermediate binding and no call.
+// The index must not emit a free-standing owned address temporary — that would
+// fail the ownership verifier — and must still honour the field offset.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let pts: []Pt = make([]Pt, 1, 2)
+    exit(pts[0].y + 4)
+}

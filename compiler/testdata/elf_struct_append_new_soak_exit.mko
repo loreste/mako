@@ -1,0 +1,15 @@
+// Append of a *constructed* struct must free the construction after the
+// element is copied. Without that, one mmap per iteration leaks the Pt block.
+// 20_000 iterations must balance.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let mut i = 0
+    while i < 20000 {
+        let mut out: []Pt = make([]Pt, 0, 2)
+        out = append(out, Pt { x: 1, y: 2 })
+        let n = out[0].x + out[0].y
+        i = i + 1 + n - n
+    }
+    exit(3)
+}

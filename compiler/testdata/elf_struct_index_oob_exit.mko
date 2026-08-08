@@ -1,0 +1,8 @@
+// Out-of-range element address must hit the bounds trap (exit 70), not wrap
+// or read past the allocation. Stage-0 aborts rather than trapping cleanly.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let pts: []Pt = make([]Pt, 1, 2)
+    exit(pts[5].x)
+}

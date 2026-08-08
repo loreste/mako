@@ -689,8 +689,11 @@ fn x86_emit_syscall_const(bytes: []int, value: int, position: int) []int {
 // r8/r9.
 fn x86_emit_clone_slice(bytes: []int, source_slot: int, result_slot: int, element_size: int) []int {
     // Byte slices are packed; every other element is slot-based, so its stride
-    // is a whole number of slots. The arithmetic here is stride-generic, so a
-    // struct element only has to pass this shape check.
+    // is a whole number of slots. Capacity and length scale through
+    // `x86_emit_scale_by_stride` so a multi-field struct slice is not sized as
+    // if it were `[]byte` (which left the clone undersized and the drop
+    // unbalanced).
+    if element_size < 1 { return bytes }
     if element_size != 1 and (element_size < 8 or element_size - (element_size / 8) * 8 != 0) { return bytes }
     let mut out = x86_emit_load_rax(bytes, source_slot)
     out = append(out, 73); out = append(out, 137); out = append(out, 196)
@@ -698,11 +701,10 @@ fn x86_emit_clone_slice(bytes: []int, source_slot: int, result_slot: int, elemen
     out = append(out, 77); out = append(out, 139); out = append(out, 116); out = append(out, 36); out = append(out, 8)
     // mmap(0, capacity * stride + 24, PROT_READ|WRITE, PRIVATE|ANON, -1, 0)
     out = append(out, 49); out = append(out, 255)
-    out = append(out, 76); out = append(out, 137); out = append(out, 246)
-    if element_size == 8 {
-        out = append(out, 72); out = append(out, 193); out = append(out, 230); out = append(out, 3)
-    }
-    out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 24)
+    out = append(out, 76); out = append(out, 137); out = append(out, 240)
+    out = x86_emit_scale_by_stride(out, element_size)
+    out = append(out, 72); out = append(out, 131); out = append(out, 192); out = append(out, 24)
+    out = append(out, 72); out = append(out, 137); out = append(out, 198)
     out = append(out, 186); out = x86_emit_u32(out, 3)
     out = append(out, 65); out = append(out, 186); out = x86_emit_u32(out, 34)
     out = append(out, 73); out = append(out, 199); out = append(out, 192); out = x86_emit_u32(out, 4294967295)
@@ -718,10 +720,9 @@ fn x86_emit_clone_slice(bytes: []int, source_slot: int, result_slot: int, elemen
     // Copy length * stride bytes from the source payload.
     out = append(out, 76); out = append(out, 137); out = append(out, 215)
     out = append(out, 73); out = append(out, 139); out = append(out, 116); out = append(out, 36); out = append(out, 16)
-    out = append(out, 76); out = append(out, 137); out = append(out, 233)
-    if element_size == 8 {
-        out = append(out, 72); out = append(out, 193); out = append(out, 225); out = append(out, 3)
-    }
+    out = append(out, 76); out = append(out, 137); out = append(out, 232)
+    out = x86_emit_scale_by_stride(out, element_size)
+    out = append(out, 72); out = append(out, 137); out = append(out, 193)
     out = append(out, 243); out = append(out, 164)
     out = append(out, 76); out = append(out, 137); out = append(out, 248)
     return x86_emit_store_rax(out, result_slot)
@@ -963,7 +964,51 @@ fn x86_emit_index_byte(bytes: []int, slice_slot: int, index_slot: int, result_sl
 // new capacity cannot be parked in any of those. Doing so previously fed the
 // copy a garbage source pointer, wrote the mmap protection value into the
 // capacity field, and unmapped an arbitrary address.
-fn x86_emit_append_growth(bytes: []int, value_slot: int, result_slot: int, element_size: int) []int {
+// Scale a count in rax by `element_size` bytes. Byte slices stay as-is; slot
+// slices use an immediate imul so a multi-field struct stride is not silently
+// treated as one byte (which left multi-slot `make`/`drop` unbalanced).
+fn x86_emit_scale_by_stride(bytes: []int, element_size: int) []int {
+    let mut out = bytes
+    if element_size == 1 { return out }
+    if element_size == 8 {
+        out = append(out, 72); out = append(out, 193); out = append(out, 224); out = append(out, 3)
+        return out
+    }
+    // imul rax, rax, element_size
+    out = append(out, 72); out = append(out, 105); out = append(out, 192)
+    out = x86_emit_u32(out, element_size)
+    return out
+}
+
+// Write one element at `dest` (r12). When `value_is_pointer` the slot holds a
+// pointer to `element_size` bytes (struct value / element address); otherwise
+// it holds a scalar and only element_size 1 or 8 are accepted.
+fn x86_emit_store_append_value(bytes: []int, value_slot: int, element_size: int, value_is_pointer: bool) []int {
+    let mut out = bytes
+    if value_is_pointer {
+        // rsi = source pointer; rdi = dest (r12); rcx = byte count; rep movsb.
+        out = x86_emit_load_rax(out, value_slot)
+        out = append(out, 72); out = append(out, 137); out = append(out, 198)
+        out = append(out, 76); out = append(out, 137); out = append(out, 231)
+        out = append(out, 72); out = append(out, 199); out = append(out, 193)
+        out = x86_emit_u32(out, element_size)
+        out = append(out, 243); out = append(out, 164)
+        return out
+    }
+    out = x86_emit_load_rax(out, value_slot)
+    if element_size == 8 {
+        out = append(out, 73); out = append(out, 137); out = append(out, 4); out = append(out, 36)
+    } else {
+        out = append(out, 65); out = append(out, 136); out = append(out, 4); out = append(out, 36)
+    }
+    return out
+}
+
+fn x86_emit_append_growth(bytes: []int, value_slot: int, result_slot: int, element_size: int, value_is_pointer: bool) []int {
+    if element_size < 1 { return bytes }
+    if element_size != 1 and (element_size < 8 or element_size - (element_size / 8) * 8 != 0) { return bytes }
+    if value_is_pointer and element_size < 8 { return bytes }
+    if not value_is_pointer and element_size != 1 and element_size != 8 { return bytes }
     let mut out = bytes
     // Preserve the incoming header/length/capacity out of the syscall path.
     out = append(out, 77); out = append(out, 137); out = append(out, 196)
@@ -975,13 +1020,10 @@ fn x86_emit_append_growth(bytes: []int, value_slot: int, result_slot: int, eleme
     out = append(out, 73); out = append(out, 209); out = append(out, 231)
     // mmap(0, new capacity * stride + 24, PROT_READ|WRITE, PRIVATE|ANON, -1, 0)
     out = append(out, 49); out = append(out, 255)
-    if element_size == 8 {
-        out = append(out, 76); out = append(out, 137); out = append(out, 254)
-        out = append(out, 72); out = append(out, 193); out = append(out, 230); out = append(out, 3)
-        out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 24)
-    } else {
-        out = append(out, 73); out = append(out, 141); out = append(out, 119); out = append(out, 24)
-    }
+    out = append(out, 76); out = append(out, 137); out = append(out, 248)
+    out = x86_emit_scale_by_stride(out, element_size)
+    out = append(out, 72); out = append(out, 131); out = append(out, 192); out = append(out, 24)
+    out = append(out, 72); out = append(out, 137); out = append(out, 198)
     out = append(out, 186); out = x86_emit_u32(out, 3)
     out = append(out, 65); out = append(out, 186); out = x86_emit_u32(out, 34)
     out = append(out, 73); out = append(out, 199); out = append(out, 192); out = x86_emit_u32(out, 4294967295)
@@ -997,48 +1039,39 @@ fn x86_emit_append_growth(bytes: []int, value_slot: int, result_slot: int, eleme
     // Copy the old payload, then release the old mapping.
     out = append(out, 76); out = append(out, 137); out = append(out, 215)
     out = append(out, 73); out = append(out, 139); out = append(out, 116); out = append(out, 36); out = append(out, 16)
-    out = append(out, 76); out = append(out, 137); out = append(out, 233)
-    if element_size == 8 {
-        out = append(out, 72); out = append(out, 193); out = append(out, 225); out = append(out, 3)
-    }
+    out = append(out, 76); out = append(out, 137); out = append(out, 232)
+    out = x86_emit_scale_by_stride(out, element_size)
+    out = append(out, 72); out = append(out, 137); out = append(out, 193)
     out = append(out, 243); out = append(out, 164)
     out = append(out, 76); out = append(out, 137); out = append(out, 231)
-    if element_size == 8 {
-        out = append(out, 76); out = append(out, 137); out = append(out, 246)
-        out = append(out, 72); out = append(out, 193); out = append(out, 230); out = append(out, 3)
-        out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 24)
-    } else {
-        out = append(out, 73); out = append(out, 141); out = append(out, 118); out = append(out, 24)
-    }
+    out = append(out, 76); out = append(out, 137); out = append(out, 240)
+    out = x86_emit_scale_by_stride(out, element_size)
+    out = append(out, 72); out = append(out, 131); out = append(out, 192); out = append(out, 24)
+    out = append(out, 72); out = append(out, 137); out = append(out, 198)
     out = append(out, 184); out = x86_emit_u32(out, 11)
     out = append(out, 15); out = append(out, 5)
-    // Store the new byte at data + old length and bump the length.
+    // Store the new element at data + old_length * stride and bump the length.
     out = append(out, 77); out = append(out, 139); out = append(out, 103); out = append(out, 16)
-    if element_size == 8 {
-        // lea r12, [r12 + r13*8]
-        out = append(out, 79); out = append(out, 141); out = append(out, 36); out = append(out, 236)
-    } else {
-        out = append(out, 77); out = append(out, 1); out = append(out, 236)
-    }
-    out = x86_emit_load_rax(out, value_slot)
-    if element_size == 8 {
-        out = append(out, 73); out = append(out, 137); out = append(out, 4); out = append(out, 36)
-    } else {
-        out = append(out, 65); out = append(out, 136); out = append(out, 4); out = append(out, 36)
-    }
+    out = append(out, 76); out = append(out, 137); out = append(out, 232)
+    out = x86_emit_scale_by_stride(out, element_size)
+    out = append(out, 73); out = append(out, 1); out = append(out, 196)
+    out = x86_emit_store_append_value(out, value_slot, element_size, value_is_pointer)
     out = append(out, 73); out = append(out, 255); out = append(out, 7)
     out = append(out, 76); out = append(out, 137); out = append(out, 248)
     return x86_emit_store_rax(out, result_slot)
 }
 
 fn x86_emit_drop_byte_slice(bytes: []int, slice_slot: int, element_size: int) []int {
+    if element_size < 1 { return bytes }
+    if element_size != 1 and (element_size < 8 or element_size - (element_size / 8) * 8 != 0) { return bytes }
     let mut out = x86_emit_load_rax(bytes, slice_slot)
     out = append(out, 73); out = append(out, 137); out = append(out, 192)
     out = append(out, 73); out = append(out, 139); out = append(out, 112); out = append(out, 8)
-    if element_size == 8 {
-        out = append(out, 72); out = append(out, 193); out = append(out, 230); out = append(out, 3)
-    }
-    out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 24)
+    // rsi = capacity; scale to bytes, then +24 for the header.
+    out = append(out, 72); out = append(out, 137); out = append(out, 240)
+    out = x86_emit_scale_by_stride(out, element_size)
+    out = append(out, 72); out = append(out, 131); out = append(out, 192); out = append(out, 24)
+    out = append(out, 72); out = append(out, 137); out = append(out, 198)
     out = append(out, 76); out = append(out, 137); out = append(out, 199)
     out = append(out, 184); out = x86_emit_u32(out, 11)
     out = append(out, 49); out = append(out, 210)
@@ -1087,34 +1120,37 @@ fn x86_emit_open_byte_slice(bytes: []int, slice_slot: int, result_slot: int) []i
     return x86_emit_store_rax(out, result_slot)
 }
 
-// Store one byte at header.data + length and bump the length, leaving the
-// slice header pointer in rax.
+// Store one element at header.data + length*stride and bump the length,
+// leaving the slice header pointer in rax.
 //
-// The destination has to be parked in r11 first: loading the byte value goes
-// through rax, so computing the address into rax and then loading the value
-// would overwrite the address and store through the value instead.
-fn x86_emit_append_byte_in_place(bytes: []int, value_slot: int, element_size: int) []int {
+// Destination is parked in r12 before the value is loaded: the value path
+// goes through rax, so computing the address into rax and then loading the
+// value would overwrite the address and store through the value instead.
+// On entry r8 holds the header and rcx holds the length in elements.
+fn x86_emit_append_byte_in_place(bytes: []int, value_slot: int, element_size: int, value_is_pointer: bool) []int {
+    if element_size < 1 { return bytes }
+    if element_size != 1 and (element_size < 8 or element_size - (element_size / 8) * 8 != 0) { return bytes }
+    if value_is_pointer and element_size < 8 { return bytes }
+    if not value_is_pointer and element_size != 1 and element_size != 8 { return bytes }
     let mut out = bytes
+    // r11 = header.data
     out = append(out, 73); out = append(out, 139); out = append(out, 64); out = append(out, 16)
-    if element_size == 8 {
-        // lea rax, [rax + rcx*8] — rcx is the length in elements.
-        out = append(out, 72); out = append(out, 141); out = append(out, 4); out = append(out, 200)
-    } else {
-        out = append(out, 72); out = append(out, 1); out = append(out, 200)
-    }
     out = append(out, 73); out = append(out, 137); out = append(out, 195)
-    out = x86_emit_load_rax(out, value_slot)
-    if element_size == 8 {
-        out = append(out, 73); out = append(out, 137); out = append(out, 3)
-    } else {
-        out = append(out, 65); out = append(out, 136); out = append(out, 3)
-    }
+    // rax = length * stride; r11 += rax → destination
+    out = append(out, 72); out = append(out, 137); out = append(out, 200)
+    out = x86_emit_scale_by_stride(out, element_size)
+    out = append(out, 73); out = append(out, 1); out = append(out, 195)
+    // r12 = dest
+    out = append(out, 77); out = append(out, 137); out = append(out, 220)
+    out = x86_emit_store_append_value(out, value_slot, element_size, value_is_pointer)
+    // bump length; return header in rax
     out = append(out, 73); out = append(out, 255); out = append(out, 0)
     out = append(out, 76); out = append(out, 137); out = append(out, 192)
     return out
 }
 
-fn x86_emit_append_byte_grow(bytes: []int, slice_slot: int, value_slot: int, result_slot: int, element_size: int) []int {
+fn x86_emit_append_byte_grow(bytes: []int, slice_slot: int, value_slot: int, result_slot: int, element_size: int, value_is_pointer: bool) []int {
+    if element_size < 1 { return bytes }
     let mut out = x86_emit_load_rax(bytes, slice_slot)
     out = append(out, 73); out = append(out, 137); out = append(out, 192)
     out = append(out, 73); out = append(out, 139); out = append(out, 8)
@@ -1122,12 +1158,16 @@ fn x86_emit_append_byte_grow(bytes: []int, slice_slot: int, value_slot: int, res
     out = append(out, 72); out = append(out, 57); out = append(out, 209)
     out = append(out, 15); out = append(out, 131)
     let full_disp = len(out); out = append(out, 0); out = append(out, 0); out = append(out, 0); out = append(out, 0)
-    out = x86_emit_append_byte_in_place(out, value_slot, element_size)
+    let before_in_place = len(out)
+    out = x86_emit_append_byte_in_place(out, value_slot, element_size, value_is_pointer)
+    if len(out) == before_in_place { return bytes }
     out = x86_emit_store_rax(out, result_slot)
     out = append(out, 233)
     let skip_growth = len(out); out = append(out, 0); out = append(out, 0); out = append(out, 0); out = append(out, 0)
     let growth = len(out)
-    out = x86_emit_append_growth(out, value_slot, result_slot, element_size)
+    let before_growth = len(out)
+    out = x86_emit_append_growth(out, value_slot, result_slot, element_size, value_is_pointer)
+    if len(out) == before_growth { return bytes }
     let after_growth = len(out)
     out = x86_patch_u32(out, skip_growth, after_growth - (skip_growth + 4))
     out = x86_patch_u32(out, full_disp, growth - (full_disp + 4))
@@ -1742,7 +1782,12 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
         } else if instruction.op == IR_CALL and instruction.aux >= 0 and
                 instruction.aux < len(call_sites) and call_sites[instruction.aux].callee_item == -10 {
             let site = call_sites[instruction.aux]
-            if x86_slice_element_size(instruction.type_kind) == 0 or site.argument_count != 2 or site.argument_start < 0 or site.argument_start + 1 >= len(call_arguments) or slot < 1 or slot > function.value_count {
+            let append_stride = x86_slice_element_size(instruction.type_kind)
+            // A struct-slice element is a pointer to N slots; a scalar element
+            // is the value itself. Mixing those up stores a pointer where a
+            // field should be, or a field where a pointer should be.
+            let append_from_pointer = semantic_is_struct_array(instruction.type_kind)
+            if append_stride == 0 or site.argument_count != 2 or site.argument_start < 0 or site.argument_start + 1 >= len(call_arguments) or slot < 1 or slot > function.value_count {
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 byte append call invalid"))
             }
             let slice_slot = call_arguments[site.argument_start] - function.value_start + 1
@@ -1750,7 +1795,11 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
             if slice_slot < 1 or slice_slot >= slot or value_slot < 1 or value_slot >= slot {
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 byte append operands not earlier values"))
             }
-            bytes = x86_emit_append_byte_grow(bytes, slice_slot, value_slot, slot, x86_slice_element_size(instruction.type_kind))
+            let append_before = len(bytes)
+            bytes = x86_emit_append_byte_grow(bytes, slice_slot, value_slot, slot, append_stride, append_from_pointer)
+            if len(bytes) == append_before {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 byte append call invalid"))
+            }
         } else if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) and call_sites[instruction.aux].callee_item == -16 {
             let site = call_sites[instruction.aux]
             if instruction.type_kind != SEM_INT or site.argument_count != 0 or slot < 1 or slot > function.value_count {

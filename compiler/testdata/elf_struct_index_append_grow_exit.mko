@@ -1,0 +1,14 @@
+// Second append must grow: capacity starts at 1, two elements force the
+// reallocate path. Wrong growth arithmetic for stride 16 either faults or
+// corrupts the length.
+//
+// Expected exit: len 2 + out[1].y 0 + 5 = 7.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let src: []Pt = make([]Pt, 1, 1)
+    let mut out: []Pt = make([]Pt, 0, 1)
+    out = append(out, src[0])
+    out = append(out, src[0])
+    exit(len(out) + out[1].y + 5)
+}

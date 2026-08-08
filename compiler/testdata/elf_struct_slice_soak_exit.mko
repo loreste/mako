@@ -1,0 +1,14 @@
+// Per-iteration make of a multi-field struct slice, read, and scope-exit drop.
+// 20_000 iterations must balance mmap/munmap and keep RSS flat — the memory
+// bar for a per-call leak. Exit 3 matches the while-alloc soak convention.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let mut i = 0
+    while i < 20000 {
+        let pts: []Pt = make([]Pt, 4, 4)
+        let n = pts[0].x + pts[1].y + len(pts)
+        i = i + 1 + n - n
+    }
+    exit(3)
+}

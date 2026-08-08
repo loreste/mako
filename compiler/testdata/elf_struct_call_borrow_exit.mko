@@ -1,0 +1,12 @@
+// Passing a bound element to a struct parameter must borrow, not clone.
+// A clone would allocate one block per call with no freer on this path.
+// Exit: take returns 0+0, +5 → 5 against zero-init storage.
+struct Pt { x: int  y: int }
+
+fn take(p: Pt) -> int { return p.x + p.y }
+
+fn main() {
+    let pts: []Pt = make([]Pt, 1, 2)
+    let node = pts[0]
+    exit(take(node) + 5)
+}

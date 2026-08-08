@@ -1,0 +1,14 @@
+// After append, read both fields of the copied element. If append only stored
+// the first word, a non-zero source would disagree — but make zeros everything,
+// so the check here is that the fused field form still lowers after an append
+// rebind (general path, not a matched shape).
+//
+// Expected exit: 0 + 0 + 1 + 10 = 11.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let src: []Pt = make([]Pt, 1, 2)
+    let mut out: []Pt = make([]Pt, 0, 2)
+    out = append(out, src[0])
+    exit(out[0].x + out[0].y + len(out) + 10)
+}

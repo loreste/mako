@@ -1,0 +1,12 @@
+// Single-shot: append a constructed struct, read both fields. Pins the
+// drop-after-copy path. Expected exit: 1+2+1 = 4.
+// Stage-0 can run this (no make'd element field read on the *source* side
+// before construction is copied — out[0].x still hits the stage-0 defect).
+// Linux execution is the oracle; image pin holds Darwin.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let mut out: []Pt = make([]Pt, 0, 2)
+    out = append(out, Pt { x: 1, y: 2 })
+    exit(out[0].x + out[0].y + len(out))
+}

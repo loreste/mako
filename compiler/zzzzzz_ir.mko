@@ -184,8 +184,38 @@ fn ir_struct_field_aux(
     return fields * IR_FIELD_AUX_UNIT + slot
 }
 
-// True when this index expression is the object of some field read, which is
-// the only position a struct-slice index is allowed to appear in.
+// True when a struct-slice index must materialise as `IR_ELEM_ADDR` rather
+// than being fused into a field read. Call arguments and local bindings need a
+// free-standing pointer; an index that is *only* the object of field reads
+// does not — and must not, because an address temporary is typed as an owned
+// struct value and the ownership verifier would then demand a consumer the
+// field load does not provide.
+fn ir_struct_index_needs_address(
+    expressions: []ExprNode, expression_locals: []int, locals: []LocalBinding, index_expression: int
+) -> bool {
+    if ir_expression_is_call_argument(expressions, index_expression) { return true }
+    let mut local_index = 0
+    while local_index < len(locals) {
+        if locals[local_index].initializer_root == index_expression and not locals[local_index].is_parameter {
+            return true
+        }
+        local_index = local_index + 1
+    }
+    let mut i = 0
+    while i < len(expressions) {
+        if i != index_expression and (expressions[i].left == index_expression or expressions[i].right == index_expression) {
+            if expressions[i].kind != EXPR_FIELD or expressions[i].left != index_expression {
+                return true
+            }
+        }
+        i = i + 1
+    }
+    return false
+}
+
+// True when this index expression is the object of some field read, or a call
+// argument, which are the positions a matched-path struct-slice index may
+// appear in without materialising a free-standing value of its own.
 fn ir_index_is_field_object(
     expressions: []ExprNode, expression_locals: []int, locals: []LocalBinding, index_expression: int
 ) -> bool {
@@ -194,9 +224,10 @@ fn ir_index_is_field_object(
         if expressions[i].kind == EXPR_FIELD and expressions[i].left == index_expression { return true }
         i = i + 1
     }
+    // A bare `take(pts[0])` materialises the element address at the call site.
+    if ir_expression_is_call_argument(expressions, index_expression) { return true }
     // Or it initialises a local, in which case every reference to that local
-    // has to be a field object too. One reference used any other way would need
-    // a materialised struct value, which this path does not model.
+    // has to be a field object or call argument too.
     let mut binding = -1
     let mut local_index = 0
     while local_index < len(locals) {
@@ -526,9 +557,19 @@ fn ir_is_intrinsic_callee(item: int) -> bool {
 // is borrowed from its caller and treating it as live here would demand a drop
 // the callee must never emit — `str_byte_at(s, i)` on a string parameter is the
 // case that showed it.
+//
+// Struct values are *never* consumed by a call. Parameters of struct type are
+// borrowed element pointers: cloning one has no emitter (and would allocate a
+// block for every `take(node)`), and consuming a construction into `append`
+// would drop the ownership without freeing the block the element was copied
+// out of. The element is always copied; the caller's value keeps its nature.
 fn ir_call_consumes_arguments(callee_item: int, argument_type: int) -> bool {
+    if semantic_is_struct_value(argument_type) { return false }
     if not ir_is_intrinsic_callee(callee_item) { return true }
-    if callee_item == -10 { return true }
+    // append moves the destination slice. The element is always copied — a
+    // scalar by value, a struct by a stride-wide memcpy — so treating the
+    // element as consumed leaked every `append(out, Pt { ... })`.
+    if callee_item == -10 { return semantic_is_slice(argument_type) }
     if argument_type == SEM_STRING { return true }
     return false
 }
@@ -1129,25 +1170,20 @@ fn ir_cfg_lower_range(
                         let argument_binding = if argument < len(expression_locals) { expression_locals[argument] } else { -1 }
                         let argument_is_binding = expressions[argument].kind == EXPR_IDENT and
                             argument_binding >= 0 and argument_binding < len(locals)
-                        let argument_owned = argument < len(expression_types) and
-                            ir_type_is_owned(expression_types[argument])
-                        // A string argument is cloned whatever it was, not only
-                        // when it names a binding. The callee drops its owned
-                        // parameter, and a string's nature is not visible from
-                        // the signature: a literal is a static view into the
-                        // code image, and a Mako function returning one hands
-                        // back that same view. Cloning unconditionally is what
-                        // makes "a string parameter is always an allocation"
-                        // true at every call site, so the callee's drop can
-                        // never unmap read-only code. The clone itself always
-                        // allocates, so a literal source is fine.
+                        let argument_type = if argument < len(expression_types) { expression_types[argument] } else { SEM_UNKNOWN }
+                        let argument_owned = ir_type_is_owned(argument_type)
+                        // Struct values are always borrowed at call sites — there
+                        // is no clone emitter for one, and parameters of struct
+                        // type are element pointers. Strings and slices still
+                        // clone so the callee can own what it is handed.
                         let clone_argument = argument_owned and
-                            (argument_is_binding or expression_types[argument] == SEM_STRING)
+                            not semantic_is_struct_value(argument_type) and
+                            (argument_is_binding or argument_type == SEM_STRING)
                         if clone_argument {
                             let cloned = value_cursor
                             value_cursor = value_cursor + 1
                             out_instructions = append(out_instructions, IrInstruction {
-                                op: IR_CLONE, result: cloned, type_kind: expression_types[argument],
+                                op: IR_CLONE, result: cloned, type_kind: argument_type,
                                 left: passed, right: -1, aux: -1, token: expressions[argument].token,
                             })
                             // Cloning a temporary leaves the original with no
@@ -1155,11 +1191,20 @@ fn ir_cfg_lower_range(
                             // dropping one here would be a double free.
                             if not argument_is_binding {
                                 out_instructions = append(out_instructions, IrInstruction {
-                                    op: IR_DROP, result: -1, type_kind: expression_types[argument],
+                                    op: IR_DROP, result: -1, type_kind: argument_type,
                                     left: passed, right: -1, aux: -1, token: expressions[argument].token,
                                 })
                             }
                             passed = cloned
+                        }
+                        // A temporary owned struct (a construction, an element
+                        // address) is not consumed by the call. Drop it once
+                        // the call has read it — the backend no-ops a borrow
+                        // and frees a construction.
+                        if semantic_is_struct_value(argument_type) and not argument_is_binding {
+                            pending_drop_after = append(pending_drop_after, i)
+                            pending_drop_value = append(pending_drop_value, passed)
+                            pending_drop_type = append(pending_drop_type, argument_type)
                         }
                         reversed = append(reversed, passed)
                     }
@@ -1392,39 +1437,77 @@ fn ir_cfg_lower_range(
                     left: -1, right: -1, aux: make_length, token: expression.token,
                 })
             } else if expression.kind == EXPR_FIELD {
-                // `p.field` where the object is one slot holding a pointer —
-                // either a constructed struct or a borrowed slice element. Both
-                // read the same way: an offset load, no index to scale and no
-                // length to check, because the pointer names the value.
+                // Two shapes share this opcode:
+                //   1. pointer form — object is a constructed struct or a
+                //      materialised element address (one slot, no index);
+                //   2. fused form — object is `slice[i]` that never materialised,
+                //      so the field instruction carries the slice, the index and
+                //      the slot, and the backend does one bounds-checked load.
+                // Emitting a free-standing address for (2) would define an owned
+                // temporary the field load does not consume.
                 let object_kind = if expression.left >= 0 and expression.left < len(expression_types) {
                     expression_types[expression.left]
                 } else {
                     SEM_UNKNOWN
                 }
-                if not semantic_is_struct_value(object_kind) {
+                let object_is_index = expression.left >= 0 and expression.left < len(expressions) and
+                    expressions[expression.left].kind == EXPR_INDEX
+                let object_has_value = expression.left >= 0 and expression.left < len(out_values) and
+                    out_values[expression.left] >= 0
+                if not semantic_is_struct_value(object_kind) and not object_is_index {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                         "CFG lowering reads a field only of a struct value")
                 }
-                let field_owner = struct_kind_index(object_kind)
-                let field_width = struct_kind_fields(object_kind)
+                let mut field_owner = -1
+                let mut field_width = 0
+                if semantic_is_struct_value(object_kind) {
+                    field_owner = struct_kind_index(object_kind)
+                    field_width = struct_kind_fields(object_kind)
+                } else if object_is_index {
+                    let index_node = expressions[expression.left]
+                    let slice_kind = if index_node.left >= 0 and index_node.left < len(expression_types) {
+                        expression_types[index_node.left]
+                    } else {
+                        SEM_UNKNOWN
+                    }
+                    if not semantic_is_struct_array(slice_kind) {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering fused field needs a struct slice")
+                    }
+                    field_owner = struct_kind_index(slice_kind)
+                    field_width = struct_kind_fields(slice_kind)
+                }
                 let read_slot = struct_field_slot(layout, source, field_owner,
                     token_text(source, tokens[expression.token]))
                 if field_owner < 0 or field_width < 1 or read_slot < 0 or read_slot >= field_width {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                         "CFG lowering could not resolve a struct field")
                 }
-                if expression.left >= len(out_values) or out_values[expression.left] < 0 {
-                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                        "CFG lowering struct object is not available")
-                }
                 let read_result = value_cursor
                 value_cursor = value_cursor + 1
                 out_values[i] = read_result
-                out_instructions = append(out_instructions, IrInstruction {
-                    op: IR_FIELD, result: read_result, type_kind: expression_types[i],
-                    left: out_values[expression.left], right: -1,
-                    aux: field_width * IR_FIELD_AUX_UNIT + read_slot, token: expression.token,
-                })
+                if object_has_value {
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_FIELD, result: read_result, type_kind: expression_types[i],
+                        left: out_values[expression.left], right: -1,
+                        aux: field_width * IR_FIELD_AUX_UNIT + read_slot, token: expression.token,
+                    })
+                } else if object_is_index {
+                    let index_node = expressions[expression.left]
+                    if index_node.left < 0 or index_node.left >= len(out_values) or out_values[index_node.left] < 0 or
+                        index_node.right < 0 or index_node.right >= len(out_values) or out_values[index_node.right] < 0 {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering fused field operands are not available")
+                    }
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_FIELD, result: read_result, type_kind: expression_types[i],
+                        left: out_values[index_node.left], right: out_values[index_node.right],
+                        aux: field_width * IR_FIELD_AUX_UNIT + read_slot, token: expression.token,
+                    })
+                } else {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering struct object is not available")
+                }
                 // Reading an *owned* field yields a borrow into the struct's
                 // block, which the struct still owns and will free. Cloning it
                 // is what dissolves the partial-move problem: the struct keeps
@@ -1467,25 +1550,17 @@ fn ir_cfg_lower_range(
                 // `xs[i]` on a slice of scalars: one bounds-checked load whose
                 // stride the backend reads off the element type.
                 //
-                // A slice of structs is deliberately excluded. Its element is a
-                // borrowed pointer, not a loaded word, so admitting it here
-                // would hand the encoder an index it would load at the wrong
-                // width — the same fail-open that made `pts[0].x` and `pts[0].y`
-                // compile to identical images. The matched path fuses those into
-                // the field read instead.
+                // A slice of structs is different. Its element is a *borrowed
+                // pointer*, not a loaded word. Emitting `IR_INDEX` would hand
+                // the encoder a word load at the wrong width — the fail-open
+                // that once made `pts[0].x` and `pts[0].y` compile identically.
+                // The address form (`IR_ELEM_ADDR`) is the only safe lowering:
+                // field reads and call arguments then share one pointer, and
+                // the backend's owned-producer check refuses to free it.
                 let base = if expression.left >= 0 and expression.left < len(expression_types) {
                     expression_types[expression.left]
                 } else {
                     SEM_UNKNOWN
-                }
-                if semantic_is_struct_array(base) {
-                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                        "CFG lowering cannot index a slice of structs")
-                }
-                if (base != SEM_ARRAY_INT and base != SEM_ARRAY_BYTE) or
-                    (expression_types[i] != SEM_INT and expression_types[i] != SEM_BYTE) {
-                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                        "CFG lowering indexes only slices of int or byte")
                 }
                 if expression.left >= len(out_values) or out_values[expression.left] < 0 or
                     expression.right < 0 or expression.right >= len(out_values) or
@@ -1493,14 +1568,46 @@ fn ir_cfg_lower_range(
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                         "CFG lowering index operand is not available")
                 }
-                let index_result = value_cursor
-                value_cursor = value_cursor + 1
-                out_values[i] = index_result
-                out_instructions = append(out_instructions, IrInstruction {
-                    op: IR_INDEX, result: index_result, type_kind: expression_types[i],
-                    left: out_values[expression.left], right: out_values[expression.right],
-                    aux: -1, token: expression.token,
-                })
+                if semantic_is_struct_array(base) {
+                    if not semantic_is_struct_value(expression_types[i]) {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering struct-slice index has no element type")
+                    }
+                    // Field-only indexes stay fused: the field instruction
+                    // re-reads the slice and index. Emitting an address here
+                    // would define an owned temporary nobody consumes.
+                    if not ir_struct_index_needs_address(expressions, expression_locals, locals, i) {
+                        // out_values[i] stays -1; the field path fuses.
+                    } else {
+                        let stride = 8 * struct_kind_fields(base)
+                        if stride < 8 {
+                            return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                "CFG lowering struct-slice index has no element stride")
+                        }
+                        let address_result = value_cursor
+                        value_cursor = value_cursor + 1
+                        out_values[i] = address_result
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_ELEM_ADDR, result: address_result, type_kind: expression_types[i],
+                            left: out_values[expression.left], right: out_values[expression.right],
+                            aux: stride, token: expression.token,
+                        })
+                    }
+                } else {
+                    if (base != SEM_ARRAY_INT and base != SEM_ARRAY_BYTE) or
+                        (expression_types[i] != SEM_INT and expression_types[i] != SEM_BYTE) {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering indexes only slices of int or byte")
+                    }
+                    let index_result = value_cursor
+                    value_cursor = value_cursor + 1
+                    out_values[i] = index_result
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_INDEX, result: index_result, type_kind: expression_types[i],
+                        left: out_values[expression.left], right: out_values[expression.right],
+                        aux: -1, token: expression.token,
+                    })
+                }
             } else {
                 let op = ir_expression_opcode(expression.kind)
                 if op != IR_CONST and op != IR_UNARY and op != IR_BINARY {
@@ -3009,12 +3116,15 @@ fn lower_typed_ir_once(
                     supported = false
                 }
             }
-            // An index into a struct slice carries a struct value, which is not
-            // modelled. It may exist only as the object of a fused field read,
-            // where it never emits on its own.
+            // An index into a struct slice is a borrowed element pointer. The
+            // matched path may fuse it into a field read, materialise it as a
+            // call argument, or forward it through a local that only does those
+            // things. Anything else falls to the general path, which emits
+            // `IR_ELEM_ADDR` rather than a word load.
             if scanned.kind == EXPR_INDEX and scanned.left >= 0 and scanned.left < len(expression_types) and
                 semantic_is_struct_array(expression_types[scanned.left]) and
-                not ir_index_is_field_object(expressions, expression_locals, locals, scanned_index) {
+                not ir_index_is_field_object(expressions, expression_locals, locals, scanned_index) and
+                not ir_expression_is_call_argument(expressions, scanned_index) {
                 supported = false
             }
             expr_scan = expr_scan + 1
@@ -4539,9 +4649,11 @@ fn lower_typed_ir_once(
                     } else {
                         ir_expression_opcode(expression.kind)
                     }
-                    // An index into a struct slice is fused into the field
-                    // read above it and emits nothing of its own. The pre-scan
-                    // proved every such index has a field read to consume it.
+                    // An index into a struct slice is fused into a field read
+                    // above it, or materialised as a call-argument address.
+                    // Either way the index node itself emits nothing here: the
+                    // field path re-reads the slice/index operands, and the
+                    // call path emits `IR_ELEM_ADDR` next to the clone prefix.
                     let fused_index = op == IR_INDEX and expression.left >= 0 and
                         expression.left < len(expression_types) and
                         semantic_is_struct_array(expression_types[expression.left])
@@ -4644,10 +4756,17 @@ fn lower_typed_ir_once(
                                         // does. Cloning for one of those leaks
                                         // the copy: nothing on the other side
                                         // ever drops it.
+                                        // Struct values are always borrowed at
+                                        // the call site — never cloned. There is
+                                        // no clone emitter for one, and a
+                                        // parameter of struct type is an
+                                        // element pointer the callee must not
+                                        // free.
                                         if call_signature >= 0 and
                                             argument_local >= 0 and argument_local < len(locals) and
                                             argument_expression < len(expression_types) and
                                             ir_type_is_owned(expression_types[argument_expression]) and
+                                            not semantic_is_struct_value(expression_types[argument_expression]) and
                                             locals[argument_local].ownership != LOCAL_OWN_HOLD {
                                             let cloned_value = next_value
                                             next_value = next_value + 1

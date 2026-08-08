@@ -1,0 +1,17 @@
+// Append of a borrowed element, including the grow path (cap 1 → two
+// elements). Each iteration allocates src + out, copies, grows, and drops.
+// 20_000 iterations must balance mmap/munmap exactly.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let mut i = 0
+    while i < 20000 {
+        let src: []Pt = make([]Pt, 1, 1)
+        let mut out: []Pt = make([]Pt, 0, 1)
+        out = append(out, src[0])
+        out = append(out, src[0])
+        let n = len(out) + out[1].x
+        i = i + 1 + n - n
+    }
+    exit(3)
+}

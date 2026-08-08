@@ -1,0 +1,10 @@
+// Negative index must hit the same bounds trap as out-of-range positive.
+// The check runs before the index is scaled, so a wrapped unsigned compare
+// cannot admit it.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let pts: []Pt = make([]Pt, 1, 2)
+    let i = 0 - 1
+    exit(pts[i].x)
+}

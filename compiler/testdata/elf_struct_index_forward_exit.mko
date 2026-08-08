@@ -1,0 +1,9 @@
+// The dominant compiler pattern: bind an element, then read a field.
+// Materialises the address into the local and uses the pointer-form field load.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let pts: []Pt = make([]Pt, 1, 2)
+    let node = pts[0]
+    exit(node.y + 6)
+}

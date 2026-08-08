@@ -1,0 +1,14 @@
+// A mut local bound to a slice element and then rebound is refused by the
+// matched-path forwarding rules when the local is only a field object. The
+// general path may materialise an address; either way the program must not
+// silently answer for the wrong element. This fixture must fail to lower or
+// must rebind correctly — the gate asserts it does not produce an image under
+// the forwarding-only rules still in force for mut.
+struct Pt { x: int  y: int }
+
+fn main() {
+    let pts: []Pt = make([]Pt, 2, 2)
+    let mut node = pts[0]
+    node = pts[1]
+    exit(node.x)
+}
