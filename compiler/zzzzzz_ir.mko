@@ -1301,16 +1301,29 @@ fn ir_cfg_lower_range(
                             pending_drop_value = append(pending_drop_value, passed)
                             pending_drop_type = append(pending_drop_type, argument_type)
                         }
+                        // Same for a temporary string/slice mid-call argument
+                        // when the callee only borrows: without this drop,
+                        // `f(mk_string())` leaks once per evaluation.
+                        if argument_owned and not semantic_is_struct_value(argument_type) and
+                            not argument_is_binding and
+                            not ir_call_consumes_arguments(callee_item, argument_type) {
+                            pending_drop_after = append(pending_drop_after, i)
+                            pending_drop_value = append(pending_drop_value, passed)
+                            pending_drop_type = append(pending_drop_type, argument_type)
+                        }
                         reversed = append(reversed, passed)
                     }
                     arg_cursor = expressions[arg_cursor].left
                     steps = steps + 1
                 }
                 // Int/bool results occupy one slot and come back in rax. An
-                // owned result is allowed as the range's owned_root, a concat
-                // operand, or the argument of `len` (which only loads the
-                // header). Broader mid-expression owned calls need a sealed
-                // pending-drop story across consuming vs borrowing callees.
+                // owned result is allowed when something seals its lifetime:
+                // the range's owned_root, a concat operand, `len` (header
+                // load then pending drop), a call argument (outer call's
+                // pending drop for temp structs / clone for owned strings),
+                // or a field initialiser (construction clones then drops the
+                // source). That is what lets `x86_plain_body(x86_error(...))`
+                // and `X86Code { bytes: make(...), ... }` lower.
                 let call_type = expression_types[i]
                 let call_owned = ir_type_is_owned(call_type)
                 let len_reader = ir_expression_consumer(expressions, i)
@@ -1325,11 +1338,15 @@ fn ir_cfg_lower_range(
                     ""
                 }
                 let feeds_len = feeds_len_base >= 0 and (feeds_len_name == "len" or feeds_len_name == "str_len")
+                let feeds_call_arg = ir_expression_is_call_argument(expressions, i)
+                let feeds_field = ir_expression_is_field_initializer(expressions, i)
                 let call_owned_ok = call_owned and (
                     i == owned_root or
                     (call_type == SEM_STRING and
                         ir_expression_feeds_string_concat(expressions, expression_types, i)) or
-                    feeds_len
+                    feeds_len or
+                    feeds_call_arg or
+                    feeds_field
                 )
                 if call_type != SEM_INT and call_type != SEM_BOOL and not call_owned_ok {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering supports only integer- and boolean-returning calls")

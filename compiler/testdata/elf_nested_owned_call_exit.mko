@@ -1,0 +1,17 @@
+// Mid-expression owned call as argument of another call.
+struct Box {
+    n: int
+    tag: string
+}
+
+fn make_box(n: int) -> Box {
+    return Box { n: n, tag: "ok" }
+}
+
+fn use_box(b: Box) -> int {
+    return b.n + 1
+}
+
+fn main() {
+    exit(use_box(make_box(10)))
+}

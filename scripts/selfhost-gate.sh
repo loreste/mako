@@ -822,7 +822,8 @@ for cap_case in \
   "elf_struct_field_call_exit:elf-struct-field-call:9256684faa84257cc154eb3182b49bf954195123fe8a7a01b098016dff4c51ed:1218:3" \
   "elf_str_eq_exit:elf-str-eq:dc1e713132ab8a5d7a53a793fb0eff8a1302d1f29c2466588b9955e07d357558:320:1" \
   "elf_if_else_continue_exit:elf-if-else-continue:a38d0b0a65d9e0cd5e765bfd6364a0550e40ba030bf978ce905422f437ed8042:364:13" \
-  "elf_if_else_merge_exit:elf-if-else-merge:2ce66d4b7ecda0103a2186a5af135ae18e2cd8f739d819d7853d60ab64a17f87:289:11"; do
+  "elf_if_else_merge_exit:elf-if-else-merge:2ce66d4b7ecda0103a2186a5af135ae18e2cd8f739d819d7853d60ab64a17f87:289:11" \
+  "elf_nested_owned_call_exit:elf-nested-owned-call:f83b4d1d007b866918c0e5e40ff78eae9be008306d389b9527a374b3616eb544:501:11"; do
   cap_fixture="${cap_case%%:*}"; cap_rest="${cap_case#*:}"
   cap_name="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
   cap_sha="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"

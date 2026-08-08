@@ -40,9 +40,10 @@ Publish `ir_functions / signatures` from tooling, not prose.
 6. ~~String `==` / `!=` (IR + x86 emit + temp drops)~~ pin `elf_str_eq_exit`  
 7. ~~`if/else` followed only by `continue`/`break`~~ arm-dup + pin `elf_if_else_continue_exit`  
 8. ~~`if/else` then more statements~~ arm-dup post into both arms (no join/phi); pin `elf_if_else_merge_exit`  
-9. **Remaining untyped / cascade calls** (~36+35)  
-10. **Mid-expression owned / non-scalar call results** (~13)  
-11. **`[]Token` / constructible LexResult** — deferred: makes LexResult constructible but breaks stage-0 seed backends  
+9. **Remaining untyped / cascade calls** (~46+35)  
+10. ~~Mid-expression owned call as arg/field~~ sealed; pin `elf_nested_owned_call_exit`  
+11. **Nested constructible fields** (e.g. `X86Body { code: X86Code }`) — layout still refuses; blocks x86 body helpers  
+12. **`[]Token` / constructible LexResult** — deferred: stage-0 seed backends choke on `[]Token`  
 12. **Register allocation**  
 13. **Runtime pieces still on C** → Mako syscalls  
 14. **Fixed point** stage 1→2→3 + purity audit  
