@@ -773,8 +773,8 @@ fi
 # gate re-pinned on every gain gets re-pinned without being read. It must never
 # silently fall.
 package_lowered="$(printf '%s' "$package_result" | sed -n 's/.*ir_functions \([0-9]*\).*/\1/p')"
-if [[ "${package_lowered:-0}" -lt 113 ]]; then
-  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 113" >&2
+if [[ "${package_lowered:-0}" -lt 125 ]]; then
+  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 125" >&2
   exit 1
 fi
 for bad_package in "$repo_dir/compiler/lexer.mko,$repo_dir/compiler/nope.mko" \
@@ -816,7 +816,9 @@ for cap_case in \
   "elf_array_call_exit:elf-array-call:fb9437c961f0e8f798a185ddf18af27c81ea451f8a0feb6fa82300a66a73eb43:1267:6" \
   "elf_array_append_exit:elf-array-append:5c3cdb894c32339a145d2b13151e5a87b474f6e924aeb86b7e008a9345cb8f48:1562:9" \
   "elf_loop_owned_slice_exit:elf-loop-owned-slice:9262e904f314e1ffe2661d80731a887f1cbbd5b332cb838efe88c4b9044b105f:1036:6" \
-  "elf_loop_owned_array_exit:elf-loop-owned-array:24e7a216fdbbe278dd6bf9ebeb280ab2ed04cf91810c93e772dc5d6621286c05:1298:56"; do
+  "elf_loop_owned_array_exit:elf-loop-owned-array:24e7a216fdbbe278dd6bf9ebeb280ab2ed04cf91810c93e772dc5d6621286c05:1298:56" \
+  "elf_loop_owned_dual_exit:elf-loop-owned-dual:09bd968f0d51b39314887d03c3884580a216be571196221cec67ffbd38db97dd:1065:6" \
+  "elf_struct_field_call_exit:elf-struct-field-call:9256684faa84257cc154eb3182b49bf954195123fe8a7a01b098016dff4c51ed:1218:3"; do
   cap_fixture="${cap_case%%:*}"; cap_rest="${cap_case#*:}"
   cap_name="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
   cap_sha="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"

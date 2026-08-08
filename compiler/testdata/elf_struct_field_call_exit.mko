@@ -1,0 +1,21 @@
+// Owned field passed into a call must not double-drop the field clone.
+struct Code {
+    bytes: []int
+    status: int
+    error: string
+}
+fn make_code() -> Code {
+    let mut b = make([]int, 0)
+    b = append(b, 7)
+    return Code { bytes: b, status: 0, error: "ok" }
+}
+fn take_len(xs: []int) -> int {
+    return len(xs)
+}
+fn take_str(s: string) -> int {
+    return len(s)
+}
+fn main() {
+    let code = make_code()
+    exit(take_len(code.bytes) + take_str(code.error))
+}

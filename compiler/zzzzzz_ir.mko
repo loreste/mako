@@ -1227,6 +1227,23 @@ fn ir_cfg_lower_range(
                             }
                             passed = cloned
                         }
+                        // The call either clones (and drops the temp above) or
+                        // consumes the temp as an owned argument. In both cases
+                        // a pending drop of the same value — scheduled by an
+                        // owned field read — would free it twice.
+                        // `take(code.error)` and `pass_img(code.bytes)` both hit
+                        // this.
+                        if argument_owned and not argument_is_binding and
+                            not semantic_is_struct_value(argument_type) {
+                            let mut pend = 0
+                            while pend < len(pending_drop_after) {
+                                if pending_drop_value[pend] == out_values[argument] or
+                                    pending_drop_value[pend] == passed {
+                                    pending_drop_after[pend] = -1
+                                }
+                                pend = pend + 1
+                            }
+                        }
                         // A temporary owned struct (a construction, an element
                         // address) is not consumed by the call. Drop it once
                         // the call has read it — the backend no-ops a borrow
@@ -1991,7 +2008,16 @@ fn ir_lower_returning_if_tree(
                 let param_value = loop_params[loop_carried_start[exit_loop] + carried_live]
                 if param_value >= 0 and carried_local < len(local_types) and
                     ir_type_is_owned(local_types[carried_local]) {
-                    live = append(live, param_value)
+                    // Dedupe: a nested-if snapshot can already name the param.
+                    let mut already = false
+                    let mut live_scan = 0
+                    while live_scan < len(live) {
+                        if live[live_scan] == param_value { already = true }
+                        live_scan = live_scan + 1
+                    }
+                    if not already {
+                        live = append(live, param_value)
+                    }
                 }
                 carried_live = carried_live + 1
             }
@@ -2430,33 +2456,31 @@ fn ir_lower_returning_if_tree(
                     }
                     carried_scan = carried_scan + 1
                 }
-                // An owned carry rides a single-parameter jump. Mixing it with
-                // a scalar carry forces a multi-arg jump whose live tracking is
-                // still incomplete (package verify saw a double-drop). Refuse
-                // that shape until the multi-arg path is sealed.
-                if owned_carry_count > 0 and len(carried_here) != 1 {
-                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                        "CFG lowering carries an owned slice only as the sole loop-carried local")
-                }
+                // At most one owned among the carries: two would need a scratch
+                // move across a multi-arg jump. Scalars may ride beside it.
                 if owned_carry_count > 1 {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                         "CFG lowering carries at most one owned value through a loop")
                 }
-                // Transfer ownership of the owned carry into the header: the
+                // Transfer ownership of each owned carry into the header: the
                 // entry jump consumes the pre-loop value, so it must leave
                 // `live` before the body/exit scopes are snapshotted.
-                if owned_carry_count == 1 {
-                    let carried_local = carried_here[0]
-                    let transferred = owned_locals[carried_local]
-                    let mut kept_live: []int = make([]int, 0, len(live))
-                    let mut live_i = 0
-                    while live_i < len(live) {
-                        if live[live_i] != transferred {
-                            kept_live = append(kept_live, live[live_i])
+                let mut carry_live = 0
+                while carry_live < len(carried_here) {
+                    let carried_local = carried_here[carry_live]
+                    if ir_type_is_owned(local_types[carried_local]) {
+                        let transferred = owned_locals[carried_local]
+                        let mut kept_live: []int = make([]int, 0, len(live))
+                        let mut live_i = 0
+                        while live_i < len(live) {
+                            if live[live_i] != transferred {
+                                kept_live = append(kept_live, live[live_i])
+                            }
+                            live_i = live_i + 1
                         }
-                        live_i = live_i + 1
+                        live = kept_live
                     }
-                    live = kept_live
+                    carry_live = carry_live + 1
                 }
                 let loop_index = len(loop_statement)
                 let header_list = len(list_start)

@@ -1,0 +1,10 @@
+// Dual loop-carried: owned []int plus a scalar index.
+fn main() {
+    let mut a = make([]int, 0)
+    let mut i = 0
+    while i < 3 {
+        a = append(a, i)
+        i = i + 1
+    }
+    exit(len(a) + a[0] + a[1] + a[2])
+}

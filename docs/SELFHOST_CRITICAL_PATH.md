@@ -27,20 +27,21 @@ Publish `ir_functions / signatures` from tooling, not prose.
 | Metric | Value |
 |---|---|
 | signatures | 321 |
-| ir_functions lowered | **113** (floor in `selfhost-gate.sh`) |
-| ir_skipped | ~208 |
+| ir_functions lowered | **125** (floor in `selfhost-gate.sh`) |
+| ir_skipped | ~196 |
 
 ## Highest-leverage order (after constructible returns)
 
 1. ~~Struct-returning calls / returns (string + `[]int` fields)~~ done for constructible shapes  
 2. ~~Array literals (`IR_ARRAY` → make/append)~~ done for typed `[]int` chains; empty untyped still skipped  
-3. ~~Loop-carried owned slices (sole carry)~~ done; dual scalar+owned still refused  
-4. **Remaining untyped calls** (~36) — often nested/result types still incomplete  
-5. **Owned + scalar dual loop carries** (~15)  
+3. ~~Loop-carried owned slices~~ sole and dual (scalar + one owned slice)  
+4. ~~Owned field → call without double-drop~~ pending-drop cancel on consume  
+5. **Remaining untyped / cascade calls** (~49+36)  
 6. **if/else merge after statements** (~12)  
-7. **Register allocation**  
-8. **Runtime pieces still on C** → Mako syscalls  
-9. **Fixed point** stage 1→2→3 + purity audit  
+7. **Empty/untyped array literals** (~12)  
+8. **Register allocation**  
+9. **Runtime pieces still on C** → Mako syscalls  
+10. **Fixed point** stage 1→2→3 + purity audit  
 
 ## Safety invariants while growing the backend
 
