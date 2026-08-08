@@ -1,0 +1,18 @@
+// The same owned field read, used *inside* a larger expression rather than
+// bound first. It needs a lifetime the general path did not have: this path
+// gives one owner per statement — the node the statement consumes — so an
+// allocation anywhere else has to be released once whatever reads it is done.
+//
+// Expressions are built bottom-up, so a consumer always has a higher index than
+// what it reads. Flushing every pending temporary whose consumer is already
+// behind places the drop after the read and never before it.
+struct HostPort { host: string  port: int }
+
+fn mk(p: int) -> int {
+    let hp = HostPort { host: "example.com", port: p }
+    return len(hp.host) + hp.port
+}
+
+fn main() {
+    exit(mk(3))
+}

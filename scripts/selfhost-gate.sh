@@ -765,7 +765,7 @@ for package_member in z_expression z_statement z_type zz_expression_attach zz_sy
   selfhost_package="$selfhost_package,$repo_dir/compiler/$package_member.mko"
 done
 package_result="$("$stage1" "$selfhost_package")"
-if [[ "$package_result" != *"signatures 317"* ]]; then
+if [[ "$package_result" != *"signatures 318"* ]]; then
   echo "selfhost frontend gate: package signature count changed: $package_result" >&2
   exit 1
 fi
@@ -807,7 +807,8 @@ for cap_case in \
   "elf_straight_line_assign_exit:elf-sl-assign:fa96ae649b72f2cd5c793ecb7050a21efcb2a6ffcc69b49951b3d1d2c7d1ed2b:184:14" \
   "elf_owned_rebind_exit:elf-owned-rebind:ed6d2ee7ba4fb8db9310d0ffc3078a78ce0647e8b3c857d1bd6c09816b2e16ce:1660:43" \
   "elf_struct_literal_exit:elf-struct-literal:7a8547d71a71839c093d26cac073b1c2f5d65d5d5a5cff7db1c954addefbd82b:402:34" \
-  "elf_struct_string_field_exit:elf-struct-string:7d5cfaf2f3061c2f4c59907136693162576ec439473b68add884092077f0e389:694:14"; do
+  "elf_struct_string_field_exit:elf-struct-string:7d5cfaf2f3061c2f4c59907136693162576ec439473b68add884092077f0e389:694:14" \
+  "elf_struct_field_inline_exit:elf-struct-inline:30bbc1115dd0a3d48dd9ae79e495e50ba02aee90b44fd0090f2759f0b048013a:694:14"; do
   cap_fixture="${cap_case%%:*}"; cap_rest="${cap_case#*:}"
   cap_name="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
   cap_sha="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
@@ -866,7 +867,7 @@ done
 # the backedge, 20000 times.
 if [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] && command -v strace >/dev/null 2>&1; then
   for balance_case in "elf-format-int:6" "elf-concat:7" "elf-string-clone:5" \
-    "elf-owned-rebind:6" "elf-struct-literal:1" "elf-struct-string:3" "elf-while-soak:20000"; do
+    "elf-owned-rebind:6" "elf-struct-literal:1" "elf-struct-string:3" "elf-struct-inline:3" "elf-while-soak:20000"; do
     balance_path="$work_dir/${balance_case%%:*}"
     balance_expect="${balance_case##*:}"
     chmod +x "$balance_path"

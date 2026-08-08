@@ -964,6 +964,21 @@ fn ir_drop_aux(layout: StructLayout, source: string, type_kind: int) -> int {
     return struct_owned_slot_mask(layout, struct_kind_index(type_kind))
 }
 
+// Index of the node that reads this one as an operand, or -1. Expressions are
+// built bottom-up, so a consumer always has a higher index than what it reads —
+// which is what lets a temporary be dropped once its reader has been lowered.
+fn ir_expression_consumer(expressions: []ExprNode, node: int) -> int {
+    if node < 0 { return -1 }
+    let mut i = 0
+    while i < len(expressions) {
+        if i != node and (expressions[i].left == node or expressions[i].right == node) {
+            return i
+        }
+        i = i + 1
+    }
+    return -1
+}
+
 // True when a concat operand is a temporary rather than a binding.
 //
 // A concat consumes neither operand, so a temporary would be defined and never
@@ -1005,9 +1020,30 @@ fn ir_cfg_lower_range(
     let mut out_string_index = constant_string_index
     let mut out_values = expression_values
     let mut value_cursor = next_value
+    // Owned temporaries waiting for their reader. This path gives one owner per
+    // range — the node the statement consumes — so anything else that allocates
+    // has to be released once whatever reads it has been lowered. Expressions
+    // are built bottom-up, so a consumer always has a higher index: flushing
+    // everything whose consumer is already behind us is enough to place the
+    // drop after the read and never before it.
+    let mut pending_drop_after: []int = make([]int, 0, 4)
+    let mut pending_drop_value: []int = make([]int, 0, 4)
+    let mut pending_drop_type: []int = make([]int, 0, 4)
     let mut i = 0
     while i < len(expressions) {
         let expression = expressions[i]
+        let mut pending_index = 0
+        while pending_index < len(pending_drop_after) {
+            if pending_drop_after[pending_index] >= 0 and pending_drop_after[pending_index] < i {
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_DROP, result: -1, type_kind: pending_drop_type[pending_index],
+                    left: pending_drop_value[pending_index], right: -1, aux: -1,
+                    token: expression.token,
+                })
+                pending_drop_after[pending_index] = -1
+            }
+            pending_index = pending_index + 1
+        }
         if i == skip_expression {
             // The owning statement's intrinsic call; the caller emits it.
         } else if expression.token >= range_start and expression.token < range_end {
@@ -1395,15 +1431,6 @@ fn ir_cfg_lower_range(
                 // everything it ever owned, so its drop is unconditional and
                 // there is no per-field moved-out state to get right on every
                 // path. It costs a copy, the same trade as clone-on-pass.
-                if ir_type_is_owned(expression_types[i]) and i != owned_root {
-                    // An owned field read produces a value somebody has to own.
-                    // This path gives one owner per range — the node the
-                    // statement consumes — so a read anywhere else is refused
-                    // rather than leaked. `let host = hp.host` works; the same
-                    // read buried inside a larger expression does not yet.
-                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                        "CFG lowering owned field read has no owner on this path")
-                }
                 if ir_type_is_owned(expression_types[i]) {
                     let cloned_field = value_cursor
                     value_cursor = value_cursor + 1
@@ -1421,6 +1448,20 @@ fn ir_cfg_lower_range(
                         op: IR_DROP, result: -1, type_kind: expression_types[i],
                         left: read_result, right: -1, aux: -1, token: expression.token,
                     })
+                    // The clone belongs to whatever reads it. If that is the
+                    // node the statement consumes it is the statement's own
+                    // value; otherwise it dies once its reader has been
+                    // lowered.
+                    if i != owned_root {
+                        let clone_reader = ir_expression_consumer(expressions, i)
+                        if clone_reader < 0 {
+                            return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                "CFG lowering owned field read has no reader on this path")
+                        }
+                        pending_drop_after = append(pending_drop_after, clone_reader)
+                        pending_drop_value = append(pending_drop_value, cloned_field)
+                        pending_drop_type = append(pending_drop_type, expression_types[i])
+                    }
                 }
             } else if expression.kind == EXPR_INDEX {
                 // `xs[i]` on a slice of scalars: one bounds-checked load whose
@@ -1549,6 +1590,16 @@ fn ir_cfg_lower_range(
             }
         }
         i = i + 1
+    }
+    let mut trailing = 0
+    while trailing < len(pending_drop_after) {
+        if pending_drop_after[trailing] >= 0 {
+            out_instructions = append(out_instructions, IrInstruction {
+                op: IR_DROP, result: -1, type_kind: pending_drop_type[trailing],
+                left: pending_drop_value[trailing], right: -1, aux: -1, token: range_start,
+            })
+        }
+        trailing = trailing + 1
     }
     return IrCfgLowering {
         instructions: out_instructions, constants: out_constants,
