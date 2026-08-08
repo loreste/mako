@@ -1,5 +1,5 @@
 // Minimal WASI preview1 example — print + fib (no sockets/TLS).
-// Build: mako build examples/wasi_hello.mko --target wasm32-wasi -o out/wasi_hello.wasm
+// Build: mako build examples/wasi_hello.mko --target wasm32-wasip1 -o out/wasi_hello.wasm
 // Run:   wasmtime out/wasi_hello.wasm
 fn main() {
     print("hello from mako wasi")

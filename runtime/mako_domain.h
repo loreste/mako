@@ -1900,23 +1900,29 @@ static inline int64_t mako_rollback_free(MakoRollback *r) {
     return 0;
 }
 
-/* ---- Graphics / audio / physics soft seeds (handles only) ---- */
+/* ---- Graphics / audio / physics — real WSI + soft framebuffer ---- */
+#include "mako_wsi.h"
+
 typedef struct {
     int64_t w, h;
     int open;
     char title[64];
-    uint32_t *pixels; /* soft framebuffer ARGB seed (host only) */
+    uint32_t *pixels; /* ARGB framebuffer (software rendered) */
     int64_t npix;
+    MakoWsiWindow *wsi; /* real OS window (NULL = headless/soft-only) */
+    int64_t last_event_type;
+    int64_t last_key;
+    int64_t last_mouse_x, last_mouse_y;
+    int64_t last_mouse_button;
 } MakoGfxWindow;
 
 static inline MakoGfxWindow *mako_gfx_window_open(int64_t w, int64_t h, MakoString title) {
     MakoGfxWindow *win = (MakoGfxWindow *)calloc(1, sizeof(MakoGfxWindow));
     if (!win) return NULL;
-    /* Clamp dimensions; explicit overflow check on w*h. */
     win->w = (w > 0 && w <= 4096) ? w : 640;
     win->h = (h > 0 && h <= 4096) ? h : 480;
     if (win->w > 0 && win->h > (int64_t)16777216 / win->w) {
-        win->w = 640; win->h = 480; /* fallback on overflow */
+        win->w = 640; win->h = 480;
     }
     win->open = 1;
     size_t n = title.len < 63 ? title.len : 63;
@@ -1925,6 +1931,10 @@ static inline MakoGfxWindow *mako_gfx_window_open(int64_t w, int64_t h, MakoStri
     win->npix = win->w * win->h;
     if (win->npix > 0 && win->npix <= 4096 * 4096) {
         win->pixels = (uint32_t *)calloc((size_t)win->npix, sizeof(uint32_t));
+    }
+    /* Open a real OS window unless MAKO_GFX_HEADLESS is set. */
+    if (!getenv("MAKO_GFX_HEADLESS")) {
+        win->wsi = mako_wsi_open((int)win->w, (int)win->h, win->title);
     }
     return win;
 }
@@ -1939,21 +1949,61 @@ static inline int64_t mako_gfx_window_height(MakoGfxWindow *w) {
 
 static inline int64_t mako_gfx_window_close(MakoGfxWindow *w) {
     if (!w) return 0;
+    if (w->wsi) mako_wsi_close(w->wsi);
+    w->wsi = NULL;
     w->open = 0;
     free(w->pixels);
     free(w);
     return 0;
 }
 
-/* Event poll seed (no real windowing backend): always 0 = no events. */
+/* Poll for window events. Returns event type (0 = none).
+ * Event details available via gfx_event_key, gfx_event_mouse_x/y/button. */
 static inline int64_t mako_gfx_poll(MakoGfxWindow *w) {
-    (void)w;
+    if (!w) return 0;
+    if (w->wsi) {
+        MakoWsiEvent ev;
+        if (mako_wsi_poll(w->wsi, &ev)) {
+            w->last_event_type = ev.type;
+            w->last_key = ev.keycode;
+            w->last_mouse_x = ev.mouse_x;
+            w->last_mouse_y = ev.mouse_y;
+            w->last_mouse_button = ev.mouse_button;
+            if (ev.type == MAKO_WSI_EVENT_CLOSE) w->open = 0;
+            if (ev.type == MAKO_WSI_EVENT_RESIZE) {
+                w->w = ev.width; w->h = ev.height;
+            }
+            return ev.type;
+        }
+    }
     return 0;
 }
 
-/* Backend name for soft window seed. */
+/* Present the framebuffer to the OS window. */
+static inline int64_t mako_gfx_present(MakoGfxWindow *w) {
+    if (!w || !w->wsi || !w->pixels) return 0;
+    mako_wsi_present(w->wsi, w->pixels, (int)w->w, (int)w->h);
+    return 1;
+}
+
+/* Event accessors — read after gfx_poll returns a nonzero event type. */
+static inline int64_t mako_gfx_event_type(MakoGfxWindow *w) { return w ? w->last_event_type : 0; }
+static inline int64_t mako_gfx_event_key(MakoGfxWindow *w) { return w ? w->last_key : 0; }
+static inline int64_t mako_gfx_event_mouse_x(MakoGfxWindow *w) { return w ? w->last_mouse_x : 0; }
+static inline int64_t mako_gfx_event_mouse_y(MakoGfxWindow *w) { return w ? w->last_mouse_y : 0; }
+static inline int64_t mako_gfx_event_mouse_button(MakoGfxWindow *w) { return w ? w->last_mouse_button : 0; }
+static inline int64_t mako_gfx_is_open(MakoGfxWindow *w) { return (w && w->open) ? 1 : 0; }
+
 static inline MakoString mako_gfx_backend_name(void) {
+#if defined(__APPLE__) && defined(__MACH__)
+    return mako_str_from_cstr("cocoa");
+#elif defined(__linux__)
+    return mako_str_from_cstr("x11");
+#elif defined(_WIN32)
+    return mako_str_from_cstr("win32");
+#else
     return mako_str_from_cstr("soft");
+#endif
 }
 
 static inline int64_t mako_gfx_window_pixels(MakoGfxWindow *w) {

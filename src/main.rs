@@ -4338,6 +4338,32 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
         }
         cc::OsKind::Windows | cc::OsKind::Wasm => {}
     }
+    // WSI platform frameworks (mako_wsi.h).
+    match os {
+        cc::OsKind::Macos => {
+            args.push("-framework".into());
+            args.push("Cocoa".into());
+            args.push("-framework".into());
+            args.push("CoreGraphics".into());
+        }
+        cc::OsKind::Linux | cc::OsKind::Other => {
+            // X11 linked only when dev headers are available; headless servers skip.
+            if std::process::Command::new("pkg-config")
+                .args(["--exists", "x11"])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+            {
+                args.push("-DMAKO_HAS_X11".into());
+                args.push("-lX11".into());
+            }
+        }
+        cc::OsKind::Windows => {
+            args.push("-lgdi32".into());
+            args.push("-luser32".into());
+        }
+        cc::OsKind::Wasm => {}
+    }
     // Years-up: optional production allocator (docs/LONG_RUNNING.md · LR-3).
     //   MAKO_ALLOCATOR=mimalloc|jemalloc|system
     //   MAKO_ALLOCATOR=/path/to/libmimalloc.a
@@ -4515,9 +4541,9 @@ fn build_native_object(
                     None
                 }
             };
-            if native_ir_object.is_none()
-                && (std::env::var_os("MAKO_NATIVE_SHARED_IR_ONLY").is_some() || !test_fns.is_empty())
-            {
+            let force_shared_ir = std::env::var_os("MAKO_NATIVE_SHARED_IR_ONLY").is_some()
+                || !test_fns.is_empty();
+            if native_ir_object.is_none() && force_shared_ir {
                 emit_plain_error(&format!(
                     "--backend native shared IR lowering failed: {}",
                     native_ir_error
@@ -4528,17 +4554,30 @@ fn build_native_object(
             }
             match native_ir_object {
                 Some(object) => object,
-                None => native_codegen::compile_object(program, matches!(level, OptLevel::Release))
-                    .map_err(|e| {
-                        Diagnostic::error(
-                            &src_file.display().to_string(),
-                            "",
-                            Span::unknown(),
-                            "Cranelift code generation failed",
-                        )
-                        .with_hint(e.to_string())
-                        .emit();
-                    })?,
+                None => {
+                    // Shared IR is the canonical path (including string/slice
+                    // struct fields). The legacy AST→Cranelift path only handles
+                    // scalar-field structs, so when both fail we surface the
+                    // shared-IR diagnostic — otherwise users see a misleading
+                    // "HostPort.host string fields not implemented" for programs
+                    // that failed earlier on a missing builtin.
+                    let ir_err = native_ir_error
+                        .into_inner()
+                        .unwrap_or_else(|| "program is outside the shared IR subset".to_owned());
+                    match native_codegen::compile_object(
+                        program,
+                        matches!(level, OptLevel::Release),
+                    ) {
+                        Ok(object) => object,
+                        Err(legacy_err) => {
+                            emit_plain_error(&format!(
+                                "--backend native shared IR lowering failed: {ir_err}\n  \
+                                 (legacy Cranelift path also failed: {legacy_err})"
+                            ));
+                            return Err(());
+                        }
+                    }
+                }
             }
         }
         BackendCli::Llvm => {
@@ -4707,14 +4746,29 @@ fn build_native_object(
     }
     cmd.arg(&object_path);
     let runtime_dir = runtime_include_dir().unwrap_or_else(|_| PathBuf::new());
-    // Honor the selected/installed runtime first; fall back to the checkout
-    // for source-tree development.
+    // Prefer the compile-time checkout when it still exists (dev builds of
+    // target/release/mako). An older install under share/mako must not shadow
+    // newly-added bridge symbols. MAKO_RUNTIME (via runtime_include_dir) still
+    // wins when the checkout path is missing or when the user overrides.
+    let checkout_runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
     let runtime_c_candidates = [
+        // Explicit MAKO_RUNTIME / install path first only if it is not the
+        // stale default install while a live checkout is available.
         runtime_dir.clone(),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+        checkout_runtime.clone(),
     ];
+    // When both exist and differ, prefer the checkout (source of truth for
+    // this binary). Skip if MAKO_RUNTIME was set explicitly.
+    let prefer_checkout = std::env::var_os("MAKO_RUNTIME").is_none()
+        && checkout_runtime.join("native_bridge.c").is_file()
+        && runtime_dir != checkout_runtime;
+    let ordered: Vec<PathBuf> = if prefer_checkout {
+        vec![checkout_runtime, runtime_dir.clone()]
+    } else {
+        runtime_c_candidates.to_vec()
+    };
     let mut linked_runtime = false;
-    for root in &runtime_c_candidates {
+    for root in &ordered {
         let nr = root.join("native_runtime.c");
         let nb = root.join("native_bridge.c");
         if nr.is_file() && nb.is_file() {

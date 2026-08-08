@@ -2611,6 +2611,34 @@ impl TypeChecker {
             Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
         );
         fns.insert(
+            "gfx_present".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_event_type".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_event_key".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_event_mouse_x".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_event_mouse_y".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_event_mouse_button".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "gfx_is_open".into(),
+            Type::Fn(vec![Type::Named("GfxWindow".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
             "gfx_backend_name".into(),
             Type::Fn(vec![], Box::new(Type::String)),
         );
@@ -4371,6 +4399,91 @@ impl TypeChecker {
         fns.insert(
             "udp_close".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        // DTLS 1.2 over UDP + SRTP key export + cert fingerprints.
+        fns.insert(
+            "dtls_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "dtls_ctx_new".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::Named("DtlsCtx".into())),
+            ),
+        );
+        fns.insert(
+            "dtls_ctx_free".into(),
+            Type::Fn(vec![Type::Named("DtlsCtx".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "dtls_connect".into(),
+            Type::Fn(
+                vec![
+                    Type::Named("DtlsCtx".into()),
+                    Type::Int,
+                    Type::String,
+                    Type::Int,
+                ],
+                Box::new(Type::Named("DtlsConn".into())),
+            ),
+        );
+        fns.insert(
+            "dtls_accept".into(),
+            Type::Fn(
+                vec![Type::Named("DtlsCtx".into()), Type::Int],
+                Box::new(Type::Named("DtlsConn".into())),
+            ),
+        );
+        fns.insert(
+            "dtls_send".into(),
+            Type::Fn(
+                vec![Type::Named("DtlsConn".into()), Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "dtls_recv".into(),
+            Type::Fn(
+                vec![Type::Named("DtlsConn".into()), Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "dtls_close".into(),
+            Type::Fn(vec![Type::Named("DtlsConn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "dtls_conn_fd".into(),
+            Type::Fn(vec![Type::Named("DtlsConn".into())], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "dtls_peer_fingerprint".into(),
+            Type::Fn(
+                vec![Type::Named("DtlsConn".into())],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "dtls_local_fingerprint".into(),
+            Type::Fn(
+                vec![Type::Named("DtlsCtx".into())],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "dtls_export_srtp_keys".into(),
+            Type::Fn(
+                vec![Type::Named("DtlsConn".into())],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "dtls_srtp_profile".into(),
+            Type::Fn(
+                vec![Type::Named("DtlsConn".into())],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "unix_socket_pair".into(),
@@ -20886,6 +20999,9 @@ fn is_kick_sendable(t: &Type) -> bool {
         // TlsServer: synchronized shared SSL_CTX/SNI configuration handle. The
         // runtime retains it while accepted connections are handshaking.
         Type::Named(n) if n == "TlsServer" => true,
+        // DtlsCtx/DtlsConn: same ownership model as TlsServer/TlsConn (void*
+        // handles; the ctx outlives conns, the conn moves exclusively).
+        Type::Named(n) if n == "DtlsCtx" || n == "DtlsConn" => true,
         Type::Named(n) if n == "Arena" || n == "Crew" => false,
         Type::Named(_) => false, // non-POD / handled in TypeChecker::is_kick_sendable_ty
         // Option/Result/tuple/enum handled in TypeChecker::is_kick_sendable_ty (fuller Send).

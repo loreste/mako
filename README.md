@@ -4,7 +4,7 @@ Mako is a compiled language for backend and systems work. You write `.mko`
 files; Mako turns them into standalone native binaries — no garbage collector,
 no VM, nothing extra to install next to them at runtime.
 
-**Status: alpha (v0.5.0).** It works, it compiles real programs, people have
+**Status: alpha (v0.5.1).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -84,13 +84,16 @@ Struct update syntax.
 **Memory.** Ownership tracking with compile-time move checks. Arenas for
 bulk allocation. Bounds checks in debug and release. Escape analysis.
 Deterministic cleanup — no GC, no reference counting on the hot path.
-The safety model is validated under ASan, UBSan, and TSan in CI but is
-not proven complete. `unsafe` and FFI are outside the model.
+The ownership and runtime safety model was introduced in 0.2.4 and
+continues to be hardened through adversarial tests, sanitizers, and
+regression gates. It is not proven complete. `unsafe` and FFI are
+outside the model.
 
-**Concurrency.** `crew` / `kick` / `join` — structured concurrency where jobs
-cannot outlive their scope. Typed channels (`chan[int]`, `chan[string]`,
-`chan[T]`), `select`, `fan` for parallel map. Actors with mailboxes. No free
-`go` keyword — every spawned task has an owner.
+**Concurrency.** `crew` / `kick` / `join` — structured concurrency where
+ordinary crew jobs cannot outlive their scope. Explicit `detach` tasks are
+process-scoped and require separate lifecycle management. Typed channels
+(`chan[int]`, `chan[string]`, `chan[T]`), `select`, `fan` for parallel map.
+Actors with mailboxes. No free `go` keyword — every spawned task has an owner.
 
 **Stdlib.** HTTP server and client. TLS (OpenSSL). WebSocket. JSON. SQLite and
 Postgres. SIP parsing and building. HEP (Homer) ingest. UDP/TCP/Unix sockets.
@@ -100,8 +103,10 @@ records what has real tests and what only verifies its shape.
 
 **Backends.** Native object code is the default (Cranelift). The C backend
 remains available via `--backend c` and is used automatically for sanitizers,
-cross-compilation, and emit-c. Both pass 394/394 tests and produce standalone
+cross-compilation, and emit-c. Both pass 395/395 tests and produce standalone
 binaries. LLVM release builds available with `--backend llvm --release`.
+Both the C and native backends require clang for final linking. Only specially
+built LLVM/LLD configurations avoid the system linker.
 
 **Packages.** `mako pkg` manages dependencies with a lockfile, SHA-256 content
 hashes, and SemVer resolution. Supports path deps, git deps, local registry,
@@ -116,12 +121,15 @@ and inlay hints. VS Code extension.
 
 ## What does not work yet
 
+- Both backends require clang for linking (the installer handles this on Linux)
+- WASM: WASI Preview 1 only — no sockets, no TLS, no Preview 2/WIT/DOM
 - Sanitizers, cross-compilation, and emit-c auto-fall back to the C backend
 - No debugger product (lldb works with `#line` source mapping, but no IDE integration beyond seeds)
 - Stdlib coverage is uneven — some APIs are shape-only
 - No stable ABI promise
-- Package registry is public but has few packages so far
-- Windows HTTP engine is incomplete
+- Package registry is public but has few packages; signing lacks key rotation and revocation
+- Windows: ~21 test fixtures fail (filesystem semantics, signals, crypto paths); HTTP engine incomplete
+- Package security model is not independently audited
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
 
@@ -149,6 +157,35 @@ for msg in range ch {
 }
 ```
 
+## WebAssembly
+
+Mako compiles to WASM via the C backend and zig (or wasi-sdk):
+
+```bash
+mako build main.mko --target wasm32-wasip1 -o main.wasm
+wasmtime main.wasm
+```
+
+WASI Preview 1 is supported — args, env, filesystem (via preopens), stdout.
+Networking, TLS, and stdlib areas that depend on POSIX sockets or OpenSSL are
+not available in WASM. The output is a standalone `.wasm` module runnable by
+wasmtime, wasmer, or any WASI-compatible runtime.
+
+```bash
+# With filesystem access
+wasmtime --dir=./data::. main.wasm
+
+# With env vars and args
+wasmtime --env KEY=value main.wasm arg1 arg2
+
+# Browser/edge scaffold
+mako deploy wasm dist --entry main.mko --wasm app.wasm --port 8080
+```
+
+**Limitations:** WASI Preview 1 only. No Preview 2 component model, no WIT,
+no browser DOM bindings, no WASM sockets. Cross-compilation requires zig on
+PATH or `WASI_SDK_PATH` set.
+
 ## Errors
 
 If a function returns `Result`, you have to handle it:
@@ -168,7 +205,8 @@ mako test -r TestAdd -v                   # filter + verbose
 mako test --sanitize address examples/testing  # under ASan
 ```
 
-393 test files. The suite runs under ASan, UBSan, and TSan in CI.
+395 test files. The complete suite is exercised under ASan and UBSan in CI.
+A focused concurrency subset is exercised under TSan.
 
 ## Docs
 

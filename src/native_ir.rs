@@ -1257,6 +1257,8 @@ fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
                     | "BufReader"
                     | "BufWriter"
                     | "TlsServer"
+                    | "DtlsCtx"
+                    | "DtlsConn"
                     | "WaitGroup"
                     | "Once"
                     | "Cond"
@@ -2562,6 +2564,10 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
     })
 }
 
+/// Limits that apply only when a struct is used as a **map key** (content-hash
+/// packing in `mako_native_struct_content_key`). Ordinary nested structs
+/// (e.g. `Frontend` with 27 fields inside `UdpListener`) are not subject to the
+/// 16-bit nest string-mask pack — clone/drop walk layouts recursively without it.
 fn validate_struct_key_metadata(structs: &StructRegistry) -> Result<(), IrError> {
     let layouts = structs.layouts.borrow();
     for layout in layouts.iter() {
@@ -2572,31 +2578,38 @@ fn validate_struct_key_metadata(structs: &StructRegistry) -> Result<(), IrError>
                 layout.fields.len()
             )));
         }
+    }
+    Ok(())
+}
 
-        let nested = layout
-            .fields
-            .iter()
-            .filter_map(|(_, ty)| match ty {
-                Type::Struct(id) => Some(*id),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        if nested.len() > 4 {
+/// Extra checks when `sid` is used as a map[Struct] key (called from map make/set).
+#[allow(dead_code)]
+fn validate_map_struct_key(structs: &StructRegistry, sid: u32) -> Result<(), IrError> {
+    let layouts = structs.layouts.borrow();
+    let layout = &layouts[sid as usize];
+    let nested = layout
+        .fields
+        .iter()
+        .filter_map(|(_, ty)| match ty {
+            Type::Struct(id) => Some(*id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if nested.len() > 4 {
+        return Err(IrError::new(format!(
+            "native IR: map-key struct `{}` has {} nested struct fields; metadata supports at most 4",
+            layout.name,
+            nested.len()
+        )));
+    }
+    for id in nested {
+        let nested_layout = &layouts[id as usize];
+        if nested_layout.fields.len() > 16 {
             return Err(IrError::new(format!(
-                "native IR: struct `{}` has {} nested struct fields; native struct metadata supports at most 4",
-                layout.name,
-                nested.len()
+                "native IR: nested map-key struct `{}` has {} fields; metadata supports at most 16",
+                nested_layout.name,
+                nested_layout.fields.len()
             )));
-        }
-        for id in nested {
-            let nested_layout = &layouts[id as usize];
-            if nested_layout.fields.len() > 16 {
-                return Err(IrError::new(format!(
-                    "native IR: nested struct `{}` has {} fields; native struct metadata supports at most 16",
-                    nested_layout.name,
-                    nested_layout.fields.len()
-                )));
-            }
         }
     }
     Ok(())
@@ -5639,13 +5652,16 @@ impl<'a> FunctionLowerer<'a> {
         });
         for (i, arg) in args.iter().enumerate() {
             let (mut v, ty, owned) = self.lower_expr(arg)?;
-            if ty != params[i]
-                && !(params[i] == Type::I64 && ty == Type::I1)
-            {
-                // allow I1→I64 for bool params stored as i64
-                if !(params[i] == Type::I64 && matches!(ty, Type::I64 | Type::I1)) {
-                    return Err(IrError::new("native IR: kick arg type mismatch"));
-                }
+            let param = params[i];
+            let kick_ty_ok = ty == param
+                || (param == Type::I64 && matches!(ty, Type::I1 | Type::Opaque | Type::OwnedOpaque(_)))
+                || (ty == Type::I64 && matches!(param, Type::Opaque | Type::OwnedOpaque(_)))
+                || (param == Type::Opaque && matches!(ty, Type::OwnedOpaque(_)))
+                || (ty == Type::Opaque && matches!(param, Type::OwnedOpaque(_)));
+            if !kick_ty_ok {
+                return Err(IrError::new(format!(
+                    "native IR: kick arg type mismatch ({ty:?} vs {param:?})"
+                )));
             }
             // Pack ABI is always i64 slots — widen bool / bitcast float.
             if ty == Type::I1 {
@@ -10396,6 +10412,8 @@ impl<'a> FunctionLowerer<'a> {
                     if *expected == actual {
                         return true;
                     }
+                    // Opaque domain handles (EvLoop, TlsConn, GameUDP, …) share the
+                    // i64 ABI with builtins that return I64 pointer-sized values.
                     matches!(
                         (expected, actual),
                         (Type::I64, Type::I1)
@@ -10403,6 +10421,12 @@ impl<'a> FunctionLowerer<'a> {
                             | (Type::OwnedOpaque(OpaqueKind::Interface), Type::Struct(_))
                             | (Type::OwnedOpaque(OpaqueKind::Interface), Type::I64)
                             | (Type::I64, Type::OwnedOpaque(OpaqueKind::Interface))
+                            | (Type::Opaque, Type::I64)
+                            | (Type::I64, Type::Opaque)
+                            | (Type::OwnedOpaque(_), Type::I64)
+                            | (Type::I64, Type::OwnedOpaque(_))
+                            | (Type::Opaque, Type::OwnedOpaque(_))
+                            | (Type::OwnedOpaque(_), Type::Opaque)
                     )
                 };
                 let (fn_name, params, ret) = mono_candidates
@@ -10482,9 +10506,21 @@ impl<'a> FunctionLowerer<'a> {
                         {
                             // Opaque handle passed where i64 fd/handle expected.
                             actual = Type::I64;
+                        } else if (expected == Type::Opaque && actual == Type::I64)
+                            || (expected == Type::I64 && actual == Type::Opaque)
+                            || (matches!(expected, Type::OwnedOpaque(_)) && actual == Type::I64)
+                            || (expected == Type::I64 && matches!(actual, Type::OwnedOpaque(_)))
+                            || (expected == Type::Opaque
+                                && matches!(actual, Type::OwnedOpaque(_)))
+                            || (matches!(expected, Type::OwnedOpaque(_)) && actual == Type::Opaque)
+                        {
+                            // Domain handles (EvLoop, GameUDP, TlsConn, …) are
+                            // pointer-sized; builtins often return I64 while user
+                            // signatures use Opaque — same ABI.
+                            actual = expected;
                         } else {
                             return Err(IrError::new(format!(
-                                "native IR: call type mismatch ({actual:?} vs {expected:?})"
+                                "native IR: call `{function}` type mismatch ({actual:?} vs {expected:?})"
                             )));
                         }
                     }
@@ -15792,6 +15828,18 @@ impl<'a> FunctionLowerer<'a> {
                 return false;
             }
             self.heap_owned.insert(name.clone(), false);
+            // Null the slot so that any later drop is a runtime no-op.
+            // This is critical when ownership is transferred inside an
+            // if-branch: the merge restores the pre-if ownership snapshot
+            // (marking the local as owned again), but the runtime slot was
+            // already given away.  A null slot makes the restored drop safe.
+            if let Some(&(slot, _ty)) = self.locals.get(name) {
+                let null = self.const_int(0, Type::I64);
+                self.emit(Inst::Store {
+                    ptr: slot,
+                    value: null,
+                });
+            }
             true
         } else {
             already_owned
@@ -15992,6 +16040,12 @@ impl<'a> FunctionLowerer<'a> {
             "http_get" if args.len() == 1 => Some((
                 "mako_native_http_get_ptr",
                 &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "http_get_timeout" if args.len() == 2 => Some((
+                "mako_native_http_get_timeout_ptr",
+                &[Type::Str, Type::I64],
                 Some(Type::Str),
                 true,
             )),
@@ -17092,11 +17146,48 @@ impl<'a> FunctionLowerer<'a> {
             "hpack_decode_block" if args.len() == 1 => Some(("mako_native_hpack_decode_block_ptr", &[Type::Str], Some(Type::I64), false)),
             "http2_response" if args.len() == 3 => Some(("mako_native_http2_response_ptr", &[Type::I64, Type::I64, Type::Str], Some(Type::Str), true)),
             "tls_server_available" if args.is_empty() => Some(("mako_native_tls_server_available", &[], Some(Type::I64), false)),
+            "dtls_available" if args.is_empty() => Some(("mako_native_dtls_available", &[], Some(Type::I64), false)),
+            "dtls_ctx_new" if args.len() == 3 => Some(("mako_native_dtls_ctx_new_ptr", &[Type::Str, Type::Str, Type::I64], Some(Type::Opaque), false)),
+            "dtls_ctx_free" if args.len() == 1 => Some(("mako_native_dtls_ctx_free", &[Type::Opaque], Some(Type::I64), false)),
+            "dtls_connect" if args.len() == 4 => Some(("mako_native_dtls_connect_ptr", &[Type::Opaque, Type::I64, Type::Str, Type::I64], Some(Type::Opaque), false)),
+            "dtls_accept" if args.len() == 2 => Some(("mako_native_dtls_accept", &[Type::Opaque, Type::I64], Some(Type::Opaque), false)),
+            "dtls_send" if args.len() == 2 => Some(("mako_native_dtls_send_ptr", &[Type::Opaque, Type::Str], Some(Type::I64), false)),
+            "dtls_recv" if args.len() == 2 => Some(("mako_native_dtls_recv", &[Type::Opaque, Type::I64], Some(Type::Str), true)),
+            "dtls_close" if args.len() == 1 => Some(("mako_native_dtls_close", &[Type::Opaque], Some(Type::I64), false)),
+            "dtls_conn_fd" if args.len() == 1 => Some(("mako_native_dtls_conn_fd", &[Type::Opaque], Some(Type::I64), false)),
+            "dtls_peer_fingerprint" if args.len() == 1 => Some(("mako_native_dtls_peer_fingerprint", &[Type::Opaque], Some(Type::Str), true)),
+            "dtls_local_fingerprint" if args.len() == 1 => Some(("mako_native_dtls_local_fingerprint", &[Type::Opaque], Some(Type::Str), true)),
+            "dtls_export_srtp_keys" if args.len() == 1 => Some(("mako_native_dtls_export_srtp_keys", &[Type::Opaque], Some(Type::Str), true)),
+            "dtls_srtp_profile" if args.len() == 1 => Some(("mako_native_dtls_srtp_profile", &[Type::Opaque], Some(Type::Str), true)),
             "tls_server_new" if args.len() == 2 => Some(("mako_native_tls_server_new_ptr", &[Type::Str, Type::Str], Some(Type::Opaque), false)),
+            "tls_server_new_tls13" if args.len() == 2 => Some((
+                "mako_native_tls_server_new_tls13_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Opaque),
+                false,
+            )),
             "tls_accept" if args.len() == 2 => Some(("mako_native_tls_accept", &[Type::I64, Type::I64], Some(Type::I64), false)),
             "tls_read" if args.len() == 2 => Some(("mako_native_tls_read", &[Type::Opaque, Type::I64], Some(Type::Str), true)),
             "tls_write" if args.len() == 2 => Some(("mako_native_tls_write_ptr", &[Type::Opaque, Type::Str], Some(Type::I64), false)),
             "tls_conn_close" if args.len() == 1 => Some(("mako_native_tls_conn_close", &[Type::Opaque], Some(Type::I64), false)),
+            "tls_conn_alpn" if args.len() == 1 => Some((
+                "mako_native_tls_conn_alpn_ptr",
+                &[Type::Opaque],
+                Some(Type::Str),
+                true,
+            )),
+            "https_request" if args.len() == 6 => Some((
+                "mako_native_https_request_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "https_post" if args.len() == 5 => Some((
+                "mako_native_https_post_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
             "h3_server_close" if args.len() == 1 => Some(("mako_native_h3_server_close", &[Type::I64], Some(Type::I64), false)),
             "h3_server_poll" if args.len() == 2 => Some(("mako_native_h3_server_poll", &[Type::I64, Type::I64], Some(Type::I64), false)),
             "h3_response" if args.len() == 5 => Some(("mako_native_h3_response_ptr", &[Type::I64, Type::I64, Type::I64, Type::Str, Type::Str], Some(Type::I64), false)),
@@ -17225,6 +17316,18 @@ impl<'a> FunctionLowerer<'a> {
                 &[Type::I64],
                 Some(Type::I64),
                 false,
+            )),
+            "http_forward_body" if args.len() == 1 => Some((
+                "mako_native_http_forward_body_ptr",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "http_forward_headers" if args.len() == 1 => Some((
+                "mako_native_http_forward_headers_ptr",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
             )),
 
             "h3_accept_stream" if args.len() == 1 => Some(("mako_native_h3_accept_stream", &[Type::I64], Some(Type::I64), false)),
@@ -17394,6 +17497,12 @@ impl<'a> FunctionLowerer<'a> {
                 &[Type::Str],
                 Some(Type::Str),
                 true,
+            )),
+            "exec_run" if args.len() == 1 => Some((
+                "mako_native_exec_run_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
             )),
             "fmt_sprintf" if args.len() == 2 => Some((
                 "mako_native_fmt_sprintf_ptr",
@@ -20863,6 +20972,24 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
+            "game_udp_bind_addr" if args.len() == 2 => Some((
+                "mako_native_game_udp_bind_addr_ptr",
+                &[Type::Str, Type::I64],
+                Some(Type::Opaque),
+                false,
+            )),
+            "game_udp_send" if args.len() == 3 => Some((
+                "mako_native_game_udp_send_ptr",
+                &[Type::Opaque, Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "game_udp_sender" if args.len() == 1 => Some((
+                "mako_native_game_udp_sender",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
             "gif_encode_rgb" if args.len() == 3 => Some((
                 "mako_native_gif_encode_rgb_ptr",
                 &[Type::I64, Type::I64, Type::Str],
@@ -21012,6 +21139,12 @@ impl<'a> FunctionLowerer<'a> {
                 &[Type::Str, Type::Str],
                 Some(Type::I64),
                 false,
+            )),
+            "jwt_payload" if args.len() == 1 => Some((
+                "mako_native_jwt_payload_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
             )),
             "lb_pick2" if args.len() == 3 => Some((
                 "mako_native_lb_pick2_ptr",
@@ -21700,6 +21833,12 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "tcp_write_all" if args.len() == 2 => Some((
                 "mako_native_tcp_write_all_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "tcp_write" if args.len() == 2 => Some((
+                "mako_native_tcp_write_ptr",
                 &[Type::I64, Type::Str],
                 Some(Type::I64),
                 false,
@@ -27507,6 +27646,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
+            "evloop_close" if args.len() == 1 => Some((
+                "mako_native_evloop_close",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
             "fn_has_env" if args.len() == 1 => Some((
                 "mako_native_fn_has_env",
                 &[Type::FnPtr],
@@ -31401,6 +31546,38 @@ mod tests {
     }
 
     #[test]
+    fn conditional_string_move_nulls_source_slot() {
+        // Regression: transferring a string local inside an `if` body left the
+        // source slot live. After the if-merge restored ownership from the
+        // else-path snapshot, the scope-exit drop freed the string that had
+        // already been given to the destination — a use-after-free (#30/#31).
+        let source = r#"
+            struct Cfg { name: string }
+            fn build(flag: bool) -> Cfg {
+                var name = "default"
+                let cand = "override"
+                if flag {
+                    name = cand
+                }
+                return Cfg { name: name }
+            }
+            fn main() {
+                let c = build(true)
+                print(c.name)
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let build = module.functions.iter().find(|f| f.name == "build").unwrap();
+        let insts: Vec<_> = build.blocks.iter().flat_map(|b| &b.instructions).collect();
+        // After the move `name = cand`, cand's slot must be nulled (Store of 0)
+        // so the scope-exit drop is safe regardless of the if-merge ownership.
+        let has_null_store = insts.iter().any(|i| matches!(i, Inst::ConstInt { value: 0, .. }));
+        assert!(has_null_store, "conditional move must null the source slot");
+    }
+
+    #[test]
     fn destructures_owned_tuple_with_per_binding_clone() {
         let source = r#"
             fn split(s: string) -> (string, string) {
@@ -31711,7 +31888,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_too_many_nested_struct_metadata_fields() {
+    fn allows_many_nested_struct_fields_outside_map_keys() {
+        // Map-key packing is limited to 4 nested fields / 16 nested slots; ordinary
+        // nested aggregates (e.g. Frontend inside UdpListener) are unrestricted.
         let source = r#"
             struct Inner { value: int }
             struct Outer {
@@ -31721,26 +31900,51 @@ mod tests {
                 d: Inner
                 e: Inner
             }
-            fn main() {}
+            fn main() {
+                let o = Outer {
+                    a: Inner { value: 1 },
+                    b: Inner { value: 2 },
+                    c: Inner { value: 3 },
+                    d: Inner { value: 4 },
+                    e: Inner { value: 5 }
+                }
+                print_int(o.a.value)
+            }
         "#;
         let tokens = Lexer::new(source).tokenize().unwrap();
         let program = Parser::new(tokens).parse().unwrap();
-        let error = lower(&program).unwrap_err();
-        assert!(error.to_string().contains("supports at most 4"));
+        let module = lower(&program).expect("ordinary nested structs should lower");
+        assert!(!module.structs.is_empty());
     }
 
     #[test]
-    fn rejects_nested_structs_too_wide_for_packed_metadata() {
+    fn allows_wide_nested_structs_outside_map_keys() {
         let fields = (0..17)
             .map(|index| format!("f{index}: int"))
             .collect::<Vec<_>>()
+            .join("\n                ");
+        let field_inits = (0..17)
+            .map(|index| format!("f{index}: {index}"))
+            .collect::<Vec<_>>()
             .join(", ");
-        let source =
-            format!("struct Inner {{ {fields} }} struct Outer {{ inner: Inner }} fn main() {{}}");
+        let source = format!(
+            r#"
+            struct Inner {{
+                {fields}
+            }}
+            struct Outer {{
+                inner: Inner
+            }}
+            fn main() {{
+                let o = Outer {{ inner: Inner {{ {field_inits} }} }}
+                print_int(o.inner.f0)
+            }}
+            "#
+        );
         let tokens = Lexer::new(&source).tokenize().unwrap();
         let program = Parser::new(tokens).parse().unwrap();
-        let error = lower(&program).unwrap_err();
-        assert!(error.to_string().contains("supports at most 16"));
+        let module = lower(&program).expect("wide nested structs should lower");
+        assert!(!module.structs.is_empty());
     }
 
     #[test]

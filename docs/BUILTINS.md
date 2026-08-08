@@ -790,6 +790,36 @@ application code. See `examples/testing/scram_test.mko` (RFC 7677 §3 vector),
 | `chacha20_poly1305_seal` | `chacha20_poly1305_seal(key: string, nonce: string, plaintext: string, aad: string) -> string` | Encrypt with ChaCha20-Poly1305 |
 | `chacha20_poly1305_open` | `chacha20_poly1305_open(key: string, nonce: string, ciphertext: string, aad: string) -> string` | Decrypt with ChaCha20-Poly1305 |
 
+### DTLS (datagram TLS over UDP)
+
+DTLS 1.2 over a UDP socket — the WebRTC DTLS-SRTP building block: blocking
+handshake with RFC 6347 retransmit timers and stateless cookie exchange
+(HelloVerifyRequest), SHA-256 cert fingerprints for SDP `a=fingerprint`, and
+RFC 5764 keying-material export for SRTP. Requires OpenSSL linked
+(`dtls_available() == 1`); otherwise every constructor fails cleanly. Package
+mirror: `pull "dtls"` (`std/dtls`). v1: DTLS 1.2 only, PEM-path certs, one
+peer per UDP socket (after `dtls_accept` the socket is `connect()`ed to that
+peer), POSIX only.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `dtls_available` | `dtls_available() -> int` | Whether DTLS is available in this build (1/0) |
+| `dtls_ctx_new` | `dtls_ctx_new(cert_path: string, key_path: string, use_srtp: int) -> DtlsCtx` | DTLS context from cert+key PEM paths; `use_srtp=1` advertises SRTP protection profiles |
+| `dtls_ctx_free` | `dtls_ctx_free(ctx: DtlsCtx) -> int` | Free a DTLS context |
+| `dtls_connect` | `dtls_connect(ctx: DtlsCtx, udp_fd: int, host: string, port: int) -> DtlsConn` | Client handshake over a UDP fd (blocking, retransmit timers internal) |
+| `dtls_accept` | `dtls_accept(ctx: DtlsCtx, udp_fd: int) -> DtlsConn` | Server handshake on a bound UDP fd (cookie exchange, then blocking handshake) |
+| `dtls_send` | `dtls_send(conn: DtlsConn, data: string) -> int` | Send one datagram (bytes written or -1) |
+| `dtls_recv` | `dtls_recv(conn: DtlsConn, max: int) -> string` | Receive one record ("" on close/would-block) |
+| `dtls_close` | `dtls_close(conn: DtlsConn) -> int` | close_notify + free; does NOT close the UDP fd |
+| `dtls_conn_fd` | `dtls_conn_fd(conn: DtlsConn) -> int` | Underlying (borrowed) UDP fd |
+| `dtls_peer_fingerprint` | `dtls_peer_fingerprint(conn: DtlsConn) -> string` | Peer cert SHA-256 fingerprint, `AA:BB:…` uppercase colon-hex ("" if none) |
+| `dtls_local_fingerprint` | `dtls_local_fingerprint(ctx: DtlsCtx) -> string` | Own cert SHA-256 fingerprint (for SDP offer/answer) |
+| `dtls_export_srtp_keys` | `dtls_export_srtp_keys(conn: DtlsConn) -> string` | RFC 5764 keying material `client_key\|client_salt\|server_key\|server_salt` (60 bytes AES128_CM, 88 AEAD_AES_256_GCM; "" if no SRTP). Key material — wrap with `secret_from_str`/`secret_drop` to wipe |
+| `dtls_srtp_profile` | `dtls_srtp_profile(conn: DtlsConn) -> string` | Negotiated SRTP protection profile name ("" if none) |
+
+Tests: `examples/testing/dtls_test.mko` · interop: `scripts/dtls-smoke.sh`
+(`openssl s_client -dtls1_2`) · demo server: `examples/dtls_echo_server.mko`.
+
 ---
 
 ## 18. Encoding
@@ -1530,9 +1560,9 @@ AVP (else non-2xxx Result-Code). HbH match also requires Command-Code. Conn hand
 include a generation so free/reuse does not alias. Still require **peer authentication**
 (mTLS / IP allowlist) at the app layer.
 
-**Out of scope:** Gx/S6a application state machines, full AVP dictionary, DTLS,
-multi-stream per-App-Id policy. You own app answers, Session-Id maps, and I/O
-loops (`crew` + `io_poll` / `mgr_flush`).
+**Out of scope:** Gx/S6a application state machines, full AVP dictionary, DTLS
+transport, multi-stream per-App-Id policy. You own app answers, Session-Id
+maps, and I/O loops (`crew` + `io_poll` / `mgr_flush`).
 
 | Area | Surface |
 |------|---------|

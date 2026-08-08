@@ -405,6 +405,7 @@ fn main() {
     println!("cargo:rerun-if-changed=runtime/mako_sctp.h");
     println!("cargo:rerun-if-changed=runtime/mako_diameter.h");
     println!("cargo:rerun-if-changed=runtime/mako_tls.h");
+    println!("cargo:rerun-if-changed=runtime/mako_dtls.h");
     println!("cargo:rustc-link-search=native={}", lld_static.display());
     println!("cargo:rustc-link-lib=static=lldMachO");
     println!("cargo:rustc-link-lib=static=lldCommon");

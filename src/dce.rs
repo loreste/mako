@@ -670,6 +670,15 @@ fn collect_expr_refs(expr: &Expr, queue: &mut Vec<String>, types: &mut HashSet<S
             method,
             args,
         } => {
+            // Import alias: `foo.bar(...)` resolves to the mangled pack fn
+            // `foo__bar` (mirrors TypeChecker::check_method_expr). Without
+            // this, pack fns with '_' in the name (dtls.ctx_new, tls.server_new)
+            // were DCE'd: the bare method name never enters `method_names`
+            // because it contains an underscore. Junk entries for non-pack
+            // receivers (e.g. `dog.describe()` → `dog__describe`) are harmless.
+            if let Expr::Ident(alias) = receiver.as_ref() {
+                queue.push(format!("{alias}__{method}"));
+            }
             collect_expr_refs(receiver, queue, types);
             // Method call: receiver.method(args) → Type_method in codegen.
             // Without type info we can't resolve `Type`, so mark the method
@@ -909,6 +918,33 @@ fn main() {
                 .iter()
                 .any(|item| matches!(item, Item::Enum(def) if def.name == "Msg")),
             "variant use must retain its enum declaration"
+        );
+    }
+
+    #[test]
+    fn keeps_pack_fn_called_via_alias_with_underscore_name() {
+        // `dtls.ctx_new(...)` resolves to the mangled pack fn `dtls__ctx_new`.
+        // The bare method name ("ctx_new") contains '_' so it never enters
+        // `method_names`; without the alias-aware ref this fn was DCE'd and
+        // the call silently compiled to `0`.
+        let source = r#"
+fn dtls__ctx_new(x: int) -> int {
+    return x + 1
+}
+
+fn main() {
+    print_int(dtls.ctx_new(1))
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let kept = eliminate(&program, &["main".into()]);
+
+        assert!(
+            kept.items
+                .iter()
+                .any(|item| matches!(item, Item::Fn(f) if f.name == "dtls__ctx_new")),
+            "alias.method() must retain the mangled pack fn"
         );
     }
 }

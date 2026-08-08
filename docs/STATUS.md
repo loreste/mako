@@ -1,10 +1,10 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-29** · product **mako0.5.0** (tip; last tag **v0.5.0**) ·
+Last inventory: **2026-07-29** · product **mako0.5.1** (tip; last tag **v0.5.1**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings · `s[i]`) · suite **393** `examples/testing`
+const-fn depth (match/while/for/strings · `s[i]`) · suite **395** `examples/testing`
 programs on **native** (0 failures) + Rust unit tests · full suite under ASan/UBSan;
 focused concurrency suite under TSan · [The Mako Book](book/).
 
@@ -16,18 +16,22 @@ focused concurrency suite under TSan · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.5.0** tip · last tag [**v0.5.0**](https://github.com/loreste/mako/releases/tag/v0.5.0) · then **0.5.1** ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.5.1** tip · last tag [**v0.5.1**](https://github.com/loreste/mako/releases/tag/v0.5.1) · then **0.5.2** ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
 | **Target pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
 | **Dual-form coverage (optional sugar)** | **~94%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol or integration) |
-| **Soundness (SAFE/RT core)** | **Shipped in 0.2.4** — [SOUNDNESS.md](SOUNDNESS.md); optional soaks remain |
+| **Soundness (SAFE/RT core)** | Introduced in 0.2.4, actively hardened — [SOUNDNESS.md](SOUNDNESS.md); soaks and edge cases remain |
 
 ---
 
-## Soundness — **shipped in 0.2.4**
+## Soundness — introduced in 0.2.4, actively hardened
+
+The core ownership and runtime safety model was introduced in 0.2.4 and
+continues to be hardened through adversarial tests, sanitizers, and regression
+gates. It is not a completed, permanently solved property.
 
 Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.md) · roadmap: [ROADMAP.md](ROADMAP.md).
 
@@ -100,7 +104,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 |-------|--------|
 | Ownership free + no double-free (match Own, bind-scope, alias mut `__own`, move/clone) | PASS — ASan: `double_free_guard_test`, `match_own_free_test`, `own_branch_regress_test`, ownership suite |
 | `cargo build --release` | PASS |
-| `cargo test --release` | PASS — 134 unit tests |
+| `cargo test --release` | PASS — 140 unit tests |
 | `map[K]Option[T]` / `map[K]Result[T,E]` | PASS — `map_option_result_test` (11 tests) |
 | Security residuals (at-rest, limits, cancel, mTLS, SCRAM cbind) | PASS — `security_residuals_test` |
 | Security product polish (path size, PEM, CSR/self-signed, prom/trace, SCRAM-PLUS helpers) | PASS — `security_product_test` |
@@ -181,8 +185,8 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **393 passed**, 0 failed (C backend oracle) |
-| `mako test examples/testing --backend native` | PASS — **393 passed**, 0 failed (2026-07-22; shared-IR Cranelift + native bridge) |
+| `mako test examples/testing` | PASS — **395 passed**, 0 failed (C backend oracle) |
+| `mako test examples/testing --backend native` | PASS — **395 passed**, 0 failed (2026-07-22; shared-IR Cranelift + native bridge) |
 | GC removal regression checks | PASS — removed builtin and legacy `[package] gc = true` both fail, including isolated cache paths |
 | Speed gate | PASS — normal ≤2.0× and strict ≤1.5× Rust gates; final measured ratios 0.21×–0.65× |
 | Leba downstream smoke | PASS — current compiler builds/checks Leba; compiled `doctor` reports 0 errors |
@@ -264,6 +268,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | Native bind-address control (`tcp_listen_addr`) | Done — verified on Linux: loopback-only bind, non-host IP rejected |
 | TLS 1.3 termination | Verified on Linux — `openssl s_client -tls1_3` → `TLSv1.3` / `TLS_AES_256_GCM_SHA384` |
 | Socket-style TLS server (`tls_server_new`/`tls_accept`/`read`/`write`/`alpn`) | Done — STARTTLS-upgrade verified; `examples/testing/tls_server_test.mko` |
+| DTLS 1.2 over UDP + SRTP key export + fingerprints (`std/dtls`, `dtls_*`) | Done — loopback handshake/echo/fingerprint/SRTP export on C + native backends; `examples/testing/dtls_test.mko`; `openssl s_client -dtls1_2` interop via `scripts/dtls-smoke.sh` |
 | Signal hooks by name (`signal_watch`/`fired`/`ignore` HUP/TERM/…) | Done — reload/shutdown verified; `examples/testing/signal_test.mko` |
 | File-system watch (`watch_new`/`add`/`poll`/`close`, kqueue+inotify) | Done — change detection verified; `examples/testing/watch_test.mko` |
 | Contextual `pack`/`pull`/`switch`/`go` (usable as identifiers) | Fixed — no longer reserved words |

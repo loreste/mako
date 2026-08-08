@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.5.1 — 2026-07-30
+
+### DTLS over UDP + SRTP key export
+
+New `std/dtls` pack and `dtls_*` builtins (`runtime/mako_dtls.h`): DTLS 1.2
+over a UDP socket — the WebRTC DTLS-SRTP building block Nalobi-style programs
+need.
+
+- **Handshake**: blocking client/server handshake over a datagram fd with
+  RFC 6347 retransmit timers; server side runs the stateless cookie exchange
+  (HelloVerifyRequest, per-connection HMAC-SHA256 cookie secret).
+- **Fingerprints**: `dtls.local_fingerprint` / `dtls.peer_fingerprint` expose
+  SHA-256 cert digests (`AA:BB:…`) for SDP `a=fingerprint`.
+- **SRTP**: `dtls.export_srtp_keys` returns RFC 5764 keying material
+  (`client_key|client_salt|server_key|server_salt`) for the negotiated
+  profile; `dtls.srtp_profile` reports it; `dtls.export_srtp_secret` wraps the
+  bytes as a wipe-on-drop `Secret`.
+- **Interop**: `scripts/dtls-smoke.sh` verifies a Mako echo server against
+  `openssl s_client -dtls1_2`; loopback test at
+  `examples/testing/dtls_test.mko` (C + native backends).
+- **v1 limits**: DTLS 1.2 only, PEM-path certs, one peer per UDP socket,
+  POSIX only.
+
+Also fixed along the way:
+
+- **DCE dropped pack functions with `_` in the name** (`src/dce.rs`):
+  `alias.method()` reachability only registered the bare method name, which
+  never matched `method_names` when it contained an underscore — so calls like
+  `dtls.ctx_new(...)` or `tls.server_new(...)` compiled to literal `0`. The
+  reachability walk now also pushes the mangled `alias__method` name, mirroring
+  the typechecker.
+- **Native runtime `print`/`print_int`/`print_bool` flush stdout**
+  (`runtime/native_runtime.c`): the Cranelift runtime buffered stdout when
+  redirected to a file, so log markers only appeared at process exit; now
+  matches the C runtime's unbuffered line semantics.
+
 ## 0.5.0 — 2026-07-29
 
 ### Native-first default

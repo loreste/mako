@@ -14,6 +14,7 @@
 // TLS before WebSocket — WSS client frames over TlsConn.
 // mako_log.h redefines symbols already in mako_stdlib.h — use stdlib log only.
 #include "mako_tls.h"
+#include "mako_dtls.h"
 #include "mako_ws.h"
 #include "mako_db.h"
 #include "mako_evloop.h"
@@ -306,6 +307,10 @@ int64_t mako_native_http_serve_ptr(int64_t port, MakoNativeString *body) {
 
 MakoNativeString *mako_native_http_get_ptr(MakoNativeString *url) {
     return bridge_take_str(mako_http_get(bridge_borrow_str(url)));
+}
+
+MakoNativeString *mako_native_http_get_timeout_ptr(MakoNativeString *url, int64_t timeout_ms) {
+    return bridge_take_str(mako_http_get_timeout(bridge_borrow_str(url), timeout_ms));
 }
 
 // ---- fmt --------------------------------------------------------------------
@@ -1798,6 +1803,10 @@ int64_t mako_native_tls_server_new_ptr(MakoNativeString *c, MakoNativeString *k)
     void *srv = mako_tls_server_new(bridge_borrow_str(c), bridge_borrow_str(k));
     return (int64_t)(intptr_t)srv;
 }
+int64_t mako_native_tls_server_new_tls13_ptr(MakoNativeString *c, MakoNativeString *k) {
+    void *srv = mako_tls_server_new_tls13(bridge_borrow_str(c), bridge_borrow_str(k));
+    return (int64_t)(intptr_t)srv;
+}
 int64_t mako_native_tls_accept(int64_t srv, int64_t fd) {
     void *conn = mako_tls_accept((void *)(intptr_t)srv, fd);
     return (int64_t)(intptr_t)conn;
@@ -1810,6 +1819,69 @@ int64_t mako_native_tls_write_ptr(int64_t conn, MakoNativeString *s) {
 }
 int64_t mako_native_tls_conn_close(int64_t c) {
     return mako_tls_conn_close((void *)(intptr_t)c);
+}
+MakoNativeString *mako_native_tls_conn_alpn_ptr(int64_t c) {
+    return bridge_take_str(mako_tls_conn_alpn((void *)(intptr_t)c));
+}
+MakoNativeString *mako_native_https_request_ptr(
+    MakoNativeString *method, MakoNativeString *url, MakoNativeString *body,
+    MakoNativeString *content_type, MakoNativeString *ca_pem, int64_t timeout_ms
+) {
+    return bridge_take_str(mako_https_request(
+        bridge_borrow_str(method), bridge_borrow_str(url), bridge_borrow_str(body),
+        bridge_borrow_str(content_type), bridge_borrow_str(ca_pem), timeout_ms));
+}
+MakoNativeString *mako_native_https_post_ptr(
+    MakoNativeString *url, MakoNativeString *body, MakoNativeString *content_type,
+    MakoNativeString *ca_pem, int64_t timeout_ms
+) {
+    return bridge_take_str(mako_https_post(
+        bridge_borrow_str(url), bridge_borrow_str(body),
+        bridge_borrow_str(content_type), bridge_borrow_str(ca_pem), timeout_ms));
+}
+
+int64_t mako_native_dtls_available(void) {
+    return mako_dtls_available();
+}
+int64_t mako_native_dtls_ctx_new_ptr(MakoNativeString *c, MakoNativeString *k, int64_t srtp) {
+    /* Opaque handle: store pointer as i64 for IR ABI. */
+    void *ctx = mako_dtls_ctx_new(bridge_borrow_str(c), bridge_borrow_str(k), srtp);
+    return (int64_t)(intptr_t)ctx;
+}
+int64_t mako_native_dtls_ctx_free(int64_t ctx) {
+    return mako_dtls_ctx_free((void *)(intptr_t)ctx);
+}
+int64_t mako_native_dtls_connect_ptr(int64_t ctx, int64_t fd, MakoNativeString *h, int64_t port) {
+    void *conn = mako_dtls_connect((void *)(intptr_t)ctx, fd, bridge_borrow_str(h), port);
+    return (int64_t)(intptr_t)conn;
+}
+int64_t mako_native_dtls_accept(int64_t ctx, int64_t fd) {
+    void *conn = mako_dtls_accept((void *)(intptr_t)ctx, fd);
+    return (int64_t)(intptr_t)conn;
+}
+int64_t mako_native_dtls_send_ptr(int64_t conn, MakoNativeString *d) {
+    return mako_dtls_send((void *)(intptr_t)conn, bridge_borrow_str(d));
+}
+MakoNativeString *mako_native_dtls_recv(int64_t conn, int64_t max) {
+    return bridge_take_str(mako_dtls_recv((void *)(intptr_t)conn, max));
+}
+int64_t mako_native_dtls_close(int64_t conn) {
+    return mako_dtls_close((void *)(intptr_t)conn);
+}
+int64_t mako_native_dtls_conn_fd(int64_t conn) {
+    return mako_dtls_conn_fd((void *)(intptr_t)conn);
+}
+MakoNativeString *mako_native_dtls_peer_fingerprint(int64_t conn) {
+    return bridge_take_str(mako_dtls_peer_fingerprint((void *)(intptr_t)conn));
+}
+MakoNativeString *mako_native_dtls_local_fingerprint(int64_t ctx) {
+    return bridge_take_str(mako_dtls_local_fingerprint((void *)(intptr_t)ctx));
+}
+MakoNativeString *mako_native_dtls_export_srtp_keys(int64_t conn) {
+    return bridge_take_str(mako_dtls_export_srtp_keys((void *)(intptr_t)conn));
+}
+MakoNativeString *mako_native_dtls_srtp_profile(int64_t conn) {
+    return bridge_take_str(mako_dtls_srtp_profile((void *)(intptr_t)conn));
 }
 
 int64_t mako_native_h3_server_close(int64_t h) {
@@ -2239,6 +2311,10 @@ int64_t mako_native_elapsed_ms(int64_t a0) {
 
 MakoNativeString *mako_native_exec_output_ptr(MakoNativeString *a0) {
     return bridge_take_str(mako_exec_output(bridge_borrow_str(a0)));
+}
+
+int64_t mako_native_exec_run_ptr(MakoNativeString *cmd) {
+    return mako_exec_run(bridge_borrow_str(cmd));
 }
 
 MakoNativeString *mako_native_fmt_sprintf_ptr(MakoNativeString *a0, MakoNativeString *a1) {
@@ -2774,6 +2850,10 @@ int64_t mako_native_jpeg_sof0_precision_ptr(MakoNativeString *a0) {
 
 int64_t mako_native_jpeg_sof0_quant_table_ptr(MakoNativeString *a0) {
     return (int64_t)mako_jpeg_sof0_quant_table(bridge_borrow_str(a0));
+}
+
+MakoNativeString *mako_native_jwt_payload_ptr(MakoNativeString *token) {
+    return bridge_take_str(mako_jwt_payload(bridge_borrow_str(token)));
 }
 
 int64_t mako_native_jwt_verify_jwks_ptr(MakoNativeString *a0, MakoNativeString *a1) {
@@ -8938,6 +9018,9 @@ int64_t mako_native_smtp_send_starttls_ptr(
 int64_t mako_native_evloop_shutdown(int64_t el) {
     return mako_evloop_shutdown((MakoEvLoop *)(intptr_t)el);
 }
+int64_t mako_native_evloop_close(int64_t el) {
+    return mako_evloop_close((MakoEvLoop *)(intptr_t)el);
+}
 int64_t mako_native_fn_has_env(int64_t f) {
     if (!f) return 0;
     MakoFn *p = (MakoFn *)(intptr_t)f;
@@ -9089,6 +9172,18 @@ int64_t mako_native_bytes_buffer(void) {
 int64_t mako_native_det_rng_next(int64_t seed) {
     return mako_deterministic_rng_next(seed);
 }
+int64_t mako_native_game_udp_bind_addr_ptr(MakoNativeString *host, int64_t port) {
+    return (int64_t)(intptr_t)mako_game_udp_bind_addr(bridge_borrow_str(host), port);
+}
+
+int64_t mako_native_game_udp_send_ptr(int64_t u, int64_t peer, MakoNativeString *data) {
+    return mako_game_udp_send((MakoGameUDP *)(intptr_t)u, peer, bridge_borrow_str(data));
+}
+
+int64_t mako_native_game_udp_sender(int64_t u) {
+    return mako_game_udp_sender((MakoGameUDP *)(intptr_t)u);
+}
+
 int64_t mako_native_game_udp_bind(int64_t port) {
     MakoGameUDP *u = mako_game_udp_bind_addr(mako_str_view("0.0.0.0", 7), port);
     return u ? (int64_t)(intptr_t)u : 0;
@@ -10102,6 +10197,18 @@ int64_t mako_native_http_forward_body_len(int64_t h) {
 int64_t mako_native_http_forward_total_bytes(int64_t h) {
     MakoHttpForwardResult *r = (MakoHttpForwardResult *)(intptr_t)h;
     return r ? r->total_bytes : 0;
+}
+
+MakoNativeString *mako_native_http_forward_body_ptr(int64_t h) {
+    MakoHttpForwardResult *r = (MakoHttpForwardResult *)(intptr_t)h;
+    if (!r) return mako_native_string_literal_ptr("", 0);
+    return bridge_take_str(mako_http_forward_body(*r));
+}
+
+MakoNativeString *mako_native_http_forward_headers_ptr(int64_t h) {
+    MakoHttpForwardResult *r = (MakoHttpForwardResult *)(intptr_t)h;
+    if (!r) return mako_native_string_literal_ptr("", 0);
+    return bridge_take_str(mako_http_forward_headers(*r));
 }
 
 int64_t mako_native_http_forward_fd_ptr(
