@@ -1701,15 +1701,27 @@ fn ir_cfg_lower_range(
                     // node the statement consumes it is the statement's own
                     // value; otherwise it dies once its reader has been
                     // lowered.
+                    //
+                    // A field initialiser is only a label: the enclosing
+                    // struct construction clones owned sources into the block
+                    // and drops non-binding temps itself. Scheduling a
+                    // pending drop on the initialiser would free the clone
+                    // *before* the construction runs (initialisers are
+                    // skipped nodes, so the drop flushes at the struct
+                    // index), and the construction's second clone would
+                    // use a consumed value — the shape
+                    // `X86Code { bytes: body.bytes, ... }` hits exactly.
                     if i != owned_root {
                         let clone_reader = ir_expression_consumer(expressions, i)
                         if clone_reader < 0 {
                             return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                                 "CFG lowering owned field read has no reader on this path")
                         }
-                        pending_drop_after = append(pending_drop_after, clone_reader)
-                        pending_drop_value = append(pending_drop_value, cloned_field)
-                        pending_drop_type = append(pending_drop_type, expression_types[i])
+                        if expressions[clone_reader].kind != EXPR_FIELD_INIT {
+                            pending_drop_after = append(pending_drop_after, clone_reader)
+                            pending_drop_value = append(pending_drop_value, cloned_field)
+                            pending_drop_type = append(pending_drop_type, expression_types[i])
+                        }
                     }
                 }
             } else if expression.kind == EXPR_INDEX {
@@ -5669,18 +5681,17 @@ fn lower_typed_ir_once(
                 }
             }
             let condition = expression_values[branch_statement.expr_root]
+            // Shape matched but the condition did not lower (e.g. an owned mid-
+            // call the shape path does not emit). Skip rather than failing the
+            // whole package; the general returning-if path already ran only for
+            // unsupported shapes, and re-entering it mid-shape would leave
+            // orphan instructions without blocks.
             if condition < 0 {
-                return TypedIr {
-                    functions: functions, blocks: blocks, instructions: instructions,
-                    constants: constants, successors: successors,
-                    call_sites: call_sites, call_arguments: call_arguments,
-                    jump_arguments: jump_arguments,
-                    string_literals: string_literals,
-                    constant_string_index: constant_string_index,
-                    expression_values: expression_values,
-                    value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
-                    ok: false, error: "typed if condition did not lower to an SSA value",
-                }
+                skipped = skipped + 1
+                skip_reasons = skip_reasons + ir_item_name(source, items, signature.item) +
+                    ": simple if condition did not lower to an SSA value\n"
+                signature_index = signature_index + 1
+                continue
             }
             let entry_terminator = len(instructions)
             instructions = append(instructions, IrInstruction {
@@ -5910,17 +5921,11 @@ fn lower_typed_ir_once(
             }
             let condition = expression_values[branch_statement.expr_root]
             if condition < 0 {
-                return TypedIr {
-                    functions: functions, blocks: blocks, instructions: instructions,
-                    constants: constants, successors: successors,
-                    call_sites: call_sites, call_arguments: call_arguments,
-                    jump_arguments: jump_arguments,
-                    string_literals: string_literals,
-                    constant_string_index: constant_string_index,
-                    expression_values: expression_values,
-                    value_count: next_value, skipped_functions: skipped, skip_reason: skip_reasons,
-                    ok: false, error: "typed merge condition did not lower to an SSA value",
-                }
+                skipped = skipped + 1
+                skip_reasons = skip_reasons + ir_item_name(source, items, signature.item) +
+                    ": simple merge condition did not lower to an SSA value\n"
+                signature_index = signature_index + 1
+                continue
             }
             let merge_statement = statements[continuation_return]
             let merge_value = if merge_statement.expr_root >= 0 and merge_statement.expr_root < len(expression_values) { expression_values[merge_statement.expr_root] } else { -1 }

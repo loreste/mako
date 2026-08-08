@@ -1,0 +1,14 @@
+struct Body {
+    bytes: []int
+    status: int
+    error: string
+}
+
+fn plain(bytes: []int) -> Body {
+    return Body { bytes: bytes, status: 0, error: "" }
+}
+
+fn main() {
+    let b = plain(make([]int, 0, 0))
+    exit(b.status + 7)
+}

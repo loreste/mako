@@ -42,7 +42,7 @@ Publish `ir_functions / signatures` from tooling, not prose.
 8. ~~`if/else` then more statements~~ arm-dup post into both arms (no join/phi); pin `elf_if_else_merge_exit`  
 9. **Remaining untyped / cascade calls** (~46+35)  
 10. ~~Mid-expression owned call as arg/field~~ sealed; pin `elf_nested_owned_call_exit`  
-11. **Nested constructible fields** (e.g. `X86Body { code: X86Code }`) — layout still refuses; blocks x86 body helpers  
+11. **Nested constructible fields** (e.g. `X86Body { code: X86Code }`) — layout still refuses; flatten attempted but multi-file package IR broke (`no owning block`). Pin `elf_flat_body_exit` for the flat constructible shape.  
 12. **`[]Token` / constructible LexResult** — deferred: stage-0 seed backends choke on `[]Token`  
 13. **Register allocation**  
 14. **Runtime pieces still on C** → Mako syscalls  
