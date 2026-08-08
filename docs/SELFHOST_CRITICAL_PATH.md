@@ -44,9 +44,9 @@ Publish `ir_functions / signatures` from tooling, not prose.
 10. ~~Mid-expression owned call as arg/field~~ sealed; pin `elf_nested_owned_call_exit`  
 11. **Nested constructible fields** (e.g. `X86Body { code: X86Code }`) — layout still refuses; blocks x86 body helpers  
 12. **`[]Token` / constructible LexResult** — deferred: stage-0 seed backends choke on `[]Token`  
-12. **Register allocation**  
-13. **Runtime pieces still on C** → Mako syscalls  
-14. **Fixed point** stage 1→2→3 + purity audit  
+13. **Register allocation**  
+14. **Runtime pieces still on C** → Mako syscalls  
+15. **Fixed point** stage 1→2→3 + purity audit  
 
 ## Safety invariants while growing the backend
 
