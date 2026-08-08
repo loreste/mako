@@ -1,0 +1,16 @@
+// 20k construct-return-drop cycles of a string-field struct. Exit 3.
+struct HostPort { host: string  port: int }
+
+fn make_hp() -> HostPort {
+    return HostPort { host: "x", port: 1 }
+}
+
+fn main() {
+    let mut i = 0
+    while i < 20000 {
+        let h = make_hp()
+        let n = len(h.host) + h.port
+        i = i + 1 + n - n
+    }
+    exit(3)
+}

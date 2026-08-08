@@ -1,0 +1,11 @@
+// Constructible non-POD struct returned through rax. Expected exit 8: len("a")+7.
+struct HostPort { host: string  port: int }
+
+fn make_hp() -> HostPort {
+    return HostPort { host: "a", port: 7 }
+}
+
+fn main() {
+    let h = make_hp()
+    exit(len(h.host) + h.port)
+}

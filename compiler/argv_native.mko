@@ -173,54 +173,99 @@ fn x86_emit_str_byte_at(bytes: []int, string_slot: int, index_slot: int, result_
  return x86_emit_store_rax(out, result_slot)
 }
 
-// True when this struct value is one the program *constructed*, as opposed to a
+// True when this struct value is one the program owns, as opposed to a
 // borrowed pointer into a slice somebody else owns.
 //
 // Both share a semantic kind, deliberately — the type checker cares that it is
 // a Pt, not who owns it — so ownership is read off the producing instruction,
 // exactly as it is for strings. Getting this backwards frees a slice's storage
 // out from under it, so anything that is not a construction is a borrow.
+//
+// Owned producers:
+//   - IR_STRUCT_NEW (a literal construction)
+//   - a Mako function call that returns a struct (caller receives ownership)
+//   - IR_MOVE of an owned value (return transfer, rebinding)
+// Element addresses and parameters are not owned.
 fn x86_struct_value_owned(instructions: []IrInstruction, call_sites: []IrCallSite, value: int) bool {
- let mut i = 0
- while i < len(instructions) {
-  if instructions[i].result == value and instructions[i].op == IR_CALL and
-   instructions[i].aux >= 0 and instructions[i].aux < len(call_sites) and
-   call_sites[instructions[i].aux].callee_item == IR_STRUCT_NEW_ITEM {
-   return true
+ let mut guard = 0
+ let mut current = value
+ while guard < len(instructions) {
+  let mut found = false
+  let mut i = 0
+  while i < len(instructions) {
+   if instructions[i].result == current {
+    found = true
+    if instructions[i].op == IR_CALL and instructions[i].aux >= 0 and
+     instructions[i].aux < len(call_sites) {
+     let callee = call_sites[instructions[i].aux].callee_item
+     // Construction sentinel or a declared function (non-negative item).
+     // Intrinsics are negative and never return a struct value.
+     if callee == IR_STRUCT_NEW_ITEM or callee >= 0 { return true }
+     return false
+    }
+    if instructions[i].op == IR_MOVE {
+     current = instructions[i].left
+     i = len(instructions)
+    } else {
+     return false
+    }
+   } else {
+    i = i + 1
+   }
   }
-  i = i + 1
+  if not found { return false }
+  guard = guard + 1
  }
  return false
 }
 
-// Release a constructed struct: munmap(block, fields * 8). The width comes from
-// the kind, so nothing has to be read back out of the block.
-// Free every owned field of a constructed struct. `owned_mask` has one bit per
-// field slot; a set bit is a string object the struct holds, released before the
-// block so the reads of its own fields still have a block to read from.
-fn x86_emit_drop_struct_fields(bytes: []int, slot: int, field_count: int, owned_mask: int) []int {
+// Free every owned field of a constructed struct, then the block itself is
+// released by the caller. `owned_pack` carries 2 bits per field (see
+// `struct_owned_slot_mask`): 1 = string, 2 = []int, 3 = []byte. Fields are
+// released before the block so their pointers are still readable.
+fn x86_emit_drop_struct_fields(bytes: []int, slot: int, field_count: int, owned_pack: int) []int {
  let mut out = bytes
- if owned_mask <= 0 { return out }
+ if owned_pack <= 0 { return out }
  let mut i = 0
- let mut bit = 1
+ let mut unit = 1
  while i < field_count {
-  if (owned_mask / bit) - ((owned_mask / bit) / 2) * 2 == 1 {
+  let code = (owned_pack / unit) - ((owned_pack / unit) / 4) * 4
+  if code > 0 {
    out = x86_emit_load_rax(out, slot)
    // rax = [block + 8*i]
    out = append(out, 72); out = append(out, 139); out = append(out, 128)
    out = x86_emit_u32(out, i * 8)
-   // munmap(field, field.length + 10) — the size every string producer maps.
-   out = append(out, 72); out = append(out, 137); out = append(out, 199)
-   out = append(out, 72); out = append(out, 139); out = append(out, 48)
-   out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
-   out = x86_emit_int_rax(out, 11)
-   out = x86_emit_syscall_const(out, 0, 3)
-   out = x86_emit_syscall_const(out, 0, 4)
-   out = x86_emit_syscall_const(out, 0, 5)
-   out = x86_emit_syscall_const(out, 0, 6)
-   out = append(out, 15); out = append(out, 5)
+   if code == 1 {
+    // string: munmap(field, field.length + 10)
+    out = append(out, 72); out = append(out, 137); out = append(out, 199)
+    out = append(out, 72); out = append(out, 139); out = append(out, 48)
+    out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
+    out = x86_emit_int_rax(out, 11)
+    out = x86_emit_syscall_const(out, 0, 3)
+    out = x86_emit_syscall_const(out, 0, 4)
+    out = x86_emit_syscall_const(out, 0, 5)
+    out = x86_emit_syscall_const(out, 0, 6)
+    out = append(out, 15); out = append(out, 5)
+   } else {
+    // slice header in rax: munmap(header, capacity * stride + 24)
+    // r8 = header; rsi = capacity; scale; +24; munmap
+    out = append(out, 73); out = append(out, 137); out = append(out, 192)
+    out = append(out, 73); out = append(out, 139); out = append(out, 112); out = append(out, 8)
+    out = append(out, 72); out = append(out, 137); out = append(out, 240)
+    if code == 2 {
+     // []int: stride 8
+     out = append(out, 72); out = append(out, 193); out = append(out, 224); out = append(out, 3)
+    }
+    // []byte: stride 1, no scale
+    out = append(out, 72); out = append(out, 131); out = append(out, 192); out = append(out, 24)
+    out = append(out, 72); out = append(out, 137); out = append(out, 198)
+    out = append(out, 76); out = append(out, 137); out = append(out, 199)
+    out = append(out, 184); out = x86_emit_u32(out, 11)
+    out = append(out, 49); out = append(out, 210)
+    out = append(out, 15); out = append(out, 5)
+   }
   }
-  bit = bit * 2
+  unit = unit * 4
   i = i + 1
  }
  return out

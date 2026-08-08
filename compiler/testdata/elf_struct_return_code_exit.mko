@@ -1,0 +1,13 @@
+// Result struct with a []int field — the compiler's X86Code shape in miniature.
+// Expected exit 11: status 9 + len 2.
+struct Code { bytes: []int  status: int }
+
+fn make_code() -> Code {
+    let b: []int = make([]int, 2, 2)
+    return Code { bytes: b, status: 9 }
+}
+
+fn main() {
+    let c = make_code()
+    exit(c.status + len(c.bytes))
+}

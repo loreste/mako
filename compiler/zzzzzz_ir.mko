@@ -565,6 +565,9 @@ fn ir_is_intrinsic_callee(item: int) -> bool {
 // out of. The element is always copied; the caller's value keeps its nature.
 fn ir_call_consumes_arguments(callee_item: int, argument_type: int) -> bool {
     if semantic_is_struct_value(argument_type) { return false }
+    // Construction stores each field into the block. The field value is
+    // transferred into the struct's ownership — not dropped, not left live.
+    if callee_item == IR_STRUCT_NEW_ITEM { return true }
     if not ir_is_intrinsic_callee(callee_item) { return true }
     // append moves the destination slice. The element is always copied — a
     // scalar by value, a struct by a stride-wide memcpy — so treating the
@@ -1318,9 +1321,11 @@ fn ir_cfg_lower_range(
                         "CFG lowering constructs only eligible structs")
                 }
                 let mut slot_values: []int = make([]int, field_count, field_count)
+                let mut slot_exprs: []int = make([]int, field_count, field_count)
                 let mut clear = 0
                 while clear < field_count {
                     slot_values[clear] = -1
+                    slot_exprs[clear] = -1
                     clear = clear + 1
                 }
                 let mut link = i
@@ -1347,6 +1352,7 @@ fn ir_cfg_lower_range(
                                 "CFG lowering struct literal sets a field twice")
                         }
                         slot_values[field_slot] = out_values[init_value]
+                        slot_exprs[field_slot] = init_value
                     }
                     link = expressions[link].left
                     link_steps = link_steps + 1
@@ -1362,9 +1368,11 @@ fn ir_cfg_lower_range(
                 // An owned field is cloned into the block. Without it the
                 // struct can hold a *static* string — the view a literal is —
                 // and its drop would try to unmap the code image. Cloning makes
-                // "a struct owns its owned fields" true however it was built,
-                // which is what lets the drop be unconditional. Same invariant,
-                // and same reason, as cloning a string argument at a call site.
+                // "a struct owns its owned fields" true however it was built.
+                //
+                // Drop the source only when it is a temporary. A binding keeps
+                // its scope-exit drop — dropping one here was a double free on
+                // `Code { bytes: b, ... }` where `b` is a local.
                 let mut emit_slot = 0
                 while emit_slot < field_count {
                     let field_type = struct_field_type(layout, owner, emit_slot)
@@ -1376,11 +1384,22 @@ fn ir_cfg_lower_range(
                             left: slot_values[emit_slot], right: -1, aux: -1,
                             token: expression.token,
                         })
-                        out_instructions = append(out_instructions, IrInstruction {
-                            op: IR_DROP, result: -1, type_kind: field_type,
-                            left: slot_values[emit_slot], right: -1, aux: -1,
-                            token: expression.token,
-                        })
+                        let src_expr = slot_exprs[emit_slot]
+                        let src_binding = if src_expr >= 0 and src_expr < len(expression_locals) {
+                            expression_locals[src_expr]
+                        } else {
+                            -1
+                        }
+                        let src_is_binding = src_expr >= 0 and src_expr < len(expressions) and
+                            expressions[src_expr].kind == EXPR_IDENT and
+                            src_binding >= 0 and src_binding < len(locals)
+                        if not src_is_binding {
+                            out_instructions = append(out_instructions, IrInstruction {
+                                op: IR_DROP, result: -1, type_kind: field_type,
+                                left: slot_values[emit_slot], right: -1, aux: -1,
+                                token: expression.token,
+                            })
+                        }
                         slot_values[emit_slot] = field_clone
                     }
                     emit_slot = emit_slot + 1

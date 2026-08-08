@@ -22,15 +22,24 @@ pkg=compiler/lexer.mko,compiler/parser.mko,... # gate package list
 
 Publish `ir_functions / signatures` from tooling, not prose.
 
-## Highest-leverage order (current ranking)
+## Measured package floor (re-check after each increment)
 
-1. **Struct-returning calls / returns** — bulk of "needs a known type for this call" + cascade  
-2. **Non-POD / constructible aggregates end-to-end** (string/slice fields in more places)  
-3. **Loop-carried owned values** (builder loops)  
-4. **Array literals** in general path  
-5. **Register allocation** (perf, not first correctness unblocker)  
-6. **Runtime pieces still on C** → Mako syscalls  
-7. **Fixed point** stage 1→2→3 + purity audit  
+| Metric | Value |
+|---|---|
+| signatures | 321 |
+| ir_functions lowered | **113** (floor in `selfhost-gate.sh`) |
+| ir_skipped | ~208 |
+
+## Highest-leverage order (after constructible returns)
+
+1. ~~Struct-returning calls / returns (string + `[]int` fields)~~ done for constructible shapes  
+2. **Remaining untyped calls** (~36) — often nested/result types still incomplete  
+3. **Loop-carried owned values** (~16)  
+4. **Array literals** (~12)  
+5. **if/else merge after statements** (~12)  
+6. **Register allocation**  
+7. **Runtime pieces still on C** → Mako syscalls  
+8. **Fixed point** stage 1→2→3 + purity audit  
 
 ## Safety invariants while growing the backend
 

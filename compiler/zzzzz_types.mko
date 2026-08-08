@@ -185,23 +185,36 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
             while one_slot and scan + 2 < item.body_end and scan + 2 < len(tokens) {
                 if tokens[scan].kind == TK_IDENT and tokens[scan + 1].kind == TK_COLON {
                     let type_token = scan + 2
-                    let field_name = if tokens[type_token].kind == TK_IDENT {
-                        token_text(source, tokens[type_token])
-                    } else {
-                        ""
+                    // `[]int` / `[]byte` / `[]string`: one pointer slot that owns
+                    // a heap block. Constructible (can be built and dropped as a
+                    // value) but never POD-eligible (a slice of them would leak
+                    // every element's allocation).
+                    let mut kind = SEM_UNKNOWN
+                    let mut advance = 3
+                    if type_token + 2 < len(tokens) and tokens[type_token].kind == TK_LBRACKET and
+                        tokens[type_token + 1].kind == TK_RBRACKET and
+                        tokens[type_token + 2].kind == TK_IDENT {
+                        let elem = token_text(source, tokens[type_token + 2])
+                        if elem == "int" or elem == "int64" { kind = SEM_ARRAY_INT }
+                        if elem == "byte" or elem == "uint8" { kind = SEM_ARRAY_BYTE }
+                        if elem == "string" { kind = SEM_ARRAY_STRING }
+                        advance = 5
+                        ok = false
+                    } else if tokens[type_token].kind == TK_IDENT {
+                        let field_name = token_text(source, tokens[type_token])
+                        let scalar = semantic_scalar_named(field_name)
+                        // A `string` field is one slot — a pointer to a string
+                        // object — but it owns what it points at, so it makes
+                        // the struct constructible without making it POD.
+                        kind = if scalar != SEM_UNKNOWN {
+                            scalar
+                        } else if field_name == "string" {
+                            SEM_STRING
+                        } else {
+                            SEM_UNKNOWN
+                        }
+                        if scalar == SEM_UNKNOWN { ok = false }
                     }
-                    let scalar = semantic_scalar_named(field_name)
-                    // A `string` field is one slot — a pointer to a string
-                    // object — but it owns what it points at, so it makes the
-                    // struct constructible without making it POD.
-                    let kind = if scalar != SEM_UNKNOWN {
-                        scalar
-                    } else if field_name == "string" {
-                        SEM_STRING
-                    } else {
-                        SEM_UNKNOWN
-                    }
-                    if scalar == SEM_UNKNOWN { ok = false }
                     if kind == SEM_UNKNOWN {
                         one_slot = false
                         scan = scan + 3
@@ -210,7 +223,7 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
                         field_name_end = append(field_name_end, tokens[scan].end)
                         field_type = append(field_type, kind)
                         count = count + 1
-                        scan = scan + 3
+                        scan = scan + advance
                     }
                 } else {
                     scan = scan + 1
@@ -236,26 +249,27 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
     }
 }
 
-// Bitmask of the field slots of a struct that own storage, or 0.
-//
-// Carried in `IR_DROP.aux` so the backend can free a struct's owned fields
-// without being handed the struct table — the same reason the element stride
-// travels in the kind. One bit per slot; a struct wider than 30 fields is
-// refused rather than silently truncated.
+// Per-field drop codes packed into IR_DROP.aux (2 bits each, field 0 low).
+// Codes: 0 = none, 1 = string, 2 = []int, 3 = []byte. Wider than 15 fields is
+// refused rather than truncated. The backend frees without the struct table —
+// the same reason element stride travels in the kind.
 fn struct_owned_slot_mask(layout: StructLayout, struct_index: int) -> int {
     if struct_index < 0 or struct_index >= len(layout.field_start) { return 0 }
-    if layout.field_count[struct_index] > 30 { return -1 }
-    let mut mask = 0
-    let mut bit = 1
+    if layout.field_count[struct_index] > 15 { return -1 }
+    let mut pack = 0
+    let mut unit = 1
     let mut i = 0
     while i < layout.field_count[struct_index] {
-        if layout.field_type[layout.field_start[struct_index] + i] == SEM_STRING {
-            mask = mask + bit
-        }
-        bit = bit * 2
+        let field_type = layout.field_type[layout.field_start[struct_index] + i]
+        let mut code = 0
+        if field_type == SEM_STRING { code = 1 }
+        if field_type == SEM_ARRAY_INT { code = 2 }
+        if field_type == SEM_ARRAY_BYTE { code = 3 }
+        pack = pack + code * unit
+        unit = unit * 4
         i = i + 1
     }
-    return mask
+    return pack
 }
 
 // Index of a *constructible* struct by source name, or -1. Wider than
@@ -412,10 +426,19 @@ fn semantic_declared_type(source: string, tokens: []Token, types: []TypeNode, ty
     if name == "bool" { return SEM_BOOL }
     if name == "string" { return SEM_STRING }
     if name == "byte" or name == "uint8" { return SEM_BYTE }
-    // A parameter or local declared as an eligible struct is one borrowed
-    // element: the caller owns the storage, and every field is a scalar, so
-    // the callee can read fields but can never free or copy anything.
-    return semantic_struct_value_of(semantic_struct_array_kind(layout, struct_layout_lookup(layout, source, name)))
+    // A named user struct: constructible ones (POD and string-field values)
+    // resolve to a value kind. Eligible-only lookup would miss HostPort and
+    // every other non-POD result type, so call results typed as those names
+    // stayed SEM_UNKNOWN and every caller was declined.
+    //
+    // Ownership is not in the kind: a parameter of this type is a borrow,
+    // a construction or call result is owned — the IR/backend read that off
+    // the producer, as with strings.
+    let constructible = struct_layout_constructible(layout, source, name)
+    if constructible >= 0 {
+        return semantic_struct_value_kind(layout, constructible)
+    }
+    return SEM_UNKNOWN
 }
 
 fn semantic_array_of(element: int) -> int {

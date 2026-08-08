@@ -773,8 +773,8 @@ fi
 # gate re-pinned on every gain gets re-pinned without being read. It must never
 # silently fall.
 package_lowered="$(printf '%s' "$package_result" | sed -n 's/.*ir_functions \([0-9]*\).*/\1/p')"
-if [[ "${package_lowered:-0}" -lt 101 ]]; then
-  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 101" >&2
+if [[ "${package_lowered:-0}" -lt 113 ]]; then
+  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 113" >&2
   exit 1
 fi
 for bad_package in "$repo_dir/compiler/lexer.mko,$repo_dir/compiler/nope.mko" \
@@ -876,7 +876,10 @@ for ss_case in \
   "elf_struct_slice_soak_exit:ss-slice-soak:9abff190eedcc06f50b5267a283f1422125153fefd5d118dfc5f3110a3406707:642:3" \
   "elf_struct_append_soak_exit:ss-append-soak:79da064f94b285b2d9004ba89b566825a4d37ff31a50a935663683da42bdb808:1713:3" \
   "elf_struct_append_new_soak_exit:ss-append-new-soak:5874c6121f136d659426725677a0a64fe5ff2d79c80ddf878f088491b9d6b981:1190:3" \
-  "elf_struct_return_exit:ss-struct-return:2b7fb0fd4e6afe52b41adba134598de78011baecf240975f8fde54b0567b7bb0:321:7"; do
+  "elf_struct_return_exit:ss-struct-return:169eaac503091fab9be2f8d223563be3ba415d0dbbbeafec77fc6c649f3b4900:370:7" \
+  "elf_struct_return_string_exit:ss-ret-string:84cad7f56cd724bcb1ea0d95769882b6277ce288af6e8a6bab28b351209d42d9:483:8" \
+  "elf_struct_return_code_exit:ss-ret-code:995edbf89c715fa8ca761575c738d5e313d9e46bf221ef7ede4230d3f5da32f1:653:11" \
+  "elf_struct_return_string_soak_exit:ss-ret-string-soak:93dcbef79b6cc8a3d81a5ec466aa89b9c138c2a458f1dcafb39572484ef73956:777:3"; do
   ss_fixture="${ss_case%%:*}"; ss_rest="${ss_case#*:}"
   ss_name="${ss_rest%%:*}"; ss_rest="${ss_rest#*:}"
   ss_sha="${ss_rest%%:*}"; ss_rest="${ss_rest#*:}"
@@ -944,7 +947,7 @@ fi
 if [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] && command -v strace >/dev/null 2>&1; then
   for balance_case in "elf-format-int:6" "elf-concat:7" "elf-string-clone:5" \
     "elf-owned-rebind:6" "elf-struct-literal:1" "elf-struct-string:3" "elf-struct-inline:3" "elf-while-soak:20000" \
-    "ss-slice-soak:20000" "ss-append-soak:60000" "ss-append-new-soak:40000"; do
+    "ss-slice-soak:20000" "ss-append-soak:60000" "ss-append-new-soak:40000" "ss-ret-string-soak:40000"; do
     balance_path="$work_dir/${balance_case%%:*}"
     balance_expect="${balance_case##*:}"
     chmod +x "$balance_path"
