@@ -134,11 +134,11 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | OTLP protobuf + HTTP exporter client | Done seed — `trace_export_otlp_pb` · `otlp_export_traces_*` · `observability_depth_test` |
 | Sampling CPU profiler | Done seed — `profile_sample_*` · `profile_sample_test` |
 | DAP JSON + pprof-text + tid samples | Done seed — `residual_seeds_test` · `profile_sample_test` |
-| DAP handle + `mako dap` CLI · profile HTTP routes | Done seed — `dap_handle_request` · `/debug/pprof/*` |
+| lldb-backed source-level debugger (`mako dap` real DAP adapter · `mako debug` · lldb formatters · VS Code direct) | Done — `scripts/test-dap.sh` · `src/dap.rs` · `editors/lldb/mako_formatters.py` · profile HTTP routes `/debug/pprof/*` |
 | Cross-target FreeBSD/RISC-V dry-run | Done seed — `scripts/cross-target-seed.sh` · CI workflow |
 | Comptime const if / comparisons | Done seed — `const_fn_test` (`abs_const` / `clamp_const`) |
 | Hot-reload swap/stamp · predict service | Done seed — `residual_seeds_test` |
-| DAP --stdio · profile-serve · plugin live reload · soft FB | Done seed — CLI + `residual_seeds_test` |
+| DAP stdio session (real adapter, no flags) · profile-serve · plugin live reload · soft FB | Done — `mako dap` + `residual_seeds_test` |
 | MSI/notarize/brew/winget publish seeds | Done seed — scripts + `package-seed.yml` · WiX skeleton |
 | gfx_poll · GPU backend availability · netcode deltas | Done seed — `residual_seeds_test` |
 | plugin_open/call/close · hot_reload_unwatch | Done seed — `residual_seeds_test` · `domain_tracks_test` |

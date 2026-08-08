@@ -98,6 +98,11 @@ if [[ -d "$VSCODE_SRC" ]]; then
   cp -R "$VSCODE_SRC" "$EDITORS_DST/vscode"
 fi
 
+# lldb data formatters for `mako dap` / `mako debug`.
+if [[ -f "$ROOT/editors/lldb/mako_formatters.py" ]]; then
+  install -m 644 "$ROOT/editors/lldb/mako_formatters.py" "$SHARE_DIR/mako_formatters.py"
+fi
+
 # Install manifest for doctor / support (P3 polish).
 VER_LINE="$("$BIN_DIR/mako" version 2>/dev/null || "$BIN_DIR/mako" --version 2>/dev/null || echo unknown)"
 HOST="$(uname -s 2>/dev/null || echo unknown)-$(uname -m 2>/dev/null || echo unknown)"

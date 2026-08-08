@@ -10,10 +10,6 @@ function lspEnabled() {
   return vscode.workspace.getConfiguration("mako").get("lsp.enabled", true);
 }
 
-function debugAdapter() {
-  return vscode.workspace.getConfiguration("mako").get("debug.adapter", "lldb");
-}
-
 function workspaceCwd() {
   const folders = vscode.workspace.workspaceFolders;
   if (folders && folders.length > 0) {
@@ -51,56 +47,37 @@ function shellQuote(value) {
   return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
 }
 
-function binarySuffix() {
-  return process.platform === "win32" ? ".exe" : "";
-}
-
-function defaultProgramForSource(source) {
-  const parsed = path.parse(source || "main.mko");
-  return path.join(workspaceCwd(), `${parsed.name}${binarySuffix()}`);
-}
-
 function normalizeDebugArgs(args) {
   return Array.isArray(args) ? args.map((arg) => String(arg)) : [];
 }
 
+// The `mako-native` debug type is served by `mako dap` (see factory below):
+// the adapter builds the .mko source on launch and drives lldb-dap, so no
+// preLaunchTask or external debug extension is needed.
 function nativeDebugConfig(config) {
-  const source = config.source || activeTarget(path.join(workspaceCwd(), "main.mko"));
-  const adapter = config.adapter || debugAdapter();
-  const program = config.program || defaultProgramForSource(source);
-  const cwd = config.cwd || workspaceCwd();
-  const args = normalizeDebugArgs(config.args);
-  const preLaunchTask = config.preLaunchTask || "Mako: Build Active File";
-
-  if (adapter === "cppdbg") {
-    return {
-      type: "cppdbg",
-      request: "launch",
-      name: config.name || "Mako: Debug",
-      program,
-      args,
-      cwd,
-      stopAtEntry: config.stopAtEntry || false,
-      externalConsole: config.externalConsole || false,
-      MIMode: process.platform === "darwin" ? "lldb" : "gdb",
-      preLaunchTask
-    };
-  }
-
+  const program = config.program || activeTarget(path.join(workspaceCwd(), "main.mko"));
   return {
-    type: "lldb",
+    type: "mako-native",
     request: "launch",
     name: config.name || "Mako: Debug",
     program,
-    args,
-    cwd,
-    preLaunchTask
+    args: normalizeDebugArgs(config.args),
+    cwd: config.cwd || workspaceCwd(),
+    stopOnEntry: config.stopOnEntry || false
   };
 }
 
 class MakoDebugConfigurationProvider {
   resolveDebugConfiguration(_folder, config) {
     return nativeDebugConfig(config || {});
+  }
+}
+
+class MakoDebugAdapterFactory {
+  createDebugAdapterDescriptor(_session, _executable) {
+    return new vscode.DebugAdapterExecutable(makoPath(), ["dap"], {
+      cwd: workspaceCwd()
+    });
   }
 }
 
@@ -112,9 +89,7 @@ function debugActiveFile() {
   }
   return vscode.debug.startDebugging(undefined, nativeDebugConfig({
     name: "Mako: Debug active file",
-    source,
-    program: defaultProgramForSource(source),
-    cwd: workspaceCwd()
+    program: source
   }));
 }
 
@@ -581,6 +556,10 @@ function activate(context) {
     vscode.debug.registerDebugConfigurationProvider(
       "mako-native",
       new MakoDebugConfigurationProvider()
+    ),
+    vscode.debug.registerDebugAdapterDescriptorFactory(
+      "mako-native",
+      new MakoDebugAdapterFactory()
     )
   );
 

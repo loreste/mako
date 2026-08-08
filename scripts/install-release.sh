@@ -506,6 +506,9 @@ if [[ -d "$STAGE/share/mako/runtime" ]]; then
     mkdir -p "$EDITORS_DST"
     cp -R "$STAGE/share/mako/editors/." "$EDITORS_DST/"
   fi
+  if [[ -f "$STAGE/share/mako/mako_formatters.py" ]]; then
+    install -m 644 "$STAGE/share/mako/mako_formatters.py" "$SHARE_DIR/mako_formatters.py"
+  fi
   if [[ -f "$STAGE/share/mako/docs/README.md" ]]; then
     mkdir -p "$SHARE_DIR/docs"
     install -m 644 "$STAGE/share/mako/docs/README.md" "$SHARE_DIR/docs/README.md"

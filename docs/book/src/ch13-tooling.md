@@ -474,11 +474,11 @@ The `editors/vscode/` extension provides:
 - Snippets for common patterns
 - Task integration (build, run, test)
 - Command palette actions
-- Debug launch configurations (`mako-native` via CodeLLDB or cppdbg)
+- Debug launch configurations (`mako-native` spawns the built-in `mako dap`
+  adapter directly — no CodeLLDB or cppdbg needed)
 
 Configure the extension:
 - `mako.path` -- path to the `mako` binary
-- `mako.debug.adapter` -- `lldb` (CodeLLDB) or `cppdbg` (Microsoft C/C++)
 
 ---
 

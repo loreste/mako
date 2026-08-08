@@ -160,15 +160,6 @@
           "type": "boolean",
           "default": true,
           "description": "Start the built-in Mako language server client for diagnostics, hover, completion, definitions, references, rename, code actions, symbols, and signature help."
-        },
-        "mako.debug.adapter": {
-          "type": "string",
-          "default": "lldb",
-          "enum": [
-            "lldb",
-            "cppdbg"
-          ],
-          "description": "Native debugger adapter used for Mako launch configs. Use lldb with CodeLLDB or cppdbg with Microsoft C/C++."
         }
       }
     },
@@ -183,13 +174,9 @@
           "launch": {
             "required": [],
             "properties": {
-              "source": {
-                "type": "string",
-                "description": "Mako source file to build before launching."
-              },
               "program": {
                 "type": "string",
-                "description": "Native binary path. Defaults to ${workspaceFolder}/${fileBasenameNoExtension}."
+                "description": "Mako source file (.mko) or prebuilt binary to debug. Defaults to the active editor file. The adapter builds .mko sources with debug info before launching."
               },
               "cwd": {
                 "type": "string",
@@ -200,15 +187,12 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Arguments passed to the launched binary."
+                "description": "Arguments passed to the launched program."
               },
-              "adapter": {
-                "type": "string",
-                "enum": [
-                  "lldb",
-                  "cppdbg"
-                ],
-                "description": "Native adapter to delegate to."
+              "stopOnEntry": {
+                "type": "boolean",
+                "default": false,
+                "description": "Stop at the program entry point before continuing."
               }
             }
           }
@@ -216,13 +200,12 @@
         "configurationSnippets": [
           {
             "label": "Mako: Debug active file",
-            "description": "Build the active .mko file, then launch the native binary with LLDB.",
+            "description": "Build the active .mko file with debug info, then launch it under lldb via the Mako DAP adapter.",
             "body": {
               "type": "mako-native",
               "request": "launch",
               "name": "Mako: Debug active file",
-              "source": "${file}",
-              "program": "${workspaceFolder}/${fileBasenameNoExtension}",
+              "program": "${file}",
               "cwd": "${workspaceFolder}",
               "args": []
             }

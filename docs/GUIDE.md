@@ -2373,8 +2373,9 @@ VS Code support under `editors/vscode/` includes syntax highlighting, snippets,
 tasks, command palette actions, `mako-native` debug launch configs, and a
 dependency-free client for `mako lsp` covering diagnostics, hover, completion,
 definitions, references, rename, code actions, symbols, and signature help.
-Configure the executable path with `mako.path`; native debugging delegates to
-CodeLLDB (`lldb`) or Microsoft C/C++ (`cppdbg`) via `mako.debug.adapter`.
+Configure the executable path with `mako.path`; native debugging spawns the
+built-in `mako dap` adapter directly (no CodeLLDB or Microsoft C/C++
+extension needed).
 
 Flags of note: `--time`, `-j` / `MAKO_JOBS`, `--no-incremental`, `--target <triple>`,
 `--sanitize=thread|address`, `--static-link`, `--no-static-link`, `--emit-c`.
