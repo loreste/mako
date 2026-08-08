@@ -867,6 +867,21 @@ if name == "unsafe_open_string" { inferred = SEM_INT }
         }
         pass = pass + 1
     }
+    // Array literals are left-associated chains whose seed is an empty
+    // `[` node with no element. The seed has no right child, so the forward
+    // pass leaves it unknown while every later link is typed from its
+    // element. Walk the chain backwards so the seed (and any untyped prefix)
+    // inherits the concrete slice kind before IR lowering asks for one.
+    i = len(expressions) - 1
+    while i >= 0 {
+        let expression = expressions[i]
+        if expression.kind == EXPR_ARRAY and expression_types[i] != SEM_UNKNOWN and
+            expression.left >= 0 and expression.left < len(expression_types) and
+            expression_types[expression.left] == SEM_UNKNOWN {
+            expression_types[expression.left] = expression_types[i]
+        }
+        i = i - 1
+    }
     let mut typed = 0
     i = 0
     while i < len(expression_types) {

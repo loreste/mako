@@ -1,0 +1,7 @@
+// Array literal then append growth.
+fn main() {
+    let mut a = [1]
+    a = append(a, 2)
+    a = append(a, 3)
+    exit(a[0] + a[1] + a[2] + len(a))
+}

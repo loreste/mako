@@ -1543,6 +1543,43 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
             if len(bytes) == make_before {
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 slice make invalid"))
             }
+        } else if instruction.op == IR_ARRAY {
+            // A left-associated array literal: the seed is an empty node
+            // (no left, no right) that allocates a zero-length slice; each
+            // later link appends its element onto the previous value and
+            // consumes that previous allocation. Only slice kinds with a
+            // known element stride are accepted — the same set make/append
+            // already emit.
+            let array_stride = x86_slice_element_size(instruction.type_kind)
+            if array_stride == 0 or slot < 1 or slot > function.value_count {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 array literal type unsupported"))
+            }
+            if instruction.left < 0 and instruction.right < 0 {
+                let empty_before = len(bytes)
+                bytes = x86_emit_make_byte(bytes, 0, slot, array_stride)
+                if len(bytes) == empty_before {
+                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 empty array literal invalid"))
+                }
+            } else if instruction.left >= 0 and instruction.right >= 0 {
+                let prev_slot = instruction.left - function.value_start + 1
+                let elem_slot = instruction.right - function.value_start + 1
+                if prev_slot < 1 or prev_slot >= slot or elem_slot < 1 or elem_slot >= slot {
+                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 array literal operands not earlier values"))
+                }
+                // Scalar elements only: a struct element would need the
+                // pointer-copy path, and no array-of-struct literal has been
+                // lowered yet. Fail closed rather than store a wrong width.
+                if semantic_is_struct_array(instruction.type_kind) {
+                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 array-of-struct literal not implemented"))
+                }
+                let append_before = len(bytes)
+                bytes = x86_emit_append_byte_grow(bytes, prev_slot, elem_slot, slot, array_stride, false)
+                if len(bytes) == append_before {
+                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 array literal append invalid"))
+                }
+            } else {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 array literal shape invalid"))
+            }
         } else if instruction.op == IR_ELEM_ADDR {
             let addr_slice = instruction.left - function.value_start + 1
             let addr_index = instruction.right - function.value_start + 1

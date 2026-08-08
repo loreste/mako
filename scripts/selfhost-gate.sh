@@ -808,7 +808,15 @@ for cap_case in \
   "elf_owned_rebind_exit:elf-owned-rebind:d1a0e44185273220740b16bd24a671169cdf2821bc5171eb143a0a4141cd2a10:1783:43" \
   "elf_struct_literal_exit:elf-struct-literal:7a8547d71a71839c093d26cac073b1c2f5d65d5d5a5cff7db1c954addefbd82b:402:34" \
   "elf_struct_string_field_exit:elf-struct-string:7d5cfaf2f3061c2f4c59907136693162576ec439473b68add884092077f0e389:694:14" \
-  "elf_struct_field_inline_exit:elf-struct-inline:30bbc1115dd0a3d48dd9ae79e495e50ba02aee90b44fd0090f2759f0b048013a:694:14"; do
+  "elf_struct_field_inline_exit:elf-struct-inline:30bbc1115dd0a3d48dd9ae79e495e50ba02aee90b44fd0090f2759f0b048013a:694:14" \
+  "elf_array_lit_exit:elf-array-lit:ef94cb2619192812d3693e7a24872858db571ccffe9bc4c706ad91ac72f2a915:1239:60" \
+  "elf_array_one_exit:elf-array-one:84f01e17c4ac776b47758e19235009a853a8f86772fa4538cac65021656be1e7:590:7" \
+  "elf_array_len_exit:elf-array-len:864f4c42425a8d136557d6233f57229480a88969368e5b73f6ef62fb73f87ccf:1305:8" \
+  "elf_array_rebind_exit:elf-array-rebind:2a1b1db0a44f6c7204ea427aeb4478541cb17236b478258ae75df504c492ea49:1885:15" \
+  "elf_array_call_exit:elf-array-call:fb9437c961f0e8f798a185ddf18af27c81ea451f8a0feb6fa82300a66a73eb43:1267:6" \
+  "elf_array_append_exit:elf-array-append:5c3cdb894c32339a145d2b13151e5a87b474f6e924aeb86b7e008a9345cb8f48:1562:9" \
+  "elf_loop_owned_slice_exit:elf-loop-owned-slice:9262e904f314e1ffe2661d80731a887f1cbbd5b332cb838efe88c4b9044b105f:1036:6" \
+  "elf_loop_owned_array_exit:elf-loop-owned-array:24e7a216fdbbe278dd6bf9ebeb280ab2ed04cf91810c93e772dc5d6621286c05:1298:56"; do
   cap_fixture="${cap_case%%:*}"; cap_rest="${cap_case#*:}"
   cap_name="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
   cap_sha="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"

@@ -381,6 +381,7 @@ fn verify_owned_ir_paths(
     successors: []int,
     call_sites: []IrCallSite,
     call_arguments: []int,
+    jump_arguments: []int,
     definitions: []int
 ) -> IrVerification {
     let mut value = 0
@@ -457,6 +458,32 @@ fn verify_owned_ir_paths(
                     if (instruction.left == value and ir_instruction_consumes_left(instruction, instructions, definitions)) or
                         (instruction.right == value and ir_instruction_consumes_right(instruction, instructions, definitions)) {
                         state = 2
+                    }
+                    // Multi-arg jumps carry values in the jump_arguments arena.
+                    // A single-arg jump uses `left` and is covered above.
+                    if instruction.op == IR_JUMP and instruction.left < 0 and instruction.aux >= 0 and
+                        block.successor_count == 1 {
+                        let jump_target = successors[block.successor_start]
+                        let target_block = blocks[jump_target]
+                        let mut target_params = 0
+                        while target_block.instruction_start + target_params <
+                            target_block.instruction_start + target_block.instruction_count and
+                            instructions[target_block.instruction_start + target_params].op == IR_BLOCK_PARAM {
+                            target_params = target_params + 1
+                        }
+                        let mut jump_arg = 0
+                        while jump_arg < target_params and instruction.aux + jump_arg < len(jump_arguments) {
+                            if jump_arguments[instruction.aux + jump_arg] == value {
+                                if state == 0 {
+                                    return IrVerification { ok: false, error: "IR instruction uses undefined owned value on a path", checked_values: 0 }
+                                }
+                                if state == 2 {
+                                    return IrVerification { ok: false, error: "IR instruction uses consumed owned value", checked_values: 0 }
+                                }
+                                state = 2
+                            }
+                            jump_arg = jump_arg + 1
+                        }
                     }
                     instruction_index = instruction_index + 1
                 }
@@ -1423,6 +1450,42 @@ fn ir_cfg_lower_range(
                     op: IR_CALL, result: struct_result, type_kind: expression_types[i],
                     left: -1, right: -1, aux: struct_site, token: expression.token,
                 })
+            } else if expression.kind == EXPR_ARRAY {
+                // Left-associated chain: seed is empty (no left, no right) and
+                // each later link appends one element onto the previous value.
+                // The seed must already be a concrete slice kind — reverse type
+                // propagation fills that in from the first element.
+                if not ir_type_is_owned(expression_types[i]) {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering array literals require an owned slice type")
+                }
+                let mut array_left = -1
+                let mut array_right = -1
+                if expression.left >= 0 {
+                    if expression.left >= len(out_values) or out_values[expression.left] < 0 {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering array prefix is not available")
+                    }
+                    array_left = out_values[expression.left]
+                }
+                if expression.right >= 0 {
+                    if expression.right >= len(out_values) or out_values[expression.right] < 0 {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering array element is not available")
+                    }
+                    array_right = out_values[expression.right]
+                }
+                if (array_left < 0) != (array_right < 0) {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering array literal shape is invalid")
+                }
+                let array_result = value_cursor
+                value_cursor = value_cursor + 1
+                out_values[i] = array_result
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_ARRAY, result: array_result, type_kind: expression_types[i],
+                    left: array_left, right: array_right, aux: -1, token: expression.token,
+                })
             } else if expression.kind == EXPR_MAKE {
                 // One allocation. The element stride comes from the result
                 // type, and the length is the literal after the type — the same
@@ -1914,6 +1977,25 @@ fn ir_lower_returning_if_tree(
             owned_locals[restore_binding] = list_bindings[list_bindings_start[list_index] + restore_binding]
             restore_binding = restore_binding + 1
         }
+        // Owned loop parameters re-enter `live` only on the exit continuation:
+        // the entry/backedge jump consumed the previous allocation into the
+        // header parameter, and the body/exit scopes were snapshotted without
+        // that pre-loop value. The body must not inject the parameter into
+        // `live` — rebinding already tracks the current value, and injecting
+        // would leave a stale copy that a later scope-exit drop frees twice.
+        if list_loop_exit[list_index] >= 0 {
+            let exit_loop = list_loop_exit[list_index]
+            let mut carried_live = 0
+            while carried_live < loop_carried_count[exit_loop] {
+                let carried_local = loop_carried[loop_carried_start[exit_loop] + carried_live]
+                let param_value = loop_params[loop_carried_start[exit_loop] + carried_live]
+                if param_value >= 0 and carried_local < len(local_types) and
+                    ir_type_is_owned(local_types[carried_local]) {
+                    live = append(live, param_value)
+                }
+                carried_live = carried_live + 1
+            }
+        }
         let mut closed = false
         // Falling off the end of an if arm inside a loop body is falling off
         // the end of the body, so the arms this block spawns inherit its
@@ -1943,10 +2025,18 @@ fn ir_lower_returning_if_tree(
                 // The body has to read the joined value or the loop tests the
                 // same thing forever. Header, body and continuation are pushed
                 // consecutively, so the body is the next list.
+                // Header, body and continuation are consecutive list entries.
+                // Body and exit both read the joined parameter, not the
+                // pre-loop value snapshotted at the `while`.
                 let body_list = list_index + 1
+                let exit_list = list_index + 2
                 if body_list < len(list_bindings_start) and
                     list_bindings_start[body_list] + carried_local < len(list_bindings) {
                     list_bindings[list_bindings_start[body_list] + carried_local] = param_value
+                }
+                if exit_list < len(list_bindings_start) and
+                    list_bindings_start[exit_list] + carried_local < len(list_bindings) {
+                    list_bindings[list_bindings_start[exit_list] + carried_local] = param_value
                 }
                 header_param = header_param + 1
             }
@@ -2307,24 +2397,66 @@ fn ir_lower_returning_if_tree(
                 }
                 let mut carried_here: []int = make([]int, 0, 4)
                 let mut carried_scan = 0
+                let mut owned_carry_count = 0
                 while carried_scan < len(locals) {
                     if locals[carried_scan].item == signature.item and
                         owned_locals[carried_scan] >= 0 and
                         ir_local_assigned_in_range(source, tokens, statements, locals, signature,
                             carried_scan, body_open, statement.token_end) {
-                        // An owned carried value would need its drop and clone
-                        // worked out across the backedge — the previous
-                        // iteration's allocation has to go somewhere. Refused
-                        // rather than leaked.
+                        // Bindable scalars and a single owned value may ride
+                        // the backedge. Two owned carries would need a
+                        // scratch move across a multi-arg jump (the second
+                        // write can clobber the first), so they stay refused.
                         if carried_scan >= len(local_types) or
-                            not ir_cfg_bindable_type(local_types[carried_scan]) or
-                            ir_type_is_owned(local_types[carried_scan]) {
+                            not ir_cfg_bindable_type(local_types[carried_scan]) {
                             return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                                "CFG lowering carries only non-owned scalars through a loop")
+                                "CFG lowering carries only bindable locals through a loop")
+                        }
+                        if ir_type_is_owned(local_types[carried_scan]) {
+                            // Slice headers are always heap allocations here
+                            // (make/append/array). Strings may be static
+                            // literals on the entry edge, and munmap of a
+                            // block-parameter string would free read-only
+                            // code — so only slices ride the backedge for now.
+                            let carry_kind = local_types[carried_scan]
+                            if carry_kind != SEM_ARRAY_INT and carry_kind != SEM_ARRAY_BYTE and
+                                not semantic_is_struct_array(carry_kind) {
+                                return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                    "CFG lowering carries only owned slices through a loop")
+                            }
+                            owned_carry_count = owned_carry_count + 1
                         }
                         carried_here = append(carried_here, carried_scan)
                     }
                     carried_scan = carried_scan + 1
+                }
+                // An owned carry rides a single-parameter jump. Mixing it with
+                // a scalar carry forces a multi-arg jump whose live tracking is
+                // still incomplete (package verify saw a double-drop). Refuse
+                // that shape until the multi-arg path is sealed.
+                if owned_carry_count > 0 and len(carried_here) != 1 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering carries an owned slice only as the sole loop-carried local")
+                }
+                if owned_carry_count > 1 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering carries at most one owned value through a loop")
+                }
+                // Transfer ownership of the owned carry into the header: the
+                // entry jump consumes the pre-loop value, so it must leave
+                // `live` before the body/exit scopes are snapshotted.
+                if owned_carry_count == 1 {
+                    let carried_local = carried_here[0]
+                    let transferred = owned_locals[carried_local]
+                    let mut kept_live: []int = make([]int, 0, len(live))
+                    let mut live_i = 0
+                    while live_i < len(live) {
+                        if live[live_i] != transferred {
+                            kept_live = append(kept_live, live[live_i])
+                        }
+                        live_i = live_i + 1
+                    }
+                    live = kept_live
                 }
                 let loop_index = len(loop_statement)
                 let header_list = len(list_start)
@@ -2687,20 +2819,30 @@ fn ir_lower_returning_if_tree(
                 }
                 back_argument = back_argument + 1
             }
-            // Anything the body allocated dies here. An owned value created in
-            // an iteration has no reader on the next one, and the header cannot
-            // carry it — carried values are non-owned scalars — so it must be
-            // dropped before the backedge or the loop leaks one per iteration.
-            // Only what this iteration added: entries below the loop's entry
-            // mark come from outside the loop, are still live on the next
-            // iteration and after it, and are dropped by the path that leaves.
+            // Anything the body allocated dies here — except the values the
+            // backedge hands back to the header. An owned carry is transferred
+            // by the jump; dropping it first would free the next iteration's
+            // input. Only what this iteration added beyond the entry mark is
+            // considered, then carried current values are skipped.
             let mut body_drop = len(live) - 1
             while body_drop >= loop_entry_live[back_loop] {
-                out_instructions = append(out_instructions, IrInstruction {
-                    op: IR_DROP, result: -1, type_kind: ir_cfg_value_type(out_instructions, live[body_drop]),
-                    left: live[body_drop], right: -1, aux: ir_drop_aux(layout, source, ir_cfg_value_type(out_instructions, live[body_drop])),
-                    token: statements[loop_statement[back_loop]].token_start,
-                })
+                let drop_value = live[body_drop]
+                let mut carried_now = false
+                let mut carry_check = 0
+                while carry_check < loop_carried_count[back_loop] {
+                    let carried_local = loop_carried[loop_carried_start[back_loop] + carry_check]
+                    if owned_locals[carried_local] == drop_value {
+                        carried_now = true
+                    }
+                    carry_check = carry_check + 1
+                }
+                if not carried_now {
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_DROP, result: -1, type_kind: ir_cfg_value_type(out_instructions, drop_value),
+                        left: drop_value, right: -1, aux: ir_drop_aux(layout, source, ir_cfg_value_type(out_instructions, drop_value)),
+                        token: statements[loop_statement[back_loop]].token_start,
+                    })
+                }
                 body_drop = body_drop - 1
             }
             if loop_carried_count[back_loop] == 1 {
@@ -6971,15 +7113,21 @@ fn verify_typed_ir(
                 return IrVerification { ok: false, error: "IR entry block cannot have a block parameter", checked_values: 0 }
             }
             parameter_scan = block.instruction_start
+            let mut owned_block_params = 0
             while parameter_scan < block.instruction_start + block_parameters {
                 let parameter = instructions[parameter_scan]
                 if parameter.aux != 0 or parameter.left >= 0 or parameter.right >= 0 or parameter.type_kind == SEM_UNKNOWN {
                     return IrVerification { ok: false, error: "IR block parameter is malformed", checked_values: 0 }
                 }
-                if block_parameters > 1 and ir_type_is_owned(parameter.type_kind) {
-                    return IrVerification { ok: false, error: "IR block parameter type is owned", checked_values: 0 }
+                if ir_type_is_owned(parameter.type_kind) {
+                    owned_block_params = owned_block_params + 1
                 }
                 parameter_scan = parameter_scan + 1
+            }
+            // One owned parameter may ride a multi-arg join (scalar siblings
+            // beside it). Two would need a scratch copy across the jump.
+            if owned_block_params > 1 {
+                return IrVerification { ok: false, error: "IR block parameter type is owned", checked_values: 0 }
             }
             let mut incoming = 0
             let mut predecessor = 0
@@ -7412,7 +7560,7 @@ fn verify_typed_ir(
         i = i + 1
     }
     let ownership = verify_owned_ir_paths(
-        functions, blocks, instructions, successors, call_sites, call_arguments, definitions
+        functions, blocks, instructions, successors, call_sites, call_arguments, jump_arguments, definitions
     )
     if not ownership.ok { return ownership }
     return IrVerification { ok: true, error: "", checked_values: checked }
@@ -8092,6 +8240,8 @@ fn typed_ir_local_transfer_smoke_test() -> bool {
 }
 
 fn typed_ir_ownership_smoke_test() -> bool {
+    // Array seeds are typed (empty `[]int` plus each append link), so a three
+    // element literal is: empty + three consts + three links + drop/return.
     let discard_source = "fn discard_values() -> int {\nlet values = [1, 2, 3]\nreturn 7\n}"
     let discard_lexed = lex_source(discard_source)
     if not discard_lexed.ok { return false }
@@ -8102,8 +8252,10 @@ fn typed_ir_ownership_smoke_test() -> bool {
         discard.statement_edges, discard.expressions, discard.expression_types, discard.locals,
         discard.local_types, discard.expression_locals, discard.symbols, discard.expression_symbols
     )
-    if not drop_ir.ok or len(drop_ir.instructions) != 9 or
-        drop_ir.instructions[7].op != IR_DROP or drop_ir.instructions[8].op != IR_RETURN { return false }
+    if not drop_ir.ok or len(drop_ir.instructions) != 10 or
+        drop_ir.instructions[0].op != IR_ARRAY or drop_ir.instructions[0].left >= 0 or
+        drop_ir.instructions[0].right >= 0 or
+        drop_ir.instructions[8].op != IR_DROP or drop_ir.instructions[9].op != IR_RETURN { return false }
     let drop_verified = verify_typed_ir(
         drop_ir.functions, drop_ir.blocks, drop_ir.instructions, drop_ir.constants,
         drop_ir.successors, drop_ir.call_sites, drop_ir.call_arguments, drop_ir.jump_arguments, drop_ir.value_count
@@ -8120,14 +8272,16 @@ fn typed_ir_ownership_smoke_test() -> bool {
         moved.statement_edges, moved.expressions, moved.expression_types, moved.locals,
         moved.local_types, moved.expression_locals, moved.symbols, moved.expression_symbols
     )
-    if not move_ir.ok or len(move_ir.instructions) != 8 or move_ir.value_count != 7 or
-        move_ir.instructions[6].op != IR_MOVE or move_ir.instructions[7].op != IR_RETURN or
-        move_ir.instructions[7].left != move_ir.instructions[6].result { return false }
+    // empty + 3 consts + 3 links + move + return; values are the seven SSA
+    // results of those array ops and the move (consts share the pool).
+    if not move_ir.ok or len(move_ir.instructions) != 9 or move_ir.value_count != 8 or
+        move_ir.instructions[7].op != IR_MOVE or move_ir.instructions[8].op != IR_RETURN or
+        move_ir.instructions[8].left != move_ir.instructions[7].result { return false }
     let move_verified = verify_typed_ir(
         move_ir.functions, move_ir.blocks, move_ir.instructions, move_ir.constants,
         move_ir.successors, move_ir.call_sites, move_ir.call_arguments, move_ir.jump_arguments, move_ir.value_count
     )
-    if not move_verified.ok or move_verified.checked_values != 7 { return false }
+    if not move_verified.ok or move_verified.checked_values != 8 { return false }
 
     let cfg_source = "fn choose_values(flag: bool, left: []int, right: []int) -> []int {\nif flag {\nreturn left\n} else {\nreturn right\n}\n}"
     let cfg_lexed = lex_source(cfg_source)

@@ -1,0 +1,5 @@
+// Non-empty []int literal: seed + append chain, index, drop.
+fn main() {
+    let a = [10, 20, 30]
+    exit(a[0] + a[1] + a[2])
+}

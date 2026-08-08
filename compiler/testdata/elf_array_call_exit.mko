@@ -1,0 +1,7 @@
+// Array literal passed into a callee (cloned for the owned parameter).
+fn sum3(xs: []int) -> int {
+    return xs[0] + xs[1] + xs[2]
+}
+fn main() {
+    exit(sum3([1, 2, 3]))
+}

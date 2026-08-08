@@ -1,0 +1,8 @@
+// Array literal seed, then sole owned carry via append.
+fn main() {
+    let mut a = [10]
+    while len(a) < 3 {
+        a = append(a, 20 + len(a))
+    }
+    exit(a[0] + a[1] + a[2] + len(a))
+}

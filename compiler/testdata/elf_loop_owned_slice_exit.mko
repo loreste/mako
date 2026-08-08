@@ -1,0 +1,8 @@
+// Loop-carried owned []int as the sole carried local (condition uses len).
+fn main() {
+    let mut a = make([]int, 0)
+    while len(a) < 3 {
+        a = append(a, len(a))
+    }
+    exit(len(a) + a[0] + a[1] + a[2])
+}

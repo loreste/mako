@@ -1,0 +1,5 @@
+// Single-element array literal.
+fn main() {
+    let a = [7]
+    exit(a[0])
+}

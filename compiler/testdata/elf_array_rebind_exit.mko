@@ -1,0 +1,6 @@
+// Mut rebind of an array local drops the previous allocation.
+fn main() {
+    let mut a = [1, 2]
+    a = [3, 4, 5]
+    exit(a[0] + a[1] + a[2] + len(a))
+}

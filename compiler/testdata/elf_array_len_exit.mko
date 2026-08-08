@@ -1,0 +1,5 @@
+// Array literal length plus last element.
+fn main() {
+    let a = [1, 2, 3, 4]
+    exit(len(a) + a[3])
+}

@@ -33,13 +33,14 @@ Publish `ir_functions / signatures` from tooling, not prose.
 ## Highest-leverage order (after constructible returns)
 
 1. ~~Struct-returning calls / returns (string + `[]int` fields)~~ done for constructible shapes  
-2. **Remaining untyped calls** (~36) — often nested/result types still incomplete  
-3. **Loop-carried owned values** (~16)  
-4. **Array literals** (~12)  
-5. **if/else merge after statements** (~12)  
-6. **Register allocation**  
-7. **Runtime pieces still on C** → Mako syscalls  
-8. **Fixed point** stage 1→2→3 + purity audit  
+2. ~~Array literals (`IR_ARRAY` → make/append)~~ done for typed `[]int` chains; empty untyped still skipped  
+3. ~~Loop-carried owned slices (sole carry)~~ done; dual scalar+owned still refused  
+4. **Remaining untyped calls** (~36) — often nested/result types still incomplete  
+5. **Owned + scalar dual loop carries** (~15)  
+6. **if/else merge after statements** (~12)  
+7. **Register allocation**  
+8. **Runtime pieces still on C** → Mako syscalls  
+9. **Fixed point** stage 1→2→3 + purity audit  
 
 ## Safety invariants while growing the backend
 
