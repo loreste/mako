@@ -1,0 +1,12 @@
+// Constructed POD struct returned through rax as a single pointer, bound at
+// the call site, then field-read. Expected exit 7 against stage-0.
+struct Pt { x: int  y: int }
+
+fn make_pt() -> Pt {
+    return Pt { x: 3, y: 4 }
+}
+
+fn main() {
+    let p = make_pt()
+    exit(p.x + p.y)
+}

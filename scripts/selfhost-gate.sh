@@ -875,7 +875,8 @@ for ss_case in \
   "elf_struct_append_new_exit:ss-append-new:c113c8ea61798ad92c1d40e38dd36e99e46ac3729ef2186f2e426a7091ea1266:1064:4" \
   "elf_struct_slice_soak_exit:ss-slice-soak:9abff190eedcc06f50b5267a283f1422125153fefd5d118dfc5f3110a3406707:642:3" \
   "elf_struct_append_soak_exit:ss-append-soak:79da064f94b285b2d9004ba89b566825a4d37ff31a50a935663683da42bdb808:1713:3" \
-  "elf_struct_append_new_soak_exit:ss-append-new-soak:5874c6121f136d659426725677a0a64fe5ff2d79c80ddf878f088491b9d6b981:1190:3"; do
+  "elf_struct_append_new_soak_exit:ss-append-new-soak:5874c6121f136d659426725677a0a64fe5ff2d79c80ddf878f088491b9d6b981:1190:3" \
+  "elf_struct_return_exit:ss-struct-return:2b7fb0fd4e6afe52b41adba134598de78011baecf240975f8fde54b0567b7bb0:321:7"; do
   ss_fixture="${ss_case%%:*}"; ss_rest="${ss_case#*:}"
   ss_name="${ss_rest%%:*}"; ss_rest="${ss_rest#*:}"
   ss_sha="${ss_rest%%:*}"; ss_rest="${ss_rest#*:}"

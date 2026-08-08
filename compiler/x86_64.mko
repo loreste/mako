@@ -2242,9 +2242,12 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
             bytes = append(bytes, 5)
             bytes = x86_emit_store_rax(bytes, slot)
         } else if instruction.op == IR_CALL {
-            // An int and a bool result come back the same way in rax and land
-            // in one slot; only the IR tag distinguishes them.
-            if (instruction.type_kind != SEM_INT and instruction.type_kind != SEM_BOOL) or
+            // An int, a bool, and a struct-value pointer all come back in rax
+            // and land in one slot. Struct returns share the SysV pointer
+            // convention already used for string/slice values; the IR tag is
+            // what ownership and field loads consult, not a different ABI.
+            if (instruction.type_kind != SEM_INT and instruction.type_kind != SEM_BOOL and
+                not semantic_is_struct_value(instruction.type_kind)) or
                 instruction.aux < 0 or instruction.aux >= len(call_sites) or slot < 1 or slot > function.value_count {
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 scalar body call is invalid"))
             }
