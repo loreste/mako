@@ -27,8 +27,8 @@ Publish `ir_functions / signatures` from tooling, not prose.
 | Metric | Value |
 |---|---|
 | signatures | 321 |
-| ir_functions lowered | **132** (floor in `selfhost-gate.sh`) |
-| ir_skipped | ~193 |
+| ir_functions lowered | **161** (floor in `selfhost-gate.sh`) |
+| ir_skipped | ~164 |
 
 ## Highest-leverage order (after constructible returns)
 
@@ -39,12 +39,13 @@ Publish `ir_functions / signatures` from tooling, not prose.
 5. ~~`len(mk())` mid-expression owned call~~ IR only; x86 still rejects string-returning mid-calls  
 6. ~~String `==` / `!=` (IR + x86 emit + temp drops)~~ pin `elf_str_eq_exit`  
 7. ~~`if/else` followed only by `continue`/`break`~~ arm-dup + pin `elf_if_else_continue_exit`  
-8. **Remaining untyped / cascade calls** (~36+57)  
-9. **if/else merge after statements** (~13; `lex_source` still)  
-10. **`[]Token` / constructible LexResult** — deferred: makes LexResult constructible but breaks stage-0 seed backends  
-11. **Register allocation**  
-12. **Runtime pieces still on C** → Mako syscalls  
-13. **Fixed point** stage 1→2→3 + purity audit  
+8. ~~`if/else` then more statements~~ arm-dup post into both arms (no join/phi); pin `elf_if_else_merge_exit`  
+9. **Remaining untyped / cascade calls** (~36+35)  
+10. **Mid-expression owned / non-scalar call results** (~13)  
+11. **`[]Token` / constructible LexResult** — deferred: makes LexResult constructible but breaks stage-0 seed backends  
+12. **Register allocation**  
+13. **Runtime pieces still on C** → Mako syscalls  
+14. **Fixed point** stage 1→2→3 + purity audit  
 
 ## Safety invariants while growing the backend
 

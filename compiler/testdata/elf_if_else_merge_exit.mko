@@ -1,0 +1,14 @@
+// if/else then a statement after both arms (join via arm-dup).
+fn pick(flag: bool, a: int, b: int) -> int {
+    let mut out = 0
+    if flag {
+        out = a + 1
+    } else {
+        out = b + 2
+    }
+    return out
+}
+
+fn main() {
+    exit(pick(true, 10, 20))
+}

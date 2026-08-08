@@ -2397,29 +2397,19 @@ fn ir_lower_returning_if_tree(
                 }
                 let then_count = len(list_items) - then_start
                 let else_start = len(list_items)
-                // Collect post-if flow statements (break/continue only) so
-                // `if/else { ... } continue` inside a loop does not need a join.
-                let mut post_flow: []int = make([]int, 0, 2)
-                if position + 1 < list_count[list_index] {
+                // Statements after an if/else rejoin control flow. Rather than
+                // a merge block and block parameters, copy those statements
+                // into both arms. That covers `if/else { out = ... } return out`
+                // (the x86 emitters) and `if/else { ... } continue` without a
+                // join. Each arm lowers independently with its own bindings, so
+                // a local assigned in one arm is what the arm's trailing
+                // statements see. Runtime still takes only one arm.
+                let mut post_flow: []int = make([]int, 0, 4)
+                if else_token >= 0 and position + 1 < list_count[list_index] {
                     let mut rem = position + 1
-                    let mut flow_only = true
                     while rem < list_count[list_index] {
-                        let rem_stmt = statements[list_items[list_start[list_index] + rem]]
-                        if rem_stmt.kind != STMT_BREAK and rem_stmt.kind != STMT_CONTINUE {
-                            flow_only = false
-                        } else {
-                            post_flow = append(post_flow, list_items[list_start[list_index] + rem])
-                        }
+                        post_flow = append(post_flow, list_items[list_start[list_index] + rem])
                         rem = rem + 1
-                    }
-                    if else_token >= 0 and not flow_only {
-                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                            "CFG lowering cannot merge statements after an if/else")
-                    }
-                    if else_token >= 0 and flow_only {
-                        // Consume the remaining positions so the outer scan
-                        // does not re-lower the continues after the if.
-                        // (Arms get their own copies below.)
                     }
                 }
                 if else_token >= 0 {
@@ -2444,8 +2434,8 @@ fn ir_lower_returning_if_tree(
                         tail = tail + 1
                     }
                 }
-                // For if/else with only continue/break after, rebuild arm
-                // contents: then+flow and else+flow.
+                // For if/else with trailing statements, rebuild arm
+                // contents: then+post and else+post.
                 if else_token >= 0 and len(post_flow) > 0 {
                     let else_original_count = len(list_items) - else_start
                     // Snapshot else children before rewriting.
