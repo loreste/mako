@@ -1,0 +1,8 @@
+// String equality with a literal operand (keyword-style).
+fn main() {
+    let word = "fn"
+    if word == "fn" {
+        exit(1)
+    }
+    exit(0)
+}

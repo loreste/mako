@@ -2124,6 +2124,34 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 string operand is not an earlier value"))
             }
             bytes = x86_emit_concat_string(bytes, concat_left, concat_right, slot)
+    } else if instruction.op == IR_BINARY and instruction.type_kind == SEM_BOOL and
+            (instruction.aux == TK_EQ_EQ or instruction.aux == TK_BANG_EQ) {
+            // String equality when both operands are earlier string slots. Int
+            // bool compares fall through to the scalar path below via alu.
+            let left_slot = instruction.left - function.value_start + 1
+            let right_slot = instruction.right - function.value_start + 1
+            if left_slot < 1 or left_slot >= slot or right_slot < 1 or right_slot >= slot or
+                slot < 1 or slot > function.value_count {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 bool compare operands not earlier values"))
+            }
+            // Prefer the string path only when a prior instruction tagged the
+            // operands as strings — detected by loading them as pointers and
+            // comparing. Integer == also uses SEM_BOOL; distinguish by checking
+            // whether either operand's defining instruction is a string kind.
+            let left_is_string = x86_value_is_string(instructions, instruction.left)
+            let right_is_string = x86_value_is_string(instructions, instruction.right)
+            if left_is_string or right_is_string {
+                if not left_is_string or not right_is_string {
+                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 string compare needs two strings"))
+                }
+                bytes = x86_emit_string_eq(bytes, left_slot, right_slot, slot, instruction.aux == TK_EQ_EQ)
+            } else if not x86_alu_supported(instruction.aux) {
+                return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 scalar body operator is invalid"))
+            } else {
+                bytes = x86_emit_load_rax(bytes, left_slot)
+                bytes = x86_emit_alu_mem(bytes, instruction.aux, right_slot)
+                bytes = x86_emit_store_rax(bytes, slot)
+            }
     } else if instruction.op == IR_BINARY {
             if instruction.type_kind != SEM_INT or
                 (not x86_alu_supported(instruction.aux) and not x86_div_supported(instruction.aux)) or
@@ -2624,6 +2652,21 @@ fn x86_encode_function_body(instructions: []IrInstruction, constants: []IrConsta
 // than relying on one arm falling through. That costs five bytes per branch
 // and makes correctness independent of block layout order.
 // True when nothing outside `producer` reads this value anywhere in the
+// True when the defining instruction for `value` is string-typed. Used to
+// route SEM_BOOL ==/!= to the string-payload compare rather than integer ALU
+// when both operands are strings (literals, locals, fields, call results).
+fn x86_value_is_string(instructions: []IrInstruction, value: int) -> bool {
+    if value < 0 { return false }
+    let mut i = 0
+    while i < len(instructions) {
+        if instructions[i].result == value {
+            return instructions[i].type_kind == SEM_STRING
+        }
+        i = i + 1
+    }
+    return false
+}
+
 // function: no other instruction names it as an operand, no call or jump passes
 // it, and it is not carried by a block parameter.
 //

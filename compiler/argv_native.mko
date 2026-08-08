@@ -148,6 +148,48 @@ fn x86_emit_string_terminators(bytes: []int) []int {
 // negative index or one at or past the length, and the lexer reads that as end
 // of input. Trapping here instead would diverge from the stage-0 oracle on
 // every scan that walks off the end deliberately.
+// Compare two string objects. Layout: word 0 is length, payload at +8.
+// `equal` selects == (1 when match) vs != (1 when differ).
+fn x86_emit_string_eq(bytes: []int, left_slot: int, right_slot: int, result_slot: int, equal: bool) []int {
+    let mut out = x86_emit_load_rax(bytes, left_slot)
+    // r8 = left object
+    out = append(out, 73); out = append(out, 137); out = append(out, 192)
+    out = x86_emit_load_rax(out, right_slot)
+    // r9 = right object
+    out = append(out, 73); out = append(out, 137); out = append(out, 193)
+    // rcx = left.len; rdx = right.len
+    out = append(out, 73); out = append(out, 139); out = append(out, 8)
+    out = append(out, 73); out = append(out, 139); out = append(out, 17)
+    // cmp rcx, rdx; jne len_diff (offset filled after building match path)
+    out = append(out, 72); out = append(out, 57); out = append(out, 209)
+    let jne_at = len(out)
+    out = append(out, 117); out = append(out, 0)
+    // rsi = left.data; rdi = right.data
+    out = append(out, 73); out = append(out, 141); out = append(out, 112); out = append(out, 8)
+    out = append(out, 73); out = append(out, 141); out = append(out, 121); out = append(out, 8)
+    // repe cmpsb (rcx is length; zero length leaves ZF set)
+    out = append(out, 243); out = append(out, 166)
+    if equal {
+        out = append(out, 15); out = append(out, 148); out = append(out, 192) // sete al
+    } else {
+        out = append(out, 15); out = append(out, 149); out = append(out, 192) // setne al
+    }
+    out = append(out, 15); out = append(out, 182); out = append(out, 192) // movzx eax, al
+    // jmp done
+    let jmp_at = len(out)
+    out = append(out, 235); out = append(out, 0)
+    let len_diff = len(out)
+    out = x86_patch_u8(out, jne_at + 1, len_diff - (jne_at + 2))
+    if equal {
+        out = append(out, 49); out = append(out, 192) // xor eax, eax → 0
+    } else {
+        out = append(out, 184); out = x86_emit_u32(out, 1) // mov eax, 1
+    }
+    let done = len(out)
+    out = x86_patch_u8(out, jmp_at + 1, done - (jmp_at + 2))
+    return x86_emit_store_rax(out, result_slot)
+}
+
 fn x86_emit_str_byte_at(bytes: []int, string_slot: int, index_slot: int, result_slot: int) []int {
  let mut out = x86_emit_load_rax(bytes, string_slot)
  // mov r9, rax (object); mov rdx, [r9] (length)

@@ -1016,6 +1016,29 @@ fn ir_expression_feeds_string_concat(expressions: []ExprNode, expression_types: 
     return false
 }
 
+// True when a string-typed binary comparison (`==` / `!=` / ordered) reads
+// this node. Literals and other string temps there are owned by the comparison
+// path the same way concat owns its operands — without this, `s == "async"`
+// is declined as an ownerless string literal.
+fn ir_expression_feeds_string_compare(expressions: []ExprNode, expression_types: []int, node: int) -> bool {
+    if node < 0 { return false }
+    let mut i = 0
+    while i < len(expressions) {
+        if expressions[i].kind == EXPR_BINARY and i < len(expression_types) and
+            expression_types[i] == SEM_BOOL and
+            (expressions[i].left == node or expressions[i].right == node) {
+            let left = expressions[i].left
+            let right = expressions[i].right
+            if left >= 0 and right >= 0 and left < len(expression_types) and right < len(expression_types) and
+                expression_types[left] == SEM_STRING and expression_types[right] == SEM_STRING {
+                return true
+            }
+        }
+        i = i + 1
+    }
+    return false
+}
+
 // True when a field initialiser inside a struct literal names this node as its
 // value. The construction stores it into the block, which is what gives an
 // owned value there a reader — the same reason a call argument counts.
@@ -1164,8 +1187,13 @@ fn ir_cfg_lower_range(
                 // string object both carry their length first, so one form
                 // serves both.
                 let len_callee = ir_call_chain_base(expressions, i)
+                let len_name = if len_callee >= 0 and expressions[len_callee].kind == EXPR_IDENT {
+                    token_text(source, tokens[expressions[len_callee].token])
+                } else {
+                    ""
+                }
                 if len_callee >= 0 and expressions[len_callee].kind == EXPR_IDENT and
-                    token_text(source, tokens[expressions[len_callee].token]) == "len" and
+                    (len_name == "len" or len_name == "str_len") and
                     expression_types[i] == SEM_INT and expressions[i].left == len_callee {
                     let len_argument = expressions[i].right
                     if len_argument < 0 or len_argument >= len(out_values) or
@@ -1286,10 +1314,17 @@ fn ir_cfg_lower_range(
                 let call_type = expression_types[i]
                 let call_owned = ir_type_is_owned(call_type)
                 let len_reader = ir_expression_consumer(expressions, i)
-                let feeds_len = len_reader >= 0 and expressions[len_reader].kind == EXPR_CALL and
-                    ir_call_chain_base(expressions, len_reader) >= 0 and
-                    expressions[ir_call_chain_base(expressions, len_reader)].kind == EXPR_IDENT and
-                    token_text(source, tokens[expressions[ir_call_chain_base(expressions, len_reader)].token]) == "len"
+                let feeds_len_base = if len_reader >= 0 and expressions[len_reader].kind == EXPR_CALL {
+                    ir_call_chain_base(expressions, len_reader)
+                } else {
+                    -1
+                }
+                let feeds_len_name = if feeds_len_base >= 0 and expressions[feeds_len_base].kind == EXPR_IDENT {
+                    token_text(source, tokens[expressions[feeds_len_base].token])
+                } else {
+                    ""
+                }
+                let feeds_len = feeds_len_base >= 0 and (feeds_len_name == "len" or feeds_len_name == "str_len")
                 let call_owned_ok = call_owned and (
                     i == owned_root or
                     (call_type == SEM_STRING and
@@ -1733,6 +1768,7 @@ fn ir_cfg_lower_range(
                 }
                 if op == IR_CONST and expression.kind == EXPR_STRING and i != owned_root and
                     not ir_expression_feeds_string_concat(expressions, expression_types, i) and
+                    not ir_expression_feeds_string_compare(expressions, expression_types, i) and
                     not ir_expression_is_call_argument(expressions, i) and
                     not ir_expression_is_field_initializer(expressions, i) {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor, "CFG lowering string literal has no owner on this path")
@@ -1795,6 +1831,28 @@ fn ir_cfg_lower_range(
                 // after the copy, is what keeps a chain like `a + b + c` to one
                 // surviving allocation instead of one per link.
                 if op == IR_BINARY and expression_types[i] == SEM_STRING {
+                    if ir_string_operand_is_temporary(expressions, expression_types, expression.left) {
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: SEM_STRING,
+                            left: left, right: -1, aux: -1, token: expression.token,
+                        })
+                    }
+                    if ir_string_operand_is_temporary(expressions, expression_types, expression.right) {
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: SEM_STRING,
+                            left: right, right: -1, aux: -1, token: expression.token,
+                        })
+                    }
+                }
+                // String equality/ordering also only reads its operands. A
+                // temporary (including a string literal) must be dropped after
+                // the compare so `s == "async"` is linear; bindings stay for
+                // their scope-exit drop.
+                if op == IR_BINARY and expression_types[i] == SEM_BOOL and
+                    expression.left >= 0 and expression.right >= 0 and
+                    expression.left < len(expression_types) and expression.right < len(expression_types) and
+                    expression_types[expression.left] == SEM_STRING and
+                    expression_types[expression.right] == SEM_STRING {
                     if ir_string_operand_is_temporary(expressions, expression_types, expression.left) {
                         out_instructions = append(out_instructions, IrInstruction {
                             op: IR_DROP, result: -1, type_kind: SEM_STRING,
@@ -2339,6 +2397,31 @@ fn ir_lower_returning_if_tree(
                 }
                 let then_count = len(list_items) - then_start
                 let else_start = len(list_items)
+                // Collect post-if flow statements (break/continue only) so
+                // `if/else { ... } continue` inside a loop does not need a join.
+                let mut post_flow: []int = make([]int, 0, 2)
+                if position + 1 < list_count[list_index] {
+                    let mut rem = position + 1
+                    let mut flow_only = true
+                    while rem < list_count[list_index] {
+                        let rem_stmt = statements[list_items[list_start[list_index] + rem]]
+                        if rem_stmt.kind != STMT_BREAK and rem_stmt.kind != STMT_CONTINUE {
+                            flow_only = false
+                        } else {
+                            post_flow = append(post_flow, list_items[list_start[list_index] + rem])
+                        }
+                        rem = rem + 1
+                    }
+                    if else_token >= 0 and not flow_only {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering cannot merge statements after an if/else")
+                    }
+                    if else_token >= 0 and flow_only {
+                        // Consume the remaining positions so the outer scan
+                        // does not re-lower the continues after the if.
+                        // (Arms get their own copies below.)
+                    }
+                }
                 if else_token >= 0 {
                     child_scan = 0
                     while child_scan < statement.child_count {
@@ -2352,10 +2435,6 @@ fn ir_lower_returning_if_tree(
                         }
                         child_scan = child_scan + 1
                     }
-                    if position + 1 < list_count[list_index] {
-                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                            "CFG lowering cannot merge statements after an if/else")
-                    }
                 } else {
                     // No else arm: the statements after this if at the same
                     // level are the false path.
@@ -2364,6 +2443,109 @@ fn ir_lower_returning_if_tree(
                         list_items = append(list_items, list_items[list_start[list_index] + tail])
                         tail = tail + 1
                     }
+                }
+                // For if/else with only continue/break after, rebuild arm
+                // contents: then+flow and else+flow.
+                if else_token >= 0 and len(post_flow) > 0 {
+                    let else_original_count = len(list_items) - else_start
+                    // Snapshot else children before rewriting.
+                    let mut else_kids: []int = make([]int, 0, else_original_count)
+                    let mut ek = 0
+                    while ek < else_original_count {
+                        else_kids = append(else_kids, list_items[else_start + ek])
+                        ek = ek + 1
+                    }
+                    // Truncate back to then-only, then rebuild then+flow, else+flow.
+                    while len(list_items) > then_start + then_count {
+                        // pop by rebuilding prefix
+                        let mut prefix: []int = make([]int, 0, then_start + then_count)
+                        let mut pi = 0
+                        while pi < then_start + then_count {
+                            prefix = append(prefix, list_items[pi])
+                            pi = pi + 1
+                        }
+                        list_items = prefix
+                    }
+                    let mut fi = 0
+                    while fi < len(post_flow) {
+                        list_items = append(list_items, post_flow[fi])
+                        fi = fi + 1
+                    }
+                    let new_then_count = then_count + len(post_flow)
+                    let new_else_start = len(list_items)
+                    ek = 0
+                    while ek < len(else_kids) {
+                        list_items = append(list_items, else_kids[ek])
+                        ek = ek + 1
+                    }
+                    fi = 0
+                    while fi < len(post_flow) {
+                        list_items = append(list_items, post_flow[fi])
+                        fi = fi + 1
+                    }
+                    // then_count / else_start are lets — use new locals below.
+                    let else_count = len(list_items) - new_else_start
+                    if new_then_count < 1 or else_count < 1 {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering requires both if arms to hold statements")
+                    }
+                    let successor_start = len(out_successors)
+                    out_successors = append(out_successors, entry_block + len(list_start))
+                    out_successors = append(out_successors, entry_block + len(list_start) + 1)
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_BRANCH, result: -1, type_kind: SEM_BOOL,
+                        left: out_values[statement.expr_root], right: -1, aux: -1,
+                        token: statement.token_start,
+                    })
+                    out_blocks = append(out_blocks, IrBlock {
+                        function: function_index, instruction_start: block_instruction_start,
+                        instruction_count: len(out_instructions) - block_instruction_start,
+                        terminator: len(out_instructions) - 1,
+                        successor_start: successor_start, successor_count: 2,
+                    })
+                    let arm_scope = len(scope_items)
+                    let mut carry = 0
+                    while carry < len(live) {
+                        scope_items = append(scope_items, live[carry])
+                        carry = carry + 1
+                    }
+                    let arm_scope_count = len(scope_items) - arm_scope
+                    let else_scope = len(scope_items)
+                    carry = 0
+                    while carry < len(live) {
+                        scope_items = append(scope_items, live[carry])
+                        carry = carry + 1
+                    }
+                    list_start = append(list_start, then_start)
+                    list_count = append(list_count, new_then_count)
+                    scope_start = append(scope_start, arm_scope)
+                    scope_count = append(scope_count, arm_scope_count)
+                    list_bindings_start = append(list_bindings_start, len(list_bindings))
+                    let mut snap_1 = 0
+                    while snap_1 < len(owned_locals) {
+                        list_bindings = append(list_bindings, owned_locals[snap_1])
+                        snap_1 = snap_1 + 1
+                    }
+                    list_loop_header = append(list_loop_header, -1)
+                    list_loop_back = append(list_loop_back, inherited_back)
+                    list_loop_exit = append(list_loop_exit, -1)
+                    list_start = append(list_start, new_else_start)
+                    list_count = append(list_count, else_count)
+                    scope_start = append(scope_start, else_scope)
+                    scope_count = append(scope_count, len(scope_items) - else_scope)
+                    list_bindings_start = append(list_bindings_start, len(list_bindings))
+                    let mut snap_2 = 0
+                    while snap_2 < len(owned_locals) {
+                        list_bindings = append(list_bindings, owned_locals[snap_2])
+                        snap_2 = snap_2 + 1
+                    }
+                    list_loop_header = append(list_loop_header, -1)
+                    list_loop_back = append(list_loop_back, inherited_back)
+                    list_loop_exit = append(list_loop_exit, -1)
+                    closed = true
+                    // Skip past the post-flow statements in this list.
+                    position = list_count[list_index]
+                    continue
                 }
                 let else_count = len(list_items) - else_start
                 if then_count < 1 or else_count < 1 {
@@ -2825,6 +3007,115 @@ fn ir_lower_returning_if_tree(
                     })
                     closed = true
                 }
+            } else if statement.kind == STMT_CONTINUE {
+                // Jump to the enclosing loop's header with the current carried
+                // bindings — same edge the body fallthrough builds.
+                if list_loop_back[list_index] < 0 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering continue is outside a loop")
+                }
+                let cont_loop = list_loop_back[list_index]
+                let mut cont_drop = len(live) - 1
+                while cont_drop >= loop_entry_live[cont_loop] {
+                    let drop_value = live[cont_drop]
+                    let mut carried_now = false
+                    let mut carry_check = 0
+                    while carry_check < loop_carried_count[cont_loop] {
+                        if owned_locals[loop_carried[loop_carried_start[cont_loop] + carry_check]] == drop_value {
+                            carried_now = true
+                        }
+                        carry_check = carry_check + 1
+                    }
+                    if not carried_now {
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: ir_cfg_value_type(out_instructions, drop_value),
+                            left: drop_value, right: -1, aux: ir_drop_aux(layout, source, ir_cfg_value_type(out_instructions, drop_value)),
+                            token: statement.token_start,
+                        })
+                    }
+                    cont_drop = cont_drop - 1
+                }
+                if loop_carried_count[cont_loop] == 1 {
+                    let only_carried = loop_carried[loop_carried_start[cont_loop]]
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_JUMP, result: -1, type_kind: local_types[only_carried],
+                        left: owned_locals[only_carried], right: -1, aux: -1,
+                        token: statement.token_start,
+                    })
+                } else if loop_carried_count[cont_loop] == 0 {
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_JUMP, result: -1, type_kind: SEM_UNKNOWN,
+                        left: -1, right: -1, aux: -1, token: statement.token_start,
+                    })
+                } else {
+                    let cont_arg_start = len(out_jump_arguments)
+                    let mut ca = 0
+                    while ca < loop_carried_count[cont_loop] {
+                        out_jump_arguments = append(out_jump_arguments,
+                            owned_locals[loop_carried[loop_carried_start[cont_loop] + ca]])
+                        ca = ca + 1
+                    }
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_JUMP, result: -1, type_kind: SEM_UNKNOWN,
+                        left: -1, right: -1, aux: cont_arg_start, token: statement.token_start,
+                    })
+                }
+                let cont_succ = len(out_successors)
+                out_successors = append(out_successors, loop_header_block[cont_loop])
+                out_blocks = append(out_blocks, IrBlock {
+                    function: function_index, instruction_start: block_instruction_start,
+                    instruction_count: len(out_instructions) - block_instruction_start,
+                    terminator: len(out_instructions) - 1,
+                    successor_start: cont_succ, successor_count: 1,
+                })
+                closed = true
+            } else if statement.kind == STMT_BREAK {
+                if list_loop_back[list_index] < 0 {
+                    return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                        "CFG lowering break is outside a loop")
+                }
+                let brk_loop = list_loop_back[list_index]
+                // Publish current carried values as the exit params, then drop
+                // only non-carried temps. The exit block re-injects those params.
+                let mut bp = 0
+                while bp < loop_carried_count[brk_loop] {
+                    loop_params[loop_carried_start[brk_loop] + bp] =
+                        owned_locals[loop_carried[loop_carried_start[brk_loop] + bp]]
+                    bp = bp + 1
+                }
+                let mut brk_drop = len(live) - 1
+                while brk_drop >= 0 {
+                    let drop_value = live[brk_drop]
+                    let mut carried_now = false
+                    let mut carry_check = 0
+                    while carry_check < loop_carried_count[brk_loop] {
+                        if owned_locals[loop_carried[loop_carried_start[brk_loop] + carry_check]] == drop_value {
+                            carried_now = true
+                        }
+                        carry_check = carry_check + 1
+                    }
+                    if not carried_now {
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: ir_cfg_value_type(out_instructions, drop_value),
+                            left: drop_value, right: -1, aux: ir_drop_aux(layout, source, ir_cfg_value_type(out_instructions, drop_value)),
+                            token: statement.token_start,
+                        })
+                    }
+                    brk_drop = brk_drop - 1
+                }
+                out_instructions = append(out_instructions, IrInstruction {
+                    op: IR_JUMP, result: -1, type_kind: SEM_UNKNOWN,
+                    left: -1, right: -1, aux: -1, token: statement.token_start,
+                })
+                let brk_succ = len(out_successors)
+                out_successors = append(out_successors, loop_exit_block[brk_loop])
+                out_blocks = append(out_blocks, IrBlock {
+                    function: function_index, instruction_start: block_instruction_start,
+                    instruction_count: len(out_instructions) - block_instruction_start,
+                    terminator: len(out_instructions) - 1,
+                    successor_start: brk_succ, successor_count: 1,
+                })
+                closed = true
             } else {
                 return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                     "CFG lowering supports only if, while, let, assignment, print, exit, and return statements")
@@ -4840,7 +5131,8 @@ fn lower_typed_ir_once(
                         }
                         if len_callee >= 0 and len_callee < len(expressions) and
                             expressions[len_callee].kind == EXPR_IDENT and
-                            token_text(source, tokens[expressions[len_callee].token]) == "len" and
+                            (token_text(source, tokens[expressions[len_callee].token]) == "len" or
+                                token_text(source, tokens[expressions[len_callee].token]) == "str_len") and
                             expression_types[i] == SEM_INT {
                             IR_LEN
                         } else {

@@ -1,0 +1,16 @@
+// if/else followed only by continue inside a loop.
+fn main() {
+    let mut i = 0
+    let mut s = 0
+    while i < 4 {
+        if i == 1 {
+            s = s + 10
+            i = i + 1
+        } else {
+            s = s + 1
+            i = i + 1
+        }
+        continue
+    }
+    exit(s)
+}

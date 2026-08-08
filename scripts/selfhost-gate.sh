@@ -765,7 +765,7 @@ for package_member in z_expression z_statement z_type zz_expression_attach zz_sy
   selfhost_package="$selfhost_package,$repo_dir/compiler/$package_member.mko"
 done
 package_result="$("$stage1" "$selfhost_package")"
-if [[ "$package_result" != *"signatures 321"* ]]; then
+if [[ "$package_result" != *"signatures 325"* ]]; then
   echo "selfhost frontend gate: package signature count changed: $package_result" >&2
   exit 1
 fi
@@ -773,8 +773,8 @@ fi
 # gate re-pinned on every gain gets re-pinned without being read. It must never
 # silently fall.
 package_lowered="$(printf '%s' "$package_result" | sed -n 's/.*ir_functions \([0-9]*\).*/\1/p')"
-if [[ "${package_lowered:-0}" -lt 125 ]]; then
-  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 125" >&2
+if [[ "${package_lowered:-0}" -lt 132 ]]; then
+  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 132" >&2
   exit 1
 fi
 for bad_package in "$repo_dir/compiler/lexer.mko,$repo_dir/compiler/nope.mko" \
@@ -819,7 +819,9 @@ for cap_case in \
   "elf_loop_owned_slice_exit:elf-loop-owned-slice:9262e904f314e1ffe2661d80731a887f1cbbd5b332cb838efe88c4b9044b105f:1036:6" \
   "elf_loop_owned_array_exit:elf-loop-owned-array:24e7a216fdbbe278dd6bf9ebeb280ab2ed04cf91810c93e772dc5d6621286c05:1298:56" \
   "elf_loop_owned_dual_exit:elf-loop-owned-dual:09bd968f0d51b39314887d03c3884580a216be571196221cec67ffbd38db97dd:1065:6" \
-  "elf_struct_field_call_exit:elf-struct-field-call:9256684faa84257cc154eb3182b49bf954195123fe8a7a01b098016dff4c51ed:1218:3"; do
+  "elf_struct_field_call_exit:elf-struct-field-call:9256684faa84257cc154eb3182b49bf954195123fe8a7a01b098016dff4c51ed:1218:3" \
+  "elf_str_eq_exit:elf-str-eq:dc1e713132ab8a5d7a53a793fb0eff8a1302d1f29c2466588b9955e07d357558:320:1" \
+  "elf_if_else_continue_exit:elf-if-else-continue:a38d0b0a65d9e0cd5e765bfd6364a0550e40ba030bf978ce905422f437ed8042:364:13"; do
   cap_fixture="${cap_case%%:*}"; cap_rest="${cap_case#*:}"
   cap_name="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
   cap_sha="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"

@@ -198,6 +198,13 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
                         if elem == "int" or elem == "int64" { kind = SEM_ARRAY_INT }
                         if elem == "byte" or elem == "uint8" { kind = SEM_ARRAY_BYTE }
                         if elem == "string" { kind = SEM_ARRAY_STRING }
+                        if elem == "float" or elem == "float64" { kind = SEM_ARRAY_FLOAT }
+                        if elem == "bool" { kind = SEM_ARRAY_BOOL }
+                        // []Struct (e.g. []Token) stays unrecognized here until
+                        // the seed backends can materialize the element type;
+                        // recognizing it made LexResult constructible and broke
+                        // stage-0 bootstrap. Self-host can revisit after ELF
+                        // can emit constructible returns with struct-slice fields.
                         advance = 5
                         ok = false
                     } else if tokens[type_token].kind == TK_IDENT {
@@ -803,7 +810,7 @@ fn infer_semantic_types(
                 if callee.kind == EXPR_IDENT {
                     if semantic_is_unbound_identifier(expression_symbols, expression_locals, expression.left) {
                         let name = token_text(source, tokens[callee.token])
-                        if name == "len" or name == "cap" { inferred = SEM_INT }
+                        if name == "len" or name == "cap" or name == "str_len" { inferred = SEM_INT }
                         // Int rather than byte: out of range it yields -1, which
                         // a byte cannot hold and which the lexer reads as end of
                         // input.
@@ -1246,7 +1253,7 @@ if name == "unsafe_open_string" { inferred = SEM_INT }
             } else if cursor >= 0 and cursor < len(expressions) and expressions[cursor].kind == EXPR_IDENT and
                 semantic_is_unbound_identifier(expression_symbols, expression_locals, cursor) {
                 let name = token_text(source, tokens[expressions[cursor].token])
-                        let intrinsic = name == "argc" or name == "arg_get" or name == "len" or name == "cap" or name == "format_int" or
+                        let intrinsic = name == "argc" or name == "arg_get" or name == "len" or name == "str_len" or name == "cap" or name == "format_int" or
                             name == "print" or name == "exit" or name == "byte" or name == "linux_syscall6" or
                             name == "unsafe_ptr_load8" or name == "unsafe_ptr_store8" or
                             name == "unsafe_alloc" or name == "unsafe_free" or name == "unsafe_write" or name == "unsafe_write_bytes" or name == "unsafe_write_all" or name == "unsafe_read_all" or name == "unsafe_read_bytes" or name == "unsafe_open_bytes" or name == "unsafe_open_string" or name == "unsafe_close" or name == "unsafe_read_file" or name == "unsafe_write_file" or name == "unsafe_argv_ptr" or name == "unsafe_argv_len" or name == "unsafe_argv_byte" or name == "unsafe_argv_copy" or name == "unsafe_bytes_to_string" or name == "append"
@@ -1446,7 +1453,7 @@ if name == "unsafe_open_string" and argument_count != 1 {
                         let is_array = semantic_array_element(actual) != SEM_UNKNOWN
                         let mut valid = true
                         let mut message = ""
-                        if name == "len" {
+                        if name == "len" or name == "str_len" {
                             valid = actual == SEM_UNKNOWN or semantic_is_slice(actual) or actual == SEM_STRING or actual == SEM_MAP
                             message = "len needs slice/array/string/map/string_view, got " + semantic_type_name(actual)
                         }
