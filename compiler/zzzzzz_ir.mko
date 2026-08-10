@@ -796,7 +796,16 @@ fn ir_cfg_scalar_type(kind: int) -> bool {
 // is deliberately excluded — it is a one-slot allocation that
 // `ir_type_is_owned` does not classify as owned, so this path cannot tell
 // whether to drop it and declines instead of guessing.
-fn ir_cfg_bindable_type(kind: int) -> bool {
+fn ir_cfg_bindable_type(layout: StructLayout, kind: int) -> bool {
+    // A slice whose element struct owns storage — a string, int-slice or
+    // byte-slice field — is refused. Constructing one segfaults at runtime, by
+    // literal and by `make` + `append` alike, while a slice of POD structs is
+    // correct. Six fixtures pinned this capability by image hash and none was
+    // ever executed, so the corpus asserted something that has never worked.
+    // Fail closed until the element's owned fields are really copied into the
+    // slice storage and the images are proven by execution.
+    if semantic_is_struct_array(kind) and
+        struct_owned_slot_mask(layout, struct_kind_index(kind)) > 0 { return false }
     // A struct value is one slot holding a borrowed element pointer. It is
     // bindable but never owned: the slice it points into owns the storage, so
     // dropping it would free another value's memory.
@@ -2292,7 +2301,7 @@ fn ir_lower_returning_if_tree(
             // this path emits their drops, so they fail closed rather than
             // leaking a parameter the caller transferred.
             if parameter_index >= len(local_types) or
-                not ir_cfg_bindable_type(local_types[parameter_index]) {
+                not ir_cfg_bindable_type(layout, local_types[parameter_index]) {
                 return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                     "CFG lowering parameter type is not bindable")
             }
@@ -2682,7 +2691,7 @@ fn ir_lower_returning_if_tree(
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                         "CFG lowering could not find the local for a let statement")
                 }
-                if bound >= len(local_types) or not ir_cfg_bindable_type(local_types[bound]) {
+                if bound >= len(local_types) or not ir_cfg_bindable_type(layout, local_types[bound]) {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                         "CFG lowering local type is not bindable")
                 }
@@ -2962,7 +2971,7 @@ fn ir_lower_returning_if_tree(
                         // scratch move across a multi-arg jump (the second
                         // write can clobber the first), so they stay refused.
                         if carried_scan >= len(local_types) or
-                            not ir_cfg_bindable_type(local_types[carried_scan]) {
+                            not ir_cfg_bindable_type(layout, local_types[carried_scan]) {
                             return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                                 "CFG lowering carries only bindable locals through a loop")
                         }
@@ -3156,7 +3165,7 @@ fn ir_lower_returning_if_tree(
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                         "CFG lowering could not resolve an assignment target")
                 }
-                if assigned >= len(local_types) or not ir_cfg_bindable_type(local_types[assigned]) {
+                if assigned >= len(local_types) or not ir_cfg_bindable_type(layout, local_types[assigned]) {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                         "CFG lowering assigns only bindable locals")
                 }

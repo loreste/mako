@@ -922,11 +922,6 @@ for ss_case in \
   "elf_struct_index_field_exit:ss-field:3c656fe3c5f659fe8e6621a6beb03f0fdbcd25ceb2d0482b96753f1de7e2d960:402:4" \
   "elf_struct_slice_literal_exit:ss-literal:42b380be3fd14286d8abecd4c4d37c015937e583cc69fe95936601ed46f44449:747:5" \
   "elf_struct_slice_append_exit:ss-append:91948a4729cee12b069c072428dd78b00f6d7e656abc92ae54513b20e412237e:1303:9" \
-  "elf_owned_struct_slice_literal_exit:ss-owned-string:dc83028097794ebeff9b60d24cba2d6a3d69bbb05c5662b23f84671b1e2975f6:1218:8" \
-  "elf_owned_struct_slice_multi_exit:ss-owned-multi:d6cb64c743151513d896048c8d0c852e0805ba1736f0ef22659533a575d310da:1919:7" \
-  "elf_owned_struct_slice_binding_exit:ss-owned-binding:884d9c60053cf007909a1123a620fefe1186726ec047746a2850def1fcdaada5:1212:8" \
-  "elf_owned_struct_slice_int_field_exit:ss-owned-int-slice:b948d1509d547ee491a97ff036e456165a8ab6ba8db17a6692ffa23f25adfc68:1312:10" \
-  "elf_owned_struct_slice_byte_field_exit:ss-owned-byte-slice:a48aaa7ce73b571e46b32148a74969b64000972a924acc83ee53220d1fb06436:1284:12" \
   "elf_make_owned_struct_slice_exit:ss-owned-make:d1604e073c3e2f773da683ceb73793135e75582292a970fe05d2c261c7f79a72:522:1" \
   "elf_owned_struct_slice_element_exit:ss-owned-element:d1604e073c3e2f773da683ceb73793135e75582292a970fe05d2c261c7f79a72:522:1" \
   "elf_struct_index_forward_exit:ss-forward:c3e0f2f514a5390f674903f697cffae03ff77cb71a89015442881222177376fd:402:6" \
@@ -1084,7 +1079,14 @@ if [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] && command -v str
     balance_path="$work_dir/${balance_case%%:*}"
     balance_expect="${balance_case##*:}"
     chmod +x "$balance_path"
-    balance_counts="$(strace -c -e trace=mmap,munmap "$balance_path" 2>&1 >/dev/null \
+    # `strace -c prog` exits with prog's own status, and these images exit
+    # non-zero by design (elf-format-int is pinned to 7). Under `pipefail` that
+    # status propagates out of the command substitution and `set -e` kills the
+    # gate with it — which is what happened the first time this block ever ran,
+    # since it needs both Linux and strace and so had never executed. The exit
+    # status is checked by the execution table above; here only the syscall
+    # counts matter.
+    balance_counts="$( { strace -c -e trace=mmap,munmap "$balance_path" 2>&1 >/dev/null || true; } \
       | awk '$NF == "mmap" { m = $(NF-1) } $NF == "munmap" { u = $(NF-1) } END { print m+0, u+0 }')"
     if [[ "$balance_counts" != "$balance_expect $balance_expect" ]]; then
       echo "selfhost backend gate: $balance_path made [$balance_counts] mmap/munmap calls, expected $balance_expect $balance_expect" >&2
@@ -1142,6 +1144,27 @@ if [[ -e "$work_dir/guard-print.elf" ]]; then
   echo "selfhost backend gate: refused guarded-loop print still produced an image" >&2
   exit 1
 fi
+# Slices whose element struct owns storage are refused. All five fixtures below
+# were pinned by image hash and never executed; running them on Linux showed
+# every one segfaults at construction — by literal and by `make` + `append`
+# alike — while POD struct slices and zero-initialized `make` reads are correct.
+# The pins asserted a capability that has never worked. They stay here as
+# refusals until the element's owned fields are actually copied into the slice
+# storage and the images are proven by execution rather than by hash.
+for owned_slice_fixture in elf_owned_struct_slice_literal_exit \
+  elf_owned_struct_slice_multi_exit elf_owned_struct_slice_binding_exit \
+  elf_owned_struct_slice_int_field_exit elf_owned_struct_slice_byte_field_exit; do
+  if "$stage1" "$repo_dir/compiler/testdata/$owned_slice_fixture.mko" \
+      "$work_dir/$owned_slice_fixture.elf" >/dev/null 2>&1; then
+    echo "selfhost backend gate: $owned_slice_fixture unexpectedly lowered" >&2
+    exit 1
+  fi
+  if [[ -e "$work_dir/$owned_slice_fixture.elf" ]]; then
+    echo "selfhost backend gate: refused $owned_slice_fixture still produced an image" >&2
+    exit 1
+  fi
+done
+
 # The if-body print below stays a refusal.
 if print_if_result="$("$stage1" "$repo_dir/compiler/testdata/bad_print_if.mko" "$work_dir/bad-print-if.elf" 2>&1)"; then
   echo "selfhost backend gate: print inside an if body unexpectedly lowered" >&2
