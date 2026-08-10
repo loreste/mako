@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    # `selfhosted` carries the Mako-written compiler and is the only branch the
+    # `selfhost-linux` job is meaningful on. Without it here that job never ran
+    # once, so every stage-1 commit landed with no gate behind it.
+    branches: [main, master, selfhosted]
   pull_request:
   workflow_dispatch:
 
