@@ -1,0 +1,30 @@
+struct Token {
+    kind: int
+    start: int
+    end: int
+    line: int
+    col: int
+}
+
+struct LexResult {
+    tokens: []Token
+    ok: bool
+    error: string
+    error_line: int
+    error_col: int
+}
+
+fn lex_count(n: int) -> LexResult {
+    let mut tokens: []Token = []
+    let mut i = 0
+    while i < n {
+        tokens = append(tokens, Token { kind: i + 1, start: i, end: i + 1, line: 1, col: i })
+        i = i + 1
+    }
+    return LexResult { tokens: tokens, ok: true, error: "", error_line: 0, error_col: 0 }
+}
+
+fn main() {
+    let r = lex_count(4)
+    exit(len(r.tokens) + r.tokens[2].kind)
+}

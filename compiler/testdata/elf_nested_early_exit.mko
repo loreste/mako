@@ -1,0 +1,24 @@
+// A nested value live across an early return: every path drops it once.
+// Expected exit 21 from the early path.
+struct X86Code {
+    bytes: []int
+    status: int
+    error: string
+}
+
+struct X86Body {
+    code: X86Code
+    edge_callees: []int
+}
+
+fn score(b: X86Body, flag: bool) -> int {
+    if flag {
+        return b.code.status + 16
+    }
+    return b.code.status + len(b.edge_callees)
+}
+
+fn main() {
+    let b = X86Body { code: X86Code { bytes: make([]int, 0, 0), status: 5, error: "e" }, edge_callees: make([]int, 9, 9) }
+    exit(score(b, true))
+}

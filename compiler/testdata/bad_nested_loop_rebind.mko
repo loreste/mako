@@ -1,0 +1,21 @@
+// Rebinding a whole nested-struct value inside a loop is not lowered yet.
+// Must fail closed, never emit a partial image.
+struct Inner {
+    data: []int
+    tag: string
+}
+
+struct Outer {
+    inner: Inner
+    n: int
+}
+
+fn main() {
+    let mut k = 0
+    let mut o = Outer { inner: Inner { data: make([]int, 1, 1), tag: "a" }, n: 0 }
+    while k < 5 {
+        o = Outer { inner: Inner { data: make([]int, k + 1, k), tag: "bb" }, n: k }
+        k = k + 1
+    }
+    exit(len(o.inner.data) + o.n)
+}

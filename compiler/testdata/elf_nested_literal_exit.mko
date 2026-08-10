@@ -1,0 +1,17 @@
+// Nested literal field init, fields written out of declaration order.
+// Expected exit 9: inner status 2 + len 3 + 4.
+struct X86Code {
+    bytes: []int
+    status: int
+    error: string
+}
+
+struct X86Body {
+    code: X86Code
+    edge_callees: []int
+}
+
+fn main() {
+    let b = X86Body { edge_callees: make([]int, 3, 3), code: X86Code { error: "e", status: 2, bytes: make([]int, 0, 0) } }
+    exit(b.code.status + len(b.edge_callees) + 4)
+}

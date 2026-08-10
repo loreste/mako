@@ -1,0 +1,20 @@
+// Package member one of the nested-construction package fixture: the types
+// and the constructor. See nested_pkg_b.mko.
+struct X86Code {
+    bytes: []int
+    status: int
+    error: string
+}
+
+struct X86Body {
+    code: X86Code
+    edge_callees: []int
+}
+
+fn pkg_error(status: int, message: string) -> X86Code {
+    return X86Code { bytes: make([]int, 0, 0), status: status, error: message }
+}
+
+fn pkg_wrap(code: X86Code) -> X86Body {
+    return X86Body { code: code, edge_callees: make([]int, 1, 1) }
+}

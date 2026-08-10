@@ -1,0 +1,18 @@
+// Rebinding a nested struct drops the old value once: every owned slot of the
+// first construction is freed before the second is bound. Expected exit 4.
+struct X86Code {
+    bytes: []int
+    status: int
+    error: string
+}
+
+struct X86Body {
+    code: X86Code
+    edge_callees: []int
+}
+
+fn main() {
+    let mut b = X86Body { code: X86Code { bytes: make([]int, 0, 0), status: 1, error: "a" }, edge_callees: make([]int, 0, 0) }
+    b = X86Body { code: X86Code { bytes: make([]int, 1, 1), status: 2, error: "b" }, edge_callees: make([]int, 2, 2) }
+    exit(b.code.status + len(b.edge_callees))
+}

@@ -1,0 +1,27 @@
+// 20k construct-return-drop cycles of a nested struct value: the inner
+// literal's block and the outer block's cloned slots must all be freed each
+// iteration. Exit 3.
+struct X86Code {
+    bytes: []int
+    status: int
+    error: string
+}
+
+struct X86Body {
+    code: X86Code
+    edge_callees: []int
+}
+
+fn make_body() -> X86Body {
+    return X86Body { code: X86Code { bytes: make([]int, 0, 0), status: 1, error: "e" }, edge_callees: make([]int, 0, 0) }
+}
+
+fn main() {
+    let mut i = 0
+    while i < 20000 {
+        let b = make_body()
+        let n = b.code.status
+        i = i + n
+    }
+    exit(3)
+}

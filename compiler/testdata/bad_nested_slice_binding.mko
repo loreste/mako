@@ -1,0 +1,18 @@
+// A []Struct field initialised from a make-produced binding trips the
+// ownership verifier (drop vs field-store double counting). Append-grown
+// bindings are supported (elf_nested_lex_exit); this shape fails closed.
+struct Elem {
+    v: int
+    w: int
+}
+
+struct Bag {
+    elems: []Elem
+    n: int
+}
+
+fn main() {
+    let es = make([]Elem, 2, Elem { v: 1, w: 2 })
+    let b = Bag { elems: es, n: 2 }
+    exit(len(b.elems) + b.elems[0].v)
+}

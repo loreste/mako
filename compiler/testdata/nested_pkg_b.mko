@@ -1,0 +1,7 @@
+// Package member two: nested construction across a package boundary proves
+// the multi-file path lowers it (the pre-scan rewind keeps skipped functions'
+// instructions out of the shared arena). Expected exit 12.
+fn main() {
+    let b = pkg_wrap(pkg_error(9, "boom"))
+    exit(b.code.status + len(b.edge_callees) + 2)
+}

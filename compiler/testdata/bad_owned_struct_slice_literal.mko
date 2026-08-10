@@ -1,0 +1,12 @@
+// An owned string-slice field remains outside the bounded deep-clone/drop subset.
+// This must reject without emitting an image.
+struct HostPort {
+    bytes: []string
+    port: int
+}
+
+fn main() {
+    let item = HostPort { bytes: make([]int, 1, 1), port: 7 }
+    let values: []HostPort = [item]
+    exit(len(values))
+}

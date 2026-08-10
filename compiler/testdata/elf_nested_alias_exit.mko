@@ -1,0 +1,19 @@
+// The same binding initialises two nested fields: construction clones owned
+// slots, so each field owns an independent copy and both drops are clean.
+// Expected exit 14.
+struct X86Code {
+    bytes: []int
+    status: int
+    error: string
+}
+
+struct X86Pair {
+    first: X86Code
+    second: X86Code
+}
+
+fn main() {
+    let c = X86Code { bytes: make([]int, 1, 1), status: 6, error: "x" }
+    let p = X86Pair { first: c, second: c }
+    exit(p.first.status + p.second.status + len(p.first.bytes) + len(p.second.error))
+}

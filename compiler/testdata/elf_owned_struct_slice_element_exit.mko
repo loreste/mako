@@ -1,0 +1,13 @@
+// A non-POD struct-slice element is a borrowed pointer. Binding it must not
+// clone or drop the element block; reading its scalar field must use the
+// pointer-form field path.
+struct HostPort {
+    host: string
+    port: int
+}
+
+fn main() {
+    let values: []HostPort = make([]HostPort, 1, 1)
+    let item = values[0]
+    exit(item.port + len(values))
+}

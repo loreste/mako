@@ -1,0 +1,11 @@
+// Non-POD struct slice allocation and scalar field access. Elements are
+// zero-initialized; construction/append deep-copy coverage follows separately.
+struct HostPort {
+    host: string
+    port: int
+}
+
+fn main() {
+    let values: []HostPort = make([]HostPort, 1, 1)
+    exit(values[0].port + len(values))
+}

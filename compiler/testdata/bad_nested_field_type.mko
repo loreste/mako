@@ -1,0 +1,16 @@
+// A nested field must be initialised by the inner struct, not a scalar.
+struct X86Code {
+    bytes: []int
+    status: int
+    error: string
+}
+
+struct X86Body {
+    code: X86Code
+    edge_callees: []int
+}
+
+fn main() {
+    let b = X86Body { code: 5, edge_callees: make([]int, 0, 0) }
+    exit(0)
+}

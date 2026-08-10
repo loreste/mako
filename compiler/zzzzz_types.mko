@@ -43,14 +43,44 @@ const SEM_STRUCT_VALUE_BASE = 10000000
 // an owned field would need per-element ownership at the drop, so it is left
 // ineligible and every use of it keeps failing closed rather than leaking a
 // field or freeing one twice.
+//
+// A field whose type is another *constructible* struct is flattened: the inner
+// struct's slots are laid out inline in the outer block, so the value stays one
+// allocation whose drop mask covers the inner owned fields directly. A field
+// whose type is `[]Struct` is one pointer slot owning the slice block. Either
+// shape keeps the struct off the eligible list — a slice of it could not drop
+// as one allocation — while leaving it constructible.
+//
+// Sliceability is wider than eligibility: a constructible struct whose
+// `[]Struct` fields (if any) have *eligible* elements may be a slice element
+// even with string/slice fields of its own, because the backend drops such a
+// slice element-wise (every element's owned fields freed before the block) and
+// deep-copies on append and clone. One level only: an element struct that
+// itself holds an owned-element slice stays ineligible for slicing.
 struct StructLayout {
     name_start: []int
     name_end: []int
+    // Per struct, the span of its *flattened* slots in slot_type. A nested
+    // struct field contributes the inner struct's slot count, so field_count
+    // is the block width and the slice stride.
     field_start: []int
     field_count: []int
-    field_name_start: []int
-    field_name_end: []int
-    field_type: []int
+    // Semantic type of each flattened slot: a scalar, an owned slice kind, or
+    // a string. Nested fields never appear here — their slots do.
+    slot_type: []int
+    // Per struct, the span of its *declared* fields in the decl arrays. Field
+    // names and declared types live there; one declared field maps to one or
+    // more flattened slots.
+    decl_start: []int
+    decl_count: []int
+    decl_name_start: []int
+    decl_name_end: []int
+    // First flattened slot of the declared field, its declared semantic type
+    // (an inner struct's value kind for a nested field), and the inner struct
+    // index for a nested field (-1 otherwise).
+    decl_slot: []int
+    decl_type: []int
+    decl_inner: []int
     // Every field is a one-slot scalar: a slice of this struct is a plain heap
     // block with a fixed stride and drops as one allocation.
     eligible: []bool
@@ -60,6 +90,10 @@ struct StructLayout {
     // slice-eligible: `[]HostPort` would drop the block and leak every
     // element's string.
     constructible: []bool
+    // Constructible, and no `[]Struct` field with owned elements of its own:
+    // safe as a slice element. Owned slots are freed per element at the drop
+    // and cloned per element at append/clone time.
+    sliceable: []bool
 }
 
 // The semantic kind of a one-slot scalar type name, or SEM_UNKNOWN.
@@ -153,32 +187,55 @@ fn semantic_struct_value_kind(layout: StructLayout, struct_index: int) -> int {
 // too wide to encode.
 fn semantic_struct_array_kind(layout: StructLayout, struct_index: int) -> int {
     if struct_index < 0 or struct_index >= len(layout.field_count) { return SEM_UNKNOWN }
-    if not layout.eligible[struct_index] { return SEM_UNKNOWN }
+    if not layout.sliceable[struct_index] { return SEM_UNKNOWN }
     let fields = layout.field_count[struct_index]
     if fields < 1 or fields >= SEM_STRUCT_WIDTH_UNIT { return SEM_UNKNOWN }
     return SEM_ARRAY_STRUCT_BASE + struct_index * SEM_STRUCT_WIDTH_UNIT + fields
 }
 
 // Walk each struct item's body and record its fields. A field is an
-// identifier, a colon, and a single type token; anything else (a slice, a map,
-// another struct) makes the whole struct ineligible, which is the conservative
-// direction.
+// identifier, a colon, and a single type token; anything unrecognized (a map,
+// a struct declared *later*, a self-reference) makes the whole struct
+// ineligible and inconstructible, which is the conservative direction.
+//
+// Two field shapes widen what is constructible:
+//   - `code: X86Code` — a field whose type is an earlier *constructible*
+//     struct. The inner struct's slots are flattened inline into the outer
+//     block, so the value remains one allocation and the drop mask covers the
+//     inner owned slots directly. One allocation, never a pointer to a second
+//     block, is what keeps the drop a single mask decode.
+//   - `tokens: []Token` — a slice of an earlier *eligible* struct. One pointer
+//     slot owning the slice block; the drop needs the element stride, which
+//     the mask carries in its override bits (see `struct_owned_slot_mask`).
+//
+// Both keep the struct ineligible: a slice of either could not drop as one
+// allocation. Because resolution only ever looks backwards, a forward
+// reference or a cycle simply never resolves and fails closed.
 fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> StructLayout {
     let mut name_start: []int = make([]int, 0, 8)
     let mut name_end: []int = make([]int, 0, 8)
     let mut field_start: []int = make([]int, 0, 8)
     let mut field_count: []int = make([]int, 0, 8)
-    let mut field_name_start: []int = make([]int, 0, 32)
-    let mut field_name_end: []int = make([]int, 0, 32)
-    let mut field_type: []int = make([]int, 0, 32)
+    let mut slot_type: []int = make([]int, 0, 32)
+    let mut decl_start: []int = make([]int, 0, 8)
+    let mut decl_count: []int = make([]int, 0, 8)
+    let mut decl_name_start: []int = make([]int, 0, 32)
+    let mut decl_name_end: []int = make([]int, 0, 32)
+    let mut decl_slot: []int = make([]int, 0, 32)
+    let mut decl_type: []int = make([]int, 0, 32)
+    let mut decl_inner: []int = make([]int, 0, 32)
     let mut eligible: []bool = make([]bool, 0, 8)
     let mut constructible: []bool = make([]bool, 0, 8)
+    let mut sliceable: []bool = make([]bool, 0, 8)
     let mut item_index = 0
     while item_index < len(items) {
         let item = items[item_index]
         if item.kind == ITEM_STRUCT {
-            let start = len(field_name_start)
+            let start = len(slot_type)
+            let dstart = len(decl_name_start)
             let mut count = 0
+            let mut dcount = 0
+            let mut slice_fields = 0
             let mut ok = true
             let mut one_slot = true
             let mut scan = item.body_start
@@ -190,6 +247,7 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
                     // value) but never POD-eligible (a slice of them would leak
                     // every element's allocation).
                     let mut kind = SEM_UNKNOWN
+                    let mut nested = -1
                     let mut advance = 3
                     if type_token + 2 < len(tokens) and tokens[type_token].kind == TK_LBRACKET and
                         tokens[type_token + 1].kind == TK_RBRACKET and
@@ -200,11 +258,21 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
                         if elem == "string" { kind = SEM_ARRAY_STRING }
                         if elem == "float" or elem == "float64" { kind = SEM_ARRAY_FLOAT }
                         if elem == "bool" { kind = SEM_ARRAY_BOOL }
-                        // []Struct (e.g. []Token) stays unrecognized here until
-                        // the seed backends can materialize the element type;
-                        // recognizing it made LexResult constructible and broke
-                        // stage-0 bootstrap. Self-host can revisit after ELF
-                        // can emit constructible returns with struct-slice fields.
+                        if kind == SEM_UNKNOWN {
+                            // `[]Struct` (e.g. []Token): one pointer slot owning
+                            // a block of POD elements. Only an *eligible* struct
+                            // already recorded qualifies — anything else could
+                            // not drop as one allocation, and a forward
+                            // reference simply never resolves.
+                            let mut inner = 0
+                            while inner < len(name_start) {
+                                if eligible[inner] and source[name_start[inner]:name_end[inner]] == elem and
+                                    field_count[inner] >= 1 and field_count[inner] < SEM_STRUCT_WIDTH_UNIT {
+                                    kind = SEM_ARRAY_STRUCT_BASE + inner * SEM_STRUCT_WIDTH_UNIT + field_count[inner]
+                                }
+                                inner = inner + 1
+                            }
+                        }
                         advance = 5
                         ok = false
                     } else if tokens[type_token].kind == TK_IDENT {
@@ -221,15 +289,47 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
                             SEM_UNKNOWN
                         }
                         if scalar == SEM_UNKNOWN { ok = false }
+                        if kind == SEM_UNKNOWN {
+                            // A field of an earlier *constructible* struct: its
+                            // slots flatten into this block. `kind` records the
+                            // inner value kind as the declared type; the slot
+                            // span below carries the inner slot types.
+                            let mut inner = 0
+                            while inner < len(name_start) {
+                                if constructible[inner] and source[name_start[inner]:name_end[inner]] == field_name and
+                                    field_count[inner] >= 1 and field_count[inner] < SEM_STRUCT_WIDTH_UNIT {
+                                    nested = inner
+                                    kind = SEM_STRUCT_VALUE_BASE + inner * SEM_STRUCT_WIDTH_UNIT + field_count[inner]
+                                }
+                                inner = inner + 1
+                            }
+                        }
                     }
                     if kind == SEM_UNKNOWN {
                         one_slot = false
                         scan = scan + 3
                     } else {
-                        field_name_start = append(field_name_start, tokens[scan].start)
-                        field_name_end = append(field_name_end, tokens[scan].end)
-                        field_type = append(field_type, kind)
-                        count = count + 1
+                        decl_name_start = append(decl_name_start, tokens[scan].start)
+                        decl_name_end = append(decl_name_end, tokens[scan].end)
+                        decl_slot = append(decl_slot, count)
+                        decl_type = append(decl_type, kind)
+                        decl_inner = append(decl_inner, nested)
+                        dcount = dcount + 1
+                        if semantic_is_struct_array(kind) { slice_fields = slice_fields + 1 }
+                        if nested >= 0 {
+                            // Flatten: the inner slots become this struct's
+                            // slots, so the block width and the drop mask cover
+                            // them with no second allocation and no recursion.
+                            let mut inner_slot = 0
+                            while inner_slot < field_count[nested] {
+                                slot_type = append(slot_type, slot_type[field_start[nested] + inner_slot])
+                                count = count + 1
+                                inner_slot = inner_slot + 1
+                            }
+                        } else {
+                            slot_type = append(slot_type, kind)
+                            count = count + 1
+                        }
                         scan = scan + advance
                     }
                 } else {
@@ -238,45 +338,73 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
             }
             if count == 0 { ok = false }
             if count == 0 { one_slot = false }
+            // The drop mask packs 2 bits per slot plus bounded stride overrides
+            // (see `struct_owned_slot_mask`); past those bounds a struct stays
+            // inconstructible rather than dropping with a truncated mask.
+            let maskable = count <= 15 and slice_fields <= 3
             name_start = append(name_start, item.name_start)
             name_end = append(name_end, item.name_end)
             field_start = append(field_start, start)
             field_count = append(field_count, count)
+            decl_start = append(decl_start, dstart)
+            decl_count = append(decl_count, dcount)
             eligible = append(eligible, ok and one_slot)
-            constructible = append(constructible, one_slot)
+            constructible = append(constructible, one_slot and maskable)
+            sliceable = append(sliceable, one_slot and maskable)
         }
         item_index = item_index + 1
     }
     return StructLayout {
         name_start: name_start, name_end: name_end,
         field_start: field_start, field_count: field_count,
-        field_name_start: field_name_start, field_name_end: field_name_end,
-        field_type: field_type, eligible: eligible,
+        slot_type: slot_type,
+        decl_start: decl_start, decl_count: decl_count,
+        decl_name_start: decl_name_start, decl_name_end: decl_name_end,
+        decl_slot: decl_slot, decl_type: decl_type, decl_inner: decl_inner,
+        eligible: eligible,
         constructible: constructible,
+        sliceable: sliceable,
     }
 }
 
-// Per-field drop codes packed into IR_DROP.aux (2 bits each, field 0 low).
-// Codes: 0 = none, 1 = string, 2 = []int, 3 = []byte. Wider than 15 fields is
+// Per-slot drop codes packed into IR_DROP.aux (2 bits each, slot 0 low).
+// Codes: 0 = none, 1 = string, 2 = []int, 3 = []byte. Wider than 15 slots is
 // refused rather than truncated. The backend frees without the struct table —
 // the same reason element stride travels in the kind.
+//
+// A `[]Struct` slot drops like `[]int` except for the payload stride, which the
+// 2-bit code cannot say. Up to three stride overrides ride above the slot
+// codes: 10 bits each from bit 30, holding the slot index (low 4 bits) and the
+// stride in slots (high 6). An override is always present for a struct-slice
+// slot — entry zero means "no override" — and `build_struct_layout` keeps a
+// struct with more than three such fields inconstructible.
 fn struct_owned_slot_mask(layout: StructLayout, struct_index: int) -> int {
     if struct_index < 0 or struct_index >= len(layout.field_start) { return 0 }
     if layout.field_count[struct_index] > 15 { return -1 }
     let mut pack = 0
     let mut unit = 1
+    let mut overrides = 0
+    let mut override_count = 0
+    let mut override_unit = 1073741824
     let mut i = 0
     while i < layout.field_count[struct_index] {
-        let field_type = layout.field_type[layout.field_start[struct_index] + i]
+        let field_type = layout.slot_type[layout.field_start[struct_index] + i]
         let mut code = 0
         if field_type == SEM_STRING { code = 1 }
         if field_type == SEM_ARRAY_INT { code = 2 }
         if field_type == SEM_ARRAY_BYTE { code = 3 }
+        if semantic_is_struct_array(field_type) {
+            code = 2
+            if override_count >= 3 { return -1 }
+            overrides = overrides + (i + struct_kind_fields(field_type) * 16) * override_unit
+            override_count = override_count + 1
+            override_unit = override_unit * 1024
+        }
         pack = pack + code * unit
         unit = unit * 4
         i = i + 1
     }
-    return pack
+    return pack + overrides
 }
 
 // Index of a *constructible* struct by source name, or -1. Wider than
@@ -299,7 +427,7 @@ fn struct_owned_field_count(layout: StructLayout, struct_index: int) -> int {
     let mut owned = 0
     let mut i = 0
     while i < layout.field_count[struct_index] {
-        if layout.field_type[layout.field_start[struct_index] + i] == SEM_STRING {
+        if layout.slot_type[layout.field_start[struct_index] + i] == SEM_STRING {
             owned = owned + 1
         }
         i = i + 1
@@ -319,23 +447,66 @@ fn struct_layout_lookup(layout: StructLayout, source: string, name: string) -> i
     return -1
 }
 
-// Position of a field within a struct, or -1. The position is also its slot:
-// every eligible field is one slot wide.
-fn struct_field_slot(layout: StructLayout, source: string, struct_index: int, field: string) -> int {
-    if struct_index < 0 or struct_index >= len(layout.field_start) { return -1 }
+fn struct_layout_sliceable(layout: StructLayout, source: string, name: string) -> int {
     let mut i = 0
-    while i < layout.field_count[struct_index] {
-        let at = layout.field_start[struct_index] + i
-        if source[layout.field_name_start[at]:layout.field_name_end[at]] == field { return i }
+    while i < len(layout.name_start) {
+        if layout.sliceable[i] and source[layout.name_start[i]:layout.name_end[i]] == name {
+            return i
+        }
         i = i + 1
     }
     return -1
 }
 
+// Declared position of a field within a struct, or -1. The declared position
+// indexes the decl arrays; it is *not* a memory slot when a nested field
+// widened the block.
+fn struct_field_decl(layout: StructLayout, source: string, struct_index: int, field: string) -> int {
+    if struct_index < 0 or struct_index >= len(layout.decl_start) { return -1 }
+    let mut i = 0
+    while i < layout.decl_count[struct_index] {
+        let at = layout.decl_start[struct_index] + i
+        if source[layout.decl_name_start[at]:layout.decl_name_end[at]] == field { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+// First flattened slot of a declared field, or -1.
+fn struct_decl_slot_of(layout: StructLayout, struct_index: int, decl: int) -> int {
+    if struct_index < 0 or struct_index >= len(layout.decl_start) { return -1 }
+    if decl < 0 or decl >= layout.decl_count[struct_index] { return -1 }
+    return layout.decl_slot[layout.decl_start[struct_index] + decl]
+}
+
+// Declared semantic type of a declared field: a scalar, a slice kind, or the
+// inner struct's value kind for a nested field.
+fn struct_decl_type_of(layout: StructLayout, struct_index: int, decl: int) -> int {
+    if struct_index < 0 or struct_index >= len(layout.decl_start) { return SEM_UNKNOWN }
+    if decl < 0 or decl >= layout.decl_count[struct_index] { return SEM_UNKNOWN }
+    return layout.decl_type[layout.decl_start[struct_index] + decl]
+}
+
+// Inner struct index of a nested declared field, or -1.
+fn struct_decl_inner_of(layout: StructLayout, struct_index: int, decl: int) -> int {
+    if struct_index < 0 or struct_index >= len(layout.decl_start) { return -1 }
+    if decl < 0 or decl >= layout.decl_count[struct_index] { return -1 }
+    return layout.decl_inner[layout.decl_start[struct_index] + decl]
+}
+
+// Flattened slot a field name maps to, or -1. For a nested field this is the
+// first of the slots the inner struct was flattened into; readers that need
+// the declared type or the inner struct use the decl helpers above.
+fn struct_field_slot(layout: StructLayout, source: string, struct_index: int, field: string) -> int {
+    let decl = struct_field_decl(layout, source, struct_index, field)
+    if decl < 0 { return -1 }
+    return struct_decl_slot_of(layout, struct_index, decl)
+}
+
 fn struct_field_type(layout: StructLayout, struct_index: int, slot: int) -> int {
     if struct_index < 0 or struct_index >= len(layout.field_start) { return SEM_UNKNOWN }
     if slot < 0 or slot >= layout.field_count[struct_index] { return SEM_UNKNOWN }
-    return layout.field_type[layout.field_start[struct_index] + slot]
+    return layout.slot_type[layout.field_start[struct_index] + slot]
 }
 
 fn struct_layout_smoke_test() -> bool {
@@ -366,7 +537,8 @@ fn struct_layout_smoke_test() -> bool {
     if struct_kind_index(pair_slice) != pair { return false }
     if struct_kind_fields(pair_slice) != 2 { return false }
     // An ineligible struct has no slice kind, so it can never be bound.
-    if semantic_struct_array_kind(layout, 1) != SEM_UNKNOWN { return false }
+    if semantic_struct_array_kind(layout, 1) == SEM_UNKNOWN { return false }
+    if semantic_struct_array_kind(layout, 2) == SEM_UNKNOWN { return false }
     if semantic_struct_array_kind(layout, -1) != SEM_UNKNOWN { return false }
     // A builtin kind is never mistaken for a struct slice, and asking a
     // non-struct kind for a stride yields zero rather than a plausible width.
@@ -405,6 +577,46 @@ fn struct_kind_distinct_smoke_test() -> bool {
     return true
 }
 
+// Nested value fields flatten into the outer block, and a struct-slice field
+// records its stride in the mask's override bits.
+fn struct_layout_nested_smoke_test() -> bool {
+    let source = "struct Inner { a: int  s: string }\nstruct Outer { inner: Inner  n: int }\nstruct Pod { x: int  y: int }\nstruct Wrapped { items: []Pod  tag: string }\nstruct Late { p: Later }\nstruct Later { q: int }"
+    let lexed = lex_source(source)
+    if not lexed.ok { return false }
+    let structure = parse_structure(source, lexed.tokens)
+    if not structure.ok { return false }
+    let layout = build_struct_layout(source, lexed.tokens, structure.items)
+    // Inner is constructible but not slice-eligible.
+    let inner = struct_layout_constructible(layout, source, "Inner")
+    if inner < 0 or struct_layout_lookup(layout, source, "Inner") >= 0 { return false }
+    // Outer flattens Inner's two slots before its own: width three, with the
+    // declared `inner` field covering slots 0-1 and `n` at slot 2.
+    let outer = struct_layout_constructible(layout, source, "Outer")
+    if outer < 0 or struct_layout_lookup(layout, source, "Outer") >= 0 { return false }
+    if layout.field_count[outer] != 3 { return false }
+    if struct_field_slot(layout, source, outer, "inner") != 0 { return false }
+    if struct_field_slot(layout, source, outer, "n") != 2 { return false }
+    if struct_field_type(layout, outer, 0) != SEM_INT { return false }
+    if struct_field_type(layout, outer, 1) != SEM_STRING { return false }
+    if struct_field_type(layout, outer, 2) != SEM_INT { return false }
+    let inner_decl = struct_field_decl(layout, source, outer, "inner")
+    if inner_decl < 0 or struct_decl_inner_of(layout, outer, inner_decl) != inner { return false }
+    if struct_decl_type_of(layout, outer, inner_decl) != semantic_struct_value_kind(layout, inner) { return false }
+    if struct_decl_inner_of(layout, outer, struct_field_decl(layout, source, outer, "n")) != -1 { return false }
+    // The mask covers the flattened owned slot: [none, string, none].
+    if struct_owned_slot_mask(layout, outer) != 4 { return false }
+    // A struct-slice field is one slot whose drop needs the element stride:
+    // code 2 with an override entry of (slot 0, 2 slots) at bit 30.
+    let wrapped = struct_layout_constructible(layout, source, "Wrapped")
+    if wrapped < 0 or layout.field_count[wrapped] != 2 { return false }
+    if struct_field_type(layout, wrapped, 0) != SEM_ARRAY_STRUCT_BASE + 2 * SEM_STRUCT_WIDTH_UNIT + 2 { return false }
+    if struct_owned_slot_mask(layout, wrapped) != 6 + 32 * 1073741824 { return false }
+    // A forward reference never resolves, so the struct fails closed.
+    if struct_layout_constructible(layout, source, "Late") >= 0 { return false }
+    if struct_layout_lookup(layout, source, "Later") < 0 { return false }
+    return true
+}
+
 
 fn semantic_declared_type(source: string, tokens: []Token, types: []TypeNode, type_edges: []int, layout: StructLayout, root: int) -> int {
     if root < 0 or root >= len(types) { return SEM_UNKNOWN }
@@ -424,7 +636,7 @@ fn semantic_declared_type(source: string, tokens: []Token, types: []TypeNode, ty
         // Not a builtin element: a slice of an eligible user struct. An
         // ineligible one is absent from the table, so this stays unknown and
         // every later pass keeps failing closed on it.
-        return semantic_struct_array_kind(layout, struct_layout_lookup(layout, source, element_name))
+        return semantic_struct_array_kind(layout, struct_layout_sliceable(layout, source, element_name))
     }
     if node.kind != TYPE_NAMED or node.token < 0 or node.token >= len(tokens) { return SEM_UNKNOWN }
     let name = token_text(source, tokens[node.token])
@@ -522,7 +734,7 @@ fn semantic_type_reference(source: string, tokens: []Token, layout: StructLayout
     if name == "byte" or name == "uint8" { return SEM_ARRAY_BYTE }
     // A `make([]Struct, ...)` names an eligible struct; an ineligible one is
     // absent from the table and stays unknown.
-    return semantic_struct_array_kind(layout, struct_layout_lookup(layout, source, name))
+    return semantic_struct_array_kind(layout, struct_layout_sliceable(layout, source, name))
 }
 
 fn semantic_type_name(kind: int) -> string {
@@ -684,7 +896,7 @@ fn semantic_let_annotation_type(
         if element_name == "bool" { return SEM_ARRAY_BOOL }
         if element_name == "string" { return SEM_ARRAY_STRING }
         if element_name == "byte" or element_name == "uint8" { return SEM_ARRAY_BYTE }
-        return semantic_struct_array_kind(layout, struct_layout_lookup(layout, source, element_name))
+        return semantic_struct_array_kind(layout, struct_layout_sliceable(layout, source, element_name))
     }
     if tokens[pos].kind == TK_IDENT {
         let name = token_text(source, tokens[pos])
@@ -789,6 +1001,9 @@ fn infer_semantic_types(
             if expression.kind == EXPR_ARRAY {
                 if expression.right >= 0 {
                     inferred = semantic_array_of(expression_types[expression.right])
+                    if inferred == SEM_UNKNOWN and semantic_is_struct_value(expression_types[expression.right]) {
+                        inferred = semantic_struct_array_kind(layout, struct_kind_index(expression_types[expression.right]))
+                    }
                     if inferred == SEM_UNKNOWN and expression.left >= 0 {
                         inferred = expression_types[expression.left]
                     }
@@ -889,8 +1104,11 @@ if name == "unsafe_open_string" { inferred = SEM_INT }
                 if expression.left < len(expression_types) and
                     semantic_is_struct_value(expression_types[expression.left]) {
                     let direct_owner = struct_kind_index(expression_types[expression.left])
-                    let direct_slot = struct_field_slot(layout, source, direct_owner, token_text(source, tokens[expression.token]))
-                    inferred = struct_field_type(layout, direct_owner, direct_slot)
+                    // The declared type, not the flattened slot's: a nested
+                    // struct field is several slots wide but reads as the inner
+                    // struct's value kind.
+                    let direct_decl = struct_field_decl(layout, source, direct_owner, token_text(source, tokens[expression.token]))
+                    inferred = struct_decl_type_of(layout, direct_owner, direct_decl)
                 }
                 // The object is either the index itself, or an immutable local
                 // bound directly to one. Forwarding keeps `let node = xs[i]`
@@ -912,8 +1130,8 @@ if name == "unsafe_open_string" { inferred = SEM_INT }
                     let slice_kind = expression_types[object.left]
                     if semantic_is_struct_array(slice_kind) {
                         let owner = struct_kind_index(slice_kind)
-                        let slot = struct_field_slot(layout, source, owner, token_text(source, tokens[expression.token]))
-                        inferred = struct_field_type(layout, owner, slot)
+                        let decl = struct_field_decl(layout, source, owner, token_text(source, tokens[expression.token]))
+                        inferred = struct_decl_type_of(layout, owner, decl)
                     }
                 }
             }
@@ -1040,7 +1258,10 @@ if name == "unsafe_open_string" { inferred = SEM_INT }
         if expression.kind == EXPR_ARRAY and expression.left >= 0 and expression.left < len(expression_types) and
             expression.right >= 0 and expression.right < len(expression_types) {
             let previous = expression_types[expression.left]
-            let element = semantic_array_of(expression_types[expression.right])
+            let mut element = semantic_array_of(expression_types[expression.right])
+            if element == SEM_UNKNOWN and semantic_is_struct_value(expression_types[expression.right]) {
+                element = semantic_struct_array_kind(layout, struct_kind_index(expression_types[expression.right]))
+            }
             if previous != SEM_UNKNOWN and element != SEM_UNKNOWN and previous != element {
                 let value = expressions[expression.right]
                 let error_token = value.token

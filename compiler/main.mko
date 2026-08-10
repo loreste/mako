@@ -105,6 +105,10 @@ fn main() {
         print("internal compiler error: struct kind distinctness smoke test failed")
         exit(70)
     }
+    if not struct_layout_nested_smoke_test() {
+        print("internal compiler error: nested struct layout smoke test failed")
+        exit(70)
+    }
     if not ir_entry_item_smoke_test() {
         print("internal compiler error: entry item smoke test failed")
         exit(70)
@@ -233,6 +237,15 @@ fn main() {
     if not ir.ok {
         print(path + ": typed IR lowering failed: " + ir.error)
         exit(1)
+    }
+    // Debug dump: op/type/aux/left per instruction (fifth argument).
+    if argc() >= 5 {
+        let mut dump = 0
+        while dump < len(ir.instructions) {
+            let di = ir.instructions[dump]
+            print("ir " + format_int(dump) + " op " + format_int(di.op) + " type " + format_int(di.type_kind) + " aux " + format_int(di.aux) + " left " + format_int(di.left) + " right " + format_int(di.right) + " result " + format_int(di.result))
+            dump = dump + 1
+        }
     }
     let ir_verification = verify_typed_ir(
         ir.functions, ir.blocks, ir.instructions, ir.constants, ir.successors,

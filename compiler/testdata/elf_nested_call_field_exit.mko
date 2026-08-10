@@ -1,0 +1,21 @@
+// A call result as a nested field init: the inner temp must be dropped once
+// after its slots are read into the outer block. Expected exit 11.
+struct X86Code {
+    bytes: []int
+    status: int
+    error: string
+}
+
+struct X86Body {
+    code: X86Code
+    edge_callees: []int
+}
+
+fn x86_error(status: int, message: string) -> X86Code {
+    return X86Code { bytes: make([]int, 0, 0), status: status, error: message }
+}
+
+fn main() {
+    let b = X86Body { code: x86_error(5, "boom"), edge_callees: make([]int, 2, 2) }
+    exit(b.code.status + len(b.edge_callees) + 4)
+}

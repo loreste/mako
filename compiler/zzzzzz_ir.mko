@@ -29,6 +29,13 @@ const IR_LEN = 19
 const IR_FIELD = 20
 const IR_FIELD_AUX_UNIT = 64
 
+// Added to an `IR_FIELD` aux when the read names a *nested* struct field: the
+// result is the address of the flattened inner slots (block + 8 * slot), not
+// the word stored there. The address is a borrow into the outer block — the
+// same owned kind a construction carries, so the verifier tracks it, while the
+// backend's owned-producer check keeps its drop a no-op.
+const IR_FIELD_ADDR_FLAG = 4096
+
 // Address of one element of a slice of structs, bounds-checked. It exists so a
 // borrowed element can be handed to a struct parameter: `left` is the slice,
 // `right` the index, `aux` the stride in bytes. The result is a pointer the
@@ -169,8 +176,13 @@ fn ir_struct_field_aux(
         if not semantic_is_struct_value(object_kind) { return -1 }
         let borrowed_fields = struct_kind_fields(object_kind)
         if borrowed_fields < 1 or borrowed_fields >= IR_FIELD_AUX_UNIT { return -1 }
-        let borrowed_slot = struct_field_slot(layout, source, struct_kind_index(object_kind), token_text(source, tokens[node.token]))
+        let borrowed_decl = struct_field_decl(layout, source, struct_kind_index(object_kind), token_text(source, tokens[node.token]))
+        let borrowed_slot = struct_decl_slot_of(layout, struct_kind_index(object_kind), borrowed_decl)
         if borrowed_slot < 0 or borrowed_slot >= borrowed_fields { return -1 }
+        // A nested field is an address into the block, not a word to load; the
+        // matched path has no encoding for that, so the function declines to
+        // the general path.
+        if struct_decl_inner_of(layout, struct_kind_index(object_kind), borrowed_decl) >= 0 { return -1 }
         return borrowed_fields * IR_FIELD_AUX_UNIT + borrowed_slot
     }
     let object = expressions[object_index]
@@ -325,10 +337,26 @@ fn ir_instruction_consumes_left(instruction: IrInstruction, instructions: []IrIn
             ir_type_is_owned(source_type))
 }
 
+// True when an `IR_ARRAY` append copies its element rather than taking it: an
+// owned struct-slice literal, where `aux` is the element's owned-slot mask and
+// the lowering emits an explicit `IR_DROP` of the source. The struct-array test
+// is what makes the mask reading valid — on the matched-shape path `aux` holds
+// `expression.left` instead, which is an unrelated AST index.
+fn ir_array_copies_element(instruction: IrInstruction) -> bool {
+    return semantic_is_struct_array(instruction.type_kind) and instruction.aux > 0
+}
+
 fn ir_instruction_consumes_right(instruction: IrInstruction, instructions: []IrInstruction, definitions: []int) -> bool {
     if instruction.op != IR_ARRAY or instruction.right < 0 or instruction.right >= len(definitions) or
         definitions[instruction.right] <= 0 { return false }
-    return ir_type_is_owned(instructions[definitions[instruction.right] - 1].type_kind)
+    // An owned struct-slice literal *copies* its element into the array and
+    // drops the source right after, so it does not consume it. Only the CFG
+    // path carries that owned-slot mask in `aux`; the matched-shape path puts
+    // `expression.left` — an arbitrary AST index — there, so `aux > 0` alone
+    // would strip ownership tracking from every element after the first.
+    if ir_array_copies_element(instruction) { return false }
+    let source_type = instructions[definitions[instruction.right] - 1].type_kind
+    return ir_type_is_owned(source_type)
 }
 
 fn ir_instruction_list_consumes_value(
@@ -358,7 +386,10 @@ fn ir_instruction_range_consumes_value(
                 instruction.op == IR_SLICE or instruction.op == IR_ARRAY) {
             return true
         }
-        if instruction.right == value and instruction.op == IR_ARRAY { return true }
+        if instruction.right == value and instruction.op == IR_ARRAY and
+            not ir_array_copies_element(instruction) {
+            return true
+        }
         if instruction.op == IR_CALL and instruction.aux >= 0 and instruction.aux < len(call_sites) and
             ir_call_consumes_arguments(call_sites[instruction.aux].callee_item,
                 ir_cfg_value_type(instructions, value)) {
@@ -810,6 +841,61 @@ fn ir_cfg_failure(instructions: []IrInstruction, constants: []IrConstant, expres
     }
 }
 
+// Arena rewind for the matched-shape soft-skips. A skipped function has already
+// appended parameters (and possibly constants and call sites) to the shared
+// arenas; leaving them behind orphans instructions for the block-coverage
+// verifier and constants for the constant-ownership check, so a skip rewinds
+// every arena to the mark taken when the function started.
+fn ir_rewind_instructions(entries: []IrInstruction, keep: int) -> []IrInstruction {
+    let mut out: []IrInstruction = make([]IrInstruction, 0, keep)
+    let mut i = 0
+    while i < keep and i < len(entries) {
+        out = append(out, entries[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn ir_rewind_constants(entries: []IrConstant, keep: int) -> []IrConstant {
+    let mut out: []IrConstant = make([]IrConstant, 0, keep)
+    let mut i = 0
+    while i < keep and i < len(entries) {
+        out = append(out, entries[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn ir_rewind_call_sites(entries: []IrCallSite, keep: int) -> []IrCallSite {
+    let mut out: []IrCallSite = make([]IrCallSite, 0, keep)
+    let mut i = 0
+    while i < keep and i < len(entries) {
+        out = append(out, entries[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn ir_rewind_ints(entries: []int, keep: int) -> []int {
+    let mut out: []int = make([]int, 0, keep)
+    let mut i = 0
+    while i < keep and i < len(entries) {
+        out = append(out, entries[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn ir_rewind_strings(entries: []string, keep: int) -> []string {
+    let mut out: []string = make([]string, 0, keep)
+    let mut i = 0
+    while i < keep and i < len(entries) {
+        out = append(out, entries[i])
+        i = i + 1
+    }
+    return out
+}
+
 // True when some call node consumes this expression as its callee or as an
 // earlier link of the same call chain. Such a node is never lowered on its own:
 // only the terminal call emits, and the chain base is the callee name.
@@ -1057,6 +1143,9 @@ fn ir_expression_is_field_initializer(expressions: []ExprNode, node: int) -> boo
 // table. Minus one for everything else, which is what the field has always
 // meant for a drop.
 fn ir_drop_aux(layout: StructLayout, source: string, type_kind: int) -> int {
+    if semantic_is_struct_array(type_kind) {
+        return struct_owned_slot_mask(layout, struct_kind_index(type_kind))
+    }
     if not semantic_is_struct_value(type_kind) { return -1 }
     return struct_owned_slot_mask(layout, struct_kind_index(type_kind))
 }
@@ -1134,7 +1223,8 @@ fn ir_cfg_lower_range(
             if pending_drop_after[pending_index] >= 0 and pending_drop_after[pending_index] < i {
                 out_instructions = append(out_instructions, IrInstruction {
                     op: IR_DROP, result: -1, type_kind: pending_drop_type[pending_index],
-                    left: pending_drop_value[pending_index], right: -1, aux: -1,
+                    left: pending_drop_value[pending_index], right: -1,
+                    aux: ir_drop_aux(layout, source, pending_drop_type[pending_index]),
                     token: expression.token,
                 })
                 pending_drop_after[pending_index] = -1
@@ -1433,10 +1523,22 @@ fn ir_cfg_lower_range(
                 }
                 let mut slot_values: []int = make([]int, field_count, field_count)
                 let mut slot_exprs: []int = make([]int, field_count, field_count)
+                // A nested field spans several slots. Its source value is one
+                // struct (a literal, a call result, or a binding); each slot is
+                // read out of it at emit time. -2 marks a slot that expansion
+                // fills; -1 is still "unset".
+                let mut nested_source: []int = make([]int, field_count, field_count)
+                let mut nested_src_expr: []int = make([]int, field_count, field_count)
+                let mut nested_inner_slot: []int = make([]int, field_count, field_count)
+                let mut nested_last: []int = make([]int, field_count, field_count)
                 let mut clear = 0
                 while clear < field_count {
                     slot_values[clear] = -1
                     slot_exprs[clear] = -1
+                    nested_source[clear] = -1
+                    nested_src_expr[clear] = -1
+                    nested_inner_slot[clear] = -1
+                    nested_last[clear] = 0
                     clear = clear + 1
                 }
                 let mut link = i
@@ -1449,8 +1551,9 @@ fn ir_cfg_lower_range(
                             return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                                 "CFG lowering requires named struct fields")
                         }
-                        let field_slot = struct_field_slot(layout, source, owner,
+                        let field_decl = struct_field_decl(layout, source, owner,
                             token_text(source, tokens[expressions[init].token]))
+                        let field_slot = struct_decl_slot_of(layout, owner, field_decl)
                         let init_value = expressions[init].right
                         if field_slot < 0 or field_slot >= field_count or
                             init_value < 0 or init_value >= len(out_values) or
@@ -1458,19 +1561,51 @@ fn ir_cfg_lower_range(
                             return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                                 "CFG lowering could not resolve a struct field initializer")
                         }
-                        if slot_values[field_slot] >= 0 {
+                        if slot_values[field_slot] != -1 {
                             return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                                 "CFG lowering struct literal sets a field twice")
                         }
-                        slot_values[field_slot] = out_values[init_value]
-                        slot_exprs[field_slot] = init_value
+                        let nested_inner = struct_decl_inner_of(layout, owner, field_decl)
+                        if nested_inner >= 0 {
+                            // The source must carry the inner struct's own type:
+                            // a literal of it, a call returning it, or a binding
+                            // of it. Anything else — a scalar, another struct, a
+                            // field read borrowed out of a third value — would
+                            // store the wrong word, so it is refused.
+                            let init_kind = expressions[init_value].kind
+                            let init_binding = if init_value < len(expression_locals) {
+                                expression_locals[init_value]
+                            } else {
+                                -1
+                            }
+                            let init_allowed = init_kind == EXPR_STRUCT or init_kind == EXPR_CALL or
+                                (init_kind == EXPR_IDENT and init_binding >= 0 and init_binding < len(locals))
+                            if not init_allowed or init_value >= len(expression_types) or
+                                expression_types[init_value] != struct_decl_type_of(layout, owner, field_decl) {
+                                return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                    "CFG lowering nested struct field needs a literal, call, or binding of the inner struct")
+                            }
+                            let span = layout.field_count[nested_inner]
+                            let mut fill = 0
+                            while fill < span {
+                                slot_values[field_slot + fill] = -2
+                                nested_source[field_slot + fill] = out_values[init_value]
+                                nested_src_expr[field_slot + fill] = init_value
+                                nested_inner_slot[field_slot + fill] = fill
+                                fill = fill + 1
+                            }
+                            nested_last[field_slot + span - 1] = 1
+                        } else {
+                            slot_values[field_slot] = out_values[init_value]
+                            slot_exprs[field_slot] = init_value
+                        }
                     }
                     link = expressions[link].left
                     link_steps = link_steps + 1
                 }
                 let mut check_slot = 0
                 while check_slot < field_count {
-                    if slot_values[check_slot] < 0 {
+                    if slot_values[check_slot] == -1 {
                         return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                             "CFG lowering struct literal leaves a field unset")
                     }
@@ -1484,10 +1619,72 @@ fn ir_cfg_lower_range(
                 // Drop the source only when it is a temporary. A binding keeps
                 // its scope-exit drop — dropping one here was a double free on
                 // `Code { bytes: b, ... }` where `b` is a local.
+                //
+                // A nested field's slots are read out of the source struct one
+                // at a time; owned slots are cloned, so the outer block owns
+                // its own copies and the source — binding or temporary — keeps
+                // its own. A temporary source is then dropped once, after its
+                // last slot was read: `X86Body { code: x86_error(...), ... }`
+                // frees the inner block and its fields exactly once.
                 let mut emit_slot = 0
                 while emit_slot < field_count {
                     let field_type = struct_field_type(layout, owner, emit_slot)
-                    if ir_type_is_owned(field_type) {
+                    if slot_values[emit_slot] == -2 {
+                        // One slot of a nested field: read the inner slot out of
+                        // the source struct's block. The read is a borrow; owned
+                        // slots are cloned so the outer block owns its own copy,
+                        // and the borrow is consumed at once (the backend emits
+                        // nothing for it — its producer is a field read).
+                        let nested_src = nested_source[emit_slot]
+                        let inner_width = struct_kind_fields(expression_types[nested_src_expr[emit_slot]])
+                        let read_result = value_cursor
+                        value_cursor = value_cursor + 1
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_FIELD, result: read_result, type_kind: field_type,
+                            left: nested_src, right: -1,
+                            aux: inner_width * IR_FIELD_AUX_UNIT + nested_inner_slot[emit_slot],
+                            token: expression.token,
+                        })
+                        if ir_type_is_owned(field_type) {
+                            let field_clone = value_cursor
+                            value_cursor = value_cursor + 1
+                            out_instructions = append(out_instructions, IrInstruction {
+                                op: IR_CLONE, result: field_clone, type_kind: field_type,
+                                left: read_result, right: -1, aux: -1,
+                                token: expression.token,
+                            })
+                            out_instructions = append(out_instructions, IrInstruction {
+                                op: IR_DROP, result: -1, type_kind: field_type,
+                                left: read_result, right: -1, aux: -1,
+                                token: expression.token,
+                            })
+                            slot_values[emit_slot] = field_clone
+                        } else {
+                            slot_values[emit_slot] = read_result
+                        }
+                        if nested_last[emit_slot] == 1 {
+                            // The whole source struct has been read. A temporary
+                            // (literal or call result) is dropped here with its
+                            // own mask; a binding keeps its scope-exit drop.
+                            let src_expr = nested_src_expr[emit_slot]
+                            let src_binding = if src_expr >= 0 and src_expr < len(expression_locals) {
+                                expression_locals[src_expr]
+                            } else {
+                                -1
+                            }
+                            let src_is_binding = src_expr >= 0 and src_expr < len(expressions) and
+                                expressions[src_expr].kind == EXPR_IDENT and
+                                src_binding >= 0 and src_binding < len(locals)
+                            if not src_is_binding {
+                                out_instructions = append(out_instructions, IrInstruction {
+                                    op: IR_DROP, result: -1, type_kind: expression_types[src_expr],
+                                    left: nested_src, right: -1,
+                                    aux: ir_drop_aux(layout, source, expression_types[src_expr]),
+                                    token: expression.token,
+                                })
+                            }
+                        }
+                    } else if ir_type_is_owned(field_type) {
                         let field_clone = value_cursor
                         value_cursor = value_cursor + 1
                         out_instructions = append(out_instructions, IrInstruction {
@@ -1543,6 +1740,42 @@ fn ir_cfg_lower_range(
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                         "CFG lowering array literals require an owned slice type")
                 }
+                let mut array_owned_mask = -1
+                if semantic_is_struct_array(expression_types[i]) {
+                    let owned_mask = struct_owned_slot_mask(layout, struct_kind_index(expression_types[i]))
+                    if owned_mask > 0 and expression.right >= 0 {
+                        let owned_element = expression.right >= 0 and expression.right < len(expressions) and
+                            (expressions[expression.right].kind == EXPR_STRUCT or
+                             (expressions[expression.right].kind == EXPR_IDENT and
+                              expression.right < len(expression_locals) and expression_locals[expression.right] >= 0))
+                        if not owned_element {
+                            return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                "CFG lowering owned struct slices require struct literal elements")
+                        }
+                        let mut field_scan = 0
+                        let mut field_unit = 1
+                        while field_scan < struct_kind_fields(expression_types[i]) {
+                            let field_kind = struct_field_type(layout, struct_kind_index(expression_types[i]), field_scan)
+                            if semantic_is_struct_array(field_kind) {
+                                return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                    "CFG lowering owned struct slices reject nested struct-slice fields")
+                            }
+                            if ir_type_is_owned(field_kind) and field_kind != SEM_STRING and
+                                field_kind != SEM_ARRAY_INT and field_kind != SEM_ARRAY_BYTE {
+                                return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                    "CFG lowering owned struct slices support string, int-slice, and byte-slice fields only")
+                            }
+                            let code = (owned_mask / field_unit) - ((owned_mask / field_unit) / 4) * 4
+                            if code > 3 {
+                                return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                                    "CFG lowering owned struct slices support string, int-slice, and byte-slice fields only")
+                            }
+                            field_unit = field_unit * 4
+                            field_scan = field_scan + 1
+                        }
+                        array_owned_mask = owned_mask
+                    }
+                }
                 let mut array_left = -1
                 let mut array_right = -1
                 if expression.left >= 0 {
@@ -1568,8 +1801,24 @@ fn ir_cfg_lower_range(
                 out_values[i] = array_result
                 out_instructions = append(out_instructions, IrInstruction {
                     op: IR_ARRAY, result: array_result, type_kind: expression_types[i],
-                    left: array_left, right: array_right, aux: -1, token: expression.token,
+                    left: array_left, right: array_right, aux: array_owned_mask, token: expression.token,
                 })
+                if array_owned_mask > 0 and array_right >= 0 {
+                    let source_expr = expression.right
+                    let source_binding = if source_expr < len(expression_locals) {
+                        expression_locals[source_expr]
+                    } else { -1 }
+                    let is_binding = source_expr >= 0 and source_expr < len(expressions) and
+                        expressions[source_expr].kind == EXPR_IDENT and source_binding >= 0
+                    if not is_binding {
+                        out_instructions = append(out_instructions, IrInstruction {
+                            op: IR_DROP, result: -1, type_kind: expression_types[source_expr],
+                            left: array_right, right: -1,
+                            aux: ir_drop_aux(layout, source, expression_types[source_expr]),
+                            token: expression.token,
+                        })
+                    }
+                }
             } else if expression.kind == EXPR_MAKE {
                 // One allocation. The element stride comes from the result
                 // type, and the length is the literal after the type — the same
@@ -1591,16 +1840,42 @@ fn ir_cfg_lower_range(
                         make_length = ir_parse_decimal_int(source, tokens[make_scan])
                     }
                 }
-                if make_length < 0 {
+                // A one-argument make may use an already-lowered integer
+                // expression (`make([]int, len(xs))`). Keep the literal fast
+                // path byte-identical, and encode the dynamic length in left
+                // only when the source length is not a literal. Two-argument
+                // dynamic capacity remains rejected until the IR carries both
+                // values explicitly.
+                let mut dynamic_length = -1
+                let mut make_chain = i
+                let mut make_args: []int = make([]int, 0, 2)
+                let mut make_steps = 0
+                while make_chain >= 0 and make_chain < len(expressions) and
+                    expressions[make_chain].kind == EXPR_MAKE and make_steps < len(expressions) {
+                    if expressions[make_chain].right >= 0 {
+                        make_args = append(make_args, expressions[make_chain].right)
+                    }
+                    make_chain = expressions[make_chain].left
+                    make_steps = make_steps + 1
+                }
+                if make_length < 0 and len(make_args) == 1 {
+                    let length_expression = make_args[0]
+                    if length_expression >= 0 and length_expression < len(out_values) and
+                        out_values[length_expression] >= 0 and
+                        expression_types[length_expression] == SEM_INT {
+                        dynamic_length = out_values[length_expression]
+                    }
+                }
+                if make_length < 0 and dynamic_length < 0 {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
-                        "CFG lowering requires a literal make length")
+                        "CFG lowering requires a literal make length or a lowered integer length")
                 }
                 let make_result = value_cursor
                 value_cursor = value_cursor + 1
                 out_values[i] = make_result
                 out_instructions = append(out_instructions, IrInstruction {
                     op: IR_MAKE, result: make_result, type_kind: expression_types[i],
-                    left: -1, right: -1, aux: make_length, token: expression.token,
+                    left: dynamic_length, right: -1, aux: make_length, token: expression.token,
                 })
             } else if expression.kind == EXPR_FIELD {
                 // Two shapes share this opcode:
@@ -1643,11 +1918,47 @@ fn ir_cfg_lower_range(
                     field_owner = struct_kind_index(slice_kind)
                     field_width = struct_kind_fields(slice_kind)
                 }
-                let read_slot = struct_field_slot(layout, source, field_owner,
+                let read_decl = struct_field_decl(layout, source, field_owner,
                     token_text(source, tokens[expression.token]))
+                let read_slot = struct_decl_slot_of(layout, field_owner, read_decl)
                 if field_owner < 0 or field_width < 1 or read_slot < 0 or read_slot >= field_width {
                     return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
                         "CFG lowering could not resolve a struct field")
+                }
+                if struct_decl_inner_of(layout, field_owner, read_decl) >= 0 {
+                    // A nested field is several slots wide, so its read is the
+                    // *address* of the flattened span, not a loaded word. The
+                    // address is a borrow into the outer block; only a chained
+                    // field read (`body.code.bytes`) may consume it — anything
+                    // else would either alias owned storage into a second owner
+                    // or hand a borrow to code that drops it, so it fails
+                    // closed. The borrow's own drop is a no-op in the backend
+                    // (its producer is a field read) and exists for linearity.
+                    if not object_has_value {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering reads a nested field only of a struct value")
+                    }
+                    let nested_reader = ir_expression_consumer(expressions, i)
+                    if nested_reader < 0 or nested_reader >= len(expressions) or
+                        expressions[nested_reader].kind != EXPR_FIELD or
+                        expressions[nested_reader].left != i {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering nested field read must feed another field read")
+                    }
+                    let addr_result = value_cursor
+                    value_cursor = value_cursor + 1
+                    out_values[i] = addr_result
+                    out_instructions = append(out_instructions, IrInstruction {
+                        op: IR_FIELD, result: addr_result, type_kind: expression_types[i],
+                        left: out_values[expression.left], right: -1,
+                        aux: IR_FIELD_ADDR_FLAG + field_width * IR_FIELD_AUX_UNIT + read_slot,
+                        token: expression.token,
+                    })
+                    pending_drop_after = append(pending_drop_after, nested_reader)
+                    pending_drop_value = append(pending_drop_value, addr_result)
+                    pending_drop_type = append(pending_drop_type, expression_types[i])
+                    i = i + 1
+                    continue
                 }
                 let read_result = value_cursor
                 value_cursor = value_cursor + 1
@@ -1904,7 +2215,8 @@ fn ir_cfg_lower_range(
         if pending_drop_after[trailing] >= 0 {
             out_instructions = append(out_instructions, IrInstruction {
                 op: IR_DROP, result: -1, type_kind: pending_drop_type[trailing],
-                left: pending_drop_value[trailing], right: -1, aux: -1, token: range_start,
+                left: pending_drop_value[trailing], right: -1,
+                aux: ir_drop_aux(layout, source, pending_drop_type[trailing]), token: range_start,
             })
         }
         trailing = trailing + 1
@@ -2900,7 +3212,7 @@ fn ir_lower_returning_if_tree(
                     ) {
                         out_instructions = append(out_instructions, IrInstruction {
                             op: IR_DROP, result: -1, type_kind: local_types[assigned],
-                            left: replaced_value, right: -1, aux: -1,
+                            left: replaced_value, right: -1, aux: ir_drop_aux(layout, source, local_types[assigned]),
                             token: statement.token_start,
                         })
                     }
@@ -2984,7 +3296,7 @@ fn ir_lower_returning_if_tree(
                     if ir_type_is_owned(argument_type) and not is_binding {
                         out_instructions = append(out_instructions, IrInstruction {
                             op: IR_DROP, result: -1, type_kind: argument_type,
-                            left: out_values[argument], right: -1, aux: -1,
+                            left: out_values[argument], right: -1, aux: ir_drop_aux(layout, source, argument_type),
                             token: statement.token_start,
                         })
                     }
@@ -4801,6 +5113,15 @@ fn lower_typed_ir_once(
         let function_index = len(functions)
         let instruction_start = len(instructions)
         let value_start = next_value
+        // Rollback marks for the soft-skips below: every arena this function's
+        // attempt can grow. Instructions orphan without a block, and a constant
+        // whose instruction was rolled back fails "IR constant has no
+        // instruction" — the skip is only clean if all of them rewind.
+        let constant_start = len(constants)
+        let call_site_start = len(call_sites)
+        let call_argument_start = len(call_arguments)
+        let string_literal_start = len(string_literals)
+        let constant_string_start = len(constant_string_index)
         let mut parameter_count = 0
         let mut then_instructions: []IrInstruction = []
         let mut else_instructions: []IrInstruction = []
@@ -5685,8 +6006,20 @@ fn lower_typed_ir_once(
             // call the shape path does not emit). Skip rather than failing the
             // whole package; the general returning-if path already ran only for
             // unsupported shapes, and re-entering it mid-shape would leave
-            // orphan instructions without blocks.
+            // orphan instructions without blocks. The skip needs the same
+            // discipline: the parameters were appended to the shared arena
+            // before the shape checks ran, so they are rolled back to just
+            // before this function started — left in place with no block
+            // covering them, they orphan and the package verifier fails with
+            // "no owning block".
             if condition < 0 {
+                instructions = ir_rewind_instructions(instructions, instruction_start)
+                constants = ir_rewind_constants(constants, constant_start)
+                call_sites = ir_rewind_call_sites(call_sites, call_site_start)
+                call_arguments = ir_rewind_ints(call_arguments, call_argument_start)
+                string_literals = ir_rewind_strings(string_literals, string_literal_start)
+                constant_string_index = ir_rewind_ints(constant_string_index, constant_string_start)
+                next_value = value_start
                 skipped = skipped + 1
                 skip_reasons = skip_reasons + ir_item_name(source, items, signature.item) +
                     ": simple if condition did not lower to an SSA value\n"
@@ -5751,7 +6084,7 @@ fn lower_typed_ir_once(
                         ) {
                         instructions = append(instructions, IrInstruction {
                             op: IR_DROP, result: -1, type_kind: local_types[local_index],
-                            left: local_values[local_index], right: -1, aux: -1, token: then_statement.token_start,
+                            left: local_values[local_index], right: -1, aux: ir_drop_aux(struct_layout, source, local_types[local_index]), token: then_statement.token_start,
                         })
                     }
                     local_index = local_index - 1
@@ -5790,7 +6123,7 @@ fn lower_typed_ir_once(
                         ) {
                         instructions = append(instructions, IrInstruction {
                             op: IR_DROP, result: -1, type_kind: local_types[local_index],
-                            left: local_values[local_index], right: -1, aux: -1, token: continuation_statement.token_start,
+                            left: local_values[local_index], right: -1, aux: ir_drop_aux(struct_layout, source, local_types[local_index]), token: continuation_statement.token_start,
                         })
                     }
                     local_index = local_index - 1
@@ -5839,7 +6172,7 @@ fn lower_typed_ir_once(
                         ) {
                         instructions = append(instructions, IrInstruction {
                             op: IR_DROP, result: -1, type_kind: local_types[local_index],
-                            left: local_values[local_index], right: -1, aux: -1,
+                            left: local_values[local_index], right: -1, aux: ir_drop_aux(struct_layout, source, local_types[local_index]),
                             token: then_statement.token_start,
                         })
                     }
@@ -5878,7 +6211,7 @@ fn lower_typed_ir_once(
                         ) {
                         instructions = append(instructions, IrInstruction {
                             op: IR_DROP, result: -1, type_kind: local_types[local_index],
-                            left: local_values[local_index], right: -1, aux: -1,
+                            left: local_values[local_index], right: -1, aux: ir_drop_aux(struct_layout, source, local_types[local_index]),
                             token: continuation_statement.token_start,
                         })
                     }
@@ -5921,6 +6254,16 @@ fn lower_typed_ir_once(
             }
             let condition = expression_values[branch_statement.expr_root]
             if condition < 0 {
+                // Same rewind as the simple-if skip above: the parameters
+                // already sit in the shared arenas, and leaving them without a
+                // block orphans them for the package verifier.
+                instructions = ir_rewind_instructions(instructions, instruction_start)
+                constants = ir_rewind_constants(constants, constant_start)
+                call_sites = ir_rewind_call_sites(call_sites, call_site_start)
+                call_arguments = ir_rewind_ints(call_arguments, call_argument_start)
+                string_literals = ir_rewind_strings(string_literals, string_literal_start)
+                constant_string_index = ir_rewind_ints(constant_string_index, constant_string_start)
+                next_value = value_start
                 skipped = skipped + 1
                 skip_reasons = skip_reasons + ir_item_name(source, items, signature.item) +
                     ": simple merge condition did not lower to an SSA value\n"
@@ -5962,7 +6305,7 @@ fn lower_typed_ir_once(
                     ) {
                     instructions = append(instructions, IrInstruction {
                         op: IR_DROP, result: -1, type_kind: arm_instruction.type_kind,
-                        left: arm_instruction.result, right: -1, aux: -1,
+                        left: arm_instruction.result, right: -1, aux: ir_drop_aux(struct_layout, source, arm_instruction.type_kind),
                         token: statements[first_child].token_start,
                     })
                 }
@@ -5985,7 +6328,7 @@ fn lower_typed_ir_once(
                     ) {
                     instructions = append(instructions, IrInstruction {
                         op: IR_DROP, result: -1, type_kind: local_types[local_index],
-                        left: local_values[local_index], right: -1, aux: -1,
+                        left: local_values[local_index], right: -1, aux: ir_drop_aux(struct_layout, source, local_types[local_index]),
                         token: statements[first_child].token_start,
                     })
                 }
@@ -6019,7 +6362,7 @@ fn lower_typed_ir_once(
                     ) {
                     instructions = append(instructions, IrInstruction {
                         op: IR_DROP, result: -1, type_kind: arm_instruction.type_kind,
-                        left: arm_instruction.result, right: -1, aux: -1,
+                        left: arm_instruction.result, right: -1, aux: ir_drop_aux(struct_layout, source, arm_instruction.type_kind),
                         token: statements[second_child].token_start,
                     })
                 }
@@ -6042,7 +6385,7 @@ fn lower_typed_ir_once(
                     ) {
                     instructions = append(instructions, IrInstruction {
                         op: IR_DROP, result: -1, type_kind: local_types[local_index],
-                        left: local_values[local_index], right: -1, aux: -1,
+                        left: local_values[local_index], right: -1, aux: ir_drop_aux(struct_layout, source, local_types[local_index]),
                         token: statements[second_child].token_start,
                     })
                 }
@@ -7314,7 +7657,7 @@ fn lower_typed_ir_once(
             if owned_live[ownership_index] == 1 {
                 instructions = append(instructions, IrInstruction {
                     op: IR_DROP, result: -1, type_kind: owned_types[ownership_index],
-                    left: ownership_index, right: -1, aux: -1, token: return_token,
+                    left: ownership_index, right: -1, aux: ir_drop_aux(struct_layout, source, owned_types[ownership_index]), token: return_token,
                 })
             }
             ownership_index = ownership_index - 1
@@ -7661,7 +8004,7 @@ fn verify_typed_ir(
     i = 0
     while i < len(instructions) {
         if instruction_owners[i] < 0 {
-            return IrVerification { ok: false, error: "IR instruction has no owning block", checked_values: 0 }
+            return IrVerification { ok: false, error: "IR instruction has no owning block: index " + format_int(i) + " op " + format_int(instructions[i].op) + " token " + format_int(instructions[i].token) + " of " + format_int(len(instructions)), checked_values: 0 }
         }
         let instruction = instructions[i]
         let owner_function = blocks[instruction_owners[i]].function

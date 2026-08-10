@@ -781,6 +781,56 @@ fn x86_emit_make_byte(bytes: []int, length: int, result_slot: int, element_size:
     return out
 }
 
+// Dynamic-length form of make([]T, n). The length is checked at runtime and
+// kept in r12 across mmap; r13 carries the byte size. Capacity equals length
+// in this first increment. A negative length exits with the same bounds
+// status used by generated index failures instead of wrapping into mmap.
+fn x86_emit_make_dynamic(bytes: []int, length_slot: int, result_slot: int, element_size: int) []int {
+    if length_slot < 1 or result_slot < 1 or element_size < 1 { return bytes }
+    if element_size != 1 and (element_size < 8 or element_size - (element_size / 8) * 8 != 0) { return bytes }
+    let mut out = x86_emit_load_rax(bytes, length_slot)
+    // test rax, rax; js invalid_length
+    out = append(out, 72); out = append(out, 133); out = append(out, 192)
+    out = append(out, 15); out = append(out, 136)
+    let invalid_jump = len(out)
+    out = x86_emit_u32(out, 0)
+    // r12 = element count; r13 = count * stride + header size.
+    out = append(out, 73); out = append(out, 137); out = append(out, 196)
+    out = append(out, 73); out = append(out, 137); out = append(out, 197)
+    out = x86_emit_scale_by_stride(out, element_size)
+    // The scaler operates on rax, so move the result into r13 after scaling.
+    out = append(out, 73); out = append(out, 137); out = append(out, 197)
+    out = append(out, 73); out = append(out, 129); out = append(out, 197)
+    out = x86_emit_u32(out, 24)
+    // mmap(0, size, PROT_READ|WRITE, PRIVATE|ANON, -1, 0)
+    out = x86_emit_int_rax(out, 9)
+    out = append(out, 49); out = append(out, 255)
+    out = append(out, 76); out = append(out, 137); out = append(out, 238)
+    out = x86_emit_syscall_const(out, 3, 3)
+    out = x86_emit_syscall_const(out, 34, 4)
+    out = x86_emit_syscall_const(out, -1, 5)
+    out = x86_emit_syscall_const(out, 0, 6)
+    out = append(out, 15); out = append(out, 5)
+    out = x86_emit_store_rax(out, result_slot)
+    out = x86_emit_load_rax(out, result_slot)
+    // header = { len, cap, data }
+    out = append(out, 76); out = append(out, 137); out = append(out, 32)
+    out = append(out, 76); out = append(out, 137); out = append(out, 96); out = append(out, 8)
+    out = append(out, 72); out = append(out, 141); out = append(out, 80); out = append(out, 24)
+    out = append(out, 72); out = append(out, 137); out = append(out, 80); out = append(out, 16)
+    // Skip the invalid-length exit.
+    out = append(out, 233)
+    let skip_invalid = len(out)
+    out = x86_emit_u32(out, 0)
+    let invalid_target = len(out)
+    out = x86_emit_int_rax(out, 60)
+    out = x86_emit_syscall_const(out, 70, 1)
+    out = append(out, 15); out = append(out, 5)
+    out = x86_patch_u32(out, invalid_jump, invalid_target - (invalid_jump + 4))
+    out = x86_patch_u32(out, skip_invalid, len(out) - (skip_invalid + 4))
+    return out
+}
+
 // Allocate a constructed struct: one block of `field_count` slots, filled from
 // the values already in their frame slots. The struct value is the block
 // pointer, so it is one slot and returns through the existing convention.
@@ -863,6 +913,19 @@ fn x86_emit_field_at(bytes: []int, pointer_slot: int, result_slot: int, field_sl
         out = x86_emit_u32(out, 8 * field_slot)
     }
     out = append(out, 72); out = append(out, 139); out = append(out, 0)
+    return x86_emit_store_rax(out, result_slot)
+}
+
+// Address of a flattened nested field: block + 8 * slot, with no load. The
+// result is a borrow the chained field read loads through; it must never be
+// freed, which the drop's owned-producer check enforces.
+fn x86_emit_field_addr(bytes: []int, pointer_slot: int, result_slot: int, field_slot: int) []int {
+    if field_slot < 0 { return bytes }
+    let mut out = x86_emit_load_rax(bytes, pointer_slot)
+    if field_slot > 0 {
+        out = append(out, 72); out = append(out, 5)
+        out = x86_emit_u32(out, 8 * field_slot)
+    }
     return x86_emit_store_rax(out, result_slot)
 }
 
@@ -1534,12 +1597,22 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
             let make_stride = x86_slice_element_size(instruction.type_kind)
             // Reject before emit: a silent no-op from x86_emit_make_byte would
             // leave the result slot uninitialized (fail-open miscompile).
-            if make_stride == 0 or instruction.aux < 0 or slot < 1 or slot > function.value_count or
-                instruction.aux > (9223372036854775807 - 24) / make_stride {
+            if make_stride == 0 or slot < 1 or slot > function.value_count {
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 slice make invalid"))
             }
             let make_before = len(bytes)
-            bytes = x86_emit_make_byte(bytes, instruction.aux, slot, make_stride)
+            if instruction.aux >= 0 {
+                if instruction.aux > (9223372036854775807 - 24) / make_stride {
+                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 slice make invalid"))
+                }
+                bytes = x86_emit_make_byte(bytes, instruction.aux, slot, make_stride)
+            } else {
+                let length_slot = instruction.left - function.value_start + 1
+                if length_slot < 1 or length_slot >= slot {
+                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 dynamic slice length invalid"))
+                }
+                bytes = x86_emit_make_dynamic(bytes, length_slot, slot, make_stride)
+            }
             if len(bytes) == make_before {
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 slice make invalid"))
             }
@@ -1566,14 +1639,20 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
                 if prev_slot < 1 or prev_slot >= slot or elem_slot < 1 or elem_slot >= slot {
                     return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 array literal operands not earlier values"))
                 }
-                // Scalar elements only: a struct element would need the
-                // pointer-copy path, and no array-of-struct literal has been
-                // lowered yet. Fail closed rather than store a wrong width.
-                if semantic_is_struct_array(instruction.type_kind) {
-                    return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 array-of-struct literal not implemented"))
-                }
                 let append_before = len(bytes)
-                bytes = x86_emit_append_byte_grow(bytes, prev_slot, elem_slot, slot, array_stride, false)
+                // Struct elements are pointers to fixed-width blocks; the
+                // append helper copies the whole stride. Owned-field structs
+                // remain rejected by the IR until deep clone/drop support is
+                // available, so this path is currently the POD subset.
+                let array_value_is_pointer = semantic_is_struct_array(instruction.type_kind)
+                if instruction.aux > 0 and semantic_is_struct_array(instruction.type_kind) {
+                    // The first owned-field element is cloned field-by-field;
+                    // raw struct copying would alias its string allocations.
+                    bytes = x86_emit_append_owned_struct(bytes, prev_slot, elem_slot,
+                        slot, array_stride, struct_kind_fields(instruction.type_kind), instruction.aux)
+                } else {
+                    bytes = x86_emit_append_byte_grow(bytes, prev_slot, elem_slot, slot, array_stride, array_value_is_pointer)
+                }
                 if len(bytes) == append_before {
                     return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 array literal append invalid"))
                 }
@@ -1594,19 +1673,25 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
             }
         } else if instruction.op == IR_FIELD {
             // aux packs the element width in slots with the field's slot, so
-            // no struct table is needed here.
-            let field_slot = instruction.aux - (instruction.aux / IR_FIELD_AUX_UNIT) * IR_FIELD_AUX_UNIT
-            let field_stride = 8 * (instruction.aux / IR_FIELD_AUX_UNIT)
+            // no struct table is needed here. IR_FIELD_ADDR_FLAG marks the
+            // nested-field form: the result is the *address* of the flattened
+            // inner span, not the word stored in the slot.
+            let address_form = instruction.aux >= IR_FIELD_ADDR_FLAG
+            let field_aux = if address_form { instruction.aux - IR_FIELD_ADDR_FLAG } else { instruction.aux }
+            let field_slot = field_aux - (field_aux / IR_FIELD_AUX_UNIT) * IR_FIELD_AUX_UNIT
+            let field_stride = 8 * (field_aux / IR_FIELD_AUX_UNIT)
             let slice_slot = instruction.left - function.value_start + 1
             let index_slot = instruction.right - function.value_start + 1
             let field_index_ok = if instruction.right < 0 { true } else { index_slot >= 1 and index_slot < slot }
             if instruction.aux < 0 or not x86_one_slot_type(instruction.type_kind) or
                 slice_slot < 1 or slice_slot >= slot or not field_index_ok or
-                slot < 1 or slot > function.value_count {
+                slot < 1 or slot > function.value_count or (address_form and instruction.right >= 0) {
                 return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 struct field read is invalid"))
             }
             let field_before = len(bytes)
-            if instruction.right < 0 {
+            if address_form {
+                bytes = x86_emit_field_addr(bytes, slice_slot, slot, field_slot)
+            } else if instruction.right < 0 {
                 bytes = x86_emit_field_at(bytes, slice_slot, slot, field_slot)
             } else {
                 bytes = x86_emit_index_field(bytes, slice_slot, index_slot, slot, field_stride, field_slot)
@@ -2063,12 +2148,18 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
             }
             bytes = x86_emit_clone_slice(bytes, clone_slot, slot, x86_slice_element_size(instruction.type_kind))
         } else if instruction.op == IR_DROP {
-            if x86_slice_element_size(instruction.type_kind) != 0 {
+            if x86_slice_element_size(instruction.type_kind) != 0 and
+             x86_slice_value_owned(instructions, instruction.left) {
                 let drop_slot = instruction.left - function.value_start + 1
                 if drop_slot < 1 or drop_slot > function.value_count {
                     return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 byte-slice drop invalid"))
                 }
- bytes = x86_emit_drop_byte_slice(bytes, drop_slot, x86_slice_element_size(instruction.type_kind))
+ if instruction.aux > 0 and semantic_is_struct_array(instruction.type_kind) {
+  bytes = x86_emit_drop_owned_struct_slice_once(bytes, drop_slot, x86_slice_element_size(instruction.type_kind),
+   struct_kind_fields(instruction.type_kind), instruction.aux)
+ } else {
+  bytes = x86_emit_drop_byte_slice(bytes, drop_slot, x86_slice_element_size(instruction.type_kind))
+ }
  } else if semantic_is_struct_value(instruction.type_kind) and
   x86_struct_value_owned(instructions, call_sites, instruction.left) {
  let struct_drop_slot = instruction.left - function.value_start + 1

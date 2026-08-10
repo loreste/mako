@@ -1,0 +1,16 @@
+// Assigning through a nested field path is refused, not mis-lowered.
+struct Inner {
+    data: []int
+    tag: string
+}
+
+struct Outer {
+    inner: Inner
+    n: int
+}
+
+fn main() {
+    let o = Outer { inner: Inner { data: make([]int, 2, 4), tag: "x" }, n: 1 }
+    o.inner.n = 9
+    exit(o.n)
+}

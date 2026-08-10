@@ -1,0 +1,23 @@
+struct X86Code {
+    bytes: []int
+    status: int
+    error: string
+}
+
+struct X86Body {
+    code: X86Code
+    edge_callees: []int
+}
+
+fn x86_error(status: int, message: string) -> X86Code {
+    return X86Code { bytes: make([]int, 0, 0), status: status, error: message }
+}
+
+fn x86_plain_body(code: X86Code) -> X86Body {
+    return X86Body { code: code, edge_callees: make([]int, 0, 0) }
+}
+
+fn main() {
+    let b = x86_plain_body(x86_error(3, "boom"))
+    exit(b.code.status + 4)
+}

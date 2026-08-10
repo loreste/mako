@@ -1,0 +1,8 @@
+struct HostBuf { values: []int port:int }
+
+fn main() {
+    let payload = make([]int, 1, 1)
+    let item = HostBuf { values: payload, port: 9 }
+    let values = [item]
+    exit(values[0].port + len(values))
+}

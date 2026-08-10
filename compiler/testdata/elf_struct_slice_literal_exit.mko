@@ -1,0 +1,11 @@
+// POD struct-slice literal construction. The element block is copied by
+// stride; owned-field elements remain rejected until deep clone/drop lowering.
+struct Point {
+    x: int
+    y: int
+}
+
+fn main() {
+    let values = [Point { x: 4, y: 5 }]
+    exit(values[0].x + len(values))
+}

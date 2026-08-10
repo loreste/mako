@@ -1,0 +1,19 @@
+// Rebinding a binding after it served as a nested-field source trips the
+// ownership verifier (consumed-value tracking across the rebind). Fail closed
+// until the ownership transfer is modelled.
+struct Inner {
+    data: []int
+    tag: string
+}
+
+struct Outer {
+    inner: Inner
+    n: int
+}
+
+fn main() {
+    let mut i = Inner { data: make([]int, 1, 1), tag: "one" }
+    let o = Outer { inner: i, n: 3 }
+    i = Inner { data: make([]int, 2, 2), tag: "two" }
+    exit(len(o.inner.data) + len(i.data) + o.n)
+}

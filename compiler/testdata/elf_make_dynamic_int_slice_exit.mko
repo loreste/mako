@@ -1,0 +1,9 @@
+// Dynamic one-argument make length. The length expression is lowered before
+// IR_MAKE and the direct emitter must preserve the same zero-initialized slice
+// semantics as a literal length.
+fn main() {
+    let source = [4, 5, 6]
+    let n = len(source)
+    let values = make([]int, n)
+    exit(len(values) + values[0])
+}

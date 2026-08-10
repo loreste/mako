@@ -6,7 +6,11 @@ tracked in [SELF_HOSTING_ROADMAP.md](SELF_HOSTING_ROADMAP.md) and an
 implementation plan in
 [FULL_SELF_HOSTING_EXECUTION_PLAN.md](FULL_SELF_HOSTING_EXECUTION_PLAN.md).
 The live evidence log is
-[SELF_HOSTING_PROGRESS.md](SELF_HOSTING_PROGRESS.md). This document's bring-up
+[SELF_HOSTING_PROGRESS.md](SELF_HOSTING_PROGRESS.md), the measured frontier is
+[SELFHOST_CRITICAL_PATH.md](SELFHOST_CRITICAL_PATH.md), and the migration
+contract with historical `main` is
+[MAKO_SELFHOSTED_MAIN_PARITY_PLAN.md](MAKO_SELFHOSTED_MAIN_PARITY_PLAN.md).
+This document's bring-up
 notes are status evidence only; they do not constitute the full self-hosting
 claim.
 

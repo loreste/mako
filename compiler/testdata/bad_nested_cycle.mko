@@ -1,0 +1,13 @@
+// Mutually recursive structs can never flatten; both stay inconstructible.
+struct CycleA {
+    b: CycleB
+}
+
+struct CycleB {
+    a: CycleA
+}
+
+fn main() {
+    let a = CycleA { b: CycleB { a: a } }
+    exit(0)
+}

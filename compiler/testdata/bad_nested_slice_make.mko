@@ -1,0 +1,16 @@
+// A []Struct field initialised directly from a make call trips the ownership
+// verifier. Fail closed until call-result slice initialisers are modelled.
+struct Elem {
+    v: int
+    w: int
+}
+
+struct Bag {
+    elems: []Elem
+    n: int
+}
+
+fn main() {
+    let b = Bag { elems: make([]Elem, 2, Elem { v: 5, w: 6 }), n: 1 }
+    exit(len(b.elems) + b.elems[1].w + b.n)
+}

@@ -1,0 +1,15 @@
+// A field whose struct is declared later never resolves; the literal fails
+// closed instead of guessing a layout.
+struct Early {
+    later: Later
+    n: int
+}
+
+struct Later {
+    q: int
+}
+
+fn main() {
+    let e = Early { later: Later { q: 1 }, n: 2 }
+    exit(e.n)
+}

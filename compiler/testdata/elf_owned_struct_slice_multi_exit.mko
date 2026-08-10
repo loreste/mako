@@ -1,0 +1,9 @@
+struct HostPort { host:string port:int }
+
+fn main() {
+    let values = [
+        HostPort { host: "one", port: 4 },
+        HostPort { host: "two", port: 5 }
+    ]
+    exit(values[1].port + len(values))
+}

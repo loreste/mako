@@ -1,0 +1,8 @@
+struct HostBytes { data: []byte port:int }
+
+fn main() {
+    let payload = make([]byte, 1, 1)
+    let item = HostBytes { data: payload, port: 11 }
+    let values = [item]
+    exit(values[0].port + len(values))
+}

@@ -3,6 +3,7 @@ fn x86_emit_argc(bytes: []int, result_slot: int) []int {
  let mut out = bytes
  // mov rax, [rbp + 16] (argc remains above the body frame)
  out = append(out, 72); out = append(out, 139); out = append(out, 69); out = append(out, 16)
+ out = x86_emit_load_rax(out, result_slot)
  return x86_emit_store_rax(out, result_slot)
 }
 
@@ -261,10 +262,47 @@ fn x86_struct_value_owned(instructions: []IrInstruction, call_sites: []IrCallSit
  return false
 }
 
+// True when this slice value is one the program owns, as opposed to a borrow
+// read out of a struct field. A field read yields the pointer stored in the
+// block — the struct still owns that allocation and its own drop frees it, so
+// dropping the borrow must emit nothing. Without this check the drop of
+// `len(c.bytes)`'s field read unmapped `c.bytes` out from under `c`, and every
+// nested construction that reads an owned slot out of its source double-freed
+// it.
+fn x86_slice_value_owned(instructions: []IrInstruction, value: int) bool {
+ let mut guard = 0
+ let mut current = value
+ while guard < len(instructions) {
+  let mut found = false
+  let mut i = 0
+  while i < len(instructions) {
+   if instructions[i].result == current {
+    found = true
+    if instructions[i].op == IR_FIELD { return false }
+    if instructions[i].op == IR_MOVE {
+     current = instructions[i].left
+     i = len(instructions)
+    } else {
+     return true
+    }
+   } else {
+    i = i + 1
+   }
+  }
+  if not found { return false }
+  guard = guard + 1
+ }
+ return false
+}
+
 // Free every owned field of a constructed struct, then the block itself is
-// released by the caller. `owned_pack` carries 2 bits per field (see
+// released by the caller. `owned_pack` carries 2 bits per slot (see
 // `struct_owned_slot_mask`): 1 = string, 2 = []int, 3 = []byte. Fields are
 // released before the block so their pointers are still readable.
+//
+// A `[]Struct` field uses code 2 with a stride override above the slot codes:
+// up to three 10-bit entries from bit 30, each holding the slot index (low 4)
+// and the stride in slots (high 6). Without one, code 2 scales by one slot.
 fn x86_emit_drop_struct_fields(bytes: []int, slot: int, field_count: int, owned_pack: int) []int {
  let mut out = bytes
  if owned_pack <= 0 { return out }
@@ -294,11 +332,23 @@ fn x86_emit_drop_struct_fields(bytes: []int, slot: int, field_count: int, owned_
     out = append(out, 73); out = append(out, 137); out = append(out, 192)
     out = append(out, 73); out = append(out, 139); out = append(out, 112); out = append(out, 8)
     out = append(out, 72); out = append(out, 137); out = append(out, 240)
+    let mut stride_bytes = 1
     if code == 2 {
-     // []int: stride 8
-     out = append(out, 72); out = append(out, 193); out = append(out, 224); out = append(out, 3)
+     // []int: stride 8, unless a struct-slice override entry names this slot.
+     stride_bytes = 8
+     let mut override_scan = 0
+     let mut override_unit = 1073741824
+     while override_scan < 3 {
+      let entry = (owned_pack / override_unit) - ((owned_pack / override_unit) / 1024) * 1024
+      if entry >= 16 and entry - (entry / 16) * 16 == i {
+       stride_bytes = (entry / 16) * 8
+      }
+      override_unit = override_unit * 1024
+      override_scan = override_scan + 1
+     }
     }
     // []byte: stride 1, no scale
+    out = x86_emit_scale_by_stride(out, stride_bytes)
     out = append(out, 72); out = append(out, 131); out = append(out, 192); out = append(out, 24)
     out = append(out, 72); out = append(out, 137); out = append(out, 198)
     out = append(out, 76); out = append(out, 137); out = append(out, 199)
@@ -360,6 +410,177 @@ fn x86_emit_clone_string(bytes: []int, source_slot: int, result_slot: int) []int
  out = append(out, 243); out = append(out, 164)
  out = x86_emit_string_terminators(out)
  return x86_emit_store_rax(out, result_slot)
+}
+
+// Clone one string field from a struct into the destination element in r15.
+// The source struct is a frame slot; r15 is deliberately outside the syscall
+// clobber set and therefore remains the destination across mmap.
+fn x86_emit_clone_struct_string_field(bytes: []int, source_slot: int, source_offset: int, dest_offset: int) []int {
+ if source_offset < 0 or dest_offset < 0 { return bytes }
+ let mut out = x86_emit_load_rax(bytes, source_slot)
+ out = append(out, 73); out = append(out, 137); out = append(out, 196) // r12 = struct
+ out = append(out, 77); out = append(out, 139); out = append(out, 108); out = append(out, 36)
+ out = append(out, source_offset)
+ out = append(out, 77); out = append(out, 139); out = append(out, 52); out = append(out, 36) // r14 = len
+ out = x86_emit_int_rax(out, 9)
+ out = x86_emit_syscall_const(out, 0, 1)
+ out = append(out, 76); out = append(out, 137); out = append(out, 246)
+ out = append(out, 72); out = append(out, 137); out = append(out, 198); out = append(out, 10)
+ out = x86_emit_syscall_const(out, 3, 3)
+ out = x86_emit_syscall_const(out, 34, 4)
+ out = x86_emit_syscall_const(out, -1, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 76); out = append(out, 137); out = append(out, 48) // [rax] = len
+ out = append(out, 72); out = append(out, 141); out = append(out, 120); out = append(out, 8)
+ out = append(out, 73); out = append(out, 141); out = append(out, 116); out = append(out, 36); out = append(out, 8)
+ out = append(out, 76); out = append(out, 137); out = append(out, 241)
+ out = append(out, 243); out = append(out, 164)
+ out = x86_emit_string_terminators(out)
+ out = append(out, 73); out = append(out, 137); out = append(out, 71); out = append(out, dest_offset)
+ return out
+}
+
+// Clone an owned flat slice field from a struct into the destination element
+// in r15. The slice header and payload are copied independently; scalar
+// elements need no per-item ownership work.
+fn x86_emit_clone_struct_slice_field(bytes: []int, source_slot: int, source_offset: int, dest_offset: int, element_size: int) []int {
+ if source_offset < 0 or dest_offset < 0 { return bytes }
+ if element_size != 1 and element_size != 8 { return bytes }
+ let mut out = x86_emit_load_rax(bytes, source_slot)
+ out = append(out, 73); out = append(out, 137); out = append(out, 196) // r12 = struct
+ out = append(out, 77); out = append(out, 139); out = append(out, 108); out = append(out, 36); out = append(out, source_offset) // r13 = header
+ out = append(out, 77); out = append(out, 139); out = append(out, 52); out = append(out, 36) // r14 = len
+ out = append(out, 73); out = append(out, 139); out = append(out, 93); out = append(out, 8) // rbx = cap
+ out = append(out, 72); out = append(out, 137); out = append(out, 216)
+ out = x86_emit_scale_by_stride(out, element_size)
+ out = append(out, 72); out = append(out, 131); out = append(out, 192); out = append(out, 24)
+ out = x86_emit_int_rax(out, 9)
+ out = x86_emit_syscall_const(out, 0, 3)
+ out = x86_emit_syscall_const(out, 34, 4)
+ out = x86_emit_syscall_const(out, -1, 5)
+ out = x86_emit_syscall_const(out, 0, 6)
+ out = append(out, 15); out = append(out, 5)
+ out = append(out, 76); out = append(out, 137); out = append(out, 48) // len
+ out = append(out, 72); out = append(out, 137); out = append(out, 88); out = append(out, 8) // cap
+ out = append(out, 72); out = append(out, 141); out = append(out, 80); out = append(out, 24)
+ out = append(out, 72); out = append(out, 137); out = append(out, 80); out = append(out, 16)
+ out = append(out, 72); out = append(out, 141); out = append(out, 120); out = append(out, 24)
+ out = append(out, 77); out = append(out, 139); out = append(out, 125); out = append(out, 16)
+ out = append(out, 76); out = append(out, 137); out = append(out, 233)
+ out = x86_emit_scale_by_stride(out, element_size)
+ out = append(out, 243); out = append(out, 164)
+ out = append(out, 73); out = append(out, 137); out = append(out, 71); out = append(out, dest_offset)
+ return out
+}
+
+// Append an owned-field struct element. The ordinary append path preserves all
+// existing elements; this helper then replaces only the new element's owned
+// string fields with independent clones.
+fn x86_emit_append_owned_struct(bytes: []int, previous_slot: int, source_slot: int,
+ result_slot: int, stride: int, field_count: int, owned_pack: int) []int {
+ if stride < 8 or field_count < 1 or owned_pack <= 0 { return bytes }
+ let mut out = x86_emit_append_byte_grow(bytes, previous_slot, source_slot, result_slot, stride, true)
+ // r12 = header, r13 = data, r14 = address of the newly appended element,
+ // r15 = destination base kept across each string clone.
+ out = x86_emit_load_rax(out, result_slot)
+ out = append(out, 76); out = append(out, 137); out = append(out, 196)
+ out = append(out, 77); out = append(out, 139); out = append(out, 108); out = append(out, 36); out = append(out, 16)
+ out = append(out, 73); out = append(out, 139); out = append(out, 4); out = append(out, 36)
+ out = append(out, 72); out = append(out, 255); out = append(out, 200)
+ out = x86_emit_scale_by_stride(out, stride)
+ out = append(out, 76); out = append(out, 1); out = append(out, 240)
+ out = append(out, 76); out = append(out, 137); out = append(out, 247)
+ let mut i = 0
+ let mut unit = 1
+ while i < field_count {
+  let code = (owned_pack / unit) - ((owned_pack / unit) / 4) * 4
+  if code == 1 {
+   out = x86_emit_clone_struct_string_field(out, source_slot, i * 8, i * 8)
+  } else if code == 2 {
+   out = x86_emit_clone_struct_slice_field(out, source_slot, i * 8, i * 8, 8)
+  } else if code == 3 {
+   out = x86_emit_clone_struct_slice_field(out, source_slot, i * 8, i * 8, 1)
+  }
+  unit = unit * 4
+  i = i + 1
+ }
+ out = x86_emit_load_rax(out, result_slot)
+ return x86_emit_store_rax(out, result_slot)
+}
+
+// Drop string fields of every live element, then the slice allocation itself.
+// This is intentionally paired with the bounded owned-field lowering above.
+fn x86_emit_drop_owned_struct_slice_once(bytes: []int, slice_slot: int, stride: int,
+ field_count: int, owned_pack: int) []int {
+ if stride < 8 or field_count < 1 or owned_pack <= 0 { return bytes }
+ let mut out = x86_emit_load_rax(bytes, slice_slot)
+ out = append(out, 73); out = append(out, 137); out = append(out, 196) // r12 = header
+ out = append(out, 77); out = append(out, 139); out = append(out, 44); out = append(out, 36) // r13 = len
+ out = append(out, 72); out = append(out, 133); out = append(out, 237)
+ out = append(out, 15); out = append(out, 132)
+ let empty_skip = len(out); out = x86_emit_u32(out, 0)
+ out = append(out, 77); out = append(out, 139); out = append(out, 116); out = append(out, 36); out = append(out, 16) // r14 = data
+ out = append(out, 77); out = append(out, 49); out = append(out, 255) // r15 = index 0
+ let loop_start = len(out)
+ out = append(out, 76); out = append(out, 137); out = append(out, 248)
+ out = x86_emit_scale_by_stride(out, stride)
+ out = append(out, 76); out = append(out, 1); out = append(out, 240)
+ out = append(out, 73); out = append(out, 137); out = append(out, 192) // r8 = element
+ let mut i = 0
+ let mut unit = 1
+ while i < field_count {
+  let code = (owned_pack / unit) - ((owned_pack / unit) / 4) * 4
+  if code == 1 {
+   out = append(out, 73); out = append(out, 139); out = append(out, 64); out = append(out, i * 8)
+   out = append(out, 72); out = append(out, 133); out = append(out, 192)
+   out = append(out, 15); out = append(out, 132)
+   let null_skip = len(out); out = x86_emit_u32(out, 0)
+   out = append(out, 72); out = append(out, 139); out = append(out, 48)
+   out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 10)
+   out = x86_emit_int_rax(out, 11)
+   out = x86_emit_syscall_const(out, 0, 3)
+   out = x86_emit_syscall_const(out, 0, 4)
+   out = x86_emit_syscall_const(out, 0, 5)
+   out = x86_emit_syscall_const(out, 0, 6)
+   out = append(out, 15); out = append(out, 5)
+   out = x86_patch_u32(out, null_skip, len(out) - (null_skip + 4))
+  } else if code == 2 {
+   out = append(out, 73); out = append(out, 139); out = append(out, 64); out = append(out, i * 8)
+   out = append(out, 72); out = append(out, 133); out = append(out, 192)
+   out = append(out, 15); out = append(out, 132)
+   let null_slice_skip = len(out); out = x86_emit_u32(out, 0)
+   out = append(out, 72); out = append(out, 137); out = append(out, 199)
+   out = append(out, 72); out = append(out, 139); out = append(out, 112); out = append(out, 8)
+   out = append(out, 72); out = append(out, 193); out = append(out, 230); out = append(out, 3)
+   out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 24)
+   out = append(out, 184); out = x86_emit_u32(out, 11)
+   out = append(out, 49); out = append(out, 210)
+   out = append(out, 15); out = append(out, 5)
+   out = x86_patch_u32(out, null_slice_skip, len(out) - (null_slice_skip + 4))
+  } else if code == 3 {
+   out = append(out, 73); out = append(out, 139); out = append(out, 64); out = append(out, i * 8)
+   out = append(out, 72); out = append(out, 133); out = append(out, 192)
+   out = append(out, 15); out = append(out, 132)
+   let null_byte_skip = len(out); out = x86_emit_u32(out, 0)
+   out = append(out, 72); out = append(out, 137); out = append(out, 199)
+   out = append(out, 72); out = append(out, 139); out = append(out, 112); out = append(out, 8)
+   out = append(out, 72); out = append(out, 131); out = append(out, 198); out = append(out, 24)
+   out = append(out, 184); out = x86_emit_u32(out, 11)
+   out = append(out, 49); out = append(out, 210)
+   out = append(out, 15); out = append(out, 5)
+   out = x86_patch_u32(out, null_byte_skip, len(out) - (null_byte_skip + 4))
+  }
+ unit = unit * 4
+ i = i + 1
+ }
+ out = append(out, 76); out = append(out, 255); out = append(out, 199)
+ out = append(out, 77); out = append(out, 57); out = append(out, 253)
+ out = append(out, 15); out = append(out, 130)
+ let loop_back = len(out); out = x86_emit_u32(out, 0)
+ out = x86_patch_u32(out, loop_back, loop_start - (loop_back + 4))
+ out = x86_patch_u32(out, empty_skip, len(out) - (empty_skip + 4))
+ return x86_emit_drop_byte_slice(out, slice_slot, stride)
 }
 
 // Concatenate two string objects into a fresh owned {length, bytes}.

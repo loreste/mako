@@ -1,0 +1,27 @@
+// A struct mixing a nested-struct field and a []Struct field in one literal
+// trips the ownership verifier (consumed-value tracking across two owned
+// field classes). Fail closed until the transfer is modelled.
+struct Elem {
+    v: int
+    w: int
+}
+
+struct Inner {
+    data: []int
+    tag: string
+}
+
+struct Sink {
+    inner: Inner
+    elems: []Elem
+    name: string
+    count: int
+}
+
+fn main() {
+    let mut es: []Elem = []
+    es = append(es, Elem { v: 1, w: 2 })
+    es = append(es, Elem { v: 3, w: 4 })
+    let s = Sink { inner: Inner { data: make([]int, 2, 9), tag: "zz" }, elems: es, name: "sink", count: 2 }
+    exit(len(s.elems) + s.elems[1].w + len(s.inner.data) + len(s.name) + s.count)
+}

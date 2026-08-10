@@ -69,7 +69,7 @@ done
 # docs/SELF_HOSTING_PROGRESS.md, not re-run here (full-file stage-1 is minutes).
 
 literal_result="$("$stage1" "$repo_dir/compiler/testdata/literals.mko")"
-if [[ "$literal_result" != $'tokens 172 items 3 types 0 signatures 1 parameters 0 statements 13 bodies 1 expressions 79 symbols 3 resolved 3 locals 10 local_refs 10 typed 53 ir_functions 0 ir_blocks 0 ir_instructions 0 ir_constants 0 ir_values 0 ir_skipped 1 ir_verified 0' ]]; then
+if [[ "$literal_result" != $'tokens 172 items 3 types 0 signatures 1 parameters 0 statements 13 bodies 1 expressions 79 symbols 3 resolved 3 locals 10 local_refs 10 typed 54 ir_functions 0 ir_blocks 0 ir_instructions 0 ir_constants 0 ir_values 0 ir_skipped 1 ir_verified 0' ]]; then
   echo "selfhost frontend gate: literal arena shape changed: $literal_result" >&2
   exit 1
 fi
@@ -173,6 +173,17 @@ elf_make_byte_path="$work_dir/elf-make-byte"
 "$stage1" "$repo_dir/compiler/testdata/elf_make_byte_len.mko" "$elf_make_byte_path" >/dev/null
 if [[ "$(sha256_of "$elf_make_byte_path")" != "bf904a0863e889851ad20de7509f9f71b0fef1db314f84149a0da66dea7c691d" ]]; then
  echo "selfhost backend gate: ELF byte-make image bytes changed" >&2
+ exit 1
+fi
+elf_make_dynamic_result="$($stage1 "$repo_dir/compiler/testdata/elf_make_dynamic_int_slice_exit.mko")"
+if [[ "$elf_make_dynamic_result" != $'elf_bytes 1201\ntokens 47 items 1 types 0 signatures 1 parameters 0 statements 4 bodies 1 expressions 23 symbols 1 resolved 0 locals 3 local_refs 4 typed 19 ir_functions 1 ir_blocks 1 ir_instructions 17 ir_constants 4 ir_values 13 ir_skipped 0 ir_verified 13' ]]; then
+ echo "selfhost backend gate: ELF dynamic-make image changed: $elf_make_dynamic_result" >&2
+ exit 1
+fi
+elf_make_dynamic_path="$work_dir/elf-make-dynamic-int"
+"$stage1" "$repo_dir/compiler/testdata/elf_make_dynamic_int_slice_exit.mko" "$elf_make_dynamic_path" >/dev/null
+if [[ "$(sha256_of "$elf_make_dynamic_path")" != "a21cd4313628719537a9ad64f8149cf745aa2a52fa534bc77201266ad0dcc5ab" ]]; then
+ echo "selfhost backend gate: ELF dynamic-make image bytes changed" >&2
  exit 1
 fi
 elf_make_index_result="$($stage1 "$repo_dir/compiler/testdata/elf_make_byte_index.mko")"
@@ -280,13 +291,13 @@ if "$stage1" "$repo_dir/compiler/testdata/bad_unsafe_argv_len_arity.mko" "$work_
   exit 1
 fi
 elf_open_string_result="$("$stage1" "$repo_dir/compiler/testdata/elf_unsafe_open_string.mko")"
-if [[ "$elf_open_string_result" != *"elf_bytes 225"* || "$elf_open_string_result" != *"ir_verified 3"* ]]; then
+if [[ "$elf_open_string_result" != *"elf_bytes 237"* || "$elf_open_string_result" != *"ir_verified 3"* ]]; then
   echo "selfhost backend gate: ELF open-string image changed: $elf_open_string_result" >&2
   exit 1
 fi
 elf_open_string_path="$work_dir/elf-unsafe-open-string"
 "$stage1" "$repo_dir/compiler/testdata/elf_unsafe_open_string.mko" "$elf_open_string_path" >/dev/null
-if [[ "$(sha256_of "$elf_open_string_path")" != "160669d045e79909cfccbda5631277ac1c5414c4de55d95ab517e3ae68708c82" ]]; then
+if [[ "$(sha256_of "$elf_open_string_path")" != "40960ab19106eff741481acde4ec6a1c292dcc19d831c2a0d658420e4c7ad1a6" ]]; then
   echo "selfhost backend gate: ELF open-string image bytes changed" >&2
   exit 1
 fi
@@ -325,13 +336,13 @@ if "$stage1" "$repo_dir/compiler/testdata/bad_unsafe_write_all_arity.mko" "$work
   exit 1
 fi
 elf_write_file_result="$("$stage1" "$repo_dir/compiler/testdata/elf_unsafe_write_file.mko")"
-if [[ "$elf_write_file_result" != *"elf_bytes 364"* || "$elf_write_file_result" != *"ir_verified 4"* ]]; then
+if [[ "$elf_write_file_result" != *"elf_bytes 372"* || "$elf_write_file_result" != *"ir_verified 4"* ]]; then
   echo "selfhost backend gate: ELF write-file image changed: $elf_write_file_result" >&2
   exit 1
 fi
 elf_write_file_path="$work_dir/elf-unsafe-write-file"
 "$stage1" "$repo_dir/compiler/testdata/elf_unsafe_write_file.mko" "$elf_write_file_path" >/dev/null
-if [[ "$(sha256_of "$elf_write_file_path")" != "ef4dc994de9d0f5f704b2c2146663491edec017f955edb5b6518c3aa512f746c" ]]; then
+if [[ "$(sha256_of "$elf_write_file_path")" != "932d0ad97e4246eed32dc1f41034ab3916ef8239fffa2b12058caf410fd589e7" ]]; then
   echo "selfhost backend gate: ELF write-file image bytes changed" >&2
   exit 1
 fi
@@ -340,13 +351,13 @@ if "$stage1" "$repo_dir/compiler/testdata/bad_unsafe_write_file_arity.mko" "$wor
   exit 1
 fi
 elf_read_file_result="$("$stage1" "$repo_dir/compiler/testdata/elf_unsafe_read_file.mko")"
-if [[ "$elf_read_file_result" != *"elf_bytes 638"* || "$elf_read_file_result" != *"ir_verified 3"* ]]; then
+if [[ "$elf_read_file_result" != *"elf_bytes 642"* || "$elf_read_file_result" != *"ir_verified 3"* ]]; then
   echo "selfhost backend gate: ELF read-file image changed: $elf_read_file_result" >&2
   exit 1
 fi
 elf_read_file_path="$work_dir/elf-unsafe-read-file"
 "$stage1" "$repo_dir/compiler/testdata/elf_unsafe_read_file.mko" "$elf_read_file_path" >/dev/null
-if [[ "$(sha256_of "$elf_read_file_path")" != "682d6d26ce1de0e6b33f3a8a06a24c117fce9ad87477deb33f3425a242188dd1" ]]; then
+if [[ "$(sha256_of "$elf_read_file_path")" != "0d5ab902eae73fc15d618e9020ac49988d711cb411890b62815ba72e0a844ed2" ]]; then
   echo "selfhost backend gate: ELF read-file image bytes changed" >&2
   exit 1
 fi
@@ -415,13 +426,13 @@ if "$stage1" "$repo_dir/compiler/testdata/bad_unsafe_argv_copy_arity.mko" "$work
   exit 1
 fi
 elf_argc_result="$("$stage1" "$repo_dir/compiler/testdata/elf_argc.mko")"
-if [[ "$elf_argc_result" != *"elf_bytes 160"* || "$elf_argc_result" != *"ir_verified 2"* ]]; then
+if [[ "$elf_argc_result" != *"elf_bytes 164"* || "$elf_argc_result" != *"ir_verified 2"* ]]; then
   echo "selfhost backend gate: ELF argc image changed: $elf_argc_result" >&2
   exit 1
 fi
 elf_argc_path="$work_dir/elf-argc"
 "$stage1" "$repo_dir/compiler/testdata/elf_argc.mko" "$elf_argc_path" >/dev/null
-if [[ "$(sha256_of "$elf_argc_path")" != "eca6519fc544fe6e1d89e2eff2eb9cb13452d3a70082a0469131b1e27b896d1f" ]]; then
+if [[ "$(sha256_of "$elf_argc_path")" != "9aaa5be449998714ce25ffa14c2c06bdf86ba5a50e5123025200013f25ae4823" ]]; then
   echo "selfhost backend gate: ELF argc image bytes changed" >&2
   exit 1
 fi
@@ -657,13 +668,13 @@ elf_bool_guard_false_path="$work_dir/elf-bool-guard-false"
 # resolves through the shared intrinsic-sentinel table rather than being
 # rejected as a call to an undeclared function.
 elf_argc_guard_result="$("$stage1" "$repo_dir/compiler/testdata/elf_argc_guard_exit.mko")"
-if [[ "$elf_argc_guard_result" != $'elf_bytes 561\ntokens 56 items 2 types 1 signatures 2 parameters 0 statements 9 bodies 2 expressions 26 symbols 2 resolved 1 locals 0 local_refs 0 typed 18 ir_functions 2 ir_blocks 6 ir_instructions 27 ir_constants 8 ir_values 12 ir_skipped 0 ir_verified 12' ]]; then
+if [[ "$elf_argc_guard_result" != $'elf_bytes 565\ntokens 56 items 2 types 1 signatures 2 parameters 0 statements 9 bodies 2 expressions 26 symbols 2 resolved 1 locals 0 local_refs 0 typed 18 ir_functions 2 ir_blocks 6 ir_instructions 27 ir_constants 8 ir_values 12 ir_skipped 0 ir_verified 12' ]]; then
   echo "selfhost backend gate: ELF argc-guard image changed: $elf_argc_guard_result" >&2
   exit 1
 fi
 elf_argc_guard_path="$work_dir/elf-argc-guard"
 "$stage1" "$repo_dir/compiler/testdata/elf_argc_guard_exit.mko" "$elf_argc_guard_path" >/dev/null
-if [[ "$(sha256_of "$elf_argc_guard_path")" != "f5063a4da26c24a68a193dd00d835b52d1e8d9cb31f6c826143c5f76552cac3b" ]]; then
+if [[ "$(sha256_of "$elf_argc_guard_path")" != "1831a50c4bca174e1313710993f715376b0cd63c652cb4bcf331dbe36a6ea188" ]]; then
   echo "selfhost backend gate: ELF argc-guard image bytes changed" >&2
   exit 1
 fi
@@ -692,13 +703,13 @@ fi
 # a local, printed, and dropped when the path exits. The ownership verifier's
 # consumed-exactly-once rule is what proves the drop is there on every path.
 elf_arg_get_guard_result="$("$stage1" "$repo_dir/compiler/testdata/elf_arg_get_guard_exit.mko")"
-if [[ "$elf_arg_get_guard_result" != $'elf_bytes 529\ntokens 38 items 1 types 0 signatures 1 parameters 0 statements 6 bodies 1 expressions 19 symbols 1 resolved 0 locals 1 local_refs 1 typed 13 ir_functions 1 ir_blocks 3 ir_instructions 17 ir_constants 5 ir_values 8 ir_skipped 0 ir_verified 8' ]]; then
+if [[ "$elf_arg_get_guard_result" != $'elf_bytes 533\ntokens 38 items 1 types 0 signatures 1 parameters 0 statements 6 bodies 1 expressions 19 symbols 1 resolved 0 locals 1 local_refs 1 typed 13 ir_functions 1 ir_blocks 3 ir_instructions 17 ir_constants 5 ir_values 8 ir_skipped 0 ir_verified 8' ]]; then
   echo "selfhost backend gate: ELF arg_get-guard image changed: $elf_arg_get_guard_result" >&2
   exit 1
 fi
 elf_arg_get_guard_path="$work_dir/elf-arg-get-guard"
 "$stage1" "$repo_dir/compiler/testdata/elf_arg_get_guard_exit.mko" "$elf_arg_get_guard_path" >/dev/null
-if [[ "$(sha256_of "$elf_arg_get_guard_path")" != "1701171ea3c17a3292c0ad0fbb2c80cf42729aa78b14cf0d8812515d06a3a0e9" ]]; then
+if [[ "$(sha256_of "$elf_arg_get_guard_path")" != "cecd1d4f1ea94a5508b96de9413ec6240a94bf681bcad811b148c62a1f9b2a03" ]]; then
   echo "selfhost backend gate: ELF arg_get-guard image bytes changed" >&2
   exit 1
 fi
@@ -765,7 +776,7 @@ for package_member in z_expression z_statement z_type zz_expression_attach zz_sy
   selfhost_package="$selfhost_package,$repo_dir/compiler/$package_member.mko"
 done
 package_result="$("$stage1" "$selfhost_package")"
-if [[ "$package_result" != *"signatures 325"* ]]; then
+if [[ "$package_result" != *"signatures 344"* ]]; then
   echo "selfhost frontend gate: package signature count changed: $package_result" >&2
   exit 1
 fi
@@ -773,8 +784,8 @@ fi
 # gate re-pinned on every gain gets re-pinned without being read. It must never
 # silently fall.
 package_lowered="$(printf '%s' "$package_result" | sed -n 's/.*ir_functions \([0-9]*\).*/\1/p')"
-if [[ "${package_lowered:-0}" -lt 161 ]]; then
-  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 161" >&2
+if [[ "${package_lowered:-0}" -lt 175 ]]; then
+  echo "selfhost frontend gate: package lowered $package_lowered functions, expected at least 175" >&2
   exit 1
 fi
 for bad_package in "$repo_dir/compiler/lexer.mko,$repo_dir/compiler/nope.mko" \
@@ -791,17 +802,32 @@ done
 # and every one is checked three ways: the arena shape and image bytes are
 # pinned, the stage-0 oracle proves the exit status, and on Linux the generated
 # image is executed and must agree with it.
+#
+# Re-pinned in the nested-constructible-fields increment (byte-level reasons in
+# docs/SELFHOST_CRITICAL_PATH.md):
+#   - elf-string-clone (1087 -> 814) and elf-str-byte-at (688 -> 436): commit
+#     76f04fb tightened call-site clone/consume (intrinsics borrow strings,
+#     temps are not cloned for consuming callees) but never re-pinned these two.
+#     Bisected: pins reproduce at 3dc7a05, drift at 76f04fb.
+#   - elf-struct-field-call (1218 -> 1318), elf-nested-owned-call (501 -> 557),
+#     elf-flat-body (733 -> 833), ss-ret-string (483 -> 539): matched-shape
+#     scope-exit drops now carry the struct owned-slot mask, so owned fields of
+#     struct values are freed instead of leaked (static munmap sites now match
+#     the mmap sites in each image).
+#   - ss-ret-code (653 -> 660): the two above, plus the slice-drop producer
+#     check — a field read's borrow drop no longer unmaps the field out from
+#     under its struct (was a double free paired with the leak).
 for cap_case in \
   "elf_uncalled_helper_exit:elf-uncalled-helper:aa1a8ba34298ae66ca21ff2ddc44af8c0d392cc04deefe46dd3e8ffe1834b913:204:4" \
   "elf_format_int_exit:elf-format-int:3631f60e08db92c85188e37aa632faf6831d239cf782eff8b893b279cfda9e2a:1861:7" \
   "elf_concat_exit:elf-concat:5bc2ea28998ef1e08c4273066fb257061f2c2d64536f6832ff7ebf151bf8a2c7:1807:5" \
-  "elf_string_clone_exit:elf-string-clone:b0a1514e3660687db2b9aaa7952696343ebe93a3ab3fe66a136eeaba8dc822a1:1087:6" \
+  "elf_string_clone_exit:elf-string-clone:6460264e354ffa6e6b16d0cc1ccbf2d930ace5046ee977487776180be872c2ac:814:6" \
   "elf_while_sum_exit:elf-while-sum:054c2c39e75fd855907155b9369b25548e23357f5e937f12d8092c66e030bd51:383:18" \
   "elf_while_guard_exit:elf-while-guard:fef9e762b4f673470e4b675e8f5ad7f6594ddd540fb8aa2790df267e95bf1a6f:330:10" \
   "elf_while_alloc_soak_exit:elf-while-soak:9ded95273bf151d3b3daced0e109d3dda5008396e5c70eb3a5223b8fbcd13b50:444:3" \
   "elf_loop_body_print_exit:elf-loop-body-print:70993ce51c9a80cff943c832e772795f23a066fbf3b9f31519d9c3cb2424ce01:321:0" \
   "elf_loop_print_update_exit:elf-loop-print-update:07f70ecb46ed5ed7e1da9b6f80d36be22e7ff4582f20e1d70cfc529abeb3a1bc:411:60" \
-  "elf_str_byte_at_exit:elf-str-byte-at:81d93cf057d45ae066c0edcacddb8041af5dba83f98bdb16e95ca9aca050ed88:688:79" \
+  "elf_str_byte_at_exit:elf-str-byte-at:79daf0d11226b2a85d2cb522a642737ba3e4835047dfe82b206070130243864f:436:79" \
   "elf_general_len_exit:elf-general-len:200031d536a62f22fcc33c1ada4783feb05c8c762b0100d8e1f87ec562c80931:886:34" \
   "elf_general_index_exit:elf-general-index:2ab090f6ec9aefe8ae590f5e4ba6385e43d28aa0cf52c3c52a4b3c4596207b4b:1042:190" \
   "elf_straight_line_assign_exit:elf-sl-assign:fa96ae649b72f2cd5c793ecb7050a21efcb2a6ffcc69b49951b3d1d2c7d1ed2b:184:14" \
@@ -819,12 +845,25 @@ for cap_case in \
   "elf_loop_owned_slice_exit:elf-loop-owned-slice:9262e904f314e1ffe2661d80731a887f1cbbd5b332cb838efe88c4b9044b105f:1036:6" \
   "elf_loop_owned_array_exit:elf-loop-owned-array:24e7a216fdbbe278dd6bf9ebeb280ab2ed04cf91810c93e772dc5d6621286c05:1298:56" \
   "elf_loop_owned_dual_exit:elf-loop-owned-dual:09bd968f0d51b39314887d03c3884580a216be571196221cec67ffbd38db97dd:1065:6" \
-  "elf_struct_field_call_exit:elf-struct-field-call:9256684faa84257cc154eb3182b49bf954195123fe8a7a01b098016dff4c51ed:1218:3" \
+  "elf_struct_field_call_exit:elf-struct-field-call:20bf5da56787a64a500ac26c3c27e492ef0de9ea86b3d20d07b5f45655ec912d:1318:3" \
   "elf_str_eq_exit:elf-str-eq:dc1e713132ab8a5d7a53a793fb0eff8a1302d1f29c2466588b9955e07d357558:320:1" \
   "elf_if_else_continue_exit:elf-if-else-continue:a38d0b0a65d9e0cd5e765bfd6364a0550e40ba030bf978ce905422f437ed8042:364:13" \
   "elf_if_else_merge_exit:elf-if-else-merge:2ce66d4b7ecda0103a2186a5af135ae18e2cd8f739d819d7853d60ab64a17f87:289:11" \
-  "elf_nested_owned_call_exit:elf-nested-owned-call:f83b4d1d007b866918c0e5e40ff78eae9be008306d389b9527a374b3616eb544:501:11" \
-  "elf_flat_body_exit:elf-flat-body:0993a87e3930dd7759a977e5b047ec70b569165c1d1edba75841d65e507d450d:733:7"; do
+  "elf_nested_owned_call_exit:elf-nested-owned-call:e8258e8eb3b4aa2cfd2209a8b7dade7c7d120b1bc8d63d74477cdf5c295f2f3f:557:11" \
+  "elf_flat_body_exit:elf-flat-body:e2ab12c40840741f21216882704a5dd89f675164f82430763c2f3a574fb5cade:833:7" \
+  "elf_nested_body_exit:elf-nested-body:f3c7ea710bbf38f73706d52bb8e86816a0c9f040095accf5ee4618187c295e80:1659:7" \
+  "elf_nested_literal_exit:elf-nested-literal:496a169ed9028f8506eb9a43098d458307be7cafc913d23dcadfa0a3d4da258e:1840:9" \
+  "elf_nested_call_field_exit:elf-nested-call-field:985175d3611993d02c41c19358db541e3b89a32ba4cf26841ddf7b612c086777:1838:11" \
+  "elf_nested_lex_exit:elf-nested-lex:b40e5f36af7ed128f4efc341510af8c3eec18cc18128e5789f342e78ad18d059:1720:7" \
+  "elf_nested_deep_exit:elf-nested-deep:cc92080d74d60283ca80e2a8faedeebadbf5c4d25e9471979d1c3519591b2083:1511:13" \
+  "elf_nested_alias_exit:elf-nested-alias:b42b4f25e498b24df65033fdf16f216a5394a518614a43b583f91f9f56df6215:2200:14" \
+  "elf_nested_early_exit:elf-nested-early:b3edbbcd65a2a2ed64c4853a07a5e55fe6aee21ce56485a788bcfc10c3a334fb:1889:21" \
+  "elf_nested_lex_soak_exit:elf-nested-lex-soak:b2208e787e265828244b3cb066fe9a5194602e46dfafb0a8f7c63485021d1593:1113:3" \
+  "elf_nested_body_soak_exit:elf-nested-body-soak:bbe2e3967f8c06c2659b2d2d46a143264cc78dae8e1b3bf5e91ca9720785bb33:1697:3" \
+  "elf_nested_rebind_exit:elf-nested-rebind:d9a417f46ace6346b1bbadce2cfe3c9a4621ce8a62296b01670b2b2b208009f7:3339:4" \
+  "elf_nested_param_exit:elf-nested-param:f13a76ad052c95f81d5c48de6a6ce782210c639f0384ef847d33b33078a32891:1437:8" \
+  "elf_nested_source_rebind_exit:elf-nested-source-rebind:e0e1289d87d7dfe4b4b55ccc61fce4ef4c122110fe25bddc64c8b4d74b665745:2296:6" \
+  "elf_loop_guard_print_exit:elf-loop-guard-print:e0ef159754db9bb71798f8a087b1acc8c903221dfa4f56e7989db95e1ce17448:369:5"; do
   cap_fixture="${cap_case%%:*}"; cap_rest="${cap_case#*:}"
   cap_name="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
   cap_sha="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
@@ -881,6 +920,15 @@ for ss_case in \
   "elf_struct_index_call_exit:ss-call-x:c433b5eb2b92362beda0a563853d3de5a1da115b81f8eb4778e0236922e46187:435:3" \
   "elf_struct_index_call_y_exit:ss-call-y:53e141859329ce59365f7796d6c366b0e30cefb806a957ffabe971165bfae471:441:3" \
   "elf_struct_index_field_exit:ss-field:3c656fe3c5f659fe8e6621a6beb03f0fdbcd25ceb2d0482b96753f1de7e2d960:402:4" \
+  "elf_struct_slice_literal_exit:ss-literal:42b380be3fd14286d8abecd4c4d37c015937e583cc69fe95936601ed46f44449:747:5" \
+  "elf_struct_slice_append_exit:ss-append:91948a4729cee12b069c072428dd78b00f6d7e656abc92ae54513b20e412237e:1303:9" \
+  "elf_owned_struct_slice_literal_exit:ss-owned-string:dc83028097794ebeff9b60d24cba2d6a3d69bbb05c5662b23f84671b1e2975f6:1218:8" \
+  "elf_owned_struct_slice_multi_exit:ss-owned-multi:d6cb64c743151513d896048c8d0c852e0805ba1736f0ef22659533a575d310da:1919:7" \
+  "elf_owned_struct_slice_binding_exit:ss-owned-binding:884d9c60053cf007909a1123a620fefe1186726ec047746a2850def1fcdaada5:1212:8" \
+  "elf_owned_struct_slice_int_field_exit:ss-owned-int-slice:b948d1509d547ee491a97ff036e456165a8ab6ba8db17a6692ffa23f25adfc68:1312:10" \
+  "elf_owned_struct_slice_byte_field_exit:ss-owned-byte-slice:a48aaa7ce73b571e46b32148a74969b64000972a924acc83ee53220d1fb06436:1284:12" \
+  "elf_make_owned_struct_slice_exit:ss-owned-make:d1604e073c3e2f773da683ceb73793135e75582292a970fe05d2c261c7f79a72:522:1" \
+  "elf_owned_struct_slice_element_exit:ss-owned-element:d1604e073c3e2f773da683ceb73793135e75582292a970fe05d2c261c7f79a72:522:1" \
   "elf_struct_index_forward_exit:ss-forward:c3e0f2f514a5390f674903f697cffae03ff77cb71a89015442881222177376fd:402:6" \
   "elf_struct_index_oob_exit:ss-oob:4078d1dfc2a738b780bf1ed681e273a66947547ac143288739af794d288fbf72:382:70" \
   "elf_struct_index_neg_exit:ss-neg:29ec81d304edb3930dca77abbe85ba0889ed9403bb01c1ebe09458ba08a07791:396:70" \
@@ -893,8 +941,8 @@ for ss_case in \
   "elf_struct_append_soak_exit:ss-append-soak:79da064f94b285b2d9004ba89b566825a4d37ff31a50a935663683da42bdb808:1713:3" \
   "elf_struct_append_new_soak_exit:ss-append-new-soak:5874c6121f136d659426725677a0a64fe5ff2d79c80ddf878f088491b9d6b981:1190:3" \
   "elf_struct_return_exit:ss-struct-return:169eaac503091fab9be2f8d223563be3ba415d0dbbbeafec77fc6c649f3b4900:370:7" \
-  "elf_struct_return_string_exit:ss-ret-string:84cad7f56cd724bcb1ea0d95769882b6277ce288af6e8a6bab28b351209d42d9:483:8" \
-  "elf_struct_return_code_exit:ss-ret-code:995edbf89c715fa8ca761575c738d5e313d9e46bf221ef7ede4230d3f5da32f1:653:11" \
+  "elf_struct_return_string_exit:ss-ret-string:06ef330cee56b137157cbd22a5897beb9417048b0a7750808f8811b5935730d3:539:8" \
+  "elf_struct_return_code_exit:ss-ret-code:a8839f2a3c19e087265d40fd4d7aff410206a355c035e12115d3f6db53de55ec:660:11" \
   "elf_struct_return_string_soak_exit:ss-ret-string-soak:93dcbef79b6cc8a3d81a5ec466aa89b9c138c2a458f1dcafb39572484ef73956:777:3"; do
   ss_fixture="${ss_case%%:*}"; ss_rest="${ss_case#*:}"
   ss_name="${ss_rest%%:*}"; ss_rest="${ss_rest#*:}"
@@ -950,6 +998,66 @@ if [[ -e "$work_dir/bad-struct-mut.elf" ]]; then
   exit 1
 fi
 
+# Nested construction across a package boundary: both members compile as one
+# translation unit, and the matched-shape soft-skip rewind keeps a skipped
+# function's instructions out of the shared arena (the "no owning block"
+# failure this guards). There is no stage-0 oracle for a comma-list package,
+# so the summary and the image bytes carry the pin.
+nested_pkg_result="$("$stage1" "$repo_dir/compiler/testdata/nested_pkg_a.mko,$repo_dir/compiler/testdata/nested_pkg_b.mko")"
+if [[ "$nested_pkg_result" != $'elf_bytes 1837\ntokens 133 items 5 types 5 signatures 3 parameters 3 statements 4 bodies 3 expressions 48 symbols 5 resolved 4 locals 4 local_refs 5 typed 35 ir_functions 3 ir_blocks 3 ir_instructions 48 ir_constants 7 ir_values 33 ir_skipped 0 ir_verified 33' ]]; then
+  echo "selfhost backend gate: nested package image changed: $nested_pkg_result" >&2
+  exit 1
+fi
+"$stage1" "$repo_dir/compiler/testdata/nested_pkg_a.mko,$repo_dir/compiler/testdata/nested_pkg_b.mko" "$work_dir/nested-pkg" >/dev/null
+if [[ "$(sha256_of "$work_dir/nested-pkg")" != "c1a3d37965218662b8dc50bb37b157ab597b0f9cb57c55f89176c23b611b1ea7" ]]; then
+  echo "selfhost backend gate: nested package image bytes changed" >&2
+  exit 1
+fi
+if [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]]; then
+  chmod +x "$work_dir/nested-pkg"
+  set +e
+  "$work_dir/nested-pkg"
+  nested_pkg_status=$?
+  set -e
+  if [[ "$nested_pkg_status" -ne 12 ]]; then
+    echo "selfhost backend gate: nested package ELF exited $nested_pkg_status, expected 12" >&2
+    exit 1
+  fi
+fi
+
+# Nested-construction refusals must fail closed with a deterministic reason
+# and leave no output file.
+for bad_nested_case in \
+  "bad_nested_move_out:nested field read must feed another field read" \
+  "bad_nested_field_type:nested struct field needs a literal, call, or binding of the inner struct" \
+  "bad_nested_forward:needs a known type for this struct literal" \
+  "bad_nested_cycle:needs a known type for this identifier" \
+  "bad_nested_partial:struct literal leaves a field unset" \
+  "bad_nested_loop_rebind:source contains functions the typed IR cannot lower yet" \
+  "bad_nested_field_assign:source contains functions the typed IR cannot lower yet" \
+  "bad_nested_slice_binding:IR owned value is not consumed exactly once" \
+  "bad_nested_slice_make:IR owned value is not consumed exactly once" \
+  "bad_nested_mixed:IR instruction uses consumed owned value" \
+  "bad_owned_struct_slice_literal:IR clone has invalid type"; do
+  bad_nested="${bad_nested_case%%:*}"
+  bad_reason="${bad_nested_case#*:}"
+  if "$stage1" "$repo_dir/compiler/testdata/$bad_nested.mko" "$work_dir/$bad_nested.elf" >/dev/null 2>&1; then
+    echo "selfhost backend gate: $bad_nested unexpectedly lowered" >&2
+    exit 1
+  fi
+  if [[ -e "$work_dir/$bad_nested.elf" ]]; then
+    echo "selfhost backend gate: $bad_nested failure left an output file" >&2
+    exit 1
+  fi
+  set +e
+  bad_nested_reasons="$("$stage1" "$repo_dir/compiler/testdata/$bad_nested.mko" /dev/null reasons 2>&1)"
+  set -e
+  if [[ "$bad_nested_reasons" != *"$bad_reason"* ]]; then
+    echo "selfhost backend gate: $bad_nested refused for an unexpected reason: $bad_nested_reasons" >&2
+    exit 1
+  fi
+done
+
 # Allocation balance, counted at run time rather than read off the image.
 
 # Static site counts cannot express this: one callee's parameter drop serves
@@ -960,10 +1068,19 @@ fi
 # The soak is the per-call leak check the memory bar asks for and that no
 # earlier increment could run: one owned allocation per iteration, dropped at
 # the backedge, 20000 times.
+#
+# elf-string-clone counts 3 since the call-site clone/consume tightening:
+# the literal and the concat temp are handed to the consuming callee without a
+# clone now (format_int + one binding clone + one concat allocate; the callee's
+# parameter drop site serves all three calls, and the binding's scope exit
+# frees the original). elf-nested-lex-soak counts 5 per iteration: the []Token
+# make, its clone into the result block, the "" field clone, the struct block
+# itself, and the len() field-read clone, each freed once per iteration.
 if [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] && command -v strace >/dev/null 2>&1; then
-  for balance_case in "elf-format-int:6" "elf-concat:7" "elf-string-clone:5" \
+  for balance_case in "elf-format-int:6" "elf-concat:7" "elf-string-clone:3" \
     "elf-owned-rebind:6" "elf-struct-literal:1" "elf-struct-string:3" "elf-struct-inline:3" "elf-while-soak:20000" \
-    "ss-slice-soak:20000" "ss-append-soak:60000" "ss-append-new-soak:40000" "ss-ret-string-soak:40000"; do
+    "ss-slice-soak:20000" "ss-append-soak:60000" "ss-append-new-soak:40000" "ss-ret-string-soak:40000" \
+    "elf-nested-lex-soak:100000" "elf-nested-body-soak:180000"; do
     balance_path="$work_dir/${balance_case%%:*}"
     balance_expect="${balance_case##*:}"
     chmod +x "$balance_path"
@@ -1007,18 +1124,11 @@ fi
 # matched shapes had to refuse, and SSA rebinding gets it right. They are
 # renamed to `elf_loop_body_print_exit` and `elf_loop_print_update_exit` and are
 # pinned and executed with the other loop fixtures below.
-if guard_print_result="$("$stage1" "$repo_dir/compiler/testdata/bad_loop_print_guard.mko" "$work_dir/bad-loop-print-guard.elf" 2>&1)"; then
-  echo "selfhost backend gate: guarded-loop print unexpectedly lowered" >&2
-  exit 1
-fi
-if [[ "$guard_print_result" != *"ELF lowering failed: source contains functions the typed IR cannot lower yet" ]]; then
-  echo "selfhost backend gate: unexpected guard-print diagnostic: $guard_print_result" >&2
-  exit 1
-fi
-if [[ -e "$work_dir/bad-loop-print-guard.elf" ]]; then
-  echo "selfhost backend gate: guard-print failure left an output file" >&2
-  exit 1
-fi
+#
+# The guarded-loop print joined them once arm-dup carried the trailing
+# statements of an if into both arms (d8fa222): it lowers and prints 1..4
+# before the break, so it is pinned as `elf_loop_guard_print_exit` with the
+# other capability fixtures. The if-body print below stays a refusal.
 if print_if_result="$("$stage1" "$repo_dir/compiler/testdata/bad_print_if.mko" "$work_dir/bad-print-if.elf" 2>&1)"; then
   echo "selfhost backend gate: print inside an if body unexpectedly lowered" >&2
   exit 1
@@ -1872,13 +1982,13 @@ if [[ "$typed_ir_cfg_owned_alias_result" != $'elf_bytes 422\ntokens 37 items 1 t
 fi
 
 typed_ir_owned_drop_result="$("$stage1" "$repo_dir/compiler/testdata/typed_ir_owned_drop.mko")"
-if [[ "$typed_ir_owned_drop_result" != $'tokens 21 items 1 types 1 signatures 1 parameters 0 statements 2 bodies 1 expressions 8 symbols 1 resolved 0 locals 1 local_refs 0 typed 7 ir_functions 1 ir_blocks 1 ir_instructions 9 ir_constants 4 ir_values 7 ir_skipped 0 ir_verified 7' ]]; then
+if [[ "$typed_ir_owned_drop_result" != $'elf_bytes 973\ntokens 21 items 1 types 1 signatures 1 parameters 0 statements 2 bodies 1 expressions 8 symbols 1 resolved 0 locals 1 local_refs 0 typed 8 ir_functions 1 ir_blocks 1 ir_instructions 10 ir_constants 4 ir_values 8 ir_skipped 0 ir_verified 8' ]]; then
   echo "selfhost frontend gate: typed IR owned-drop shape changed: $typed_ir_owned_drop_result" >&2
   exit 1
 fi
 
 typed_ir_owned_move_result="$("$stage1" "$repo_dir/compiler/testdata/typed_ir_owned_move.mko")"
-if [[ "$typed_ir_owned_move_result" != $'tokens 23 items 1 types 2 signatures 1 parameters 0 statements 2 bodies 1 expressions 8 symbols 1 resolved 0 locals 1 local_refs 1 typed 7 ir_functions 1 ir_blocks 1 ir_instructions 8 ir_constants 3 ir_values 7 ir_skipped 0 ir_verified 7' ]]; then
+if [[ "$typed_ir_owned_move_result" != $'elf_bytes 923\ntokens 23 items 1 types 2 signatures 1 parameters 0 statements 2 bodies 1 expressions 8 symbols 1 resolved 0 locals 1 local_refs 1 typed 8 ir_functions 1 ir_blocks 1 ir_instructions 9 ir_constants 3 ir_values 8 ir_skipped 0 ir_verified 8' ]]; then
   echo "selfhost frontend gate: typed IR owned-move shape changed: $typed_ir_owned_move_result" >&2
   exit 1
 fi
@@ -1904,7 +2014,7 @@ if [[ "$typed_ir_owned_string_move_result" != $'elf_bytes 181\ntokens 15 items 1
 fi
 
 typed_ir_owned_string_array_result="$("$stage1" "$repo_dir/compiler/testdata/typed_ir_owned_string_array.mko")"
-if [[ "$typed_ir_owned_string_array_result" != $'tokens 19 items 1 types 1 signatures 1 parameters 0 statements 2 bodies 1 expressions 6 symbols 1 resolved 0 locals 1 local_refs 0 typed 5 ir_functions 1 ir_blocks 1 ir_instructions 7 ir_constants 3 ir_values 5 ir_skipped 0 ir_verified 5' ]]; then
+if [[ "$typed_ir_owned_string_array_result" != $'tokens 19 items 1 types 1 signatures 1 parameters 0 statements 2 bodies 1 expressions 6 symbols 1 resolved 0 locals 1 local_refs 0 typed 6 ir_functions 1 ir_blocks 1 ir_instructions 8 ir_constants 3 ir_values 6 ir_skipped 0 ir_verified 6' ]]; then
   echo "selfhost frontend gate: typed IR string-array ownership shape changed: $typed_ir_owned_string_array_result" >&2
   exit 1
 fi

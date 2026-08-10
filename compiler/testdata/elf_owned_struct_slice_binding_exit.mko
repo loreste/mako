@@ -1,0 +1,7 @@
+struct HostPort { host:string port:int }
+
+fn main() {
+    let item = HostPort { host: "bound", port: 6 }
+    let values: []HostPort = [item]
+    exit(values[0].port + len(values))
+}

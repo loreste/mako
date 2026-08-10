@@ -1,0 +1,20 @@
+// Three levels of flattened nesting. Expected exit 13.
+struct Inner {
+    n: int
+    tag: string
+}
+
+struct Mid {
+    inner: Inner
+    m: int
+}
+
+struct Outer {
+    mid: Mid
+    o: int
+}
+
+fn main() {
+    let v = Outer { mid: Mid { inner: Inner { n: 3, tag: "t" }, m: 4 }, o: 5 }
+    exit(v.mid.inner.n + v.mid.m + v.o + len(v.mid.inner.tag))
+}

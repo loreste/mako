@@ -1,0 +1,12 @@
+// POD struct-slice append growth. Struct elements are copied by their full
+// stride; no owned fields are present in this fixture.
+struct Point {
+    x: int
+    y: int
+}
+
+fn main() {
+    var values = [Point { x: 4, y: 5 }]
+    values = append(values, Point { x: 7, y: 8 })
+    exit(values[1].x + len(values))
+}

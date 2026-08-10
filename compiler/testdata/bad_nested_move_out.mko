@@ -1,0 +1,18 @@
+// Moving a nested field out of its parent is refused: the value is a borrow
+// into the parent's block and only a chained field read may consume it.
+struct X86Code {
+    bytes: []int
+    status: int
+    error: string
+}
+
+struct X86Body {
+    code: X86Code
+    edge_callees: []int
+}
+
+fn main() {
+    let b = X86Body { code: X86Code { bytes: make([]int, 0, 0), status: 1, error: "e" }, edge_callees: make([]int, 0, 0) }
+    let c = b.code
+    exit(0)
+}

@@ -1,0 +1,21 @@
+// A nested struct passed by value to a function that reads inner fields.
+// Expected exit 8.
+struct Inner {
+    data: []int
+    tag: string
+}
+
+struct Outer {
+    inner: Inner
+    n: int
+}
+
+fn readit(o: Outer) -> int {
+    return len(o.inner.data) + o.n
+}
+
+fn main() {
+    let i = Inner { data: make([]int, 3, 7), tag: "ab" }
+    let o = Outer { inner: i, n: 5 }
+    exit(readit(o))
+}

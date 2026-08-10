@@ -1,3 +1,5 @@
+// A print after a guard-break inside a loop body lowers (arm-dup carries the
+// trailing statements into both arms). Prints 1..4 and exits 5.
 fn main() -> int {
     let mut i = 0
     while i < 10 {
