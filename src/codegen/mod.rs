@@ -4387,6 +4387,7 @@ impl Codegen {
             }
         }
 
+        let _ = writeln!(self.out, "#line 1 \"<mako-codegen>\"");
         if let Some(tests) = &self.test_fns {
             self.out.push_str("\nint main(int argc, char **argv) {\n");
             self.out.push_str("    mako_set_args(argc, argv);\n");
@@ -12496,6 +12497,13 @@ impl Codegen {
         }
         let ret = self.c_ret_type_resolved(f);
         let params = self.c_params_resolved(f);
+        // Keep the prologue out of the user's line table: without this reset the
+        // header inherits whatever line the previous #line implies, and a source
+        // breakpoint on that line resolves into the prologue where locals are
+        // still uninitialized. Attribute the header to a synthetic file instead.
+        if self.source_file.is_some() {
+            let _ = writeln!(self.out, "#line 1 \"<mako-codegen>\"");
+        }
         let _ = writeln!(
             self.out,
             "{ret} {name}({params}) {{",

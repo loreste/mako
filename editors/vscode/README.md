@@ -20,9 +20,9 @@ VS Code support for `.mko` files.
 - Built-in `mako lsp` stdio client for diagnostics, hover, completion,
   definitions, references, rename, code actions, document/workspace symbols,
   and signature help.
-- Native debug launch support through VS Code debugger adapters:
-  `mako-native` builds the active file with `mako build` and delegates launch to
-  CodeLLDB (`lldb`) or Microsoft C/C++ (`cppdbg`).
+- Native debug launch: the `mako-native` debug type spawns `mako dap` (the
+  built-in DAP adapter) directly — no CodeLLDB or Microsoft C/C++ extension
+  needed, and no `preLaunchTask` (the adapter builds the program on launch).
 
 ## Development
 
@@ -33,8 +33,7 @@ The extension expects `mako` on `PATH`. Override with:
 ```json
 {
   "mako.path": "/path/to/mako",
-  "mako.lsp.enabled": true,
-  "mako.debug.adapter": "lldb"
+  "mako.lsp.enabled": true
 }
 ```
 
@@ -45,15 +44,15 @@ Use **Mako: Debug Active File** or add a launch config:
   "type": "mako-native",
   "request": "launch",
   "name": "Mako: Debug active file",
-  "source": "${file}",
-  "program": "${workspaceFolder}/${fileBasenameNoExtension}",
-  "cwd": "${workspaceFolder}",
+  "program": "${file}",
   "args": []
 }
 ```
 
-Install CodeLLDB for the default `lldb` adapter, or set
-`mako.debug.adapter` / `adapter` to `cppdbg` when using Microsoft C/C++.
+`program` may point at a `.mko` file (the adapter builds it with debug info,
+C backend) or at an already-built binary. The adapter locates `lldb-dap` via
+`$MAKO_LLDB_DAP`, `xcrun -f lldb-dap` (macOS), or `PATH`. See
+[docs/DEBUG.md](../../docs/DEBUG.md).
 
 ## Packaging
 

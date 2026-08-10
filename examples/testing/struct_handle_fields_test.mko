@@ -1,0 +1,50 @@
+// Regression tests for native-backend aggregate/handle ownership bugs:
+//  - a chan stored in a tuple must not consume the source binding
+//    (tuple lowering took ownership and nulled the slot → null mutex crash)
+//  - a struct holding a StrBuilder passed by value must not double-free the
+//    shared builder (struct drop freed the shallow-copied field)
+//  - a struct holding slice fields aliases/deep-clones consistently
+
+struct BuilderBag {
+    buf: StrBuilder
+    n: int
+}
+
+fn bag_add(b: BuilderBag, s: string) {
+    builder_write(b.buf, s)
+}
+
+fn TestChanInTupleKeepsSource() {
+    let ch = chan_open[int](1)
+    let _ = ch.send(4)
+    let t = (ch, 9)
+    let c, n = t
+    assert_eq(n, 9)
+    assert_eq(c.recv(), 4)
+    // The source binding is still valid after the tuple took a copy.
+    ch.close()
+}
+
+fn TestBuilderStructByValueCall() {
+    let b = str_builder()
+    builder_write(b, "x")
+    let bag = BuilderBag { buf: b, n: 1 }
+    // By-value struct pass shares the builder; both scopes must not free it twice.
+    bag_add(bag, "y")
+    assert_eq_str(builder_string(bag.buf), "xy")
+}
+
+struct FloatBag {
+    vals: []float
+    n: int
+}
+
+fn TestSliceFieldAliasConsistency() {
+    let mut a = FloatBag { vals: [1.5, 2.5], n: 2 }
+    let b = a
+    assert_eq(b.n, 2)
+    assert_eq(int(b.vals[0] + b.vals[1]), 4)
+    // Mutating through one alias must not corrupt the other's storage.
+    a.vals = [9.0]
+    assert_eq(int(b.vals[0]), 1)
+}

@@ -480,10 +480,15 @@ pub fn plan_object_units(
     program: &Program,
     opts: &IncrOptions,
     runtime_dir: &Path,
+    source_file: Option<&str>,
 ) -> Vec<ObjectUnit> {
     let mut cg = Codegen::new();
     cg.overflow_mode = opts.overflow;
     cg.bounds_checks_always = opts.bounds_always;
+    // Debug mapping: without this the incremental path emits no `#line`
+    // directives at all, so binaries built from cached objects cannot be
+    // source-level debugged (lldb breakpoints stay pending).
+    cg.source_file = source_file.map(|s| s.to_string());
     let c = cg.emit(program);
     // Release flags are part of the fingerprint; the explicit MAKO_NO_LTO
     // opt-out must never reuse an LTO object (or vice versa).

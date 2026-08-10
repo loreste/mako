@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased
+
+### Real source-level debugger (DAP + lldb)
+
+- **`mako dap` is now a real DAP adapter.** It speaks the Debug Adapter
+  Protocol over stdio (Content-Length framing), builds the `.mko` program
+  named in the `launch` request's `program` field (debug flags `-O0 -g`, C
+  backend, output in `$TMPDIR/mako_dbg_<stem>_<pid>`), and proxies the
+  session to a spawned `lldb-dap`. Stack frames and breakpoints resolve to
+  `.mko` source via per-statement `#line` directives. A `program` that
+  already points at a binary is used as-is; a failed build returns a DAP
+  error. On disconnect the lldb-dap child and inferior are killed — no
+  orphans. lldb-dap discovery: `$MAKO_LLDB_DAP`, then `xcrun -f lldb-dap`
+  (macOS), then `lldb-dap` / `lldb-dap-21..16` on `PATH`.
+- **New `mako debug [path] [-p member] [-- args]`**: builds with debug info
+  and launches an interactive lldb session with the Mako data formatters
+  preloaded. lldb discovery: `$MAKO_LLDB`, `xcrun -f lldb`, `lldb` on `PATH`.
+- **lldb data formatters** (`editors/lldb/mako_formatters.py`): `MakoString`
+  prints as a quoted UTF-8 string; `Mako*Array` / `MakoArr_*` print as
+  `[e0, e1, ...]` (first 16 elements) with expandable synthetic children.
+  Auto-loaded by `mako dap` and `mako debug` (override with
+  `$MAKO_LLDB_FORMATTERS`); installed to
+  `$PREFIX/share/mako/mako_formatters.py`.
+- **VS Code direct integration**: the `mako-native` debug type now spawns
+  `mako dap` itself via a `DebugAdapterDescriptorFactory` — no CodeLLDB or
+  Microsoft C/C++ extension, no `preLaunchTask`. The `mako.debug.adapter`
+  setting and `adapter` launch property are removed.
+- **Debug-info fixes**: incremental C builds now emit `#line` directives and
+  generate the macOS dSYM (explicit `dsymutil`); function prologues no longer
+  steal user source lines in the line table.
+- **Backend caveat**: source-level debugging requires the C backend — the
+  default `native` (Cranelift) backend emits no DWARF line info. `mako dap`
+  and `mako debug` force the C backend automatically; manual lldb users must
+  build with `mako build --backend c`.
+- **Breaking**: the old canned-response seed flags are gone — `mako dap
+  --request`, `--stdio`, and `--max-messages` no longer exist; `mako dap`
+  takes no flags.
+- Tests: `scripts/test-dap.sh` (scripted DAP session via
+  `scripts/dap_drive.py` against `examples/testing/debug_probe.mko`, skips
+  cleanly without lldb-dap, includes a build-failure negative case); unit
+  tests in `src/dap.rs`.
+
+### Native-backend ownership fixes
+
+- Moved-from heap locals are now nulled at branch-merge points
+  (`null_moved_slots`) instead of eagerly at every ownership transfer. The
+  eager null store (0.5.1, #30/#31) also killed bindings the language keeps
+  live — a chan placed in a tuple crashed any later use of the chan
+  (`pthread_mutex_lock` on a null handle), and plain `let b = a` string
+  aliases read back as empty.
+- Struct drop no longer frees `StrBuilder` fields: struct clone shares the
+  builder pointer (shared handle, like chan), so a by-value method call such
+  as `json.new_object().build()` double-freed it. Matches the C backend —
+  the builder buffer is owned by explicit builder finish/free.
+- Regression coverage: `examples/testing/struct_handle_fields_test.mko`.
+
 ## 0.5.1 — 2026-07-30
 
 ### DTLS over UDP + SRTP key export

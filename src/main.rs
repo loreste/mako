@@ -3,6 +3,7 @@ mod ast;
 mod bundled_lld;
 mod cc;
 mod codegen;
+mod dap;
 mod dce;
 mod desugar;
 mod diag;
@@ -438,17 +439,19 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// DAP adapter seed: one-shot JSON or Content-Length stdio loop
-    Dap {
-        /// Single DAP request JSON (if omitted without --stdio, read one line from stdin)
-        #[arg(long)]
-        request: Option<String>,
-        /// Multi-message DAP over stdin/stdout (Content-Length framing; exit on disconnect)
-        #[arg(long, default_value_t = false)]
-        stdio: bool,
-        /// Max messages in --stdio mode (0 = unlimited until disconnect)
-        #[arg(long, default_value_t = 0)]
-        max_messages: u64,
+    /// DAP debug adapter over stdio (used by editors; builds on launch, drives lldb-dap)
+    Dap,
+    /// Build a program and launch it under an interactive lldb session
+    Debug {
+        /// `.mko` file or workspace directory
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Focus a single workspace member
+        #[arg(short = 'p', long = "package")]
+        package: Option<String>,
+        /// Arguments forwarded to the debuggee
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Serve profile endpoints until max requests (continuous pprof seed)
     ProfileServe {
@@ -888,149 +891,6 @@ fn print_version(verbose: bool) {
             _ => println!("commit: unknown"),
         }
     }
-}
-
-fn dap_extract_command(req: &str) -> String {
-    if let Some(i) = req.find("\"command\"") {
-        let rest = &req[i + 9..];
-        if let Some(q1) = rest.find('"') {
-            let rest = &rest[q1 + 1..];
-            if let Some(q2) = rest.find('"') {
-                return rest[..q2].to_string();
-            }
-        }
-    }
-    String::new()
-}
-
-fn dap_extract_seq(req: &str) -> i64 {
-    if let Some(i) = req.find("\"seq\"") {
-        let rest = &req[i + 5..];
-        return rest
-            .chars()
-            .skip_while(|c| !c.is_ascii_digit())
-            .take_while(|c| c.is_ascii_digit())
-            .collect::<String>()
-            .parse::<i64>()
-            .unwrap_or(0);
-    }
-    0
-}
-
-fn dap_respond_json(req: &str) -> (String, bool) {
-    let cmd = dap_extract_command(req);
-    let seq = dap_extract_seq(req);
-    let disconnect = cmd == "disconnect";
-    let out = match cmd.as_str() {
-        "initialize" => format!(
-            r#"{{"seq":1,"type":"response","request_seq":{seq},"success":true,"command":"initialize","body":{{"supportsConfigurationDoneRequest":true,"supportsEvaluateForHovers":true,"makoSeed":true,"schema":"mako.dap.v1"}}}}"#
-        ),
-        "threads" => format!(
-            r#"{{"seq":3,"type":"response","request_seq":{seq},"success":true,"command":"threads","body":{{"threads":[{{"id":1,"name":"main"}}]}}}}"#
-        ),
-        "disconnect" | "configurationDone" => format!(
-            r#"{{"seq":9,"type":"response","request_seq":{seq},"success":true,"command":"{cmd}"}}"#
-        ),
-        "stackTrace" => format!(
-            r#"{{"seq":11,"type":"response","request_seq":{seq},"success":true,"command":"stackTrace","body":{{"stackFrames":[{{"id":1,"name":"main","line":1,"column":1,"source":{{"name":"main.mko"}}}}],"totalFrames":1}}}}"#
-        ),
-        "scopes" => format!(
-            r#"{{"seq":12,"type":"response","request_seq":{seq},"success":true,"command":"scopes","body":{{"scopes":[{{"name":"Locals","variablesReference":1,"expensive":false}}]}}}}"#
-        ),
-        "variables" => format!(
-            r#"{{"seq":13,"type":"response","request_seq":{seq},"success":true,"command":"variables","body":{{"variables":[]}}}}"#
-        ),
-        "continue" => format!(
-            r#"{{"seq":14,"type":"response","request_seq":{seq},"success":true,"command":"continue","body":{{"allThreadsContinued":true}}}}"#
-        ),
-        "next" | "stepIn" | "stepOut" => format!(
-            r#"{{"seq":15,"type":"response","request_seq":{seq},"success":true,"command":"{cmd}"}}"#
-        ),
-        "setBreakpoints" => format!(
-            r#"{{"seq":16,"type":"response","request_seq":{seq},"success":true,"command":"setBreakpoints","body":{{"breakpoints":[]}}}}"#
-        ),
-        other => format!(
-            r#"{{"seq":99,"type":"response","request_seq":{seq},"success":false,"command":"{other}","message":"unsupported (mako dap seed)"}}"#
-        ),
-    };
-    (out, disconnect)
-}
-
-/// Thin DAP seed: one request → one response JSON on stdout.
-fn cmd_dap_seed(request: Option<&str>) -> Result<(), ()> {
-    let req = if let Some(r) = request {
-        r.to_string()
-    } else {
-        use std::io::Read;
-        let mut buf = String::new();
-        std::io::stdin()
-            .read_to_string(&mut buf)
-            .map_err(|e| emit_plain_error(&format!("dap: read stdin: {e}")))?;
-        buf.trim().to_string()
-    };
-    if req.is_empty() {
-        emit_plain_error("dap: empty request (pass --request or pipe JSON on stdin)");
-        return Err(());
-    }
-    let (out, _) = dap_respond_json(&req);
-    println!("{out}");
-    Ok(())
-}
-
-/// Multi-message DAP over stdio with Content-Length framing (VS Code-style).
-fn cmd_dap_stdio(max_messages: u64) -> Result<(), ()> {
-    use std::io::{BufRead, BufReader, Read, Write};
-    let stdin = std::io::stdin();
-    let mut reader = BufReader::new(stdin.lock());
-    let mut stdout = std::io::stdout();
-    let mut n: u64 = 0;
-    loop {
-        if max_messages > 0 && n >= max_messages {
-            break;
-        }
-        // Headers until blank line
-        let mut content_len: Option<usize> = None;
-        loop {
-            let mut line = String::new();
-            let r = reader
-                .read_line(&mut line)
-                .map_err(|e| emit_plain_error(&format!("dap stdio: {e}")))?;
-            if r == 0 {
-                return Ok(()); // EOF
-            }
-            let t = line.trim_end_matches(['\r', '\n']);
-            if t.is_empty() {
-                break;
-            }
-            if let Some(rest) = t
-                .strip_prefix("Content-Length:")
-                .or_else(|| t.strip_prefix("content-length:"))
-            {
-                content_len = rest.trim().parse().ok();
-            }
-        }
-        let len = content_len.unwrap_or(0);
-        if len == 0 {
-            continue;
-        }
-        let mut body = vec![0u8; len];
-        reader
-            .read_exact(&mut body)
-            .map_err(|e| emit_plain_error(&format!("dap stdio body: {e}")))?;
-        let req = String::from_utf8_lossy(&body);
-        let (resp, disconnect) = dap_respond_json(req.trim());
-        let header = format!("Content-Length: {}\r\n\r\n", resp.len());
-        stdout
-            .write_all(header.as_bytes())
-            .and_then(|_| stdout.write_all(resp.as_bytes()))
-            .and_then(|_| stdout.flush())
-            .map_err(|e| emit_plain_error(&format!("dap stdio write: {e}")))?;
-        n += 1;
-        if disconnect {
-            break;
-        }
-    }
-    Ok(())
 }
 
 /// Continuous-ish profile HTTP seed on 127.0.0.1:port (exits after max_requests if > 0).
@@ -1645,17 +1505,12 @@ fn run(cli: Cli) -> Result<(), ()> {
         Commands::Lsp => lsp::run_stdio().map_err(|e| {
             emit_plain_error(&format!("lsp: {e}"));
         }),
-        Commands::Dap {
-            request,
-            stdio,
-            max_messages,
-        } => {
-            if stdio {
-                cmd_dap_stdio(max_messages)
-            } else {
-                cmd_dap_seed(request.as_deref())
-            }
-        }
+        Commands::Dap => dap::run_stdio(),
+        Commands::Debug {
+            path,
+            package,
+            args,
+        } => dap::cmd_debug(&path, package.as_deref(), &args),
         Commands::ProfileServe { port, max_requests } => cmd_profile_serve(port, max_requests),
         Commands::Pkg { cmd } => run_pkg(cmd),
         Commands::Api { cmd } => match cmd {
@@ -4202,7 +4057,8 @@ fn build_incremental(
         incr.flags_fp.push(';');
     }
 
-    let units = incremental::plan_object_units(&program, &incr, &runtime_dir);
+    let units =
+        incremental::plan_object_units(&program, &incr, &runtime_dir, Some(&file.display().to_string()));
     if emit_c {
         if let Some(u) = units.first() {
             let _ = fs::write(file.with_extension("c"), &u.c_src);
@@ -4223,6 +4079,11 @@ fn build_incremental(
 
     let link_args = link_args_native(opts, &runtime_dir);
     let _link_ms = incremental::link_objects(&objs, out_bin, &incr, &link_args)?;
+    // Separate compile+link does not trigger Apple's single-step auto-dsymutil,
+    // so Mach-O debug builds would ship no DWARF. Generate the dSYM explicitly.
+    if !incr.release && cfg!(target_os = "macos") && opts.target.is_none() {
+        let _ = Command::new("dsymutil").arg(out_bin).output();
+    }
     let backend_ms = t1.elapsed().as_secs_f64() * 1000.0;
     Ok((frontend_ms, backend_ms))
 }

@@ -1,7 +1,7 @@
 # Debugging Mako
 
 This guide covers the implemented Mako debugging tools, from quick inline
-prints to generated-C debugger sessions and sanitizer runs.
+prints to source-level debugger sessions (DAP and lldb) and sanitizer runs.
 
 **Product tip:** **0.4.0**.
 
@@ -9,59 +9,147 @@ prints to generated-C debugger sessions and sanitizer runs.
 
 ## Table of contents
 
-1. [Debug vs release builds](#debug-vs-release-builds)
-2. [Inline debugging: dbg and dbg_str](#inline-debugging-dbg-and-dbg_str)
-2b. [DAP JSON seed](#dap-json-seed)
-3. [Running with lldb](#running-with-lldb)
-4. [Address sanitizer](#address-sanitizer)
-5. [Thread sanitizer](#thread-sanitizer)
-6. [Compiler error messages](#compiler-error-messages)
-7. [Common error patterns](#common-error-patterns)
-8. [Inspecting generated code with --emit-c](#inspecting-generated-code-with---emit-c)
-9. [Tooling integration with mako check --json](#tooling-integration-with-mako-check---json)
-10. [Testing and test failures](#testing-and-test-failures)
-11. [Example debugging session](#example-debugging-session)
+1. [Source-level debugging with mako dap (DAP)](#source-level-debugging-with-mako-dap-dap)
+2. [Interactive lldb with mako debug](#interactive-lldb-with-mako-debug)
+3. [lldb data formatters](#lldb-data-formatters)
+4. [Debug vs release builds](#debug-vs-release-builds)
+5. [Inline debugging: dbg and dbg_str](#inline-debugging-dbg-and-dbg_str)
+6. [Running with lldb (manual)](#running-with-lldb-manual)
+7. [Address sanitizer](#address-sanitizer)
+8. [Thread sanitizer](#thread-sanitizer)
+9. [Compiler error messages](#compiler-error-messages)
+10. [Common error patterns](#common-error-patterns)
+11. [Inspecting generated code with --emit-c](#inspecting-generated-code-with---emit-c)
+12. [Tooling integration with mako check --json](#tooling-integration-with-mako-check---json)
+13. [Testing and test failures](#testing-and-test-failures)
+14. [Example debugging session](#example-debugging-session)
 
 ---
 
-## DAP JSON seed
+## Source-level debugging with mako dap (DAP)
 
-Mako ships **helpers** for Debug Adapter Protocol–shaped JSON (not a full DAP
-server). Use them to prototype adapters; real source-level locals still go
-through **lldb on generated C** (`-g` + `#line` mapping).
+`mako dap` is a real Debug Adapter Protocol (DAP) adapter. It speaks DAP over
+stdio (Content-Length framing) and proxies the session to a spawned
+`lldb-dap` child. Editors with a DAP client (VS Code, Neovim, …) get
+breakpoints, stepping, and stack frames on `.mko` source lines.
 
-```mko
-let init = dap_initialize_response(1)
-let stop = dap_stopped_event("breakpoint", 1)
-let cmd = dap_request_command(req_json)  // extract "command"
-let resp = dap_handle_request(req_json)  // one-shot dispatch
-let snap = debug_snapshot_json()         // tasks + locals + frames
+### How it works
+
+1. The adapter reads the DAP `launch` request and looks at its `program`
+   field.
+2. If `program` is a `.mko` file, the adapter builds it with debug flags
+   (`-O0 -g`, **C backend**) to `$TMPDIR/mako_dbg_<stem>_<pid>`. If `program`
+   already points at a binary, it is used as-is.
+3. The session is proxied to `lldb-dap`. Stack frames and breakpoints resolve
+   to `.mko` source because the C codegen emits per-statement `#line`
+   directives.
+4. A failed build returns a DAP error response to the client.
+5. On disconnect the `lldb-dap` child and the debugged process are killed —
+   no orphan processes.
+
+`mako dap` takes no flags. The old canned-response seed flags (`--request`,
+`--stdio`, `--max-messages`) are removed.
+
+### lldb-dap discovery
+
+The adapter locates `lldb-dap` in this order:
+
+| Order | Source |
+|-------|--------|
+| 1 | `$MAKO_LLDB_DAP` |
+| 2 | `xcrun -f lldb-dap` (macOS) |
+| 3 | `lldb-dap`, then `lldb-dap-21` … `lldb-dap-16` on `PATH` |
+
+### VS Code
+
+The Mako VS Code extension (`editors/vscode`) spawns `mako dap` directly via a
+`DebugAdapterDescriptorFactory` — no CodeLLDB or Microsoft C/C++ extension
+needed, and no `preLaunchTask` (the adapter builds on launch). Launch config:
+
+```json
+{
+  "type": "mako-native",
+  "request": "launch",
+  "name": "Mako: Debug active file",
+  "program": "${file}",
+  "args": []
+}
 ```
 
-CLI seed (not a full IDE debugger):
+### Backend caveat
+
+Source-level debugging requires the **C backend**. The default `native`
+(Cranelift) backend emits no DWARF line info, so breakpoints cannot resolve
+to `.mko` lines. `mako dap` and `mako debug` force the C backend
+automatically; manual lldb users must build with `--backend c` (see
+[Running with lldb](#running-with-lldb-manual)).
+
+### dap_* / debug_* builtins are not the debugger
+
+The in-process builtins (`debug_break`, `debug_line_bp_set`,
+`debug_push_frame`, `dap_initialize_response`, `debug_snapshot_json`, …)
+remain available as **manual instrumentation helpers** for prototyping. The
+compiler never auto-instruments them; real debugging goes through `mako dap`
+or `mako debug`.
+
+Tests: `scripts/test-dap.sh` drives a scripted DAP session
+(`scripts/dap_drive.py`) against `examples/testing/debug_probe.mko`. It skips
+cleanly when `lldb-dap` is absent and includes a negative case: launching
+`examples/bad/assign_string_to_int.mko` must return a DAP error. Unit tests
+live in `src/dap.rs`.
+
+---
+
+## Interactive lldb with mako debug
+
+`mako debug` is the easy path for terminal debugging: it builds the program
+with debug info (C backend) and launches an interactive lldb session with the
+[Mako data formatters](#lldb-data-formatters) preloaded.
 
 ```bash
-# One-shot
-mako dap --request '{"seq":1,"type":"request","command":"initialize"}'
-
-# Content-Length multi-message loop (exit on disconnect; cap with --max-messages)
-mako dap --stdio --max-messages 4
+mako debug                     # debug the package in .
+mako debug main.mko            # debug a specific file
+mako debug . -p app            # debug one workspace member
+mako debug main.mko -- arg1    # arguments after -- go to the program
 ```
 
-Profile continuous seed:
+| Flag | Description |
+|------|-------------|
+| `[path]` | Source file or package directory (default: `.`) |
+| `-p, --package <NAME>` | Workspace member to debug |
+| `-- [ARGS]...` | Arguments forwarded to the program |
 
-```bash
-mako profile-serve --port 9470 --max-requests 3
-# GET /debug/pprof/text | /debug/pprof/json | /debug/profile | /health
+lldb discovery: `$MAKO_LLDB`, then `xcrun -f lldb` (macOS), then `lldb` on
+`PATH`.
+
+---
+
+## lldb data formatters
+
+Mako ships lldb data formatters at `editors/lldb/mako_formatters.py`, loaded
+automatically by `mako dap` and `mako debug`:
+
+| Type | Display |
+|------|---------|
+| `MakoString` | Quoted UTF-8 string |
+| `MakoIntArray` / `MakoByteArray` / `MakoStrArray` / `MakoFloatArray` / `MakoBoolArray` / `MakoArr_*` | `[e0, e1, ...]` (first 16 elements), with expandable synthetic children |
+
+Load them manually inside lldb:
+
+```
+(lldb) command script import /path/to/mako_formatters.py
 ```
 
-Also: `debug_line_bp_*`, `debug_push_frame` / `debug_frames_json`, soft
-`debug_break` / optional `debug_trap_enable`.
+Override the formatter path with `$MAKO_LLDB_FORMATTERS`. The installers place
+the script at `$PREFIX/share/mako/mako_formatters.py`.
+
+---
 
 ## Debug vs release builds
 
-Debug is the default. Every `mako build`, `mako run`, and `mako test` invocation
-compiles with **clang `-O0 -g`**, which means:
+Debug is the default. With the C backend (`mako build --backend c`), every
+`mako build`, `mako run`, and `mako test` invocation compiles with **clang
+`-O0 -g`**, which means:
 
 - Full debug symbols are embedded in the binary.
 - No optimizations reorder or remove code.
@@ -128,16 +216,32 @@ fn main() {
 
 ---
 
-## Running with lldb
+## Running with lldb (manual)
 
-For deeper investigation, use lldb (macOS) to step through your program
-interactively.
+The easy path is [`mako debug`](#interactive-lldb-with-mako-debug), which
+builds and launches lldb for you. To drive lldb manually, read on.
 
 ### Building and launching
 
+**Backend caveat:** source-level debugging requires the **C backend**. The
+default `native` (Cranelift) backend emits no DWARF line info, so a binary
+from plain `mako build` cannot resolve `.mko` breakpoints. Build manually
+with:
+
 ```bash
-mako build main.mko -o /tmp/myapp
+mako build --backend c main.mko -o /tmp/myapp
 lldb /tmp/myapp
+```
+
+Because the C codegen emits per-statement `#line` directives, breakpoints and
+stack frames resolve to `.mko` source lines. On macOS the binary's dSYM is
+generated automatically (explicit `dsymutil` runs on the incremental path).
+Release builds strip debug info.
+
+Load the [Mako data formatters](#lldb-data-formatters) once per session:
+
+```
+(lldb) command script import /path/to/mako_formatters.py
 ```
 
 If your program takes arguments:
@@ -151,7 +255,7 @@ lldb -- /tmp/myapp arg1 arg2
 | Command | Shortcut | What it does |
 |---------|----------|--------------|
 | `breakpoint set --name main` | `b main` | Set a breakpoint on the main function |
-| `breakpoint set --file main.c --line 12` | `b main.c:12` | Break at a specific line in the generated C |
+| `breakpoint set --file main.mko --line 12` | `b main.mko:12` | Break at a `.mko` source line (via `#line` mapping) |
 | `breakpoint list` | `br l` | Show all breakpoints |
 | `breakpoint delete 1` | `br del 1` | Remove breakpoint number 1 |
 | `run` | `r` | Start (or restart) the program |
@@ -180,8 +284,8 @@ Process launched ...
 (int64_t) $0 = 42
 (lldb) bt                   # see call stack
 * thread #1, ...
-  * frame #0: myapp`process at main.c:5
-    frame #1: myapp`main at main.c:12
+  * frame #0: myapp`process at main.mko:5
+    frame #1: myapp`main at main.mko:12
 (lldb) c                    # continue to end or next breakpoint
 ```
 
@@ -698,11 +802,13 @@ Both pass cleanly. The bug is fixed and guarded by a test.
 |------|---------|
 | Debug build (default) | `mako build main.mko` |
 | Release build | `mako build --release main.mko` |
+| Debug in an editor (DAP adapter) | `mako dap` |
+| Debug in a terminal (lldb + formatters) | `mako debug main.mko` |
 | Inline debug print | `dbg(value)` / `dbg_str(value)` |
 | Type check only | `mako check main.mko` |
 | Type check as JSON | `mako check --json=v1 main.mko` |
 | Inspect generated C | `mako build --emit-c main.mko` |
-| Run in lldb | `mako build main.mko && lldb ./main` |
+| Run in lldb manually | `mako build --backend c main.mko && lldb ./main` |
 | Address sanitizer | `mako build --sanitize address main.mko` |
 | Thread sanitizer | `mako test --race` |
 | Verbose tests | `mako test dir/ -v` |

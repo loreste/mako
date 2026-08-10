@@ -381,6 +381,54 @@ Configure your editor to run `mako lsp` as the language server for `.mko` files.
 
 ---
 
+## mako dap
+
+Start the Debug Adapter Protocol (DAP) adapter on stdio. Editors with a DAP
+client (VS Code, Neovim, …) connect to it for breakpoints, stepping, and
+stack frames on `.mko` source lines.
+
+```bash
+mako dap
+```
+
+The adapter reads the DAP `launch` request, builds the `.mko` program named in
+its `program` field (debug flags `-O0 -g`, C backend, output in
+`$TMPDIR/mako_dbg_<stem>_<pid>`), and proxies the session to a spawned
+`lldb-dap`. A `program` that already points at a binary is used as-is; a
+failed build returns a DAP error response. On disconnect the `lldb-dap` child
+and the debugged process are killed. Takes no flags — the old seed flags
+(`--request`, `--stdio`, `--max-messages`) are removed.
+
+lldb-dap discovery: `$MAKO_LLDB_DAP`, then `xcrun -f lldb-dap` (macOS), then
+`lldb-dap` / `lldb-dap-21..16` on `PATH`. See [DEBUG.md](DEBUG.md).
+
+---
+
+## mako debug
+
+Build with debug info and launch an interactive lldb session with the Mako
+data formatters preloaded.
+
+```bash
+mako debug                     # debug the package in .
+mako debug main.mko            # debug a specific file
+mako debug . -p app            # debug one workspace member
+mako debug main.mko -- arg1    # forward arguments to the program
+```
+
+| Flag | Description |
+|------|-------------|
+| `[PATH]` | Source file or package directory (default: `.`) |
+| `-p, --package <NAME>` | Workspace member to debug |
+| `-- [ARGS]...` | Arguments forwarded to the program |
+
+lldb discovery: `$MAKO_LLDB`, then `xcrun -f lldb` (macOS), then `lldb` on
+`PATH`. Source-level debugging requires the C backend (the default `native`
+backend emits no DWARF line info); `mako debug` and `mako dap` select it
+automatically. See [DEBUG.md](DEBUG.md).
+
+---
+
 ## mako pkg
 
 Package management commands.
@@ -627,6 +675,9 @@ integrity mismatches. Restore the dependency or inspect the change and run
 | `MAKO_LIVE_TLS` | Enable live TLS tests |
 | `MAKO_LIVE_NGHTTP2` | Enable live HTTP/2 tests |
 | `MAKO_LIVE_QUIC` | Enable live QUIC tests |
+| `MAKO_LLDB_DAP` | Override lldb-dap path for `mako dap` |
+| `MAKO_LLDB` | Override lldb path for `mako debug` |
+| `MAKO_LLDB_FORMATTERS` | Override lldb data formatter script path |
 
 ---
 

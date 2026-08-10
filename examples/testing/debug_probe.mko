@@ -1,0 +1,15 @@
+// Probe program for the DAP adapter integration test (scripts/test-dap.sh).
+// Not a test file: no Test* functions, so `mako test` ignores it. The script
+// drives `mako dap` against this source, stops at the marked line, and checks
+// stack frames + Mako type formatting.
+fn double_it(n: int) -> int {
+    return n * 2
+}
+
+fn main() {
+    let nums: []int = [10, 20, 30]
+    let name = "mako"
+    let total = double_it(len(nums))
+    print_int(total) // bp-line: the adapter test breaks here
+    print(name)
+}

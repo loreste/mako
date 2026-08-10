@@ -96,6 +96,10 @@ fi
 if [[ -d "$ROOT/std" ]]; then
   cp -R "$ROOT/std/." "$STAGE/share/mako/std/"
 fi
+# lldb data formatters used by `mako dap` / `mako debug` (core, not full-only).
+if [[ -f "$ROOT/editors/lldb/mako_formatters.py" ]]; then
+  cp "$ROOT/editors/lldb/mako_formatters.py" "$STAGE/share/mako/mako_formatters.py"
+fi
 
 # Always ship a small README document (the full docs tree is optional).
 mkdir -p "$STAGE/share/mako/docs"

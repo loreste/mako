@@ -1034,12 +1034,13 @@ Percentages are weighted; update when a task flips.
 - [x] OTLP protobuf export seed (`trace_export_otlp_pb`) + HTTP exporter (`otlp_http_export` / `otlp_export_traces_*`).
 - [x] Sampling CPU profiler seed (`profile_sample_*` · SIGPROF + cooperative · `profile_samples_json`).
 - [x] DAP JSON seed (`dap_initialize_response` / `dap_stopped_event` / `dap_request_command`) · lldb still primary for DWARF.
-- [x] DAP dispatch + CLI seed (`dap_handle_request` · `mako dap --request …`).
-- [x] DAP stdio Content-Length loop (`mako dap --stdio` · scopes/variables/step seeds).
+- [x] DAP dispatch + CLI seed (`dap_handle_request` · canned-response flags; superseded by the real adapter below).
+- [x] DAP stdio Content-Length loop (seed; superseded by the real adapter below).
+- [x] lldb-backed DAP adapter shipped: `mako dap` builds the `.mko` program on launch (C backend, `-O0 -g`, `#line` source mapping) and proxies a real DAP session to `lldb-dap`; `mako debug` interactive lldb with data formatters; VS Code `mako-native` spawns `mako dap` directly (no CodeLLDB).
 - [x] pprof-text + multi-thread tid seed (`profile_samples_pprof_text` / `profile_sample_thread_count`).
 - [x] Profile HTTP export seed (`profile_http_route` / `profile_pprof_http_body` for `/debug/pprof/*`).
 - [x] Continuous profile HTTP CLI (`mako profile-serve --port N --max-requests K`).
-- [ ] Full DWARF-local product debugger (lldb/DAP UI product; stdio seed is not a full IDE).
+- [ ] gdb backend and DAP `attach` requests (lldb-backed launch is done; these remain future).
 - [ ] Multi-process fleet pprof aggregator product.
 
 ### 9. Installer, distribution, and portability — 10%
