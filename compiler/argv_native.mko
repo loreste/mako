@@ -3,7 +3,11 @@ fn x86_emit_argc(bytes: []int, result_slot: int) []int {
  let mut out = bytes
  // mov rax, [rbp + 16] (argc remains above the body frame)
  out = append(out, 72); out = append(out, 139); out = append(out, 69); out = append(out, 16)
- out = x86_emit_load_rax(out, result_slot)
+ // The store below is the whole point: loading the result slot back into rax
+ // here overwrote the argc that was just read, so every `argc()` returned the
+ // slot's initial value and `argc() < 2` was true no matter how many arguments
+ // the process got. The image hash matched its pin the entire time — nothing
+ // ran it with an argument until the Linux execution gate did.
  return x86_emit_store_rax(out, result_slot)
 }
 

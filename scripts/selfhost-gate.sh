@@ -426,13 +426,13 @@ if "$stage1" "$repo_dir/compiler/testdata/bad_unsafe_argv_copy_arity.mko" "$work
   exit 1
 fi
 elf_argc_result="$("$stage1" "$repo_dir/compiler/testdata/elf_argc.mko")"
-if [[ "$elf_argc_result" != *"elf_bytes 164"* || "$elf_argc_result" != *"ir_verified 2"* ]]; then
+if [[ "$elf_argc_result" != *"elf_bytes 160"* || "$elf_argc_result" != *"ir_verified 2"* ]]; then
   echo "selfhost backend gate: ELF argc image changed: $elf_argc_result" >&2
   exit 1
 fi
 elf_argc_path="$work_dir/elf-argc"
 "$stage1" "$repo_dir/compiler/testdata/elf_argc.mko" "$elf_argc_path" >/dev/null
-if [[ "$(sha256_of "$elf_argc_path")" != "9aaa5be449998714ce25ffa14c2c06bdf86ba5a50e5123025200013f25ae4823" ]]; then
+if [[ "$(sha256_of "$elf_argc_path")" != "eca6519fc544fe6e1d89e2eff2eb9cb13452d3a70082a0469131b1e27b896d1f" ]]; then
   echo "selfhost backend gate: ELF argc image bytes changed" >&2
   exit 1
 fi
@@ -668,13 +668,13 @@ elf_bool_guard_false_path="$work_dir/elf-bool-guard-false"
 # resolves through the shared intrinsic-sentinel table rather than being
 # rejected as a call to an undeclared function.
 elf_argc_guard_result="$("$stage1" "$repo_dir/compiler/testdata/elf_argc_guard_exit.mko")"
-if [[ "$elf_argc_guard_result" != $'elf_bytes 565\ntokens 56 items 2 types 1 signatures 2 parameters 0 statements 9 bodies 2 expressions 26 symbols 2 resolved 1 locals 0 local_refs 0 typed 18 ir_functions 2 ir_blocks 6 ir_instructions 27 ir_constants 8 ir_values 12 ir_skipped 0 ir_verified 12' ]]; then
+if [[ "$elf_argc_guard_result" != $'elf_bytes 561\ntokens 56 items 2 types 1 signatures 2 parameters 0 statements 9 bodies 2 expressions 26 symbols 2 resolved 1 locals 0 local_refs 0 typed 18 ir_functions 2 ir_blocks 6 ir_instructions 27 ir_constants 8 ir_values 12 ir_skipped 0 ir_verified 12' ]]; then
   echo "selfhost backend gate: ELF argc-guard image changed: $elf_argc_guard_result" >&2
   exit 1
 fi
 elf_argc_guard_path="$work_dir/elf-argc-guard"
 "$stage1" "$repo_dir/compiler/testdata/elf_argc_guard_exit.mko" "$elf_argc_guard_path" >/dev/null
-if [[ "$(sha256_of "$elf_argc_guard_path")" != "1831a50c4bca174e1313710993f715376b0cd63c652cb4bcf331dbe36a6ea188" ]]; then
+if [[ "$(sha256_of "$elf_argc_guard_path")" != "f5063a4da26c24a68a193dd00d835b52d1e8d9cb31f6c826143c5f76552cac3b" ]]; then
   echo "selfhost backend gate: ELF argc-guard image bytes changed" >&2
   exit 1
 fi
@@ -703,13 +703,13 @@ fi
 # a local, printed, and dropped when the path exits. The ownership verifier's
 # consumed-exactly-once rule is what proves the drop is there on every path.
 elf_arg_get_guard_result="$("$stage1" "$repo_dir/compiler/testdata/elf_arg_get_guard_exit.mko")"
-if [[ "$elf_arg_get_guard_result" != $'elf_bytes 533\ntokens 38 items 1 types 0 signatures 1 parameters 0 statements 6 bodies 1 expressions 19 symbols 1 resolved 0 locals 1 local_refs 1 typed 13 ir_functions 1 ir_blocks 3 ir_instructions 17 ir_constants 5 ir_values 8 ir_skipped 0 ir_verified 8' ]]; then
+if [[ "$elf_arg_get_guard_result" != $'elf_bytes 529\ntokens 38 items 1 types 0 signatures 1 parameters 0 statements 6 bodies 1 expressions 19 symbols 1 resolved 0 locals 1 local_refs 1 typed 13 ir_functions 1 ir_blocks 3 ir_instructions 17 ir_constants 5 ir_values 8 ir_skipped 0 ir_verified 8' ]]; then
   echo "selfhost backend gate: ELF arg_get-guard image changed: $elf_arg_get_guard_result" >&2
   exit 1
 fi
 elf_arg_get_guard_path="$work_dir/elf-arg-get-guard"
 "$stage1" "$repo_dir/compiler/testdata/elf_arg_get_guard_exit.mko" "$elf_arg_get_guard_path" >/dev/null
-if [[ "$(sha256_of "$elf_arg_get_guard_path")" != "cecd1d4f1ea94a5508b96de9413ec6240a94bf681bcad811b148c62a1f9b2a03" ]]; then
+if [[ "$(sha256_of "$elf_arg_get_guard_path")" != "1701171ea3c17a3292c0ad0fbb2c80cf42729aa78b14cf0d8812515d06a3a0e9" ]]; then
   echo "selfhost backend gate: ELF arg_get-guard image bytes changed" >&2
   exit 1
 fi
@@ -805,6 +805,9 @@ done
 #
 # Re-pinned in the nested-constructible-fields increment (byte-level reasons in
 # docs/SELFHOST_CRITICAL_PATH.md):
+#   - elf-string-clone is now 947: the 814 image leaked (see the mmap balance
+#     note below), and cloning the literal argument added one allocation and
+#     its release. Verified by execution, not by hash.
 #   - elf-string-clone (1087 -> 814) and elf-str-byte-at (688 -> 436): commit
 #     76f04fb tightened call-site clone/consume (intrinsics borrow strings,
 #     temps are not cloned for consuming callees) but never re-pinned these two.
@@ -821,7 +824,7 @@ for cap_case in \
   "elf_uncalled_helper_exit:elf-uncalled-helper:aa1a8ba34298ae66ca21ff2ddc44af8c0d392cc04deefe46dd3e8ffe1834b913:204:4" \
   "elf_format_int_exit:elf-format-int:3631f60e08db92c85188e37aa632faf6831d239cf782eff8b893b279cfda9e2a:1861:7" \
   "elf_concat_exit:elf-concat:5bc2ea28998ef1e08c4273066fb257061f2c2d64536f6832ff7ebf151bf8a2c7:1807:5" \
-  "elf_string_clone_exit:elf-string-clone:6460264e354ffa6e6b16d0cc1ccbf2d930ace5046ee977487776180be872c2ac:814:6" \
+  "elf_string_clone_exit:elf-string-clone:216979c2dbd78abb90e71b4f2cba67581b8f091fe88c1744241680727efd92b1:947:6" \
   "elf_while_sum_exit:elf-while-sum:054c2c39e75fd855907155b9369b25548e23357f5e937f12d8092c66e030bd51:383:18" \
   "elf_while_guard_exit:elf-while-guard:fef9e762b4f673470e4b675e8f5ad7f6594ddd540fb8aa2790df267e95bf1a6f:330:10" \
   "elf_while_alloc_soak_exit:elf-while-soak:9ded95273bf151d3b3daced0e109d3dda5008396e5c70eb3a5223b8fbcd13b50:444:3" \
@@ -852,9 +855,9 @@ for cap_case in \
   "elf_if_else_merge_exit:elf-if-else-merge:2ce66d4b7ecda0103a2186a5af135ae18e2cd8f739d819d7853d60ab64a17f87:289:11" \
   "elf_nested_owned_call_exit:elf-nested-owned-call:e8258e8eb3b4aa2cfd2209a8b7dade7c7d120b1bc8d63d74477cdf5c295f2f3f:557:11" \
   "elf_flat_body_exit:elf-flat-body:e2ab12c40840741f21216882704a5dd89f675164f82430763c2f3a574fb5cade:833:7" \
-  "elf_nested_body_exit:elf-nested-body:f3c7ea710bbf38f73706d52bb8e86816a0c9f040095accf5ee4618187c295e80:1659:7" \
+  "elf_nested_body_exit:elf-nested-body:194225ad410c118972d105c0cd3c7a187381b926924be45a308273285c072e1b:1792:7" \
   "elf_nested_literal_exit:elf-nested-literal:496a169ed9028f8506eb9a43098d458307be7cafc913d23dcadfa0a3d4da258e:1840:9" \
-  "elf_nested_call_field_exit:elf-nested-call-field:985175d3611993d02c41c19358db541e3b89a32ba4cf26841ddf7b612c086777:1838:11" \
+  "elf_nested_call_field_exit:elf-nested-call-field:ce66249983106aaaf16ca1463aac38922941a2098ebb90a37d06fe63b9224794:1977:11" \
   "elf_nested_lex_exit:elf-nested-lex:b40e5f36af7ed128f4efc341510af8c3eec18cc18128e5789f342e78ad18d059:1720:7" \
   "elf_nested_deep_exit:elf-nested-deep:cc92080d74d60283ca80e2a8faedeebadbf5c4d25e9471979d1c3519591b2083:1511:13" \
   "elf_nested_alias_exit:elf-nested-alias:b42b4f25e498b24df65033fdf16f216a5394a518614a43b583f91f9f56df6215:2200:14" \
@@ -999,12 +1002,12 @@ fi
 # failure this guards). There is no stage-0 oracle for a comma-list package,
 # so the summary and the image bytes carry the pin.
 nested_pkg_result="$("$stage1" "$repo_dir/compiler/testdata/nested_pkg_a.mko,$repo_dir/compiler/testdata/nested_pkg_b.mko")"
-if [[ "$nested_pkg_result" != $'elf_bytes 1837\ntokens 133 items 5 types 5 signatures 3 parameters 3 statements 4 bodies 3 expressions 48 symbols 5 resolved 4 locals 4 local_refs 5 typed 35 ir_functions 3 ir_blocks 3 ir_instructions 48 ir_constants 7 ir_values 33 ir_skipped 0 ir_verified 33' ]]; then
+if [[ "$nested_pkg_result" != $'elf_bytes 1970\ntokens 133 items 5 types 5 signatures 3 parameters 3 statements 4 bodies 3 expressions 48 symbols 5 resolved 4 locals 4 local_refs 5 typed 35 ir_functions 3 ir_blocks 3 ir_instructions 50 ir_constants 7 ir_values 34 ir_skipped 0 ir_verified 34' ]]; then
   echo "selfhost backend gate: nested package image changed: $nested_pkg_result" >&2
   exit 1
 fi
 "$stage1" "$repo_dir/compiler/testdata/nested_pkg_a.mko,$repo_dir/compiler/testdata/nested_pkg_b.mko" "$work_dir/nested-pkg" >/dev/null
-if [[ "$(sha256_of "$work_dir/nested-pkg")" != "c1a3d37965218662b8dc50bb37b157ab597b0f9cb57c55f89176c23b611b1ea7" ]]; then
+if [[ "$(sha256_of "$work_dir/nested-pkg")" != "46afc7df2876c6099bbc30e9c3a90dcacae5d8a63869261744746966b8fb9178" ]]; then
   echo "selfhost backend gate: nested package image bytes changed" >&2
   exit 1
 fi
@@ -1064,17 +1067,25 @@ done
 # earlier increment could run: one owned allocation per iteration, dropped at
 # the backedge, 20000 times.
 #
-# elf-string-clone counts 3 since the call-site clone/consume tightening:
-# the literal and the concat temp are handed to the consuming callee without a
-# clone now (format_int + one binding clone + one concat allocate; the callee's
-# parameter drop site serves all three calls, and the binding's scope exit
-# frees the original). elf-nested-lex-soak counts 5 per iteration: the []Token
+# The three struct-slice soak counts were expectations, not measurements:
+# this whole block needs Linux and strace, so it had never run. Measured on
+# first execution they are 5, 4 and 3 allocations per iteration, not the 3, 2
+# and 2 the comments assumed — every one balanced, so the fixtures allocate
+# more than documented but leak nothing. The counts below are measured.
+#
+# elf-string-clone counts 4: format_int, the clone of the owned binding, the
+# clone of the literal, and the concat temp — each freed once. It counted 3
+# while the literal went to the consuming callee uncloned, and that shape
+# leaked: the first Linux run of this block measured 3 mmap against 1 munmap.
+# A literal is a static view into the code image, so a callee that owns and
+# drops its parameter cannot be handed one directly; cloning it restores the
+# convention every call site depends on. elf-nested-lex-soak counts 5 per iteration: the []Token
 # make, its clone into the result block, the "" field clone, the struct block
 # itself, and the len() field-read clone, each freed once per iteration.
 if [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] && command -v strace >/dev/null 2>&1; then
-  for balance_case in "elf-format-int:6" "elf-concat:7" "elf-string-clone:3" \
+  for balance_case in "elf-format-int:6" "elf-concat:7" "elf-string-clone:4" \
     "elf-owned-rebind:6" "elf-struct-literal:1" "elf-struct-string:3" "elf-struct-inline:3" "elf-while-soak:20000" \
-    "ss-slice-soak:20000" "ss-append-soak:60000" "ss-append-new-soak:40000" "ss-ret-string-soak:40000" \
+    "ss-slice-soak:20000" "ss-append-soak:100000" "ss-append-new-soak:80000" "ss-ret-string-soak:60000" \
     "elf-nested-lex-soak:100000" "elf-nested-body-soak:180000"; do
     balance_path="$work_dir/${balance_case%%:*}"
     balance_expect="${balance_case##*:}"

@@ -1363,9 +1363,19 @@ fn ir_cfg_lower_range(
                         // clone only for a *consuming* callee so the binding
                         // survives. Temps: consuming call takes them; borrowing
                         // one relies on a pending drop after the call.
+                        // A literal is a static view into the code image, not an
+                        // allocation, so a consuming callee must receive a clone
+                        // of it too. Without this the callee owns and drops a
+                        // pointer it can never free, and the whole parameter-drop
+                        // convention degrades: `shout("literal")` alongside
+                        // `shout(owned)` left the clone made for the owned call
+                        // unreleased (3 mmap / 1 munmap in elf_string_clone_exit).
+                        // A temp needs no clone — it is already an owned
+                        // allocation the consuming call takes.
+                        let argument_is_literal = expressions[argument].kind == EXPR_STRING
                         let clone_argument = argument_owned and
                             not semantic_is_struct_value(argument_type) and
-                            argument_is_binding and
+                            (argument_is_binding or argument_is_literal) and
                             ir_call_consumes_arguments(callee_item, argument_type)
                         if clone_argument {
                             let cloned = value_cursor
@@ -1374,6 +1384,19 @@ fn ir_cfg_lower_range(
                                 op: IR_CLONE, result: cloned, type_kind: argument_type,
                                 left: passed, right: -1, aux: -1, token: expressions[argument].token,
                             })
+                            if argument_is_literal {
+                                // The call used to be the literal's one consumer;
+                                // now the clone is what the callee receives, so the
+                                // static view is released here instead. Dropping a
+                                // static is a runtime no-op — the callee performed
+                                // exactly this drop before the clone existed.
+                                out_instructions = append(out_instructions, IrInstruction {
+                                    op: IR_DROP, result: -1, type_kind: argument_type,
+                                    left: passed, right: -1,
+                                    aux: ir_drop_aux(layout, source, argument_type),
+                                    token: expressions[argument].token,
+                                })
+                            }
                             passed = cloned
                         }
                         // A consuming call takes the temp (or the clone of a
