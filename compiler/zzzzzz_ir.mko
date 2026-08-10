@@ -3408,8 +3408,24 @@ fn ir_lower_returning_if_tree(
                 let brk_loop = list_loop_back[list_index]
                 // Publish current carried values as the exit params, then drop
                 // only non-carried temps. The exit block re-injects those params.
+                //
+                // One `loop_params` slot per carried local cannot describe two
+                // different exit edges. The exit continuation restores every
+                // carried local to the header parameter, which is right when the
+                // loop is left from the header and wrong when it is left from a
+                // break that already updated that local — the exit then reads a
+                // value one iteration stale. Refuse instead of emitting it: this
+                // shape returned 4 where the stage-0 oracle returned 5, and the
+                // gate's hash pin preserved the wrong image because nothing
+                // executed it. A block parameter on the loop-exit block, fed by
+                // the header's false edge and by each break edge, is the fix.
                 let mut bp = 0
                 while bp < loop_carried_count[brk_loop] {
+                    if owned_locals[loop_carried[loop_carried_start[brk_loop] + bp]] !=
+                        loop_params[loop_carried_start[brk_loop] + bp] {
+                        return ir_cfg_failure(out_instructions, out_constants, out_values, value_cursor,
+                            "CFG lowering break after a carried-local update needs a loop-exit parameter")
+                    }
                     loop_params[loop_carried_start[brk_loop] + bp] =
                         owned_locals[loop_carried[loop_carried_start[brk_loop] + bp]]
                     bp = bp + 1

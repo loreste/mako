@@ -830,7 +830,8 @@ for cap_case in \
   "elf_str_byte_at_exit:elf-str-byte-at:79daf0d11226b2a85d2cb522a642737ba3e4835047dfe82b206070130243864f:436:79" \
   "elf_general_len_exit:elf-general-len:200031d536a62f22fcc33c1ada4783feb05c8c762b0100d8e1f87ec562c80931:886:34" \
   "elf_general_index_exit:elf-general-index:2ab090f6ec9aefe8ae590f5e4ba6385e43d28aa0cf52c3c52a4b3c4596207b4b:1042:190" \
-  "elf_straight_line_assign_exit:elf-sl-assign:fa96ae649b72f2cd5c793ecb7050a21efcb2a6ffcc69b49951b3d1d2c7d1ed2b:184:14" \
+  "elf_straight_line_assign_exit:elf-sl-assign:7b30cf65432b2afed560c07ce326e2274ad04404de8089617a3bfdc135388cb3:188:14" \
+  "elf_same_operand_exit:elf-same-operand:43388648450cfaf2cad4cdbc22774b3b40d1ddfb1a9926cc2e4e5c063081b633:179:10" \
   "elf_owned_rebind_exit:elf-owned-rebind:d1a0e44185273220740b16bd24a671169cdf2821bc5171eb143a0a4141cd2a10:1783:43" \
   "elf_struct_literal_exit:elf-struct-literal:7a8547d71a71839c093d26cac073b1c2f5d65d5d5a5cff7db1c954addefbd82b:402:34" \
   "elf_struct_string_field_exit:elf-struct-string:7d5cfaf2f3061c2f4c59907136693162576ec439473b68add884092077f0e389:694:14" \
@@ -862,8 +863,7 @@ for cap_case in \
   "elf_nested_body_soak_exit:elf-nested-body-soak:bbe2e3967f8c06c2659b2d2d46a143264cc78dae8e1b3bf5e91ca9720785bb33:1697:3" \
   "elf_nested_rebind_exit:elf-nested-rebind:d9a417f46ace6346b1bbadce2cfe3c9a4621ce8a62296b01670b2b2b208009f7:3339:4" \
   "elf_nested_param_exit:elf-nested-param:f13a76ad052c95f81d5c48de6a6ce782210c639f0384ef847d33b33078a32891:1437:8" \
-  "elf_nested_source_rebind_exit:elf-nested-source-rebind:e0e1289d87d7dfe4b4b55ccc61fce4ef4c122110fe25bddc64c8b4d74b665745:2296:6" \
-  "elf_loop_guard_print_exit:elf-loop-guard-print:e0ef159754db9bb71798f8a087b1acc8c903221dfa4f56e7989db95e1ce17448:369:5"; do
+  "elf_nested_source_rebind_exit:elf-nested-source-rebind:e0e1289d87d7dfe4b4b55ccc61fce4ef4c122110fe25bddc64c8b4d74b665745:2296:6"; do
   cap_fixture="${cap_case%%:*}"; cap_rest="${cap_case#*:}"
   cap_name="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
   cap_sha="${cap_rest%%:*}"; cap_rest="${cap_rest#*:}"
@@ -1125,10 +1125,24 @@ fi
 # renamed to `elf_loop_body_print_exit` and `elf_loop_print_update_exit` and are
 # pinned and executed with the other loop fixtures below.
 #
-# The guarded-loop print joined them once arm-dup carried the trailing
-# statements of an if into both arms (d8fa222): it lowers and prints 1..4
-# before the break, so it is pinned as `elf_loop_guard_print_exit` with the
-# other capability fixtures. The if-body print below stays a refusal.
+# The guarded-loop print was pinned as a capability fixture on the strength of
+# its hash alone. Executing it on Linux showed the image exits 4 where the
+# stage-0 oracle gives 5: the loop is left through a break that already updated
+# the carried local, but the exit continuation restores every carried local to
+# the header parameter, so the exit reads a value one iteration stale. One
+# `loop_params` slot cannot describe both exit edges. Stage 1 now refuses the
+# shape instead of emitting a wrong image; a block parameter on the loop-exit
+# block, fed by the header's false edge and by each break edge, is the fix and
+# is tracked as roadmap item 5 (merge blocks and block parameters).
+if guard_print_result="$("$stage1" "$repo_dir/compiler/testdata/elf_loop_guard_print_exit.mko" "$work_dir/guard-print.elf" 2>&1)"; then
+  echo "selfhost backend gate: break after a carried-local update unexpectedly lowered" >&2
+  exit 1
+fi
+if [[ -e "$work_dir/guard-print.elf" ]]; then
+  echo "selfhost backend gate: refused guarded-loop print still produced an image" >&2
+  exit 1
+fi
+# The if-body print below stays a refusal.
 if print_if_result="$("$stage1" "$repo_dir/compiler/testdata/bad_print_if.mko" "$work_dir/bad-print-if.elf" 2>&1)"; then
   echo "selfhost backend gate: print inside an if body unexpectedly lowered" >&2
   exit 1

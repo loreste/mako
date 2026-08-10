@@ -1,0 +1,8 @@
+// Regression: a binary whose two operands are the same SSA value. Only the
+// left read comes out of rax, so the dead-store pass must keep the frame store
+// the right read still loads. Dropping it made `i + i` evaluate to i out of an
+// uninitialized slot — 5 here, garbage on a dirtier stack.
+fn main() {
+    let i = 5
+    exit(i + i)
+}

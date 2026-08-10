@@ -2771,6 +2771,28 @@ fn x86_value_dead_after(instructions: []IrInstruction, call_sites: []IrCallSite,
     while i < len(instructions) {
         // The consumer is excluded: its read of the value is the one already
         // satisfied out of rax, which is exactly why the store can go.
+        //
+        // Exactly one read, though. `v + v` reads the same value on both
+        // operands and only the left one comes out of rax — the right still
+        // loads from the frame, so dropping the store left that load reading an
+        // uninitialized slot. `exit(i + i)` returned i instead of i + i, and on
+        // a dirtier stack it would return garbage rather than fail.
+        if i == consumer and i != producer {
+            let reader = instructions[i]
+            let mut reads = 0
+            if reader.left == value { reads = reads + 1 }
+            if reader.right == value { reads = reads + 1 }
+            if reader.op == IR_CALL and reader.aux >= 0 and reader.aux < len(call_sites) {
+                let site = call_sites[reader.aux]
+                let mut argument = site.argument_start
+                while argument < site.argument_start + site.argument_count {
+                    if argument >= 0 and argument < len(call_arguments) and
+                        call_arguments[argument] == value { reads = reads + 1 }
+                    argument = argument + 1
+                }
+            }
+            if reads > 1 { return false }
+        }
         if i != producer and i != consumer {
             let other = instructions[i]
             if other.left == value or other.right == value { return false }
