@@ -8,7 +8,7 @@ const-fn depth (match/while/for/strings · `s[i]`) · suite **395** `examples/te
 programs on **native** (0 failures) + Rust unit tests · full suite under ASan/UBSan;
 focused concurrency suite under TSan · [The Mako Book](book/).
 
-**Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
+**Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md) · **Self-hosting:** [SELF_HOSTING.md](SELF_HOSTING.md).
 
 ---
 
@@ -24,6 +24,7 @@ focused concurrency suite under TSan · [The Mako Book](book/).
 | **Dual-form coverage (optional sugar)** | **~94%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol or integration) |
 | **Soundness (SAFE/RT core)** | Introduced in 0.2.4, actively hardened — [SOUNDNESS.md](SOUNDNESS.md); soaks and edge cases remain |
+| **Self-hosted compiler** | Stage-1 subset only: deterministic Linux x86-64 ELF emission is real and gated (images executed in CI), but stage 1 lowers about half of `compiler/*.mko` and the stage-1→2→3 fixed point is pending — [SELF_HOSTING.md](SELF_HOSTING.md), [SELFHOST_CRITICAL_PATH.md](SELFHOST_CRITICAL_PATH.md) |
 
 ---
 

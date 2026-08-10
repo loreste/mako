@@ -123,6 +123,8 @@ and inlay hints. VS Code extension.
 
 - Both backends require clang for linking (the installer handles this on Linux)
 - WASM: WASI Preview 1 only — no sockets, no TLS, no Preview 2/WIT/DOM
+- Graphics/WSI: real windows on macOS (Cocoa), Linux (X11 only — no Wayland), and Windows (Win32), software-rendered pixel buffers; Linux links X11 only when detected, and CI runs headless via `MAKO_GFX_HEADLESS=1`
+- Self-hosting is not complete: the Mako-written compiler (`compiler/*.mko`) is a stage-1 subset that emits deterministic Linux x86-64 ELF (gated, images executed in CI) but lowers only about half of its own functions; the stage-1→2→3 fixed point is still pending — see [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)
 - Sanitizers, cross-compilation, and emit-c auto-fall back to the C backend
 - No debugger product (lldb works with `#line` source mapping, but no IDE integration beyond seeds)
 - Stdlib coverage is uneven — some APIs are shape-only

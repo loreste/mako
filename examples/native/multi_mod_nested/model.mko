@@ -1,0 +1,30 @@
+// Model module: nested structs with owned `string` fields (HostPort inside
+// ServerConfig), mirroring the multi-module failure shape from issue #29.
+// Values of these types cross module boundaries through the functions below.
+
+struct HostPort {
+    host: string
+    port: int
+}
+
+struct ServerConfig {
+    name: string
+    endpoint: HostPort
+}
+
+fn make_host_port(host: string, port: int) -> HostPort {
+    return HostPort { host: host, port: port }
+}
+
+fn make_config(name: string, host: string, port: int) -> ServerConfig {
+    let hp = HostPort { host: host, port: port }
+    return ServerConfig { name: name, endpoint: hp }
+}
+
+fn describe(cfg: ServerConfig) -> string {
+    return cfg.name + "@" + cfg.endpoint.host
+}
+
+fn with_port(cfg: ServerConfig, port: int) -> ServerConfig {
+    return ServerConfig { name: cfg.name, endpoint: HostPort { host: cfg.endpoint.host, port: port } }
+}

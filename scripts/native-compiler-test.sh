@@ -106,7 +106,7 @@ mem_fixtures=(
   native_owned_tuples native_enum_payload native_nested_structs native_match_owned
   native_match_guards native_match native_for native_defer native_cfor native_labeled
   native_fmt native_mem_stress native_fibonacci
-  native_if_expr
+  native_if_expr native_moved_slot_if native_struct_slice_fields
 )
 # Extra top-level examples (threaded kick / select / regex) — also 0-leak.
 # Built from examples/ not examples/native/ in the loop below via paths.
@@ -199,6 +199,46 @@ for owned_fixture in "${top_mem_fixtures[@]}"; do
   fi
 done
 
+# Multi-module heap fixture (pull-based pack; issue #29 shape): nested
+# string-field structs crossing module boundaries — same 0-leak hard gate.
+multi_mod_entry="$repo_dir/examples/native/multi_mod_nested/main.mko"
+multi_mod_bin="$tmp_dir/multi_mod_nested"
+"$mako_bin" build "$multi_mod_entry" --backend native -o "$multi_mod_bin"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if [[ -r /usr/lib/libgmalloc.dylib ]]; then
+    if ! DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib \
+      MallocScribble=1 MallocPreScribble=1 "$multi_mod_bin" >/dev/null 2>"$tmp_dir/multi_mod_nested-gm.txt"
+    then
+      echo "native compiler test: GuardMalloc failure in multi_mod_nested" >&2
+      tail -30 "$tmp_dir/multi_mod_nested-gm.txt" >&2 || true
+      exit 1
+    fi
+  fi
+  set +e
+  leaks --atExit -- "$multi_mod_bin" >"$tmp_dir/multi_mod_nested-leaks.txt" 2>&1
+  leaks_status=$?
+  set -e
+  if grep -Eq "([1-9][0-9]* leaks for|[1-9][0-9]* total leaked bytes)" \
+    "$tmp_dir/multi_mod_nested-leaks.txt"; then
+    echo "native compiler test: leaks detected in multi_mod_nested ownership" >&2
+    grep -E "leaks for|leaked bytes" "$tmp_dir/multi_mod_nested-leaks.txt" >&2 || true
+    exit 1
+  fi
+  if [[ $leaks_status -ne 0 ]]; then
+    if grep -q "Couldn't get task port" "$tmp_dir/multi_mod_nested-leaks.txt"; then
+      echo "native compiler test: leaks unavailable for multi_mod_nested (task port denied)" >&2
+    else
+      if ! grep -Eq "0 leaks for|0 total leaked bytes" "$tmp_dir/multi_mod_nested-leaks.txt"; then
+        echo "native compiler test: leaks instrumentation failed for multi_mod_nested" >&2
+        tail -20 "$tmp_dir/multi_mod_nested-leaks.txt" >&2
+        exit 1
+      fi
+    fi
+  fi
+else
+  "$multi_mod_bin" >/dev/null
+fi
+
 echo "[5/5] C/native differential execution"
 # These fixtures must use the backend-neutral IR; this opt-in prevents a
 # regression from silently selecting the legacy AST aggregate lowering.
@@ -224,6 +264,9 @@ for shared_fixture in \
   examples/native/native_match.mko \
   examples/native/native_mem_stress.mko \
   examples/native/native_if_expr.mko \
+  examples/native/native_moved_slot_if.mko \
+  examples/native/native_struct_slice_fields.mko \
+  examples/native/multi_mod_nested/main.mko \
   examples/on_methods.mko \
   examples/result.mko \
   examples/map.mko \
@@ -273,6 +316,9 @@ for fixture in \
   "examples/native/native_fmt.mko" \
   "examples/native/native_mem_stress.mko" \
   "examples/native/native_if_expr.mko" \
+  "examples/native/native_moved_slot_if.mko" \
+  "examples/native/native_struct_slice_fields.mko" \
+  "examples/native/multi_mod_nested/main.mko" \
   "examples/on_methods.mko" \
   "examples/result.mko" \
   "examples/map.mko" \

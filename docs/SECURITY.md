@@ -409,6 +409,13 @@ Debug and release (`-O3 -flto -DNDEBUG`): abort on OOB. Generated code defines
 
 Lexer/parser/type errors print `file:line:col`, caret, and `help:` hints.
 
+## Package signing limitations
+
+`mako pkg sign` uses ed25519 and packages are verified on fetch, but the
+signing model has **no key rotation and no revocation** yet, and the package
+security model has not been independently audited. Treat registry signatures
+as integrity evidence, not as a complete trust story.
+
 ## What this is not
 
 Mako does not claim "memory safe like a proof assistant." It claims **active

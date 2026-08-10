@@ -3058,8 +3058,17 @@ impl<'a> FunctionLowerer<'a> {
                     | Type::MapSPtr(_) => {
                         // Owned maps still transfer; borrowed maps stay shared.
                     }
-                    Type::Str
-                    | Type::ChanI
+                    Type::Str => {
+                        // `let` bindings have value-copy semantics, matching
+                        // the C backend: a local string source remains valid
+                        // after the new binding is created. Ownership transfer
+                        // is reserved for assignment/return paths.
+                        if !owned {
+                            value = self.emit_clone(value, inferred);
+                            owned = true;
+                        }
+                    }
+                    Type::ChanI
                     | Type::Arena
                     | Type::Nursery
                     | Type::Task
@@ -31304,7 +31313,8 @@ mod tests {
                 .iter()
                 .filter(|instruction| matches!(instruction, Inst::DropString { .. }))
                 .count(),
-            1
+            2,
+            "the source and value-copy binding each own a string"
         );
     }
 
@@ -31570,11 +31580,63 @@ mod tests {
         let program = Parser::new(tokens).parse().unwrap();
         let module = lower(&program).unwrap();
         let build = module.functions.iter().find(|f| f.name == "build").unwrap();
-        let insts: Vec<_> = build.blocks.iter().flat_map(|b| &b.instructions).collect();
-        // After the move `name = cand`, cand's slot must be nulled (Store of 0)
-        // so the scope-exit drop is safe regardless of the if-merge ownership.
-        let has_null_store = insts.iter().any(|i| matches!(i, Inst::ConstInt { value: 0, .. }));
-        assert!(has_null_store, "conditional move must null the source slot");
+        // Identify the slots precisely: a null store is `Store slot <- ConstInt 0`;
+        // the moved local's slot is a `Str` alloca that the restored ownership
+        // snapshot still loads for a `DropString` at scope exit. The fix must
+        // null exactly such a slot, inside the `if` body (a non-entry block).
+        let zero_consts: std::collections::HashSet<Value> = build
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .filter_map(|i| match i {
+                Inst::ConstInt { out, value: 0, .. } => Some(*out),
+                _ => None,
+            })
+            .collect();
+        let str_slots: std::collections::HashSet<Value> = build
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .filter_map(|i| match i {
+                Inst::Alloca { out, ty: Type::Str } => Some(*out),
+                _ => None,
+            })
+            .collect();
+        let load_src: std::collections::HashMap<Value, Value> = build
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .filter_map(|i| match i {
+                Inst::Load { out, ptr, .. } => Some((*out, *ptr)),
+                _ => None,
+            })
+            .collect();
+        let dropped_str_slots: std::collections::HashSet<Value> = build
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .filter_map(|i| match i {
+                Inst::DropString { value } => load_src.get(value).copied(),
+                _ => None,
+            })
+            .filter(|slot| str_slots.contains(slot))
+            .collect();
+        let nulled_in_branch = build.blocks.iter().enumerate().any(|(block_idx, b)| {
+            block_idx != 0
+                && b.instructions.iter().any(|i| match i {
+                    Inst::Store { ptr, value } => {
+                        zero_consts.contains(value)
+                            && str_slots.contains(ptr)
+                            && dropped_str_slots.contains(ptr)
+                    }
+                    _ => false,
+                })
+        });
+        assert!(
+            nulled_in_branch,
+            "the if-branch move must store 0 into the moved string local's own slot \
+             (the slot the restored scope-exit drop later loads)"
+        );
     }
 
     #[test]

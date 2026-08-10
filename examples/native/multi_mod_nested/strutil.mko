@@ -1,0 +1,9 @@
+// String helper module: plain owned-string in/out across a module boundary.
+
+fn banner(s: string) -> string {
+    return "== " + s + " =="
+}
+
+fn join_host(host: string, sep: string, name: string) -> string {
+    return host + sep + name
+}

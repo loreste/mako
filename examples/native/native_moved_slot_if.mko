@@ -1,0 +1,43 @@
+// Native backend: moving a string local inside an `if` branch nulls the
+// moved-from slot, so the pre-if ownership snapshot restored at the merge
+// cannot drop the pointer that was transferred away (use-after-free /
+// double-free, issues #30/#31). Both flag paths must stay leak-free: the
+// taken path relies on the nulled slot; the not-taken path drops the local
+// normally at scope exit.
+// Differentially validated against the C backend.
+
+struct Cfg {
+    name: string
+    level: int
+}
+
+fn parse_config_text(overridden: bool) -> Cfg {
+    var name = "default-" + "name"
+    let cand = "override-" + "name"
+    if overridden {
+        name = cand
+    }
+    return Cfg { name: name, level: 7 }
+}
+
+fn move_in_branch(move_it: bool) -> string {
+    let src = "pay" + "load"
+    var out = "empty"
+    if move_it {
+        out = src
+    }
+    return out
+}
+
+fn main() {
+    let c = parse_config_text(true)
+    print(c.name)
+    print_int(c.level)
+
+    let d = parse_config_text(false)
+    print(d.name)
+    print_int(d.level)
+
+    print(move_in_branch(true))
+    print(move_in_branch(false))
+}

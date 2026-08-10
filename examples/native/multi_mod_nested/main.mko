@@ -1,0 +1,22 @@
+// Native backend: multi-module regression (issue #29 shape) — nested
+// string-field structs (ServerConfig holding HostPort) constructed, passed,
+// and read across pulled modules. Differentially validated against the C
+// backend and exercised under an allocator guard with zero leaks.
+
+pull "./model.mko" as model
+pull "./strutil.mko" as strutil
+
+fn main() {
+    let cfg = model.make_config("web", "example.com", 8080)
+    print(strutil.banner(model.describe(cfg)))
+    print_int(cfg.endpoint.port)
+
+    let moved = model.with_port(cfg, 9090)
+    print(model.describe(moved))
+    print_int(moved.endpoint.port)
+    print_int(cfg.endpoint.port)
+
+    let hp = model.make_host_port(strutil.join_host("internal", ".", "svc"), 7000)
+    print(hp.host)
+    print_int(hp.port)
+}

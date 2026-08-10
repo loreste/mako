@@ -31,6 +31,13 @@ case "$(uname -s)" in
       "$repo_dir/examples/native/native_if_expr.mko" --backend native \
       -o "$install_root/native-if-expr"
     "$install_root/native-if-expr" >/dev/null
+    # Multi-module native build from the installed prefix (pull-based pack with
+    # nested string-field structs) — guards against a stale installed runtime.
+    MAKO_RUNTIME="$install_root/share/mako/runtime" \
+      "$install_root/bin/mako" build \
+      "$repo_dir/examples/native/multi_mod_nested/main.mko" --backend native \
+      -o "$install_root/native-multi-mod"
+    "$install_root/native-multi-mod" >/dev/null
     rm -rf "$install_root"
     ;;
 esac
