@@ -261,7 +261,8 @@ fn main() {
     if argc() >= 4 {
         print(ir.skip_reason)
     }
-    let elf = elf64_lower_typed_ir(ir, ir_entry_item(source, parsed.items))
+    let drop_codes = struct_drop_code_table(build_struct_layout(source, result.tokens, parsed.items))
+    let elf = elf64_lower_typed_ir(ir, ir_entry_item(source, parsed.items), drop_codes)
     if elf.status == ELF_OK { print("elf_bytes " + format_int(len(elf.bytes))) }
     if argc() >= 3 {
         if ir.skipped_functions != 0 {

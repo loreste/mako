@@ -307,13 +307,15 @@ fn x86_slice_value_owned(instructions: []IrInstruction, value: int) bool {
 // A `[]Struct` field uses code 2 with a stride override above the slot codes:
 // up to three 10-bit entries from bit 30, each holding the slot index (low 4)
 // and the stride in slots (high 6). Without one, code 2 scales by one slot.
-fn x86_emit_drop_struct_fields(bytes: []int, slot: int, field_count: int, owned_pack: int) []int {
+fn x86_emit_drop_struct_fields(bytes: []int, slot: int, field_count: int, drop_codes: []int, base: int) []int {
  let mut out = bytes
- if owned_pack <= 0 { return out }
+ if base < 0 { return out }
  let mut i = 0
- let mut unit = 1
  while i < field_count {
-  let code = (owned_pack / unit) - ((owned_pack / unit) / 4) * 4
+  let index = base + i
+  let entry = if index >= 0 and index < len(drop_codes) { drop_codes[index] } else { 0 }
+  let code = entry / 1024
+  let stride_bytes = entry - code * 1024
   if code > 0 {
    out = x86_emit_load_rax(out, slot)
    // rax = [block + 8*i]
@@ -336,22 +338,6 @@ fn x86_emit_drop_struct_fields(bytes: []int, slot: int, field_count: int, owned_
     out = append(out, 73); out = append(out, 137); out = append(out, 192)
     out = append(out, 73); out = append(out, 139); out = append(out, 112); out = append(out, 8)
     out = append(out, 72); out = append(out, 137); out = append(out, 240)
-    let mut stride_bytes = 1
-    if code == 2 {
-     // []int: stride 8, unless a struct-slice override entry names this slot.
-     stride_bytes = 8
-     let mut override_scan = 0
-     let mut override_unit = 1073741824
-     while override_scan < 3 {
-      let entry = (owned_pack / override_unit) - ((owned_pack / override_unit) / 1024) * 1024
-      if entry >= 16 and entry - (entry / 16) * 16 == i {
-       stride_bytes = (entry / 16) * 8
-      }
-      override_unit = override_unit * 1024
-      override_scan = override_scan + 1
-     }
-    }
-    // []byte: stride 1, no scale
     out = x86_emit_scale_by_stride(out, stride_bytes)
     out = append(out, 72); out = append(out, 131); out = append(out, 192); out = append(out, 24)
     out = append(out, 72); out = append(out, 137); out = append(out, 198)
@@ -361,7 +347,6 @@ fn x86_emit_drop_struct_fields(bytes: []int, slot: int, field_count: int, owned_
     out = append(out, 15); out = append(out, 5)
    }
   }
-  unit = unit * 4
   i = i + 1
  }
  return out

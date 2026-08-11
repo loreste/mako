@@ -776,7 +776,7 @@ for package_member in z_expression z_statement z_type zz_expression_attach zz_sy
   selfhost_package="$selfhost_package,$repo_dir/compiler/$package_member.mko"
 done
 package_result="$("$stage1" "$selfhost_package")"
-if [[ "$package_result" != *"signatures 344"* ]]; then
+if [[ "$package_result" != *"signatures 345"* ]]; then
   echo "selfhost frontend gate: package signature count changed: $package_result" >&2
   exit 1
 fi

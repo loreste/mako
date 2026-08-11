@@ -1151,12 +1151,18 @@ fn ir_expression_is_field_initializer(expressions: []ExprNode, node: int) -> boo
 // its owned field slots, so the backend can release them without the struct
 // table. Minus one for everything else, which is what the field has always
 // meant for a drop.
+// The struct whose per-slot drop codes the backend should read, or -1.
+//
+// This used to return a bitmask packed into one integer, which is what capped a
+// constructible struct at 15 slots and 3 slice fields and left the compiler's
+// own aggregates untypable. The codes now live in the table
+// `struct_drop_code_table` builds, so all this has to carry is which struct.
 fn ir_drop_aux(layout: StructLayout, source: string, type_kind: int) -> int {
     if semantic_is_struct_array(type_kind) {
-        return struct_owned_slot_mask(layout, struct_kind_index(type_kind))
+        return struct_kind_index(type_kind)
     }
     if not semantic_is_struct_value(type_kind) { return -1 }
-    return struct_owned_slot_mask(layout, struct_kind_index(type_kind))
+    return struct_kind_index(type_kind)
 }
 
 // Index of the node that reads this one as an operand, or -1. Expressions are

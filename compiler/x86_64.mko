@@ -1449,7 +1449,7 @@ fn x86_emit_load_stack_param(bytes: []int, slot: int, position: int) -> []int {
 // slot arguments — register tier first, the remainder spilled to a 16-byte
 // padded outgoing area — and their displacement fields are patched after
 // layout through the returned edges.
-fn x86_lower_scalar_body(instructions: []IrInstruction, constants: []IrConstant, block: IrBlock, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_scalar_body(instructions: []IrInstruction, constants: []IrConstant, block: IrBlock, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     let start = block.instruction_start
     if start < 0 or block.terminator != start + block.instruction_count - 1 or
         block.terminator >= len(instructions) or block.successor_count != 0 {
@@ -1465,7 +1465,7 @@ fn x86_lower_scalar_body(instructions: []IrInstruction, constants: []IrConstant,
     let segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         start, start + block.instruction_count, true
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if segment.code.status != X86_OK {
         return x86_plain_body(segment.code)
     }
@@ -1487,7 +1487,7 @@ fn x86_lower_scalar_body(instructions: []IrInstruction, constants: []IrConstant,
 // allow_return is set and the instruction is the last in the range. Shared by
 // the straight-line body lowering and the branch entry prefix. Call
 // displacement fields are patched after layout through the returned edges.
-fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstant, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, start: int, end: int, allow_return: bool, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstant, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, start: int, end: int, allow_return: bool, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     let mut bytes: []int = make([]int, 0, 64)
     let mut edge_callees: []int = make([]int, 0, 2)
     let mut edge_fields: []int = make([]int, 0, 2)
@@ -2167,7 +2167,7 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
   struct_kind_fields(instruction.type_kind) < 1 {
   return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 struct drop invalid"))
  }
- bytes = x86_emit_drop_struct_fields(bytes, struct_drop_slot, struct_kind_fields(instruction.type_kind), instruction.aux)
+ bytes = x86_emit_drop_struct_fields(bytes, struct_drop_slot, struct_kind_fields(instruction.type_kind), drop_codes, instruction.aux * SEM_STRUCT_WIDTH_UNIT)
  bytes = x86_emit_drop_struct(bytes, struct_drop_slot, struct_kind_fields(instruction.type_kind))
  } else if instruction.type_kind == SEM_STRING and
   (x86_string_value_owned(instructions, call_sites, instruction.left) or
@@ -2552,7 +2552,7 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
 // bodies, and — as the general fallback — straight-line scalar bodies with
 // locals through the slot-per-value lowering. Anything else is an explicit
 // error. `callee` carries the called function's arena index (or -1) so the caller can patch displacements after layout.
-fn x86_encode_function_body(instructions: []IrInstruction, constants: []IrConstant, block: IrBlock, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_encode_function_body(instructions: []IrInstruction, constants: []IrConstant, block: IrBlock, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     let start = block.instruction_start
     if start < 0 or block.terminator != start + block.instruction_count - 1 or
         block.terminator >= len(instructions) or block.successor_count != 0 {
@@ -2725,7 +2725,7 @@ fn x86_encode_function_body(instructions: []IrInstruction, constants: []IrConsta
             }
         }
     }
-    return x86_lower_scalar_body(instructions, constants, block, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
+    return x86_lower_scalar_body(instructions, constants, block, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index, drop_codes)
 }
 
 // Encode a function whose every block ends in IR_RETURN or IR_BRANCH: an
@@ -2894,7 +2894,7 @@ fn x86_block_parameter_count(instructions: []IrInstruction, block: IrBlock) -> i
     return count
 }
 
-fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     // Slots past the fifteenth address through disp32 and the prologue takes
     // an imm32 frame, so this path is not held to the 127-value ceiling the
     // fixed shapes above document. The bound that remains keeps one frame
@@ -3044,7 +3044,7 @@ fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstan
         let segment = x86_emit_scalar_segment(
             instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
             block.instruction_start + x86_block_parameter_count(instructions, block), body_end, returns,
-            string_literals, constant_string_index
+            string_literals, constant_string_index, drop_codes
         )
         if segment.code.status != X86_OK {
             return x86_plain_body(segment.code)
@@ -3174,9 +3174,9 @@ fn x86_lower_returning_cfg(instructions: []IrInstruction, constants: []IrConstan
 // four-block loop shapes (a jump backedge) through the loop lowering, and
 // three/four-block branch shapes through the branch lowering. Anything else
 // is an explicit error.
-fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     if function.block_count == 1 {
-        return x86_encode_function_body(instructions, constants, blocks[function.entry_block], call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
+        return x86_encode_function_body(instructions, constants, blocks[function.entry_block], call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index, drop_codes)
     }
     if function.block_count >= 7 and
         x86_function_has_backedge(instructions, blocks, successors, function) and
@@ -3189,11 +3189,11 @@ fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, b
         instructions[blocks[function.entry_block + 3].terminator].op == IR_JUMP {
         // A merge-if group leading the chain: the function opens with a
         // branch and the fourth block jumps into the first header.
-        return x86_lower_pre_if_chain(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
+        return x86_lower_pre_if_chain(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index, drop_codes)
     }
     if function.block_count == 4 and
         x86_function_has_backedge(instructions, blocks, successors, function) {
-        let matched_loop = x86_lower_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, 0, false, string_literals, constant_string_index)
+        let matched_loop = x86_lower_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, 0, false, string_literals, constant_string_index, drop_codes)
         if matched_loop.code.status == X86_OK {
             return matched_loop
         }
@@ -3219,7 +3219,7 @@ fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, b
             instructions[blocks[pre_index].terminator].op == IR_JUMP and
             instructions[blocks[pre_index].terminator].left < 0 and
             instructions[blocks[pre_index].terminator].aux < 0 {
-            return x86_lower_guarded_chain(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
+            return x86_lower_guarded_chain(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index, drop_codes)
         }
     }
     if (function.block_count == 7 or
@@ -3231,7 +3231,7 @@ fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, b
         instructions[blocks[function.entry_block + 3].terminator].op == IR_JUMP {
         // A chain of sequential plain loops: the fourth block is a junction
         // (a jump), never a branch.
-        let matched_chain = x86_lower_loop_chain(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, -1, 0, false, string_literals, constant_string_index)
+        let matched_chain = x86_lower_loop_chain(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, -1, 0, false, string_literals, constant_string_index, drop_codes)
         if matched_chain.code.status == X86_OK {
             return matched_chain
         }
@@ -3249,9 +3249,9 @@ fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, b
             successors[sixth.successor_start] == function.entry_block + 1 and
             blocks[function.entry_block + 5].successor_count == 1 and
             successors[blocks[function.entry_block + 5].successor_start] == function.entry_block + 6 {
-            return x86_lower_merge_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
+            return x86_lower_merge_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index, drop_codes)
         }
-        let matched_guarded = x86_lower_guarded_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, 0, false, string_literals, constant_string_index)
+        let matched_guarded = x86_lower_guarded_loop(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, 0, false, string_literals, constant_string_index, drop_codes)
         if matched_guarded.code.status == X86_OK {
             return matched_guarded
         }
@@ -3272,7 +3272,7 @@ fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, b
     // Shape-independent fallback: any all-paths-return branch tree. Tried last
     // so every shape above keeps its existing encoding, which is what lets the
     // pinned fixture images stay byte-identical.
-    return x86_lower_returning_cfg(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
+    return x86_lower_returning_cfg(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index, drop_codes)
 }
 
 // Lower a multi-function package into one code stream: the entry bridge, then
@@ -3286,7 +3286,7 @@ fn x86_encode_function(instructions: []IrInstruction, constants: []IrConstant, b
 // helper made the whole image unbuildable. `entry_item` may be -1 when the
 // caller has no item arena to name one, in which case the uncalled rule is
 // still the best available answer.
-fn x86_lower_functions(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, string_literals: []string, constant_string_index: []int, entry_item: int) -> X86Code {
+fn x86_lower_functions(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, string_literals: []string, constant_string_index: []int, entry_item: int, drop_codes: []int) -> X86Code {
     let count = len(functions)
     let mut root = -1
     let mut i = 0
@@ -3331,7 +3331,7 @@ fn x86_lower_functions(instructions: []IrInstruction, constants: []IrConstant, b
             return x86_error(X86_UNSUPPORTED, "x86 function has an invalid block range")
         }
         offsets = append(offsets, len(code))
-        let body = x86_encode_function(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index)
+        let body = x86_encode_function(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, string_literals, constant_string_index, drop_codes)
         if body.code.status != X86_OK {
             return body.code
         }
@@ -3842,7 +3842,7 @@ fn x86_lower_branch_call_return(instructions: []IrInstruction, constants: []IrCo
 // boolean value. Arms are the usual four kinds, framed with leave; ret
 // (three-block form) or a merge jump and a shared leave; ret (four-block
 // form). This is the general form behind the tighter parameter-only entries.
-fn x86_lower_branch_scalar_entry(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_branch_scalar_entry(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     if function.parameter_count < 0 or function.parameter_count > 15 or
         (function.block_count != 3 and function.block_count != 4) or
         function.value_start < 0 or function.value_count < 1 or function.value_count > 127 {
@@ -3908,7 +3908,7 @@ fn x86_lower_branch_scalar_entry(instructions: []IrInstruction, constants: []IrC
     let segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start, prefix_end, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if segment.code.status != X86_OK {
         return x86_plain_body(segment.code)
     }
@@ -4030,7 +4030,7 @@ fn x86_function_has_backedge(instructions: []IrInstruction, blocks: []IrBlock, s
 // safety); a single parameter keeps the direct copy. The condition reuses
 // the fused compare (or boolean test) of the scalar-entry branch lowering;
 // the exit falls through to the usual scalar return sequence.
-fn x86_lower_loop(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, entry_params: int, prologue_done: bool, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_loop(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, entry_params: int, prologue_done: bool, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     if function.parameter_count < 0 or function.parameter_count > 15 or function.block_count != 4 or
         function.value_start < 0 or function.value_count < 1 or function.value_count > 127 {
         return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 loop lowering requires at most fifteen parameters, four blocks, and 127 values"))
@@ -4182,7 +4182,7 @@ fn x86_lower_loop(instructions: []IrInstruction, constants: []IrConstant, blocks
     let entry_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start + entry_params, entry.terminator, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if entry_segment.code.status != X86_OK {
         return x86_plain_body(entry_segment.code)
     }
@@ -4220,7 +4220,7 @@ fn x86_lower_loop(instructions: []IrInstruction, constants: []IrConstant, blocks
     let header_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         header.instruction_start + parameter_count, prefix_end, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if header_segment.code.status != X86_OK {
         return x86_plain_body(header_segment.code)
     }
@@ -4254,7 +4254,7 @@ fn x86_lower_loop(instructions: []IrInstruction, constants: []IrConstant, blocks
     let body_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         body.instruction_start, body.terminator, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if body_segment.code.status != X86_OK {
         return x86_plain_body(body_segment.code)
     }
@@ -4293,7 +4293,7 @@ fn x86_lower_loop(instructions: []IrInstruction, constants: []IrConstant, blocks
     let exit_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         exit.instruction_start, exit.instruction_start + exit.instruction_count, true
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if exit_segment.code.status != X86_OK {
         return x86_plain_body(exit_segment.code)
     }
@@ -4337,7 +4337,7 @@ fn x86_true_jump_byte(false_byte: int) -> int {
 // jump to the exit) or a continue (jump back to the header carrying each
 // local's value as of the guard). Copies follow the same rules as the plain
 // loop lowering: direct for one parameter, scratch slots beyond.
-fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, entry_params: int, prologue_done: bool, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, entry_params: int, prologue_done: bool, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     if function.parameter_count < 0 or function.parameter_count > 15 or
         (function.block_count != 7 and function.block_count != 8) or
         function.value_start < 0 or function.value_count < 1 or function.value_count > 127 {
@@ -4552,7 +4552,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
     let entry_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start + entry_params, entry.terminator, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if entry_segment.code.status != X86_OK {
         return x86_plain_body(entry_segment.code)
     }
@@ -4587,7 +4587,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
     let header_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         header.instruction_start + parameter_count, header_prefix_end, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if header_segment.code.status != X86_OK {
         return x86_plain_body(header_segment.code)
     }
@@ -4618,7 +4618,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
     let pre_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         pre.instruction_start, pre.terminator, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if pre_segment.code.status != X86_OK {
         return x86_plain_body(pre_segment.code)
     }
@@ -4637,7 +4637,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
     let guard_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         guard.instruction_start, guard_prefix_end, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if guard_segment.code.status != X86_OK {
         return x86_plain_body(guard_segment.code)
     }
@@ -4668,7 +4668,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
     let post_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         post.instruction_start, post.terminator, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if post_segment.code.status != X86_OK {
         return x86_plain_body(post_segment.code)
     }
@@ -4756,7 +4756,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         exit.instruction_start + (if breaking { parameter_count } else { 0 }),
         exit.instruction_start + exit.instruction_count, true
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if exit_segment.code.status != X86_OK {
         return x86_plain_body(exit_segment.code)
     }
@@ -4774,7 +4774,7 @@ fn x86_lower_guarded_loop(instructions: []IrInstruction, constants: []IrConstant
 // updates, if condition, then arm, else arm, merge, exit. The merge block's
 // leading parameters are fed by both arms; the backedge carries the merged
 // values and the straight-line updates back to the header.
-fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     if function.parameter_count < 0 or function.parameter_count > 15 or function.block_count != 8 or
         function.value_start < 0 or function.value_count < 1 or function.value_count > 127 {
         return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 merge loop requires at most fifteen parameters, eight blocks, and 127 values"))
@@ -4975,7 +4975,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     let entry_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start, entry.terminator, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if entry_segment.code.status != X86_OK {
         return x86_plain_body(entry_segment.code)
     }
@@ -5010,7 +5010,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     let header_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         header.instruction_start + parameter_count, header_prefix_end, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if header_segment.code.status != X86_OK {
         return x86_plain_body(header_segment.code)
     }
@@ -5041,7 +5041,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     let pre_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         pre.instruction_start, pre.terminator, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if pre_segment.code.status != X86_OK {
         return x86_plain_body(pre_segment.code)
     }
@@ -5059,7 +5059,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     let cond_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         cond.instruction_start, cond_prefix_end, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if cond_segment.code.status != X86_OK {
         return x86_plain_body(cond_segment.code)
     }
@@ -5095,7 +5095,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
         let arm_segment = x86_emit_scalar_segment(
             instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
             arm_block.instruction_start, arm_block.terminator, false
-        , string_literals, constant_string_index)
+        , string_literals, constant_string_index, drop_codes)
         if arm_segment.code.status != X86_OK {
             return x86_plain_body(arm_segment.code)
         }
@@ -5141,7 +5141,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     let merge_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         merge.instruction_start + merge_count, merge.terminator, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if merge_segment.code.status != X86_OK {
         return x86_plain_body(merge_segment.code)
     }
@@ -5175,7 +5175,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
     let exit_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         exit.instruction_start, exit.instruction_start + exit.instruction_count, true
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if exit_segment.code.status != X86_OK {
         return x86_plain_body(exit_segment.code)
     }
@@ -5194,7 +5194,7 @@ fn x86_lower_merge_loop(instructions: []IrInstruction, constants: []IrConstant, 
 // block (leading parameters, entry jump into the first header). The merge
 // block then plays the chain entry's role and the remainder goes through the
 // loop chain lowering.
-fn x86_lower_pre_if_chain(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_pre_if_chain(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     if function.parameter_count < 0 or function.parameter_count > 15 or function.block_count < 7 or
         function.value_start < 0 or function.value_count < 1 or function.value_count > 127 or
         function.entry_block < 0 or function.entry_block + function.block_count - 1 >= len(blocks) {
@@ -5321,7 +5321,7 @@ fn x86_lower_pre_if_chain(instructions: []IrInstruction, constants: []IrConstant
     let entry_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start, entry_prefix_end, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if entry_segment.code.status != X86_OK {
         return x86_plain_body(entry_segment.code)
     }
@@ -5357,7 +5357,7 @@ fn x86_lower_pre_if_chain(instructions: []IrInstruction, constants: []IrConstant
         let arm_segment = x86_emit_scalar_segment(
             instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
             arm_block.instruction_start, arm_block.terminator, false
-        , string_literals, constant_string_index)
+        , string_literals, constant_string_index, drop_codes)
         if arm_segment.code.status != X86_OK {
             return x86_plain_body(arm_segment.code)
         }
@@ -5411,7 +5411,7 @@ fn x86_lower_pre_if_chain(instructions: []IrInstruction, constants: []IrConstant
         chain = x86_lower_loop(
             instructions, constants, blocks, successors, call_sites, call_arguments,
             jump_arguments, functions, chain_function, merge_count, true
-        , string_literals, constant_string_index)
+        , string_literals, constant_string_index, drop_codes)
     } else if remainder >= 7 and
         blocks[function.entry_block + 6].terminator >= 0 and
         blocks[function.entry_block + 6].terminator < len(instructions) and
@@ -5419,12 +5419,12 @@ fn x86_lower_pre_if_chain(instructions: []IrInstruction, constants: []IrConstant
         chain = x86_lower_guarded_loop(
             instructions, constants, blocks, successors, call_sites, call_arguments,
             jump_arguments, functions, chain_function, merge_count, true
-        , string_literals, constant_string_index)
+        , string_literals, constant_string_index, drop_codes)
     } else if remainder >= 7 and (remainder - 1) % 3 == 0 {
         chain = x86_lower_loop_chain(
             instructions, constants, blocks, successors, call_sites, call_arguments,
             jump_arguments, functions, chain_function, -1, merge_count, true
-        , string_literals, constant_string_index)
+        , string_literals, constant_string_index, drop_codes)
     }
     if chain.code.status != X86_OK {
         return chain
@@ -5445,7 +5445,7 @@ fn x86_lower_pre_if_chain(instructions: []IrInstruction, constants: []IrConstant
 // Lower a chain of plain loops whose last loop is guarded (break/continue):
 // the plain prefix goes through the chain lowering, and the guarded group —
 // whose entry is the final junction — through the guarded-loop lowering.
-fn x86_lower_guarded_chain(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_guarded_chain(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     let plain_limit = if (function.block_count - 4) % 3 == 0 {
         (function.block_count - 4) / 3 - 1
     } else if (function.block_count - 5) % 3 == 0 {
@@ -5456,7 +5456,7 @@ fn x86_lower_guarded_chain(instructions: []IrInstruction, constants: []IrConstan
     if plain_limit < 1 {
         return x86_plain_body(x86_error(X86_UNSUPPORTED, "x86 guarded chain requires at least one plain loop before the guarded one"))
     }
-    return x86_lower_loop_chain(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, plain_limit, 0, false, string_literals, constant_string_index)
+    return x86_lower_loop_chain(instructions, constants, blocks, successors, call_sites, call_arguments, jump_arguments, functions, function, plain_limit, 0, false, string_literals, constant_string_index, drop_codes)
 }
 
 // Lower a chain of N sequential plain loops (3N+1 blocks): entry, then per
@@ -5467,7 +5467,7 @@ fn x86_lower_guarded_chain(instructions: []IrInstruction, constants: []IrConstan
 // plain_limit >= 0 only that many plain groups are validated and emitted and
 // the remainder of the function is delegated to the guarded-loop lowering
 // (a guarded last loop whose entry is the final junction).
-fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, plain_limit: int, entry_params: int, prologue_done: bool, string_literals: []string, constant_string_index: []int) -> X86Body {
+fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, blocks: []IrBlock, successors: []int, call_sites: []IrCallSite, call_arguments: []int, jump_arguments: []int, functions: []IrFunction, function: IrFunction, plain_limit: int, entry_params: int, prologue_done: bool, string_literals: []string, constant_string_index: []int, drop_codes: []int) -> X86Body {
     if function.parameter_count < 0 or function.parameter_count > 15 or
         function.block_count < 7 or (plain_limit < 0 and (function.block_count - 1) % 3 != 0) or
         function.value_start < 0 or function.value_count < 1 or function.value_count > 127 {
@@ -5608,7 +5608,7 @@ fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, 
     let entry_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         entry.instruction_start + entry_params, entry.terminator, false
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if entry_segment.code.status != X86_OK {
         return x86_plain_body(entry_segment.code)
     }
@@ -5681,7 +5681,7 @@ fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, 
         let header_segment = x86_emit_scalar_segment(
             instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
             header.instruction_start + parameter_count, header_prefix_end, false
-        , string_literals, constant_string_index)
+        , string_literals, constant_string_index, drop_codes)
         if header_segment.code.status != X86_OK {
             return x86_plain_body(header_segment.code)
         }
@@ -5711,7 +5711,7 @@ fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, 
         let body_segment = x86_emit_scalar_segment(
             instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
             body.instruction_start, body.terminator, false
-        , string_literals, constant_string_index)
+        , string_literals, constant_string_index, drop_codes)
         if body_segment.code.status != X86_OK {
             return x86_plain_body(body_segment.code)
         }
@@ -5799,7 +5799,7 @@ fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, 
         let guarded = x86_lower_guarded_loop(
             instructions, constants, blocks, successors, call_sites, call_arguments,
             jump_arguments, functions, guarded_function, 0, true
-        , string_literals, constant_string_index)
+        , string_literals, constant_string_index, drop_codes)
         if guarded.code.status != X86_OK {
             return guarded
         }
@@ -5818,7 +5818,7 @@ fn x86_lower_loop_chain(instructions: []IrInstruction, constants: []IrConstant, 
     let exit_segment = x86_emit_scalar_segment(
         instructions, constants, call_sites, call_arguments, jump_arguments, functions, function,
         exit.instruction_start, exit.instruction_start + exit.instruction_count, true
-    , string_literals, constant_string_index)
+    , string_literals, constant_string_index, drop_codes)
     if exit_segment.code.status != X86_OK {
         return x86_plain_body(exit_segment.code)
     }
@@ -6186,7 +6186,7 @@ fn x86_64_smoke_test() -> bool {
     let loop_body = x86_encode_function(
         loop_instructions, loop_constants, loop_blocks, loop_successors,
         make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), loop_function
-    , make([]string, 0, 0), make([]int, 0, 0))
+    , make([]string, 0, 0), make([]int, 0, 0), make([]int, 0, 0))
     if loop_body.code.status != X86_OK or len(loop_body.code.bytes) != 90 or len(loop_body.edge_callees) != 0 {
         return false
     }
@@ -6231,7 +6231,7 @@ fn x86_64_smoke_test() -> bool {
         loop_instructions, loop_constants, loop_blocks, loop_successors,
         make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0),
         make([]IrFunction, 0, 0), loop_function,
-        make([]string, 0, 0), make([]int, 0, 0)
+        make([]string, 0, 0), make([]int, 0, 0), make([]int, 0, 0)
     )
     if general_loop.code.status != X86_OK {
         return false
@@ -6303,7 +6303,7 @@ fn x86_64_smoke_test() -> bool {
         swap_instructions, loop_constants, swap_blocks, loop_successors,
         make([]IrCallSite, 0, 0), make([]int, 0, 0), swap_jump_arguments,
         make([]IrFunction, 0, 0), swap_function,
-        make([]string, 0, 0), make([]int, 0, 0)
+        make([]string, 0, 0), make([]int, 0, 0), make([]int, 0, 0)
     ).code.status != X86_UNSUPPORTED {
         return false
     }
@@ -6318,7 +6318,7 @@ fn x86_64_smoke_test() -> bool {
     let bad_loop = x86_lower_loop(
         loop_instructions, loop_constants, loop_blocks, forward_successors,
         make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), loop_function, 0, false
-    , make([]string, 0, 0), make([]int, 0, 0))
+    , make([]string, 0, 0), make([]int, 0, 0), make([]int, 0, 0))
     if bad_loop.code.status != X86_UNSUPPORTED {
         return false
     }
@@ -6365,7 +6365,7 @@ fn x86_returning_cfg_smoke_test() -> bool {
     let body = x86_lower_returning_cfg(
         ir, pool, cfg_blocks, cfg_successors,
         make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), cfg_function,
-        make([]string, 0, 0), make([]int, 0, 0)
+        make([]string, 0, 0), make([]int, 0, 0), make([]int, 0, 0)
     )
     if body.code.status != X86_OK {
         return false
@@ -6420,7 +6420,7 @@ fn x86_returning_cfg_smoke_test() -> bool {
     if x86_lower_returning_cfg(
         param_ir, pool, param_blocks, cfg_successors,
         make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), cfg_function,
-        make([]string, 0, 0), make([]int, 0, 0)
+        make([]string, 0, 0), make([]int, 0, 0), make([]int, 0, 0)
     ).code.status != X86_UNSUPPORTED {
         return false
     }
@@ -6432,7 +6432,7 @@ fn x86_returning_cfg_smoke_test() -> bool {
     if x86_lower_returning_cfg(
         ir, pool, cfg_blocks, escaping,
         make([]IrCallSite, 0, 0), make([]int, 0, 0), make([]int, 0, 0), make([]IrFunction, 0, 0), cfg_function,
-        make([]string, 0, 0), make([]int, 0, 0)
+        make([]string, 0, 0), make([]int, 0, 0), make([]int, 0, 0)
     ).code.status != X86_UNSUPPORTED {
         return false
     }

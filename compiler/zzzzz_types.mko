@@ -341,7 +341,14 @@ fn build_struct_layout(source: string, tokens: []Token, items: []TopItem) -> Str
             // The drop mask packs 2 bits per slot plus bounded stride overrides
             // (see `struct_owned_slot_mask`); past those bounds a struct stays
             // inconstructible rather than dropping with a truncated mask.
-            let maskable = count <= 15 and slice_fields <= 3
+            // Was `count <= 15 and slice_fields <= 3`, which is what one packed
+            // integer could describe: 15 slots at 2 bits plus 3 stride overrides
+            // at 10 bits. The codes moved to `struct_drop_code_table`, so the
+            // only limit left is the type encoding's own field width. The
+            // compiler's TypedIr (16 slots, 5 slice fields) and TypeInference
+            // (21) sat just past the old bound, so every call returning one was
+            // refused and 22 functions declined on it.
+            let maskable = count < SEM_STRUCT_WIDTH_UNIT
             name_start = append(name_start, item.name_start)
             name_end = append(name_end, item.name_end)
             field_start = append(field_start, start)
@@ -419,6 +426,56 @@ fn struct_layout_constructible(layout: StructLayout, source: string, name: strin
         i = i + 1
     }
     return -1
+}
+
+// Per-slot drop descriptors for every struct, flat, `SEM_STRUCT_WIDTH_UNIT`
+// entries per struct so slot `i` of struct `s` is at `s * SEM_STRUCT_WIDTH_UNIT + i`.
+//
+// This replaces the packed mask `struct_owned_slot_mask` builds. That mask had
+// to fit one integer — 15 slots at 2 bits plus 3 stride overrides at 10 bits —
+// which is why a struct wider than 15 slots, or with a fourth slice field, was
+// inconstructible and every call returning one was refused. The compiler's own
+// TypedIr (16 slots, 5 slice fields) sat just past it.
+//
+// Each entry is `code * 1024 + stride_bytes`, which the backend splits again:
+//
+//   code 0  not owned
+//   code 1  string        — freed by length
+//   code 2  slice header  — freed by capacity * stride_bytes
+//
+// `[]int` is stride 8 and `[]byte` stride 1, so the byte case no longer needs a
+// code of its own; a slice of structs carries its own width the same way, so the
+// separate override list disappears with the mask. `[]string` becomes
+// expressible for the first time — the 2-bit field had all four codes taken.
+fn struct_drop_code_table(layout: StructLayout) -> []int {
+    let count = len(layout.field_start)
+    let mut table: []int = make([]int, count * SEM_STRUCT_WIDTH_UNIT, count * SEM_STRUCT_WIDTH_UNIT)
+    let mut fill = 0
+    while fill < len(table) {
+        table[fill] = 0
+        fill = fill + 1
+    }
+    let mut s = 0
+    while s < count {
+        let mut i = 0
+        while i < layout.field_count[s] and i < SEM_STRUCT_WIDTH_UNIT {
+            let field_type = layout.slot_type[layout.field_start[s] + i]
+            let mut entry = 0
+            if field_type == SEM_STRING { entry = 1024 }
+            if field_type == SEM_ARRAY_INT { entry = 2048 + 8 }
+            if field_type == SEM_ARRAY_FLOAT { entry = 2048 + 8 }
+            if field_type == SEM_ARRAY_BOOL { entry = 2048 + 8 }
+            if field_type == SEM_ARRAY_BYTE { entry = 2048 + 1 }
+            if field_type == SEM_ARRAY_STRING { entry = 2048 + 8 }
+            if semantic_is_struct_array(field_type) {
+                entry = 2048 + struct_kind_fields(field_type) * 8
+            }
+            table[s * SEM_STRUCT_WIDTH_UNIT + i] = entry
+            i = i + 1
+        }
+        s = s + 1
+    }
+    return table
 }
 
 // Slots of a struct that own storage and therefore need their own drop.

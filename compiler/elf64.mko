@@ -161,12 +161,12 @@ fn elf64_add_image(lhs: int, rhs: int) -> ElfImage {
 // four blocks) whose arms produce integer constants. The complete instruction
 // stream is validated by the x86 lowering before the image is produced; all
 // other IR shapes remain rejected.
-fn elf64_lower_typed_ir(ir: TypedIr, entry_item: int) -> ElfImage {
+fn elf64_lower_typed_ir(ir: TypedIr, entry_item: int, drop_codes: []int) -> ElfImage {
     if len(ir.functions) == 0 {
         return elf_error("ELF lowering requires at least one function")
     }
     if len(ir.functions) > 1 {
-        let code = x86_lower_functions(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.string_literals, ir.constant_string_index, entry_item)
+        let code = x86_lower_functions(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.string_literals, ir.constant_string_index, entry_item, drop_codes)
         if code.status != X86_OK {
             return elf_error(code.error)
         }
@@ -174,7 +174,7 @@ fn elf64_lower_typed_ir(ir: TypedIr, entry_item: int) -> ElfImage {
     }
     if len(ir.blocks) >= 4 and
         x86_function_has_backedge(ir.instructions, ir.blocks, ir.successors, ir.functions[0]) {
-        let looped = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index)
+        let looped = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index, drop_codes)
         if looped.code.status != X86_OK {
             return elf_error(looped.code.error)
         }
@@ -187,7 +187,7 @@ fn elf64_lower_typed_ir(ir: TypedIr, entry_item: int) -> ElfImage {
     if len(ir.blocks) == 3 or len(ir.blocks) == 4 {
         if len(ir.blocks) == 4 and
             x86_function_has_backedge(ir.instructions, ir.blocks, ir.successors, ir.functions[0]) {
-            let looped = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index)
+            let looped = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index, drop_codes)
             if looped.code.status != X86_OK {
                 return elf_error(looped.code.error)
             }
@@ -205,7 +205,7 @@ fn elf64_lower_typed_ir(ir: TypedIr, entry_item: int) -> ElfImage {
         if ir.functions[0].parameter_count > 1 {
             return elf_error("ELF root function takes at most one parameter")
         }
-        let branch = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index)
+        let branch = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index, drop_codes)
         if branch.code.status != X86_OK {
             return elf_error(branch.code.error)
         }
@@ -222,7 +222,7 @@ fn elf64_lower_typed_ir(ir: TypedIr, entry_item: int) -> ElfImage {
         if ir.functions[0].parameter_count > 1 {
             return elf_error("ELF root function takes at most one parameter")
         }
-        let general = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index)
+        let general = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, ir.functions[0], ir.string_literals, ir.constant_string_index, drop_codes)
         if general.code.status != X86_OK {
             return elf_error(general.code.error)
         }
@@ -258,7 +258,7 @@ fn elf64_lower_typed_ir(ir: TypedIr, entry_item: int) -> ElfImage {
     if function.parameter_count > 1 {
         return elf_error("ELF root function takes at most one parameter")
     }
-    let scalar = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, function, ir.string_literals, ir.constant_string_index)
+    let scalar = x86_encode_function(ir.instructions, ir.constants, ir.blocks, ir.successors, ir.call_sites, ir.call_arguments, ir.jump_arguments, ir.functions, function, ir.string_literals, ir.constant_string_index, drop_codes)
     if scalar.code.status != X86_OK {
         return elf_error(scalar.code.error)
     }
@@ -313,7 +313,7 @@ fn elf64_smoke_test() -> bool {
         expression_values: make([]int, 0, 0), value_count: 1,
         skipped_functions: 0, skip_reason: "", ok: true, error: "",
     }
-    let lowered = elf64_lower_typed_ir(ir, -1)
+    let lowered = elf64_lower_typed_ir(ir, -1, make([]int, 0, 0))
     if lowered.status != ELF_OK or len(lowered.bytes) != 132 {
         return false
     }
@@ -352,7 +352,7 @@ fn elf64_smoke_test() -> bool {
         expression_values: make([]int, 0, 0), value_count: 4,
         skipped_functions: 0, skip_reason: "", ok: true, error: "",
     }
-    let branch_image = elf64_lower_typed_ir(branch_ir, -1)
+    let branch_image = elf64_lower_typed_ir(branch_ir, -1, make([]int, 0, 0))
     return branch_image.status == ELF_OK and len(branch_image.bytes) == 153 and
         branch_image.bytes[120] == 139 and branch_image.bytes[123] == 232 and
         branch_image.bytes[137] == 133 and branch_image.bytes[142] == 42 and
