@@ -34,16 +34,50 @@ not by raw count.
 
 ---
 
-## W1 — Call result types (22)
+## W1 — Call result types (22) — root-caused: struct drop-mask width
 
     CFG lowering needs a known type for this call
 
-The largest genuine cause. The lowerer will not emit a call whose result type it
-cannot name. Since 49 more functions are blocked behind *some* callee, this is
-also the most likely single unlock for the cascade.
+**This is not a type-inference gap.** Traced end to end:
 
-Start by grouping the 22 by callee: if they concentrate on a few signatures, this
-is a resolution gap for particular return shapes rather than a general problem.
+    call result type <- semantic_declared_type(signature.result_type)
+                     <- named struct -> struct_layout_constructible(name)
+                     <- layout.constructible[i] = one_slot and maskable
+                     <- maskable = count <= 15 and slice_fields <= 3
+
+A struct is only constructible if its drop mask fits, and the mask is packed
+into a single int: 15 slots x 2 bits (bits 0-29) plus 3 stride overrides x 10
+bits (bits 30-59). The compiler's own aggregates exceed that, so their declared
+type is SEM_UNKNOWN and every call returning one is refused.
+
+`TypedIr` fails on three counts at once:
+
+| limit | cap | TypedIr |
+|---|---|---|
+| flattened slots | 15 | 16 |
+| struct-slice fields (overrides) | 3 | 5 |
+| `[]string` field | no code exists | `string_literals` encodes as *not owned* |
+
+The 2-bit code space is already full — 0 none, 1 `SEM_STRING`, 2 `SEM_ARRAY_INT`,
+3 `SEM_ARRAY_BYTE` — so `[]string` cannot be added without a third bit per slot.
+And the budget is spent: 20 slots plus 3 overrides needs 70 bits. There is no
+cap raise that fits; `TypeInference` (21 fields) is worse than `TypedIr`.
+
+Checked for a cheap subset and there isn't one: `IrVerification` (4 fields) and
+`LexResult` (5) are already constructible, so the blocked calls are exactly the
+ones returning the large aggregates.
+
+**The fix is a representation change**: carry a descriptor index in the drop
+instruction's `aux` and hold the real per-slot codes in a side table, instead of
+packing a bitmask into one integer. Consumers are few —
+`struct_owned_slot_mask` (produces), `ir_drop_aux` (passes through), and
+`x86_emit_drop_struct_fields` (decodes) — but every struct drop changes, so many
+pinned images move and each must be executed on Linux before it is re-pinned.
+
+**Why it is still first.** It is the one item that plausibly clears the 49-strong
+cascade as well as its own 22 — up to 71 of 169, ~42% of the backlog — and
+self-hosting cannot happen without it: a compiler that cannot compile its own
+core types cannot compile itself.
 
 ## W2 — If/return shape (40 across four reasons)
 
