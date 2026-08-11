@@ -205,3 +205,26 @@ for `SEM_ARRAY_STRING`, which a table can represent and a 2-bit field cannot.
 pinned images move. Each moved image must be executed on Linux before it is
 re-pinned — this is the exact failure mode that let `argc()` return 0 and
 `i + i` read uninitialised stack behind matching hashes.
+
+### W1 branch status (w1-drop-descriptor) — one known bug
+
+The 111-byte shrink in `elf_make_owned_struct_slice_exit` is a defect in the
+branch, not a saving. Disassembling both images: the pre-change one emits ~25
+more instructions ending in a `munmap` — slice header, element block, string
+field — which is the per-element string drop for a slice of structs. The table
+version does not emit it.
+
+It looked harmless because `make([]HostPort, 1, 1)` zero-initialises, so the
+string field is NULL and the old drop was a runtime no-op; both images show the
+same 1 mmap / 0 munmap. A *populated* struct slice would leak.
+
+So the table lookup returns no code where the mask returned one, on the
+struct-slice element path specifically — the struct-value path is fine, which is
+why every struct fixture stayed byte-identical under the transport change alone.
+Likely suspects, in order: whether `struct_kind_index` on an *array* kind
+indexes the table the same way it indexed the mask, and whether the drop site's
+base (`aux * SEM_STRUCT_WIDTH_UNIT`) is right when `type_kind` is the array kind
+rather than the value kind.
+
+Fix that, re-check the image against the pre-change disassembly, then run the
+full Linux gate before merging.
