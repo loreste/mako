@@ -1,0 +1,37 @@
+// Native backend: a `StrBuilder` field inside a struct.
+//
+// KNOWN LEAK — 112 bytes (the builder shell plus its buffer). Deliberately
+// outside the zero-leak fixture set; it is here so the behaviour is executed
+// and recorded rather than silently unexercised.
+//
+// Why it leaks, and why it is not simply "fixed":
+//
+//   * `Builder` is a shared handle (`is_shared_handle`), where clone is
+//     identity. A by-value struct copy therefore aliases one builder, so a
+//     per-copy destructor free is a double free — that is what crashed
+//     json_mako_test and why 07cc81f removed `IrType::Builder` from
+//     `emit_struct_drop`.
+//   * With no destructor free, a builder created directly into a struct field
+//     has no owner of record, so nothing releases it. That is this leak.
+//   * `mako_str_builder_string()` does not release the builder either: it
+//     copies the bytes into a fresh string and leaves the shell and buffer
+//     intact. (`mako_str_builder_finish()` is the one that steals the buffer
+//     and frees the shell.) So the fix is not "let builder_string consume it".
+//
+// Closing this needs an owner-of-record for shared handles held in aggregates
+// — refcounting, or a move into the struct that transfers the sole owner —
+// not another destructor tweak. Reinstating the destructor free trades this
+// leak for a double-free crash, which is the worse failure.
+
+struct Acc {
+    buf: StrBuilder
+    tag: int
+}
+
+fn main() {
+    let a = Acc { buf: str_builder(), tag: 4 }
+    builder_write(a.buf, "ma")
+    builder_write(a.buf, "ko")
+    print(builder_string(a.buf))
+    print_int(a.tag)
+}

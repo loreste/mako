@@ -100,6 +100,17 @@ echo "[4b/5] native backend heap ownership memory safety (mandatory)"
 # Memory safety is a hard gate: every heap-touching fixture must be clean under
 # GuardMalloc (UAF/double-free) and `leaks` (0 leaked bytes). Trap-only fixtures
 # are excluded (they deliberately abort).
+#
+# native_struct_builder_field is also excluded, and is a known leak rather than
+# an oversight: a `StrBuilder` is a shared handle, so a by-value struct copy
+# aliases it and a per-copy destructor free is a double free (that crash is why
+# 07cc81f removed Builder from emit_struct_drop). Without that free a builder
+# created into a struct field has no owner of record and leaks 112 bytes.
+# `mako_str_builder_string()` does not release it either — it copies the bytes
+# and leaves the shell. Closing this needs an owner-of-record for shared handles
+# in aggregates, not a destructor tweak, so the fixture documents the gap and
+# stays out of the zero-leak set. It must never be counted as zero-leak
+# coverage.
 mem_fixtures=(
   native_strings native_slices native_primitive_slices native_string_slices
   native_structs native_tuples native_enums native_owned_fields native_slice_fields

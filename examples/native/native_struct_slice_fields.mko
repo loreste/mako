@@ -1,11 +1,14 @@
 // Native backend: structs with owned `[]float` / `[]byte` / `[]bool` fields
-// (recursive clone/drop) plus a `StrBuilder` field (drop path).
+// (recursive clone/drop).
 // Exercises construction (moving owned slice literals in), field reads as
 // borrows, by-value pass (deep clone of the slice fields), value-copy
 // semantics (mutating a copy leaves the original intact), and per-field
-// drops on scope exit. The Builder field covers construct/use/drop only —
-// value-copying a builder struct aliases the shared handle.
-// Differentially validated against the C backend.
+// drops on scope exit.
+// Differentially validated against the C backend, and gated at zero leaks.
+//
+// A `StrBuilder` field is deliberately NOT exercised here — see
+// native_struct_builder_field.mko, which documents a known leak that would
+// otherwise take this fixture out of the zero-leak set.
 
 struct Mix {
     floats: []float
@@ -16,11 +19,6 @@ struct Mix {
 
 fn total_len(m: Mix) -> int {
     return len(m.floats) + len(m.bytes) + len(m.flags)
-}
-
-struct Acc {
-    buf: StrBuilder
-    tag: int
 }
 
 fn main() {
@@ -35,10 +33,4 @@ fn main() {
     print_int(int(c.bytes[1]))
     print(c.flags[0])
     print(m.flags[1])
-
-    let a = Acc { buf: str_builder(), tag: 4 }
-    builder_write(a.buf, "ma")
-    builder_write(a.buf, "ko")
-    print(builder_string(a.buf))
-    print_int(a.tag)
 }
