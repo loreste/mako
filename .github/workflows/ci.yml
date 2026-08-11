@@ -379,6 +379,23 @@ jobs:
         env:
           MAKO_RUNTIME: ${{ github.workspace }}/runtime
 
+      # Runs after the gate so stage 1 is already built at /tmp/makoc-stage1.
+      # Gates only on the emitted images being self-contained; the toolchain's
+      # remaining third-party surface is reported, not enforced, so the number
+      # is visible on every run instead of surfacing at cutover.
+      - name: Purity audit (emitted artifacts self-contained)
+        run: ./scripts/audit-purity.sh
+        env:
+          MAKO_RUNTIME: ${{ github.workspace }}/runtime
+
+      - name: Upload purity attestation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: purity-attestation
+          path: purity-attestation.json
+          if-no-files-found: ignore
+
   cross-smoke:
     name: Cross-compile artifacts (Windows + Linux musl + WASI)
     runs-on: ubuntu-latest
