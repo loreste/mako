@@ -1649,7 +1649,7 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
                     // The first owned-field element is cloned field-by-field;
                     // raw struct copying would alias its string allocations.
                     bytes = x86_emit_append_owned_struct(bytes, prev_slot, elem_slot,
-                        slot, array_stride, struct_kind_fields(instruction.type_kind), instruction.aux)
+                        slot, array_stride, struct_kind_fields(instruction.type_kind), drop_codes, instruction.aux * SEM_STRUCT_WIDTH_UNIT)
                 } else {
                     bytes = x86_emit_append_byte_grow(bytes, prev_slot, elem_slot, slot, array_stride, array_value_is_pointer)
                 }
@@ -2156,7 +2156,7 @@ fn x86_emit_scalar_segment(instructions: []IrInstruction, constants: []IrConstan
                 }
  if instruction.aux > 0 and semantic_is_struct_array(instruction.type_kind) {
   bytes = x86_emit_drop_owned_struct_slice_once(bytes, drop_slot, x86_slice_element_size(instruction.type_kind),
-   struct_kind_fields(instruction.type_kind), instruction.aux)
+   struct_kind_fields(instruction.type_kind), drop_codes, instruction.aux * SEM_STRUCT_WIDTH_UNIT)
  } else {
   bytes = x86_emit_drop_byte_slice(bytes, drop_slot, x86_slice_element_size(instruction.type_kind))
  }
