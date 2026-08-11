@@ -251,3 +251,48 @@ byte-stable wrong image. The six other `break` fixtures must keep their exact
 current pins; if any moves, the change altered a shape it should not have.
 Re-run the mmap/munmap balance block too: new blocks and parameters change
 allocation counts, and those numbers are measurements, not expectations.
+
+## Owned struct slices (refused: codegen corruption, not an ownership nit)
+
+Stage 1 refuses a slice whose element struct owns storage — `ir_cfg_bindable_type`
+rejects a struct-array type whose element carries an owned slot, which covers
+the literal, `make` and `append` paths at one point. Six fixtures had pinned
+this capability by image hash and none had ever been executed; all five that
+reached the executed table segfault.
+
+### What the failing image actually does
+
+Removing the refusal and running `elf_owned_struct_slice_literal_exit` on Linux:
+
+    mmap 24 ; mmap 21 ; mmap 16 ; mmap 56 ; munmap(<the 24-byte block>)
+    SIGSEGV si_addr=0xffffffffffffffd0
+
+and under gdb at the fault:
+
+    rsp  0xffffffffffffffff
+    => or  -0x39(%rax),%cl
+       ret $0x3
+
+`rsp` is -1 and the decoded instructions are nonsense, so control has left real
+code and is executing data; `si_addr` is -48, a read below that destroyed
+stack. This is **stack/control-flow corruption produced by the emitter**, not a
+missing drop or a double free. Treat it accordingly: the refusal is the correct
+state until the emitted code is proven, and it must not be relaxed on the
+strength of an ownership-only fix.
+
+Two facts worth keeping when picking this up:
+
+* The 24-byte block — slice-header shaped (`ptr,len,cap`) — is released while
+  three later allocations are still live, so ordering of the construction and
+  its cleanup is suspect.
+* String literals are emitted inline in the code stream: `lea rax,[rip+N]`
+  addresses an 8-byte length followed by the bytes, and a `jmp` steps over the
+  data. Any path that mis-sizes that jump, or that reaches the literal without
+  going through the `lea`, lands the CPU in the literal — which is exactly the
+  "executing data" signature above. The inline block in this image looked
+  correctly sized, so the fault is further in and the disassembler desyncs on
+  the data; resync from a known boundary rather than reading objdump straight
+  through.
+
+`make` + `append` of the same element type fails the same way, so the fix
+belongs in the shared struct-slice element path, not in the literal path alone.
