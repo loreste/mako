@@ -312,3 +312,44 @@ Two facts worth keeping when picking this up:
 
 `make` + `append` of the same element type fails the same way, so the fix
 belongs in the shared struct-slice element path, not in the literal path alone.
+
+### Loop-exit block parameters: mechanical steps
+
+Everything below was read out of `ir_cfg_lower_range`; the shape is settled and
+what remains is execution plus the gate.
+
+1. **Add one list-parallel array**, `list_trampoline` (loop index, else -1).
+   Lists carry 8 parallel arrays — `list_start`, `list_count`, `scope_start`,
+   `scope_count`, `list_bindings_start` (+ a snapshot of `owned_locals` into
+   `list_bindings`), `list_loop_header`, `list_loop_back`, `list_loop_exit` —
+   and every push must stay in step. There are 8 `list_loop_exit = append`
+   sites; each needs the matching `list_trampoline` append or the arrays skew
+   and every later list is misread.
+
+2. **Header lowering** — after emitting the header's block parameters, append a
+   trampoline list carrying the loop index, and point the header's false
+   successor at `entry_block + <that list's position>` instead of
+   `loop_exit_block[...]`. The true successor stays `loop_body_block[...]`.
+
+3. **Worklist** — when `list_trampoline[list_index] >= 0`, emit only a jump
+   carrying `loop_params[...]` for that loop, with `loop_exit_block[...]` as
+   the single successor, then close the block. Use the same encoding as the
+   loop entry edge: one carried local travels in `left` with the parameter's
+   type, anything wider through the `jump_arguments` arena via `aux`. The
+   verifier rejects the wide form for a one-parameter target.
+
+4. **Exit list** — emit an `IR_BLOCK_PARAM` per carried local at the head of
+   the block and bind each carried local to its own parameter, replacing the
+   `owned_locals[carried] = loop_params[...]` restore.
+
+5. **Break** — jump to `loop_exit_block[...]` carrying the values held at the
+   break, in the same encoding, instead of publishing into `loop_params` and
+   emitting an argument-less jump. The refusal added for the stale-carry case
+   then has nothing left to catch on this path; keep it for shapes this does
+   not cover so unsupported input still fails closed.
+
+Order the work so the tree stays green: land steps 1–3 first (a trampoline that
+forwards the header parameters is behaviour-preserving, and every pin should be
+unchanged — if any moves, the edge is wired wrong), then steps 4–5 together,
+which is where pins legitimately move and where each moved image must be
+executed on Linux before it is re-pinned.
