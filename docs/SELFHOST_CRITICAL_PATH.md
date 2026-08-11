@@ -242,10 +242,13 @@ it reaches the exit parameters through a trampoline because a two-successor
    `loop_exit_block = entry_block + header_list + 2`. Splicing a block in
    shifts every one of those. Appending a trampoline list the way the if-arm
    lists are appended gives it a block index for free and leaves the invariant
-   intact; the header's false successor then names that list's block. Confirm
-   the worklist tolerates a list appended during header lowering before
-   building on this — arm lists are appended during *body* lowering, which is
-   not quite the same position.
+   intact; the header's false successor then names that list's block.
+
+   Verified: the worklist is `while list_index < len(list_start)`, so its
+   bound is re-read every iteration and a list appended mid-pass is picked up.
+   The trampoline lands at a higher index than the exit list and so is emitted
+   after it, which is harmless — a jump only needs the target's block index to
+   line up, not to precede it.
 3. Each `break` edge jumps directly to the exit block, carrying the values it
    holds at that point — which is what step 2 above already computes, so the
    publish into `loop_params` becomes the jump argument list instead.
