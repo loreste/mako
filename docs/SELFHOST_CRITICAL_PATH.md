@@ -197,3 +197,57 @@ missing or exceeds the bounded drop-mask representation.
 - Port features by growing Rust product surface  
 - Update pins without a byte-level reason  
 - Claim full self-host before fixed-point + purity audit  
+
+## Loop-exit block parameters (roadmap item 5)
+
+Stage 1 currently **refuses** a `break` that leaves a loop after the body has
+already reassigned a local the loop header tests. The refusal is in the CFG
+break lowering and reports "CFG lowering break after a carried-local update
+needs a loop-exit parameter". It replaced a miscompile: the emitted image
+exited 4 where the stage-0 oracle exited 5, and the gate's hash pin held that
+wrong image because nothing had ever executed it.
+
+### Why it is wrong today
+
+Three mechanisms interact, and their ordering is the defect:
+
+1. Lowering the header points the exit list's binding snapshot at the *header*
+   block parameter: `list_bindings[exit_list + carried] = param_value`.
+2. A `break` publishes the values it holds: `loop_params[...] = owned_locals[...]`.
+3. Processing the exit list restores `owned_locals[carried] = loop_params[...]`.
+
+A `break` inside `if cond { break }` lives in an arm list that is appended
+*while the body is being processed*, so its index is higher than the exit
+list's. The exit list is therefore processed **before** the break publishes,
+and step 3 reads the header parameter — the value from the top of the
+iteration. A single `loop_params` slot per carried local cannot describe two
+different exit edges (condition-false and break), whatever the order.
+
+### The shape that fixes it
+
+The seq/guarded-chain path already builds this and can be used as the model —
+it reaches the exit parameters through a trampoline because a two-successor
+`IR_BRANCH` cannot carry jump arguments.
+
+1. Give the loop-exit block its own `IR_BLOCK_PARAM` per carried local.
+2. Insert a trampoline block on the header's false edge whose only instruction
+   is a `IR_JUMP` carrying the header parameter values to the exit block.
+   The header branches to `[body, trampoline]` instead of `[body, exit]`.
+3. Each `break` edge jumps directly to the exit block, carrying the values it
+   holds at that point — which is what step 2 above already computes, so the
+   publish into `loop_params` becomes the jump argument list instead.
+4. Bind the exit list's carried locals to the exit block's parameters rather
+   than the header's, and drop the `loop_params` restore for that path.
+5. Keep the refusal as the fallback for any shape the above cannot express, so
+   an unsupported loop still fails closed rather than emitting a stale read.
+
+### Proving it
+
+`elf_loop_guard_print_exit.mko` is the regression: it must lower again, print
+1..4, and exit 5 against the stage-0 oracle. Move it back from the refusal
+assertion into the executed capability table with a fresh pin, and re-pin only
+after the image has been executed on Linux — its previous pin was a
+byte-stable wrong image. The six other `break` fixtures must keep their exact
+current pins; if any moves, the change altered a shape it should not have.
+Re-run the mmap/munmap balance block too: new blocks and parameters change
+allocation counts, and those numbers are measurements, not expectations.
