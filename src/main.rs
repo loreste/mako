@@ -5383,18 +5383,13 @@ fn discover_std_dir() -> Option<PathBuf> {
             return Some(p);
         }
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(bin_dir) = exe.parent() {
-            for candidate in [
-                bin_dir.join("../share/mako/std"),
-                bin_dir.join("../../share/mako/std"),
-            ] {
-                if candidate.join("strings/strings.mko").exists() {
-                    return Some(candidate.canonicalize().unwrap_or(candidate));
-                }
-            }
-        }
-    }
+    // Checkout before install, matching `find_std_root` and
+    // `runtime_include_dir`. This resolver had the two the other way round, so
+    // inside a checkout one code path used the tree's std while this one used
+    // whatever was installed under share/mako. A std older than the checkout
+    // then reported a pack as missing — `import "dtls": not found` — while the
+    // same pack sat in the tree, and nothing in the message suggested which
+    // std had been searched.
     if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
         let p = PathBuf::from(manifest).join("std");
         if p.join("strings/strings.mko").exists() {
@@ -5405,6 +5400,18 @@ fn discover_std_dir() -> Option<PathBuf> {
         let p = cwd.join("std");
         if p.join("strings/strings.mko").exists() {
             return Some(p);
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            for candidate in [
+                bin_dir.join("../share/mako/std"),
+                bin_dir.join("../../share/mako/std"),
+            ] {
+                if candidate.join("strings/strings.mko").exists() {
+                    return Some(candidate.canonicalize().unwrap_or(candidate));
+                }
+            }
         }
     }
     dirs_home_share_mako_std()
