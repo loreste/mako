@@ -159,3 +159,49 @@ Ratchets, so progress cannot silently reverse:
   — the pins are hashes, and a byte-stable image can still be wrong.
 * Peak RSS must not regress more than 10%; the package run is at 8.44 GB and is
   a gating item for the fixed point, not a cleanup.
+
+### W1 implementation: two routes, measured
+
+The backend needs per-slot drop codes for a struct it can already identify —
+`struct_kind_index(instruction.type_kind)` names it at the drop site. The layout
+already holds the codes as `layout.slot_type[layout.field_start[i] + slot]`, so
+no new table has to be computed; only transported. Two ways to transport it,
+with real blast radius:
+
+**Route A — thread the layout arrays to the backend.**
+Pass `slot_type` and `field_start` from `main.mko` (which has `source`, tokens
+and items, so it can call `build_struct_layout`) into
+`elf64_lower_typed_ir`, then down to the drop site. Honest cost:
+
+    x86_emit_scalar_segment   27 call sites
+    x86_lower_scalar_body      2
+    x86_encode_function_body   2
+    x86_lower_functions        2
+    x86_emit_drop_struct_fields 2
+    elf64_lower_typed_ir + main  2
+
+~35 edit points across four files. Every one is mechanical and a missed one is
+a build error, not a silent bug — but it is a large single change.
+
+**Route B — carry the codes in the existing `constants` arena.**
+`constants` is already threaded to the drop site, so nothing new is passed.
+Emit the per-struct code runs into the arena and let `ir_drop_aux` return the
+run's index instead of a packed mask. Roughly five edits instead of thirty-five.
+
+The catch is pin churn: `ir_constants` appears in every pinned fixture summary,
+so adding entries moves fixtures that have no structs at all. Placing the table
+at the end of the arena keeps existing indices stable but leaves `ir_drop_aux`
+unable to compute the base, which is the thing that makes Route B cheap. Worth
+resolving before choosing — if the base can be derived (for instance by
+emitting the table only when the layout has an owned-field struct, and passing
+its base once), Route B is much the smaller change.
+
+**Either way**, the last step is the same and is where the value is: relax
+`maskable` in `build_struct_layout` from `count <= 15 and slice_fields <= 3` to
+the type encoding's own limit (`count < SEM_STRUCT_WIDTH_UNIT`), and add a code
+for `SEM_ARRAY_STRING`, which a table can represent and a 2-bit field cannot.
+
+**Verification is not optional here.** Every struct drop changes shape, so many
+pinned images move. Each moved image must be executed on Linux before it is
+re-pinned — this is the exact failure mode that let `argc()` return 0 and
+`i + i` read uninitialised stack behind matching hashes.
