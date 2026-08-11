@@ -230,9 +230,22 @@ it reaches the exit parameters through a trampoline because a two-successor
 `IR_BRANCH` cannot carry jump arguments.
 
 1. Give the loop-exit block its own `IR_BLOCK_PARAM` per carried local.
-2. Insert a trampoline block on the header's false edge whose only instruction
-   is a `IR_JUMP` carrying the header parameter values to the exit block.
-   The header branches to `[body, trampoline]` instead of `[body, exit]`.
+2. Add a trampoline on the header's false edge whose only instruction is an
+   `IR_JUMP` carrying the header parameter values to the exit block. The header
+   branches to `[body, trampoline]` instead of `[body, exit]`.
+
+   It must be introduced **as a list, appended like an arm list**, not as a
+   bare block. `ir_cfg_lower_range` holds the invariant stated at its top —
+   "a list's block index is entry_block + its position in the list array" —
+   and 44 sites derive block indices from it positionally, including
+   `loop_body_block = entry_block + header_list + 1` and
+   `loop_exit_block = entry_block + header_list + 2`. Splicing a block in
+   shifts every one of those. Appending a trampoline list the way the if-arm
+   lists are appended gives it a block index for free and leaves the invariant
+   intact; the header's false successor then names that list's block. Confirm
+   the worklist tolerates a list appended during header lowering before
+   building on this — arm lists are appended during *body* lowering, which is
+   not quite the same position.
 3. Each `break` edge jumps directly to the exit block, carrying the values it
    holds at that point — which is what step 2 above already computes, so the
    publish into `loop_params` becomes the jump argument list instead.
