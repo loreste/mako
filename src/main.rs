@@ -976,6 +976,30 @@ fn cmd_doctor() -> Result<(), ()> {
     match runtime_include_dir() {
         Ok(rt) => {
             println!("  runtime: ok ({})", rt.display());
+            // Report the version pairing explicitly. A runtime that resolves
+            // fine but predates the binary is the difference between a working
+            // install and undefined symbols on a multi-module app, and it is
+            // invisible from paths alone.
+            match runtime_tree_version(&rt) {
+                Some(found) if found == env!("CARGO_PKG_VERSION") => {
+                    println!("    version: ok ({found}, matches this mako)")
+                }
+                Some(found) => {
+                    println!(
+                        "    version: FAIL ({} here, {} expected) — re-run scripts/install.sh",
+                        found,
+                        env!("CARGO_PKG_VERSION")
+                    );
+                    ok = false;
+                }
+                None => {
+                    println!(
+                        "    version: FAIL (no MAKO_RUNTIME_VERSION marker; predates {}) — re-run scripts/install.sh",
+                        env!("CARGO_PKG_VERSION")
+                    );
+                    ok = false;
+                }
+            }
             for header in [
                 "mako_rt.h",
                 "mako_http.h",
@@ -4633,6 +4657,15 @@ fn build_native_object(
         let nr = root.join("native_runtime.c");
         let nb = root.join("native_bridge.c");
         if nr.is_file() && nb.is_file() {
+            // The tree that is actually about to be compiled is the one worth
+            // checking: resolution can fall through several candidates, and a
+            // mismatch anywhere else is harmless. Failing here turns "undefined
+            // symbols on a multi-module app" into a sentence naming the stale
+            // install and the fix.
+            if let Err(message) = check_runtime_version(root) {
+                emit_plain_error(&message);
+                return Err(());
+            }
             cmd.arg(format!("-I{}", root.display()));
             cmd.arg(&nr).arg(&nb);
             linked_runtime = true;
@@ -5228,11 +5261,56 @@ fn find_nghttp2() -> Option<(PathBuf, PathBuf)> {
     None
 }
 
+/// Version recorded in a runtime tree's `mako_rt.h`, or `None` when the marker
+/// is absent (a tree older than the marker itself).
+fn runtime_tree_version(dir: &std::path::Path) -> Option<String> {
+    let header = std::fs::read_to_string(dir.join("mako_rt.h")).ok()?;
+    let line = header
+        .lines()
+        .find(|l| l.trim_start().starts_with("#define MAKO_RUNTIME_VERSION"))?;
+    let start = line.find('"')? + 1;
+    let end = line[start..].find('"')? + start;
+    Some(line[start..end].to_string())
+}
+
+/// Reject a runtime tree that does not match this binary.
+///
+/// The native path compiles `native_runtime.c` and `native_bridge.c` from this
+/// directory, so a stale install links old sources against new IR and fails as
+/// undefined symbols on multi-module apps — an error that points nowhere near
+/// the cause. Checking here catches it before the C compiler runs, and names
+/// the fix.
+fn check_runtime_version(dir: &std::path::Path) -> Result<(), String> {
+    let expected = env!("CARGO_PKG_VERSION");
+    match runtime_tree_version(dir) {
+        Some(found) if found == expected => Ok(()),
+        Some(found) => Err(format!(
+            "runtime at {} is version {}, but this mako is {}.\n\
+             The native and C backends compile that runtime's sources, so a \n\
+             mismatch links stale code against this binary's IR (undefined \n\
+             symbols on multi-module apps).\n\
+             Fix: re-run scripts/install.sh, or set MAKO_RUNTIME to a {} tree.",
+            dir.display(), found, expected, expected
+        )),
+        None => Err(format!(
+            "runtime at {} predates this mako ({}): it carries no \n\
+             MAKO_RUNTIME_VERSION marker.\n\
+             Fix: re-run scripts/install.sh, or set MAKO_RUNTIME to a matching tree.",
+            dir.display(), expected
+        )),
+    }
+}
+
 fn runtime_include_dir() -> Result<PathBuf, String> {
     // 1) Explicit override (install scripts / CI / brew wrappers)
     if let Ok(rt) = std::env::var("MAKO_RUNTIME") {
         let p = PathBuf::from(rt);
         if p.join("mako_rt.h").exists() {
+            // Deliberately not version-checked here: this resolver's Err is
+            // swallowed by callers that fall through to another candidate, so
+            // rejecting a stale tree at resolution silently substitutes the
+            // checkout instead of reporting anything. The check lives where a
+            // tree is selected for compilation.
             return Ok(p.canonicalize().unwrap_or(p));
         }
         return Err(format!(

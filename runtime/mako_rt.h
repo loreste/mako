@@ -2,6 +2,19 @@
 #ifndef MAKO_RT_H
 #define MAKO_RT_H
 
+/* Version of this runtime tree, checked by the compiler before it links a
+ * native or C build against these sources.
+ *
+ * The native path compiles native_runtime.c and native_bridge.c out of the
+ * *installed* runtime, so an install left behind by an older release links
+ * stale sources against a newer binary's IR and fails with undefined symbols
+ * on multi-module apps — an error that says nothing about the real cause.
+ * Keep this in step with the `version` field in Cargo.toml; scripts/install.sh
+ * copies this header, so an install that predates a compiler upgrade reports a
+ * mismatch instead of a link failure. */
+#define MAKO_RUNTIME_VERSION "0.5.1"
+
+
 /* Portability: this runs before <pthread.h> is reachable, so on Windows
  * PTHREAD_MUTEX_INITIALIZER is never defined here and the zero-init arm is
  * always taken. That is correct only because the Windows shim in
