@@ -5015,7 +5015,8 @@ impl Codegen {
                 "    {keys_ret} out = {keys_make}(0, m ? (int64_t)m->len : 0);"
             );
             let _ = writeln!(self.out, "    if (!m) return out;");
-            let _ = writeln!(self.out, "    if (m->tombs > 0) {fnp}_rehash(m, m->cap);");
+            // ponytail: codegen'd maps lack `tombs` field; auto-shrink on
+            // predefined maps keeps their tables tight. Skip compact guard here.
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(
                 self.out,
@@ -5032,7 +5033,8 @@ impl Codegen {
                 "    MakoArr_{short} out = mako_arr_{short}_make(0, m ? (int64_t)m->len : 0);"
             );
             let _ = writeln!(self.out, "    if (!m) return out;");
-            let _ = writeln!(self.out, "    if (m->tombs > 0) {fnp}_rehash(m, m->cap);");
+            // ponytail: codegen'd maps lack `tombs` field; auto-shrink on
+            // predefined maps keeps their tables tight. Skip compact guard here.
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(
                 self.out,
@@ -38132,21 +38134,17 @@ fn map_ptr_mono_tag(c_ty: &str) -> Option<String> {
     }
 }
 
-/// Derive the rehash function name from a map C type name.
-/// `"MakoMapSI*"` → `"mako_map_si_rehash"`,
-/// `"MakoMapI_Point*"` → `"mako_map_i_Point_rehash"`.
+/// Derive the rehash function name from a **predefined** map C type name.
+/// Only predefined maps (MakoMapSI, MakoMapII, etc.) have a `tombs` field.
+/// Codegen'd struct-value/slice-value/chan-value maps do NOT have `tombs`,
+/// so we return None for them to skip the compact-before-iterate guard.
 fn map_rehash_fn_name(ty: &str) -> Option<String> {
     let rest = ty.strip_suffix('*')?.strip_prefix("MakoMap")?;
+    // Only 2-letter all-uppercase suffixes are predefined maps with `tombs`.
     if rest.len() == 2 && rest.bytes().all(|b| b.is_ascii_uppercase()) {
         Some(format!("mako_map_{}_rehash", rest.to_ascii_lowercase()))
     } else {
-        let mut chars = rest.chars();
-        let first = chars.next()?;
-        Some(format!(
-            "mako_map_{}{}_rehash",
-            first.to_ascii_lowercase(),
-            chars.as_str()
-        ))
+        None
     }
 }
 
