@@ -5015,6 +5015,7 @@ impl Codegen {
                 "    {keys_ret} out = {keys_make}(0, m ? (int64_t)m->len : 0);"
             );
             let _ = writeln!(self.out, "    if (!m) return out;");
+            let _ = writeln!(self.out, "    if (m->tombs > 0) {fnp}_rehash(m, m->cap);");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(
                 self.out,
@@ -5031,6 +5032,7 @@ impl Codegen {
                 "    MakoArr_{short} out = mako_arr_{short}_make(0, m ? (int64_t)m->len : 0);"
             );
             let _ = writeln!(self.out, "    if (!m) return out;");
+            let _ = writeln!(self.out, "    if (m->tombs > 0) {fnp}_rehash(m, m->cap);");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
             let _ = writeln!(
                 self.out,
@@ -12825,6 +12827,12 @@ impl Codegen {
             || is_struct_key_map)
             && is_range
         {
+            // Compact tombstones before iteration so the scan is O(len).
+            if let Some(rehash) = map_rehash_fn_name(&ty) {
+                self.line(&format!(
+                    "if ({val}->tombs > 0) {rehash}({val}, {val}->cap);"
+                ));
+            }
             let i = self.fresh("mi");
             self.line(&format!("for (size_t {i} = 0; {i} < {val}->cap; {i}++) {{"));
             self.indent += 1;
@@ -38121,6 +38129,24 @@ fn map_ptr_mono_tag(c_ty: &str) -> Option<String> {
             }
         }
         _ => None,
+    }
+}
+
+/// Derive the rehash function name from a map C type name.
+/// `"MakoMapSI*"` → `"mako_map_si_rehash"`,
+/// `"MakoMapI_Point*"` → `"mako_map_i_Point_rehash"`.
+fn map_rehash_fn_name(ty: &str) -> Option<String> {
+    let rest = ty.strip_suffix('*')?.strip_prefix("MakoMap")?;
+    if rest.len() == 2 && rest.bytes().all(|b| b.is_ascii_uppercase()) {
+        Some(format!("mako_map_{}_rehash", rest.to_ascii_lowercase()))
+    } else {
+        let mut chars = rest.chars();
+        let first = chars.next()?;
+        Some(format!(
+            "mako_map_{}{}_rehash",
+            first.to_ascii_lowercase(),
+            chars.as_str()
+        ))
     }
 }
 

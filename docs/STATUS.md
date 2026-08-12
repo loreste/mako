@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-07-29** · product **mako0.5.1** (tip; last tag **v0.5.1**) ·
+Last inventory: **2026-08-12** · product **mako0.5.2** (tip; last tag **v0.5.1**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·

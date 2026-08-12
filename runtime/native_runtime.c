@@ -1262,6 +1262,18 @@ void mako_native_struct_drop_ptr(void *value) {
 
 enum { MAKO_NMAP_EMPTY = 0, MAKO_NMAP_FULL = 1, MAKO_NMAP_TOMB = 2 };
 
+/* Auto-shrink after delete: rehash to smaller capacity when tombstones
+ * outnumber live entries.  LEN_EXPR is the live-entry count (either
+ * *m->lenp or m->len depending on map type). */
+#define MAKO_NMAP_MAYBE_SHRINK(m, LEN_EXPR, REHASH_CALL) do { \
+    if ((m)->tombs > (LEN_EXPR) && (m)->cap > 16) { \
+        size_t _ncap = 16; \
+        size_t _need = ((LEN_EXPR) * 2) | 1; \
+        while (_ncap < _need) _ncap *= 2; \
+        if (_ncap < (m)->cap) { REHASH_CALL; } \
+    } \
+} while (0)
+
 /* Hand-C-matched map[int]int header. keys/vals/state/cap are immutable
  * between rehashes. `lenp` points at a separate 1-word allocation so stores
  * to len do not alias header loads (enables LICM of table pointers in the
@@ -1529,6 +1541,7 @@ void mako_native_map_ii_delete_ptr(MakoNativeMapII *m, int64_t key) {
             state[i] = MAKO_NMAP_TOMB;
             (*m->lenp)--;
             m->tombs++;
+            MAKO_NMAP_MAYBE_SHRINK(m, *m->lenp, mako_native_map_ii_rehash(m, _ncap));
             return;
         }
         i = (i + 1) & mask;
@@ -1977,6 +1990,16 @@ void mako_native_map_struct_key_delete_ptr(
                 state[i] = MAKO_NMAP_TOMB;
                 (*m->lenp)--;
                 m->tombs++;
+                if (m->tombs > *m->lenp && m->cap > 16) {
+                    size_t sc = 16;
+                    size_t sn = (*m->lenp * 2) | 1;
+                    while (sc < sn) sc *= 2;
+                    if (sc < m->cap)
+                        mako_native_map_struct_key_rehash(
+                            m, sc, nfields, str_mask,
+                            nest_mask, nest_nf_pack, nest_sm_pack
+                        );
+                }
                 return;
             }
         }
@@ -2334,6 +2357,7 @@ void mako_native_map_si_delete_ptr(MakoNativeMapSI *m, MakoNativeString *key) {
             m->state[i] = MAKO_NMAP_TOMB;
             m->len--;
             m->tombs++;
+            MAKO_NMAP_MAYBE_SHRINK(m, m->len, mako_native_map_si_rehash(m, _ncap));
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -2475,6 +2499,7 @@ void mako_native_map_ss_delete_ptr(MakoNativeMapSS *m, MakoNativeString *key) {
             m->state[i] = MAKO_NMAP_TOMB;
             m->len--;
             m->tombs++;
+            MAKO_NMAP_MAYBE_SHRINK(m, m->len, mako_native_map_ss_rehash(m, _ncap));
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -2604,6 +2629,7 @@ void mako_native_map_if_delete_ptr(MakoNativeMapIF *m, int64_t key) {
             m->state[i] = MAKO_NMAP_TOMB;
             m->len--;
             m->tombs++;
+            MAKO_NMAP_MAYBE_SHRINK(m, m->len, mako_native_map_if_rehash(m, _ncap));
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -2733,6 +2759,7 @@ void mako_native_map_fi_delete_ptr(MakoNativeMapFI *m, double key) {
             m->state[i] = MAKO_NMAP_TOMB;
             m->len--;
             m->tombs++;
+            MAKO_NMAP_MAYBE_SHRINK(m, m->len, mako_native_map_fi_rehash(m, _ncap));
             return;
         }
         i = (i + 1) & (m->cap - 1);

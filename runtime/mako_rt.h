@@ -2529,6 +2529,19 @@ static inline void mako_box_free(void *p, size_t sz) {
 /* ---- Maps: open-addressing hash tables (map[string]int / map[int]int) ---- */
 enum { MAKO_MAP_EMPTY = 0, MAKO_MAP_FULL = 1, MAKO_MAP_TOMB = 2 };
 
+/* Auto-shrink after delete: when tombstones outnumber live entries and the
+ * table is worth shrinking, rehash to a smaller capacity.  Keeps iteration
+ * O(len) instead of O(cap) after churn.  REHASH_FN is the type-specific
+ * rehash function (e.g. mako_map_si_rehash). */
+#define MAKO_MAP_MAYBE_SHRINK(m, REHASH_FN) do { \
+    if (MAKO_UNLIKELY((m)->tombs > (m)->len && (m)->cap > 16)) { \
+        size_t _ncap = 16; \
+        size_t _need = ((m)->len * 2) | 1; \
+        while (_ncap < _need) _ncap *= 2; \
+        if (_ncap < (m)->cap) REHASH_FN((m), _ncap); \
+    } \
+} while (0)
+
 typedef struct {
     uint8_t *state;
     uint64_t *hashes;
@@ -2894,6 +2907,7 @@ static inline void mako_map_si_delete(MakoMapSI *m, MakoString key) {
             m->keys[i].len = 0;
             m->state[i] = MAKO_MAP_TOMB;
             m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_si_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3027,6 +3041,7 @@ static inline void mako_map_ii_delete(MakoMapII *m, int64_t key) {
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
             m->state[i] = MAKO_MAP_TOMB;
             m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_ii_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3170,6 +3185,7 @@ static inline void mako_map_if_delete(MakoMapIF *m, int64_t key) {
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
             m->state[i] = MAKO_MAP_TOMB;
             m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_if_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3319,6 +3335,7 @@ static inline void mako_map_sf_delete(MakoMapSF *m, MakoString key) {
             m->keys[i].len = 0;
             m->state[i] = MAKO_MAP_TOMB;
             m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_sf_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3446,6 +3463,7 @@ static inline void mako_map_fi_delete(MakoMapFI *m, double key) {
         if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {
             m->state[i] = MAKO_MAP_TOMB;
             m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_fi_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3579,6 +3597,7 @@ static inline void mako_map_fs_delete(MakoMapFS *m, double key) {
             m->vals[i].len = 0;
             m->state[i] = MAKO_MAP_TOMB;
             m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_fs_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3704,6 +3723,7 @@ static inline void mako_map_ff_delete(MakoMapFF *m, double key) {
         if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {
             m->state[i] = MAKO_MAP_TOMB;
             m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_ff_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3835,6 +3855,7 @@ static inline void mako_map_ib_delete(MakoMapIB *m, int64_t key) {
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
             m->state[i] = MAKO_MAP_TOMB;
             m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_ib_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -3970,6 +3991,7 @@ static inline void mako_map_sb_delete(MakoMapSB *m, MakoString key) {
             m->keys[i].data = NULL; m->keys[i].len = 0;
             m->state[i] = MAKO_MAP_TOMB;
             m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_sb_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -4103,6 +4125,7 @@ static inline void mako_map_fb_delete(MakoMapFB *m, double key) {
         if (m->state[i] == MAKO_MAP_FULL && mako_f64_key_eq(m->keys[i], key)) {
             m->state[i] = MAKO_MAP_TOMB;
             m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_fb_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);
@@ -4217,7 +4240,9 @@ static inline void mako_map_bi_delete(MakoMapBI *m, bool key) {
     for (;;) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
-            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++; return;
+            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_bi_rehash);
+            return;
         }
         i = (i + 1) & (m->cap - 1);
     }
@@ -4333,7 +4358,9 @@ static inline void mako_map_bs_delete(MakoMapBS *m, bool key) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
             mako_str_free(m->vals[i]); m->vals[i].data = NULL; m->vals[i].len = 0;
-            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++; return;
+            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_bs_rehash);
+            return;
         }
         i = (i + 1) & (m->cap - 1);
     }
@@ -4446,7 +4473,9 @@ static inline void mako_map_bf_delete(MakoMapBF *m, bool key) {
     for (;;) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
-            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++; return;
+            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_bf_rehash);
+            return;
         }
         i = (i + 1) & (m->cap - 1);
     }
@@ -4559,7 +4588,9 @@ static inline void mako_map_bb_delete(MakoMapBB *m, bool key) {
     for (;;) {
         if (m->state[i] == MAKO_MAP_EMPTY) return;
         if (m->state[i] == MAKO_MAP_FULL && m->keys[i] == key) {
-            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++; return;
+            m->state[i] = MAKO_MAP_TOMB; m->len--; m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_bb_rehash);
+            return;
         }
         i = (i + 1) & (m->cap - 1);
     }
@@ -4731,6 +4762,7 @@ static inline void mako_map_ss_delete(MakoMapSS *m, MakoString key) {
             m->state[i] = MAKO_MAP_TOMB;
             m->len--;
             m->tombs++;
+            MAKO_MAP_MAYBE_SHRINK(m, mako_map_ss_rehash);
             return;
         }
         i = (i + 1) & (m->cap - 1);

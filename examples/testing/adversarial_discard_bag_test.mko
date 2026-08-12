@@ -1,0 +1,73 @@
+// Adversarial: discarded Result/Option with complex owned payloads.
+// `let _ = expr` must free the payload deeply. ASan-clean.
+
+struct OwnedRecord {
+    name: string
+    items: []int
+}
+
+fn make_ok_record() -> Result[OwnedRecord, string] {
+    return Ok(OwnedRecord { name: f"rec-{42}", items: make([]int, 16) })
+}
+
+fn make_err_record() -> Result[OwnedRecord, string] {
+    return Err("no-record")
+}
+
+fn make_some_strings() -> Option[[]string] {
+    var s = make([]string, 0)
+    s = append(s, f"opt-{1}")
+    s = append(s, f"opt-{2}")
+    return Some(s)
+}
+
+fn make_none_strings() -> Option[[]string] {
+    return None
+}
+
+fn TestDiscardResultOwnedStructOk() {
+    // Discard Ok(OwnedRecord) — struct fields must be freed.
+    var i = 0
+    while i < 100 {
+        let _ = make_ok_record()
+        i = i + 1
+    }
+}
+
+fn TestDiscardResultOwnedStructErr() {
+    // Discard Err(string) — err string must be freed.
+    var i = 0
+    while i < 100 {
+        let _ = make_err_record()
+        i = i + 1
+    }
+}
+
+fn TestDiscardOptionStringSlice() {
+    // Discard Some([]string) — slice + all strings freed.
+    var i = 0
+    while i < 100 {
+        let _ = make_some_strings()
+        i = i + 1
+    }
+}
+
+fn TestDiscardOptionNone() {
+    var i = 0
+    while i < 100 {
+        let _ = make_none_strings()
+        i = i + 1
+    }
+}
+
+fn TestDiscardBareCall() {
+    // Bare function call whose Result/Option is discarded — must not leak.
+    var i = 0
+    while i < 100 {
+        let _ = make_ok_record()
+        let _ = make_err_record()
+        let _ = make_some_strings()
+        let _ = make_none_strings()
+        i = i + 1
+    }
+}

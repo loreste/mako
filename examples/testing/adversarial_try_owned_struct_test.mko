@@ -1,0 +1,149 @@
+// Adversarial: `?` on Result/Option with owned struct payloads, inside loops,
+// after match moves, with live closures and shares.  Every path must be
+// ASan-clean (no leak, no UaF, no double-free).
+
+struct OwnedBundle {
+    name: string
+    data: []int
+}
+
+fn make_bundle(n: string, sz: int) -> OwnedBundle {
+    return OwnedBundle { name: n, data: make([]int, sz) }
+}
+
+fn fail_bundle() -> Result[OwnedBundle, string] {
+    return Err("fail")
+}
+
+fn ok_bundle(n: string) -> Result[OwnedBundle, string] {
+    return Ok(make_bundle(n, 8))
+}
+
+fn fail_int() -> Result[int, string] {
+    return Err("nope")
+}
+
+fn ok_int(v: int) -> Result[int, string] {
+    return Ok(v)
+}
+
+// Gap 1: `?` on Result[OwnedStruct, string] — struct has string + []int fields.
+// On the Err path, the owned locals (map, slice, string) in scope must be freed.
+fn try_owned_struct_err() -> Result[int, string] {
+    let mut m = make(map[string]int)
+    m["x"] = 1
+    let owned_str = f"hello{42}"
+    let b = fail_bundle()?
+    // should never reach here
+    return Ok(len(b.name) + m["x"] + len(owned_str))
+}
+
+fn try_owned_struct_ok() -> Result[int, string] {
+    let mut m = make(map[string]int)
+    m["x"] = 1
+    let b = ok_bundle("test")?
+    return Ok(len(b.name) + len(b.data) + m["x"])
+}
+
+fn TestTryOwnedStructErr() {
+    match try_owned_struct_err() {
+        Ok(_) => assert(false),
+        Err(e) => assert(e == "fail"),
+    }
+}
+
+fn TestTryOwnedStructOk() {
+    match try_owned_struct_ok() {
+        Ok(n) => assert_eq(n, 13),  // "test"=4 + 8 + 1
+        Err(_) => assert(false),
+    }
+}
+
+// Gap 1b: `?` inside a loop body with owned locals registered per-iteration.
+fn try_in_loop() -> Result[int, string] {
+    let mut sum = 0
+    var i = 0
+    while i < 5 {
+        let local_str = f"iter{i}"
+        let v = ok_int(i)?
+        sum = sum + v + len(local_str)
+        i = i + 1
+    }
+    // Now fail on the 6th call — previous loop locals must have been freed.
+    let mut big_slice = make([]int, 64)
+    big_slice[0] = sum
+    let _ = fail_int()?
+    return Ok(big_slice[0])
+}
+
+fn TestTryInLoop() {
+    match try_in_loop() {
+        Ok(_) => assert(false),
+        Err(e) => assert(e == "nope"),
+    }
+}
+
+// Gap 6: `?` after a match arm has moved a value.
+fn try_after_match_move() -> Result[int, string] {
+    let res = ok_bundle("moved")
+    let b = match res {
+        Ok(val) => val,
+        Err(_) => make_bundle("fallback", 1),
+    }
+    // b now owns the struct; local_str is owned too.
+    let local_str = f"prefix-{b.name}"
+    let _ = fail_int()?
+    return Ok(len(local_str))
+}
+
+fn TestTryAfterMatchMove() {
+    match try_after_match_move() {
+        Ok(_) => assert(false),
+        Err(e) => assert(e == "nope"),
+    }
+}
+
+// Gap 7: `?` with a live capturing closure in scope — fn-env must be dropped.
+fn try_with_closure() -> Result[int, string] {
+    let msg = f"captured{99}"
+    let f: fn() -> int = fn() {
+        return len(msg)
+    }
+    let _ = fail_int()?
+    return Ok(f())
+}
+
+fn TestTryWithClosure() {
+    match try_with_closure() {
+        Ok(_) => assert(false),
+        Err(e) => assert(e == "nope"),
+    }
+}
+
+// Churn: call all the above many times to amplify any leak under ASan.
+fn TestTryOwnedStructChurn() {
+    var i = 0
+    while i < 100 {
+        match try_owned_struct_err() {
+            Ok(_) => { let _ = 0 },
+            Err(_) => { let _ = 0 },
+        }
+        match try_owned_struct_ok() {
+            Ok(_) => { let _ = 0 },
+            Err(_) => { let _ = 0 },
+        }
+        match try_in_loop() {
+            Ok(_) => { let _ = 0 },
+            Err(_) => { let _ = 0 },
+        }
+        match try_after_match_move() {
+            Ok(_) => { let _ = 0 },
+            Err(_) => { let _ = 0 },
+        }
+        match try_with_closure() {
+            Ok(_) => { let _ = 0 },
+            Err(_) => { let _ = 0 },
+        }
+        i = i + 1
+    }
+}

@@ -1,0 +1,69 @@
+// Adversarial: alias-mut `__own` flag with multiple if-arms and loops.
+// Only the current value should be freed at scope exit. ASan-clean.
+
+fn TestMultiArmConditionalReassign() {
+    // Multiple independent if-arms that each conditionally reassign the same
+    // `let mut out` — only the taken arm should produce the final value,
+    // and scope-exit should free exactly the current value (not previous ones).
+    let mut out = f"initial-{0}"
+    let cond1 = true
+    let cond2 = false
+    let cond3 = true
+
+    if cond1 {
+        out = f"arm1-{1}"
+    }
+    if cond2 {
+        out = f"arm2-{2}"
+    }
+    if cond3 {
+        out = f"arm3-{3}"
+    }
+    // out should be "arm3-3"; previous values freed on reassign
+    assert(out == "arm3-3")
+}
+
+fn TestAliasReassignInLoop() {
+    // Alias-mut reassigned inside a loop — each iteration may reassign.
+    let mut current = f"start-{0}"
+    var i = 0
+    while i < 50 {
+        if i % 3 == 0 {
+            current = f"updated-{i}"
+        }
+        i = i + 1
+    }
+    // Only the last value should be live; all previous freed on reassign
+    assert(current == "updated-48")
+}
+
+fn TestAliasReassignIfElseChain() {
+    let mut s = f"base-{0}"
+    var i = 0
+    while i < 30 {
+        if i < 10 {
+            s = f"low-{i}"
+        } else if i < 20 {
+            s = f"mid-{i}"
+        } else {
+            s = f"high-{i}"
+        }
+        i = i + 1
+    }
+    assert(s == "high-29")
+}
+
+fn TestAliasReassignChurn() {
+    // Heavy churn: reassign in every iteration
+    var i = 0
+    while i < 500 {
+        let mut v = f"outer-{i}"
+        var j = 0
+        while j < 5 {
+            v = f"inner-{i}-{j}"
+            j = j + 1
+        }
+        assert(len(v) > 0)
+        i = i + 1
+    }
+}

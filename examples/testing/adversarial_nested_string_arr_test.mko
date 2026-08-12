@@ -1,0 +1,51 @@
+// Adversarial: [][]string nested free under append + reassign churn.
+// Inner strings must be freed when outer slice is reassigned or goes out of scope.
+// Must be ASan-clean.
+
+fn TestNestedStringArrayDrop() {
+    {
+        var outer = make([][]string, 0)
+        var i = 0
+        while i < 20 {
+            var inner = make([]string, 0)
+            var j = 0
+            while j < 10 {
+                inner = append(inner, f"item-{i}-{j}")
+                j = j + 1
+            }
+            outer = append(outer, inner)
+            i = i + 1
+        }
+        assert_eq(len(outer), 20)
+        assert_eq(len(outer[0]), 10)
+    }
+    // outer + all inner arrays + all strings freed at block exit (ASan)
+}
+
+fn TestNestedStringArrayReassign() {
+    var arr = make([][]string, 0)
+    var i = 0
+    while i < 10 {
+        var row = make([]string, 0)
+        row = append(row, f"old-{i}")
+        arr = append(arr, row)
+        i = i + 1
+    }
+    // Reassign outer — old arr + all inner rows + all strings freed
+    arr = make([][]string, 0)
+    arr = append(arr, make([]string, 0))
+    assert_eq(len(arr), 1)
+}
+
+fn TestNestedStringArrayChurn() {
+    var i = 0
+    while i < 100 {
+        var outer = make([][]string, 0)
+        var inner = make([]string, 0)
+        inner = append(inner, f"churn-{i}")
+        inner = append(inner, f"churn-{i}-b")
+        outer = append(outer, inner)
+        // outer freed at end of each iteration
+        i = i + 1
+    }
+}

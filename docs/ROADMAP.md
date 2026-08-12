@@ -1,11 +1,11 @@
 # Mako roadmap
 
-**Product version:** **0.5.1** (tip) · last tagged **v0.5.1** · Last sync: **2026-07-30**.  
+**Product version:** **0.5.2** (tip) · last tagged **v0.5.1** · Last sync: **2026-08-12**.  
 **Suite:** **395** Mako tests on `examples/testing` (C + native backends) + 140
 Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configured.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.1`** published; tip train **0.5.1+ → 0.5.2**.
+**Release:** tag **`v0.5.1`** published; tip train **0.5.2**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  

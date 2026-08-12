@@ -1,0 +1,152 @@
+// Adversarial: nested control flow with owned values — labeled break/continue,
+// `?` inside nested match inside loop, break after consuming owned value.
+// Every path must be ASan-clean.
+
+fn fail_res() -> Result[int, string] {
+    return Err("nested-fail")
+}
+
+fn ok_res(v: int) -> Result[int, string] {
+    return Ok(v)
+}
+
+// Labeled break from inner loop with owned values in both loops.
+fn TestLabeledBreakOwnedInBothLoops() {
+    var outer_sum = 0
+    var i = 0
+    outer: while i < 5 {
+        let outer_str = f"outer-{i}"
+        var j = 0
+        while j < 5 {
+            let inner_str = f"inner-{j}"
+            if j == 2 && i == 3 {
+                // Both outer_str and inner_str must be freed.
+                break outer
+            }
+            outer_sum = outer_sum + len(inner_str)
+            j = j + 1
+        }
+        outer_sum = outer_sum + len(outer_str)
+        i = i + 1
+    }
+    assert(outer_sum > 0)
+}
+
+// Labeled continue with owned values — inner-loop owns freed on continue.
+fn TestLabeledContinueOwned() {
+    var count = 0
+    var i = 0
+    outer: while i < 10 {
+        let outer_slice = make([]int, 4)
+        var j = 0
+        while j < 3 {
+            let inner_str = f"skip-{j}-{i}"
+            if j == 1 {
+                i = i + 1
+                continue outer
+            }
+            count = count + len(inner_str)
+            j = j + 1
+        }
+        count = count + len(outer_slice)
+        i = i + 1
+    }
+    assert(count > 0)
+}
+
+// Break after consuming owned value in match arm.
+fn TestBreakAfterMatchConsume() {
+    var result_val = 0
+    var i = 0
+    while i < 10 {
+        let owned = f"match-val-{i}"
+        let n = match len(owned) {
+            0 => 0,
+            _ => len(owned),
+        }
+        if n > 10 {
+            // owned consumed by match, break must not double-free
+            result_val = n
+            break
+        }
+        i = i + 1
+    }
+    assert(result_val > 0)
+}
+
+// `?` inside nested match — owned values from enclosing scopes must be freed.
+fn try_in_nested_match() -> Result[int, string] {
+    let outer_map = make(map[string]int)
+    let tag = 2
+    match tag {
+        1 => {
+            let arm_str = f"arm1-{tag}"
+            let _ = ok_res(len(arm_str))?
+        },
+        2 => {
+            let arm_slice = make([]int, 16)
+            let _ = fail_res()?
+        },
+        _ => {
+            let _ = 0
+        },
+    }
+    return Ok(len(outer_map))
+}
+
+fn TestTryInNestedMatch() {
+    match try_in_nested_match() {
+        Ok(_) => assert(false),
+        Err(e) => assert(e == "nested-fail"),
+    }
+}
+
+// `?` inside loop inside match arm — triple nesting.
+fn try_in_loop_in_match() -> Result[int, string] {
+    let outer_str = f"triple-{1}"
+    let tag = 1
+    match tag {
+        1 => {
+            var sum = 0
+            var i = 0
+            while i < 3 {
+                let loop_str = f"loop-{i}"
+                let r = ok_res(len(loop_str))?
+                sum = sum + r
+                i = i + 1
+            }
+            let final_slice = make([]int, 8)
+            let _ = fail_res()?
+        },
+        _ => {
+            let _ = 0
+        },
+    }
+    return Ok(len(outer_str))
+}
+
+fn TestTryInLoopInMatch() {
+    match try_in_loop_in_match() {
+        Ok(_) => assert(false),
+        Err(e) => assert(e == "nested-fail"),
+    }
+}
+
+// Churn all the above to amplify leaks.
+fn TestNestedCfgDropChurn() {
+    var i = 0
+    while i < 100 {
+        TestLabeledBreakOwnedInBothLoops()
+        TestLabeledContinueOwned()
+        TestBreakAfterMatchConsume()
+        match try_in_nested_match() {
+            Ok(_) => { let _ = 0 },
+            Err(_) => { let _ = 0 },
+        }
+        match try_in_loop_in_match() {
+            Ok(_) => { let _ = 0 },
+            Err(_) => { let _ = 0 },
+        }
+        i = i + 1
+    }
+}

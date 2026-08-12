@@ -1,0 +1,73 @@
+// Verify that map iteration after heavy delete churn produces correct
+// results — exercises the auto-shrink and compact-before-iterate paths.
+
+fn TestMapIterAfterChurn() {
+    var m = make(map[string]int, 0)
+    var i = 0
+    // Insert 200 keys, delete the first 150 → 50 remain.
+    while i < 200 {
+        m["k" + int_to_string(i)] = i
+        i = i + 1
+    }
+    i = 0
+    while i < 150 {
+        delete(m, "k" + int_to_string(i))
+        i = i + 1
+    }
+    assert_eq(len(m), 50)
+
+    // Iterate and verify only the surviving keys appear.
+    var sum = 0
+    var count = 0
+    for k, v in range m {
+        assert(v >= 150)
+        sum = sum + v
+        count = count + 1
+    }
+    assert_eq(count, 50)
+    // sum of 150..199 = (150+199)*50/2 = 8725
+    assert_eq(sum, 8725)
+}
+
+fn TestMapIterAfterChurnIntKeys() {
+    var m = make(map[int]int, 0)
+    var i = 0
+    while i < 100 {
+        m[i] = i * 10
+        i = i + 1
+    }
+    // Delete odd keys
+    i = 1
+    while i < 100 {
+        delete(m, i)
+        i = i + 2
+    }
+    assert_eq(len(m), 50)
+
+    var count = 0
+    for k, v in range m {
+        assert_eq(k % 2, 0)
+        assert_eq(v, k * 10)
+        count = count + 1
+    }
+    assert_eq(count, 50)
+}
+
+fn TestMapKeysValuesAfterChurn() {
+    var m = make(map[string]int, 0)
+    var i = 0
+    while i < 50 {
+        m["key" + int_to_string(i)] = i
+        i = i + 1
+    }
+    // Delete half
+    i = 0
+    while i < 25 {
+        delete(m, "key" + int_to_string(i))
+        i = i + 1
+    }
+    let keys = maps_keys(m)
+    let vals = maps_values(m)
+    assert_eq(len(keys), 25)
+    assert_eq(len(vals), 25)
+}
