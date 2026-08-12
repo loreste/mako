@@ -1266,11 +1266,12 @@ enum { MAKO_NMAP_EMPTY = 0, MAKO_NMAP_FULL = 1, MAKO_NMAP_TOMB = 2 };
  * outnumber live entries.  LEN_EXPR is the live-entry count (either
  * *m->lenp or m->len depending on map type). */
 #define MAKO_NMAP_MAYBE_SHRINK(m, LEN_EXPR, REHASH_CALL) do { \
-    if ((m)->tombs > (LEN_EXPR) && (m)->cap > 16) { \
+    if ((LEN_EXPR) > 0 && (m)->tombs > (LEN_EXPR) * 3 \
+        && (m)->cap > 16) { \
         size_t _ncap = 16; \
-        size_t _need = ((LEN_EXPR) * 2) | 1; \
+        size_t _need = ((LEN_EXPR) * 4) | 1; \
         while (_ncap < _need) _ncap *= 2; \
-        if (_ncap * 4 < (m)->cap) { REHASH_CALL; } \
+        if (_ncap < (m)->cap) { REHASH_CALL; } \
     } \
 } while (0)
 
@@ -1990,11 +1991,11 @@ void mako_native_map_struct_key_delete_ptr(
                 state[i] = MAKO_NMAP_TOMB;
                 (*m->lenp)--;
                 m->tombs++;
-                if (m->tombs > *m->lenp && m->cap > 16) {
+                if (*m->lenp > 0 && m->tombs > *m->lenp * 3 && m->cap > 16) {
                     size_t sc = 16;
-                    size_t sn = (*m->lenp * 2) | 1;
+                    size_t sn = (*m->lenp * 4) | 1;
                     while (sc < sn) sc *= 2;
-                    if (sc * 4 < m->cap)
+                    if (sc < m->cap)
                         mako_native_map_struct_key_rehash(
                             m, sc, nfields, str_mask,
                             nest_mask, nest_nf_pack, nest_sm_pack

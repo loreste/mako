@@ -2534,11 +2534,12 @@ enum { MAKO_MAP_EMPTY = 0, MAKO_MAP_FULL = 1, MAKO_MAP_TOMB = 2 };
  * O(len) instead of O(cap) after churn.  REHASH_FN is the type-specific
  * rehash function (e.g. mako_map_si_rehash). */
 #define MAKO_MAP_MAYBE_SHRINK(m, REHASH_FN) do { \
-    if (MAKO_UNLIKELY((m)->tombs > (m)->len && (m)->cap > 16)) { \
+    if (MAKO_UNLIKELY((m)->len > 0 && (m)->tombs > (m)->len * 3 \
+                      && (m)->cap > 16)) { \
         size_t _ncap = 16; \
-        size_t _need = ((m)->len * 2) | 1; \
+        size_t _need = ((m)->len * 4) | 1; \
         while (_ncap < _need) _ncap *= 2; \
-        if (_ncap * 4 < (m)->cap) REHASH_FN((m), _ncap); \
+        if (_ncap < (m)->cap) REHASH_FN((m), _ncap); \
     } \
 } while (0)
 
