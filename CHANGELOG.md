@@ -56,6 +56,40 @@
   the builder buffer is owned by explicit builder finish/free.
 - Regression coverage: `examples/testing/struct_handle_fields_test.mko`.
 
+## 0.5.2 — 2026-08-12
+
+### Efficient map iteration
+
+- **Auto-shrink on delete:** `MAKO_MAP_MAYBE_SHRINK` rehashes to a smaller
+  table when tombstones outnumber live entries, keeping iteration O(len)
+  instead of O(cap) after delete-heavy workloads. Applied to all 15 C
+  runtime and 6 native runtime map delete functions.
+- **Compact-before-iterate:** codegen emits tombstone compaction before
+  `for k, v in range m` loops and `maps_keys`/`maps_values` helpers,
+  eliminating sparse-table scans.
+- New test: `map_iter_shrink_test`.
+
+### Adversarial ownership test suite (ASan-verified)
+
+Six new test files exercising 14 previously untested safety gaps:
+
+- `adversarial_try_owned_struct_test`: `?` on `Result[OwnedStruct]`, `?` in
+  loops, `?` after match move, `?` with live capturing closure.
+- `adversarial_defer_try_test`: defer + `?` early return, defer + break,
+  multiple defers LIFO order.
+- `adversarial_nested_cfgdrop_test`: labeled break/continue with owned
+  values, `?` inside nested match inside loop.
+- `adversarial_nested_string_arr_test`: `[][]string` nested free under
+  append + reassign churn.
+- `adversarial_discard_bag_test`: `let _ = Result[OwnedStruct]`,
+  `let _ = Option[[]string]` deep payload cleanup.
+- `adversarial_own_alias_test`: multi-arm conditional reassign, alias-mut
+  in loops.
+
+All tests pass under ASan with zero leaks, use-after-free, or double-free.
+
+---
+
 ## 0.5.1 — 2026-07-30
 
 ### DTLS over UDP + SRTP key export
