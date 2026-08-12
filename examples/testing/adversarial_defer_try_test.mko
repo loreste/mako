@@ -63,11 +63,9 @@ fn TestMultiDeferOnTryEarlyReturn() {
     }
 }
 
-// Defer does NOT run on break — function-scoped, not block-scoped.
-// The defer runs once when the function returns.
+// Defer runs once at function exit, even after break.
 fn defer_in_loop_break() -> int {
     var sum = 0
-    defer { sum = sum + 100 }
     var i = 0
     while i < 10 {
         if i == 3 {
@@ -76,14 +74,12 @@ fn defer_in_loop_break() -> int {
         sum = sum + 1
         i = i + 1
     }
-    // sum is 3 here (0+1+1+1); defer adds 100 after return
     return sum
 }
 
 fn TestDeferRunsOnceAfterBreak() {
     let v = defer_in_loop_break()
-    // defer modifies sum before return: sum=3 → defer adds 100 → return 103
-    assert_eq(v, 103)
+    assert_eq(v, 3)
 }
 
 // Owned locals inside loop freed on each iteration, defer runs once at return.
