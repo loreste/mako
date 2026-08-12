@@ -1270,7 +1270,7 @@ enum { MAKO_NMAP_EMPTY = 0, MAKO_NMAP_FULL = 1, MAKO_NMAP_TOMB = 2 };
         size_t _ncap = 16; \
         size_t _need = ((LEN_EXPR) * 2) | 1; \
         while (_ncap < _need) _ncap *= 2; \
-        if (_ncap < (m)->cap) { REHASH_CALL; } \
+        if (_ncap * 4 < (m)->cap) { REHASH_CALL; } \
     } \
 } while (0)
 
@@ -1994,7 +1994,7 @@ void mako_native_map_struct_key_delete_ptr(
                     size_t sc = 16;
                     size_t sn = (*m->lenp * 2) | 1;
                     while (sc < sn) sc *= 2;
-                    if (sc < m->cap)
+                    if (sc * 4 < m->cap)
                         mako_native_map_struct_key_rehash(
                             m, sc, nfields, str_mask,
                             nest_mask, nest_nf_pack, nest_sm_pack

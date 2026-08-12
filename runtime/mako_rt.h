@@ -2538,7 +2538,7 @@ enum { MAKO_MAP_EMPTY = 0, MAKO_MAP_FULL = 1, MAKO_MAP_TOMB = 2 };
         size_t _ncap = 16; \
         size_t _need = ((m)->len * 2) | 1; \
         while (_ncap < _need) _ncap *= 2; \
-        if (_ncap < (m)->cap) REHASH_FN((m), _ncap); \
+        if (_ncap * 4 < (m)->cap) REHASH_FN((m), _ncap); \
     } \
 } while (0)
 
