@@ -9703,11 +9703,16 @@ impl<'a> FunctionLowerer<'a> {
                     };
                     let (v, vt, o) = self.lower_expr_for_expected(&args[1], expected_elem)?;
                     let ptr_elem_ok = match t {
-                        Type::PtrSlice(vk) => vk.to_type() == vt,
+                        Type::PtrSlice(vk) => {
+                            vk.to_type() == vt
+                            // Opaque handles are int64-sized; PtrSlice(Other) stores them.
+                            || (vk == MapValKind::Other && vt == Type::Opaque)
+                        }
                         _ => false,
                     };
                     match (t, vt, o) {
                         (Type::IntSlice, Type::I64, false) => {}
+                        (Type::IntSlice, Type::Opaque, false) => {} // opaque handles are int64-sized
                         (Type::ByteSlice, Type::I64, false) => {}
                         (Type::BoolSlice, Type::I1 | Type::I64, false) => {}
                         (Type::FloatSlice, Type::F64, false) => {}
