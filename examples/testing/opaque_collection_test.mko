@@ -1,0 +1,64 @@
+// Opaque-type collections: []Handle and map[K]Handle
+
+fn TestOpaqueSliceAppendAndIndex() {
+    let mut locks = make([]Mutex, 0)
+    locks = append(locks, mutex_new())
+    locks = append(locks, mutex_new())
+    assert_eq(len(locks), 2)
+    mutex_lock(locks[0])
+    mutex_unlock(locks[0])
+}
+
+fn TestOpaqueMapSetGet() {
+    var m = make(map[string]Mutex)
+    m["db"] = mutex_new()
+    m["cache"] = mutex_new()
+    assert_eq(len(m), 2)
+    mutex_lock(m["db"])
+    mutex_unlock(m["db"])
+}
+
+fn TestOpaqueMapIntKey() {
+    var m = make(map[int]Mutex)
+    m[0] = mutex_new()
+    assert_eq(len(m), 1)
+    mutex_lock(m[0])
+    mutex_unlock(m[0])
+}
+
+fn TestOpaqueSliceIterate() {
+    let mut locks = make([]Mutex, 0)
+    var i = 0
+    while i < 3 {
+        locks = append(locks, mutex_new())
+        i = i + 1
+    }
+    var count = 0
+    for _, m in range locks {
+        mutex_lock(m)
+        mutex_unlock(m)
+        count = count + 1
+    }
+    assert_eq(count, 3)
+}
+
+fn TestOpaqueMapIterate() {
+    var m = make(map[string]Mutex)
+    m["a"] = mutex_new()
+    m["b"] = mutex_new()
+    var count = 0
+    for k, v in range m {
+        mutex_lock(v)
+        mutex_unlock(v)
+        count = count + 1
+    }
+    assert_eq(count, 2)
+}
+
+fn TestOpaqueMapDelete() {
+    var m = make(map[string]Mutex)
+    m["x"] = mutex_new()
+    m["y"] = mutex_new()
+    delete(m, "x")
+    assert_eq(len(m), 1)
+}

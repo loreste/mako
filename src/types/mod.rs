@@ -14563,9 +14563,16 @@ fns.insert(
             {
                 Ok(())
             }
+            // Opaque handles as values: map[K]SqlDB, map[K]TlsConn, etc.
+            // Stored as int64_t (pointer-sized); no ownership — not dropped.
+            (Type::Int | Type::String | Type::Float | Type::Bool | Type::Struct { .. } | Type::Enum { .. }, v)
+                if is_opaque_handle(v) =>
+            {
+                Ok(())
+            }
             _ => Err(TypeError::new(format!(
                 "unsupported map[{}]{} — keys: int|string|float|bool|Struct|Enum; \
-                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]Option[Option]|[]Option[Result]|[]Result[Option]|[]Result[Result]|[]Option[chan]|[]Result[chan]|[]chan|[][]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[[]Option]|Option[[]Result]|Option[[]chan]|Option[map]|Option[chan]|Option[Option[…]]|Option[Result[…]]|Result[T,E]|Result[[]T,E]|Result[[]Option]|Result[[]Result]|Result[[]chan]|Result[map]|Result[chan]|Result[Option[…]]|Result[Result[…]]|(T,U)| (Option|Result|chan fields)|chan[T]",
+                 values: int|string|float|bool|Struct|Enum|[]T|[][]T|[]Option|[]Result|[]Option[Option]|[]Option[Result]|[]Result[Option]|[]Result[Result]|[]Option[chan]|[]Result[chan]|[]chan|[][]chan|[]map|map[K2]V|map[K2]map[K3]V|Option[T]|Option[[]T]|Option[[]Option]|Option[[]Result]|Option[[]chan]|Option[map]|Option[chan]|Option[Option[…]]|Option[Result[…]]|Result[T,E]|Result[[]T,E]|Result[[]Option]|Result[[]Result]|Result[[]chan]|Result[map]|Result[chan]|Result[Option[…]]|Result[Result[…]]|(T,U)| (Option|Result|chan fields)|chan[T]|OpaqueHandle",
                 k.display(),
                 v.display()
             ))),
@@ -18723,6 +18730,7 @@ fns.insert(
                             | Type::Option(_)
                             | Type::Result(_, _)
                             | Type::Chan(_) => Ok(Type::Array(inner)),
+                            other if is_opaque_handle(other) => Ok(Type::Array(inner)),
                             other => Err(TypeError::new(format!(
                                 "make([]{}) not supported yet",
                                 other.display()
@@ -21015,6 +21023,34 @@ fn is_kick_sendable(t: &Type) -> bool {
         Type::Interface { .. } | Type::Enum { .. } => false,
         _ => false,
     }
+}
+
+/// Opaque runtime handles — pointer-sized, no GC, stored as int64_t.
+fn is_opaque_handle(t: &Type) -> bool {
+    matches!(
+        t,
+        Type::Crew
+            | Type::Arena
+            | Type::StrBuilder
+            | Type::Mutex
+            | Type::RWMutex
+            | Type::CMap
+            | Type::MMap
+            | Type::EvLoop
+            | Type::Buf
+            | Type::GameUDP
+            | Type::CHash
+            | Type::RateLimiter
+            | Type::CircuitBreaker
+            | Type::HttpEngine
+            | Type::BufReader
+            | Type::BufWriter
+            | Type::HttpRequest
+            | Type::SqlDB
+            | Type::WaitGroup
+            | Type::Uuid
+            | Type::Graphql
+    )
 }
 
 fn is_int_family(t: &Type) -> bool {

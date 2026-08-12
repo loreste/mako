@@ -43,6 +43,11 @@ pub struct Codegen {
     fn_ptr_casts: HashMap<String, String>,
     /// Local `MakoChanPtr*` → Mako struct type name (for send/recv boxing)
     chan_ptr_elems: HashMap<String, String>,
+    /// Maps array variable names to opaque C element types (e.g. "MakoMutex*").
+    /// Used to cast int64_t back to the handle type on index.
+    opaque_arr_elems: HashMap<String, String>,
+    /// Maps map variable names to opaque C value types for map[K]OpaqueHandle.
+    opaque_map_vals: HashMap<String, String>,
     /// Enum type name → info
     enums: HashMap<String, EnumInfo>,
     /// Struct type name → info
@@ -210,6 +215,8 @@ impl Codegen {
             locals: HashMap::new(),
             fn_ptr_casts: HashMap::new(),
             chan_ptr_elems: HashMap::new(),
+            opaque_arr_elems: HashMap::new(),
+            opaque_map_vals: HashMap::new(),
             enums: HashMap::new(),
             structs: HashMap::new(),
             variant_to_enum: HashMap::new(),
@@ -12971,6 +12978,9 @@ impl Codegen {
                         } else if ty == "MakoMapBF*" {
                             self.line(&format!("double {} = {val}->vals[{i}];", mangle(b)));
                             self.locals.insert(b.clone(), "double".into());
+                        } else if let Some(opty) = self.opaque_map_vals.get(&val).cloned() {
+                            self.line(&format!("{opty} {} = ({opty})(intptr_t){val}->vals[{i}];", mangle(b)));
+                            self.locals.insert(b.clone(), opty);
                         } else {
                             self.line(&format!("int64_t {} = {val}->vals[{i}];", mangle(b)));
                             self.locals.insert(b.clone(), "int64_t".into());
@@ -13171,6 +13181,9 @@ impl Codegen {
                 "int64_t {cname} = mako_str_get({arr}, (int64_t){idx});"
             ));
             self.locals.insert(name.to_string(), "int64_t".into());
+        } else if let Some(opty) = self.opaque_arr_elems.get(arr).cloned() {
+            self.line(&format!("{opty} {cname} = ({opty})(intptr_t){arr}.data[{idx}];"));
+            self.locals.insert(name.to_string(), opty);
         } else {
             self.line(&format!("int64_t {cname} = {arr}.data[{idx}];"));
             self.locals.insert(name.to_string(), "int64_t".into());
@@ -13362,6 +13375,27 @@ impl Codegen {
                 if ty == "MakoChanPtr*" {
                     if let Some(st) = self.chan_ptr_elems.get(&val).cloned() {
                         self.chan_ptr_elems.insert(name.clone(), st);
+                    }
+                }
+                // Track opaque value type for map[K]OpaqueHandle maps.
+                if ty.starts_with("MakoMap") && ty.ends_with('*') {
+                    if let Some(et) = self.opaque_map_vals.get(&val).cloned() {
+                        self.opaque_map_vals.insert(name.clone(), et);
+                    }
+                }
+                // Track opaque element type for []OpaqueHandle arrays.
+                if ty == "MakoIntArray" {
+                    if let Some(TypeExpr::Array(inner)) = ann {
+                        if let TypeExpr::Named(elem) = inner.as_ref() {
+                            let c = self.type_expr_c(&TypeExpr::Named(elem.clone()));
+                            if is_opaque_c_handle(&c) {
+                                self.opaque_arr_elems.insert(name.clone(), c);
+                            }
+                        }
+                    }
+                    // Propagate from rhs (e.g. append result assigned back)
+                    if let Some(et) = self.opaque_arr_elems.get(&val).cloned() {
+                        self.opaque_arr_elems.insert(name.clone(), et);
                     }
                 }
                 if self.chan_float.contains(&val) {
@@ -13937,6 +13971,13 @@ impl Codegen {
                     if let Some(cty) = self.locals.get(name).cloned() {
                         self.register_own_drop(&mn, &cty);
                     }
+                    // Propagate opaque array element type through append reassign.
+                    if let Some(et) = self.opaque_arr_elems.get(&val).cloned() {
+                        self.opaque_arr_elems.insert(mn.clone(), et);
+                    } else if let Some(et) = self.opaque_arr_elems.get(&mn).cloned() {
+                        // Keep existing mapping (self-append preserves element type).
+                        let _ = et;
+                    }
                     return;
                 }
                 // SAFE-003 residual: free previous owned value on reassign.
@@ -14070,14 +14111,16 @@ impl Codegen {
                     }
                 }
                 if bty == "MakoMapSI*" {
+                    let vc = opaque_to_int(&vty, &v);
                     // Use set_take when the key is a fresh allocation (avoids clone).
                     if self.expr_is_fresh_string_key(index) {
-                        self.emit_line(format_args!("mako_map_si_set_take({b}, {i}, {v});"));
+                        self.emit_line(format_args!("mako_map_si_set_take({b}, {i}, {vc});"));
                     } else {
-                        self.emit_line(format_args!("mako_map_si_set({b}, {i}, {v});"));
+                        self.emit_line(format_args!("mako_map_si_set({b}, {i}, {vc});"));
                     }
                 } else if bty == "MakoMapII*" {
-                    self.emit_line(format_args!("mako_map_ii_set({b}, {i}, {v});"));
+                    let vc = opaque_to_int(&vty, &v);
+                    self.emit_line(format_args!("mako_map_ii_set({b}, {i}, {vc});"));
                 } else if bty == "MakoMapSS*" {
                     if self.expr_is_fresh_string_key(index) {
                         self.emit_line(format_args!("mako_map_ss_set_take({b}, {i}, {v});"));
@@ -32635,13 +32678,15 @@ impl Codegen {
                                 }
                                 return (format!("MakoArr_{sn}"), tmp);
                             }
+                            // Opaque handles (pointers) need cast to int64_t.
+                            let vc = opaque_to_int(&vty, &v);
                             if let Some(arena) = self.current_arena.clone() {
                                 self.line(&format!(
-                                    "MakoIntArray {tmp} = mako_arena_int_array_append(&{arena}, {s}, {v});"
+                                    "MakoIntArray {tmp} = mako_arena_int_array_append(&{arena}, {s}, {vc});"
                                 ));
                             } else {
                                 self.line(&format!(
-                                    "MakoIntArray {tmp} = mako_slice_append({s}, {v});"
+                                    "MakoIntArray {tmp} = mako_slice_append({s}, {vc});"
                                 ));
                             }
                             return ("MakoIntArray".into(), tmp);
@@ -33820,8 +33865,28 @@ impl Codegen {
                             format!("{mt}*")
                         }
                         _ => {
-                            self.line(&format!("MakoMapSI *{tmp} = mako_map_si_make({hint});"));
-                            "MakoMapSI*".into()
+                            // Opaque handles as values: pick map type by key, store as int64_t.
+                            let (mt, fnp) = match k.as_ref() {
+                                TypeExpr::Named(kk) if kk == "int" || kk == "int64" || kk == "int32"
+                                    || kk == "int8" || kk == "uint64" || kk == "byte" =>
+                                    ("MakoMapII", "mako_map_ii"),
+                                TypeExpr::Named(kk) if kk == "float" || kk == "float64" =>
+                                    ("MakoMapFI", "mako_map_fi"),
+                                TypeExpr::Named(kk) if kk == "bool" =>
+                                    ("MakoMapBI", "mako_map_bi"),
+                                _ => ("MakoMapSI", "mako_map_si"),
+                            };
+                            // Record opaque value type for index/iterate casts.
+                            if let TypeExpr::Map(_, vt) = ty {
+                                if let TypeExpr::Named(vn) = vt.as_ref() {
+                                    let vc = self.type_expr_c(&TypeExpr::Named(vn.clone()));
+                                    if is_opaque_c_handle(&vc) {
+                                        self.opaque_map_vals.insert(tmp.clone(), vc);
+                                    }
+                                }
+                            }
+                            self.line(&format!("{mt} *{tmp} = {fnp}_make({hint});"));
+                            format!("{mt}*")
                         }
                     };
                     return (cty, tmp);
@@ -33977,6 +34042,15 @@ impl Codegen {
                     ));
                     (format!("MakoArr_{sn}"), tmp)
                 } else {
+                    // Record opaque element type for later index/iteration casts.
+                    if let TypeExpr::Array(inner) = ty {
+                        if let TypeExpr::Named(n) = inner.as_ref() {
+                            let elem_c = self.type_expr_c(&TypeExpr::Named(n.clone()));
+                            if is_opaque_c_handle(&elem_c) {
+                                self.opaque_arr_elems.insert(tmp.clone(), elem_c);
+                            }
+                        }
+                    }
                     self.line(&format!(
                         "MakoIntArray {tmp} = mako_int_array_make({l}, {c});"
                     ));
@@ -33993,9 +34067,19 @@ impl Codegen {
                 let (bty, b) = self.emit_expr(base);
                 let (_, i) = self.emit_expr(index);
                 if bty == "MakoMapSI*" {
+                    if let Some(opty) = self.opaque_map_vals.get(&b).cloned() {
+                        let out = self.fresh("omg");
+                        self.line(&format!("{opty} {out} = ({opty})(intptr_t)mako_map_si_get({b}, {i});"));
+                        return (opty, out);
+                    }
                     return ("int64_t".into(), format!("mako_map_si_get({b}, {i})"));
                 }
                 if bty == "MakoMapII*" {
+                    if let Some(opty) = self.opaque_map_vals.get(&b).cloned() {
+                        let out = self.fresh("omg");
+                        self.line(&format!("{opty} {out} = ({opty})(intptr_t)mako_map_ii_get({b}, {i});"));
+                        return (opty, out);
+                    }
                     return ("int64_t".into(), format!("mako_map_ii_get({b}, {i})"));
                 }
                 if bty == "MakoMapSS*" {
@@ -34161,6 +34245,12 @@ impl Codegen {
                     &format!("{tmp} < 0 || (size_t){tmp} >= {b}.len"),
                     "index out of bounds (slices are 0..len-1)",
                 );
+                // Cast int64_t back to opaque handle type if known.
+                if let Some(opty) = self.opaque_arr_elems.get(&b).cloned() {
+                    let out = self.fresh("oh");
+                    self.line(&format!("{opty} {out} = ({opty})(intptr_t){b}.data[{tmp}];"));
+                    return (opty, out);
+                }
                 ("int64_t".into(), format!("{b}.data[{tmp}]"))
             }
             _ => unreachable!(),
@@ -38138,6 +38228,27 @@ fn map_ptr_mono_tag(c_ty: &str) -> Option<String> {
 /// Only predefined maps (MakoMapSI, MakoMapII, etc.) have a `tombs` field.
 /// Codegen'd struct-value/slice-value/chan-value maps do NOT have `tombs`,
 /// so we return None for them to skip the compact-before-iterate guard.
+/// True if `cty` is a C pointer type for an opaque runtime handle.
+/// These are stored as int64_t in arrays and maps.
+fn is_opaque_c_handle(cty: &str) -> bool {
+    cty.ends_with('*')
+        && cty != "MakoMapSI*"
+        && cty != "MakoMapII*"
+        && cty != "MakoMapSS*"
+        && !cty.starts_with("MakoMap")
+        && !cty.starts_with("MakoChan")
+        && !cty.starts_with("MakoArr_")
+}
+
+/// Cast opaque handle (pointer) to int64_t for storage in arrays/maps.
+fn opaque_to_int(cty: &str, val: &str) -> String {
+    if is_opaque_c_handle(cty) {
+        format!("(int64_t)(intptr_t){val}")
+    } else {
+        val.to_string()
+    }
+}
+
 fn map_rehash_fn_name(ty: &str) -> Option<String> {
     let rest = ty.strip_suffix('*')?.strip_prefix("MakoMap")?;
     // Only 2-letter all-uppercase suffixes are predefined maps with `tombs`.
