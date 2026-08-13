@@ -32,8 +32,7 @@ struct World {
     workers: int
 }
 
-fn parse_line(w: World, line: string) -> World {
-    let mut w = w
+fn parse_line(mut w: World, line: string) -> World {
     if line == "route" {
         let r = route_new("/default", "GET", "app")
         w.routes = append(w.routes, r)
