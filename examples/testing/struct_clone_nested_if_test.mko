@@ -1,0 +1,115 @@
+// Regression test for #32: native backend SIGSEGV in struct clone
+// through deeply nested if/else chains. The root cause was unsealed
+// Cranelift basic blocks in emit_struct_clone / emit_struct_drop,
+// producing wild SSA values for struct field pointers.
+
+struct Route {
+    path: string
+    method: string
+    backend: string
+    host: string
+    prefix: string
+    rewrite: string
+    name: string
+}
+
+fn route_new(path: string, method: string, backend: string) -> Route {
+    return Route{
+        path: path,
+        method: method,
+        backend: backend,
+        host: "",
+        prefix: "",
+        rewrite: "",
+        name: "",
+    }
+}
+
+struct World {
+    name: string
+    mode: string
+    routes: []Route
+    workers: int
+}
+
+fn parse_line(w: World, line: string) -> World {
+    let mut w = w
+    if line == "route" {
+        let r = route_new("/default", "GET", "app")
+        w.routes = append(w.routes, r)
+    } else if line == "route2" {
+        let r = route_new("/api", "POST", "api")
+        w.routes = append(w.routes, r)
+    } else if line == "route3" {
+        let r = route_new("/health", "GET", "health")
+        w.routes = append(w.routes, r)
+    } else if line == "workers" {
+        w.workers = 4
+    } else if line == "mode" {
+        w.mode = "http"
+    } else if line == "name" {
+        w.name = "test"
+    }
+    return w
+}
+
+// Takes World by value — triggers clone of all string/slice fields.
+fn doctor_world(w: World) -> int {
+    let mut errors = 0
+    if len(w.name) == 0 {
+        errors = errors + 1
+    }
+    if len(w.routes) == 0 {
+        errors = errors + 1
+    }
+    for i, r in range w.routes {
+        if len(r.path) == 0 {
+            errors = errors + 1
+        }
+        if len(r.backend) == 0 {
+            errors = errors + 1
+        }
+    }
+    return errors
+}
+
+fn TestStructCloneNestedIf() {
+    let mut w = World{
+        name: "",
+        mode: "",
+        routes: make([]Route, 0, 4),
+        workers: 0,
+    }
+    w = parse_line(w, "name")
+    w = parse_line(w, "mode")
+    w = parse_line(w, "route")
+    w = parse_line(w, "route2")
+    w = parse_line(w, "route3")
+    w = parse_line(w, "workers")
+
+    // By-value call — clones World including []Route with string fields
+    let errors = doctor_world(w)
+    assert(errors == 0)
+    assert(len(w.routes) == 3)
+    assert(w.routes[0].path == "/default")
+    assert(w.routes[1].path == "/api")
+    assert(w.routes[2].path == "/health")
+    assert(w.name == "test")
+    assert(w.workers == 4)
+}
+
+fn TestRepeatedCloneCycle() {
+    let mut w = World{
+        name: "base",
+        mode: "tcp",
+        routes: make([]Route, 0, 4),
+        workers: 1,
+    }
+    // Repeated parse cycles stress the clone/drop path
+    for i in 20 {
+        w = parse_line(w, "route")
+        let e = doctor_world(w)
+        assert(e == 0)
+    }
+    assert(len(w.routes) == 20)
+}

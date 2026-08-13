@@ -1791,6 +1791,7 @@ fn emit_struct_clone(
     fb.ins().jump(merge_block, &[BlockArg::from(new_ptr)]);
     fb.seal_block(clone_block);
     fb.switch_to_block(merge_block);
+    fb.seal_block(merge_block);
     Ok(fb.block_params(merge_block)[0])
 }
 
@@ -1912,6 +1913,7 @@ fn emit_struct_drop(
     fb.ins().jump(cont_block, &[]);
     fb.seal_block(drop_block);
     fb.switch_to_block(cont_block);
+    fb.seal_block(cont_block);
     Ok(())
 }
 
