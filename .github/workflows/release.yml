@@ -11,7 +11,7 @@ on:
       tag:
         description: "Release tag to create or update"
         required: true
-        default: "v0.5.1"
+        default: "v0.5.3"
 
 permissions:
   contents: write
@@ -44,8 +44,43 @@ jobs:
         run: choco install llvm -y
         continue-on-error: true
 
+      # macOS: bootstrap bundled LLD so the release binary is self-contained
+      # (no clang/Xcode needed to compile or link Mako programs).
+      - name: Install LLVM 21 + cmake (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@21 cmake
+          echo "LLVM_SYS_211_PREFIX=$(brew --prefix llvm@21)" >> "$GITHUB_ENV"
+          echo "$(brew --prefix llvm@21)/bin" >> "$GITHUB_PATH"
+
+      - name: Cache static lld toolchain (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        id: lld-cache
+        with:
+          path: out/native-toolchain
+          key: native-toolchain-llvmorg-21.1.8-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Bootstrap static lld (macOS, cache miss)
+        if: runner.os == 'macOS' && steps.lld-cache.outputs.cache-hit != 'true'
+        run: ./scripts/bootstrap-native-toolchain.sh
+        env:
+          MAKO_LLVM_PREFIX: ${{ env.LLVM_SYS_211_PREFIX }}
+
+      - name: Export lld env (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "MAKO_LLD_STATIC_DIR=${{ github.workspace }}/out/native-toolchain/lld-build/lib" >> "$GITHUB_ENV"
+          echo "MAKO_LLD_INCLUDE_DIR=${{ github.workspace }}/out/native-toolchain/llvm-project-llvmorg-21.1.8/lld/include" >> "$GITHUB_ENV"
+
       - name: Cargo build --release
-        run: cargo build --release
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cargo build --release --features llvm-backend
+          else
+            cargo build --release
+          fi
+        shell: bash
 
       - name: Package Unix bundle
         if: runner.os != 'Windows'
@@ -78,6 +113,13 @@ jobs:
           mako build "${GITHUB_WORKSPACE}/examples/native/native_if_expr.mko" \
             --backend native -o "${RUNNER_TEMP}/native-if-expr"
           "${RUNNER_TEMP}/native-if-expr"
+          # macOS: verify self-contained linking works without clang
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            env -u SDKROOT PATH="/usr/bin:$PREFIX/bin" \
+              mako build "${GITHUB_WORKSPACE}/examples/native/native_if_expr.mko" \
+              --backend native -o "${RUNNER_TEMP}/native-no-clang"
+            "${RUNNER_TEMP}/native-no-clang"
+          fi
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

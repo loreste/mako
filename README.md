@@ -42,6 +42,10 @@ mako version
 You do not need Rust on the machine that runs Mako. The installer downloads a
 prebuilt binary bundle.
 
+**macOS** release binaries ship with a bundled linker (LLD) — no Xcode, clang,
+or any external C toolchain is required. Install and build native binaries
+out of the box. **Linux** currently requires `gcc` or `clang` for linking.
+
 ---
 
 ## What it looks like
