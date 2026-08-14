@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## 0.5.3 — 2026-08-14 (native backend completeness & memory safety)
+
+### Bug fixes
+
+- **fix: native backend SIGSEGV in struct clone/drop (#32).** `emit_struct_clone`
+  and `emit_struct_drop` in both the Cranelift and LLVM backends were missing
+  match arms for `StructSlice`, `PtrSlice` (3 sub-variants), `MapIPtr`, and
+  `MapSPtr` field types. Owned aggregate fields inside structs fell through to
+  bitwise-copy (clone) or no-op (drop), causing shared pointers and
+  use-after-free when structs with `[]Struct` or pointer-map fields were passed
+  by value. Also added missing `FloatSlice`/`ByteSlice`/`BoolSlice` arms to
+  the LLVM backend.
+
+- **fix: C backend `mut` struct param deep-clone.** Mutable struct parameters
+  shared interior pointers (strings, slices) with the caller. Reassigning an
+  owned field freed the caller's data. The codegen now deep-clones owned fields
+  at function entry for `mut` struct params.
+
+### New features
+
+- **feat: chained index+field assignment.** `w.routes[0].path = "x"` now works.
+  The parser accepts `Index` nodes as field-assign bases; the C codegen emits a
+  bounds-checked `_get_ptr` accessor for in-place mutation of struct array
+  elements. The native IR path already handled this via `StructFieldStore`.
+
+- **feat: indirect call arity raised to 8.** Function-pointer and closure calls
+  previously capped at 3 arguments; `fn_call4`–`fn_call8` runtime helpers and
+  IR dispatch now support up to 8.
+
+- **feat: 20+ missing built-in functions registered in native IR.**
+  `str_trim_left`, `str_trim_right`, `format_pad`, `duration_us_as_ms`,
+  `duration_days`, `duration_to_seconds`, `file_append`, `syscall_chmod`,
+  `syscall_kill`, `syscall_symlink`, `syscall_setrlimit_nofile`, `btree_len`,
+  `btree_get_all`, `btree_range_str`, `store_del`, and others — all with
+  corresponding native bridge wrappers where needed.
+
 ### Real source-level debugger (DAP + lldb)
 
 - **`mako dap` is now a real DAP adapter.** It speaks the Debug Adapter
