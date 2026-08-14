@@ -2,9 +2,9 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.4.6**. Patch train after v0.4.5 (LLVM residual +
-packaging + tag), then **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
-**0.5.2** runtime trust soaks. See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
+**Product tip:** **0.5.3**. Patch train: **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
+**0.5.2** runtime trust soaks, **0.5.3** native backend completeness & memory safety.
+See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 
 Mako's product contract is:
 

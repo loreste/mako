@@ -2,9 +2,12 @@
 #
 # https://mako-lang.com
 # https://github.com/loreste/mako
-# Version: 0.2.2
+# Version: 0.5.3
 #
-# Compile path: .mko -> C -> object (cached) -> native binary (clang).
+# Compile paths:
+#   native (default): .mko -> IR -> Cranelift -> native binary (no C compiler needed)
+#   c:                .mko -> C -> object (cached) -> native binary (clang/gcc)
+#   llvm:             .mko -> IR -> LLVM -> optimized native binary
 # No GC. Memory is hold/share/arena. Prefer the surface below; dual spellings
 # (func, :=, import, package) still parse but are not what docs lead with.
 

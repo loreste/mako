@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-08-12** · product **mako0.5.2** (tip; last tag **v0.5.2**) ·
+Last inventory: **2026-08-14** · product **mako0.5.3** (tip; last tag **v0.5.3**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
@@ -16,7 +16,7 @@ focused concurrency suite under TSan · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.5.2** tip · last tag [**v0.5.2**](https://github.com/loreste/mako/releases/tag/v0.5.2) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.5.3** tip · last tag [**v0.5.3**](https://github.com/loreste/mako/releases/tag/v0.5.3) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |

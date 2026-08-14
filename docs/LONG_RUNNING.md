@@ -9,7 +9,7 @@ soaks, gates, and the rest of these docs. Last sync **2026-07-23**, tip
 
 More context: [SPEED.md](SPEED.md), [PERFORMANCE.md](PERFORMANCE.md),
 [MEMORY_MODEL.md](MEMORY_MODEL.md), [SECURITY.md](SECURITY.md),
-[ROADMAP.md](ROADMAP.md) § 0.5.2.
+[ROADMAP.md](ROADMAP.md) § 0.5.3.
 
 ---
 

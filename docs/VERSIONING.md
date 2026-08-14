@@ -48,6 +48,7 @@ See [ROADMAP.md](ROADMAP.md) version map. Tip after `v0.4.5`:
 0.5.0  native-first default (CLI default flip — minor)
 0.5.1  toolchain / IDE depth
 0.5.2  runtime trust soaks
+0.5.3  native backend completeness & memory safety
 0.5.x  further patches as needed
 1.0    stability freeze
 ```
