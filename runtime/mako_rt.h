@@ -727,6 +727,11 @@ static inline MakoStrArray mako_str_array_make(int64_t len, int64_t cap) {
     return a;
 }
 
+static inline MakoStrArray mako_str_array_clone(MakoStrArray a) {
+    if (a.len == 0) { MakoStrArray e = {0}; return e; }
+    return mako_str_array_of(a.data, a.len);
+}
+
 static inline int64_t mako_str_array_len(MakoStrArray a) { return (int64_t)a.len; }
 static inline int64_t mako_str_array_cap(MakoStrArray a) { return (int64_t)a.cap; }
 

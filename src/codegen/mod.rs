@@ -2347,18 +2347,46 @@ impl Codegen {
 
     /// Clone function for an owned C type (mirrors `own_free_fn`).
     /// Used to deep-clone `mut` struct param fields at function entry.
+    /// Clone function for an owned C type (mirrors `own_free_fn`).
+    /// Used to deep-clone `mut` struct param fields at function entry.
     fn own_clone_fn(c_ty: &str) -> Option<String> {
         match c_ty {
             "MakoString" => Some("mako_str_clone".into()),
             "MakoIntArray" => Some("mako_int_array_clone".into()),
             "MakoByteArray" => Some("mako_byte_array_clone".into()),
+            "MakoStrArray" => Some("mako_str_array_clone".into()),
             "MakoFloatArray" => Some("mako_float_array_clone".into()),
             "MakoBoolArray" => Some("mako_bool_array_clone".into()),
             "MakoMapSI*" => Some("mako_map_si_clone".into()),
             "MakoMapII*" => Some("mako_map_ii_clone".into()),
             "MakoMapSS*" => Some("mako_map_ss_clone".into()),
             "MakoMapIF*" => Some("mako_map_if_clone".into()),
+            "MakoMapSF*" => Some("mako_map_sf_clone".into()),
             "MakoMapFI*" => Some("mako_map_fi_clone".into()),
+            "MakoMapFS*" => Some("mako_map_fs_clone".into()),
+            "MakoMapFF*" => Some("mako_map_ff_clone".into()),
+            "MakoMapIB*" => Some("mako_map_ib_clone".into()),
+            "MakoMapSB*" => Some("mako_map_sb_clone".into()),
+            "MakoMapFB*" => Some("mako_map_fb_clone".into()),
+            "MakoMapBI*" => Some("mako_map_bi_clone".into()),
+            "MakoMapBS*" => Some("mako_map_bs_clone".into()),
+            "MakoMapBF*" => Some("mako_map_bf_clone".into()),
+            "MakoMapBB*" => Some("mako_map_bb_clone".into()),
+            // Struct arrays: MakoArr_Route → mako_arr_Route_clone
+            other if other.starts_with("MakoArr_") => {
+                let tag = &other["MakoArr_".len()..];
+                Some(format!("mako_arr_{tag}_clone"))
+            }
+            // Pointer maps: MakoMapS_Point* → mako_map_s_Point_clone
+            other if other.starts_with("MakoMap") && other.ends_with('*') => {
+                let body = &other["MakoMap".len()..other.len() - 1];
+                if let Some((ks, rest)) = body.split_once('_') {
+                    let ks = ks.to_ascii_lowercase();
+                    Some(format!("mako_map_{ks}_{rest}_clone"))
+                } else {
+                    Some(format!("mako_map_{}_clone", body.to_ascii_lowercase()))
+                }
+            }
             _ => None,
         }
     }
@@ -5559,6 +5587,15 @@ impl Codegen {
             self.out,
             "static inline void mako_arr_{c_name}_free({arr} a) {{ if (a.cap > 0 && a.data) free(a.data); }}"
         );
+        let _ = writeln!(
+            self.out,
+            "static inline {arr} mako_arr_{c_name}_clone({arr} a) {{"
+        );
+        let _ = writeln!(self.out, "    if (a.len == 0) {{ {arr} e = {{0}}; return e; }}");
+        let _ = writeln!(self.out, "    {arr} out = mako_arr_{c_name}_make((int64_t)a.len, (int64_t)a.len);");
+        let _ = writeln!(self.out, "    memcpy(out.data, a.data, a.len * sizeof(a.data[0]));");
+        let _ = writeln!(self.out, "    return out;");
+        let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
             "static inline int64_t mako_arr_{c_name}_len({arr} a) {{ return (int64_t)a.len; }}"
