@@ -5496,9 +5496,29 @@ impl<'a> FunctionLowerer<'a> {
                 "mako_native_fn_call3",
                 vec![fp, lowered[0], lowered[1], lowered[2]],
             ),
+            4 => (
+                "mako_native_fn_call4",
+                vec![fp, lowered[0], lowered[1], lowered[2], lowered[3]],
+            ),
+            5 => (
+                "mako_native_fn_call5",
+                vec![fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4]],
+            ),
+            6 => (
+                "mako_native_fn_call6",
+                vec![fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4], lowered[5]],
+            ),
+            7 => (
+                "mako_native_fn_call7",
+                vec![fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4], lowered[5], lowered[6]],
+            ),
+            8 => (
+                "mako_native_fn_call8",
+                vec![fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4], lowered[5], lowered[6], lowered[7]],
+            ),
             _ => {
                 return Err(IrError::new(
-                    "native IR: indirect call arity > 3 not supported yet",
+                    "native IR: indirect call arity > 8 not supported",
                 ));
             }
         };
@@ -17102,6 +17122,18 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
+            "str_trim_left" if args.len() == 2 => Some((
+                "mako_native_str_trim_left_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "str_trim_right" if args.len() == 2 => Some((
+                "mako_native_str_trim_right_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
             "str_contains" if args.len() == 2 => Some((
                 "mako_native_str_contains_ptr",
                 &[Type::Str, Type::Str],
@@ -18851,6 +18883,24 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
+            "btree_len" if args.len() == 1 => Some((
+                "mako_native_btree_len",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "btree_get_all" if args.len() == 2 => Some((
+                "mako_native_btree_get_all",
+                &[Type::Opaque, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "btree_range_str" if args.len() == 3 => Some((
+                "mako_native_btree_range_str_ptr",
+                &[Type::Opaque, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
             "pbtree_new" if args.len() == 0 => Some((
                 "mako_native_pbtree_new",
                 &[],
@@ -19367,6 +19417,12 @@ impl<'a> FunctionLowerer<'a> {
             "store_commit" if args.len() == 1 => Some((
                 "mako_native_store_commit",
                 &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "store_del" if args.len() == 2 => Some((
+                "mako_native_store_del",
+                &[Type::Opaque, Type::I64],
                 Some(Type::I64),
                 false,
             )),
@@ -25615,6 +25671,60 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "duration_hours" if args.len() == 1 => Some((
                 "mako_native_duration_hours",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "duration_us_as_ms" if args.len() == 1 => Some((
+                "mako_duration_us_as_ms",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "duration_days" if args.len() == 1 => Some((
+                "mako_native_duration_days",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "duration_to_seconds" if args.len() == 1 => Some((
+                "mako_native_duration_to_seconds",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "format_pad" if args.len() == 3 => Some((
+                "mako_native_format_pad_ptr",
+                &[Type::Str, Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "file_append" if args.len() == 2 => Some((
+                "mako_native_file_append2_ptr",
+                &[Type::I64, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "syscall_chmod" if args.len() == 2 => Some((
+                "mako_syscall_chmod",
+                &[Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "syscall_kill" if args.len() == 2 => Some((
+                "mako_syscall_kill",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "syscall_symlink" if args.len() == 2 => Some((
+                "mako_syscall_symlink",
+                &[Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "syscall_setrlimit_nofile" if args.len() == 1 => Some((
+                "mako_syscall_setrlimit_nofile",
                 &[Type::I64],
                 Some(Type::I64),
                 false,

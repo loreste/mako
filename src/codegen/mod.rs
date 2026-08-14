@@ -2345,6 +2345,24 @@ impl Codegen {
         }
     }
 
+    /// Clone function for an owned C type (mirrors `own_free_fn`).
+    /// Used to deep-clone `mut` struct param fields at function entry.
+    fn own_clone_fn(c_ty: &str) -> Option<String> {
+        match c_ty {
+            "MakoString" => Some("mako_str_clone".into()),
+            "MakoIntArray" => Some("mako_int_array_clone".into()),
+            "MakoByteArray" => Some("mako_byte_array_clone".into()),
+            "MakoFloatArray" => Some("mako_float_array_clone".into()),
+            "MakoBoolArray" => Some("mako_bool_array_clone".into()),
+            "MakoMapSI*" => Some("mako_map_si_clone".into()),
+            "MakoMapII*" => Some("mako_map_ii_clone".into()),
+            "MakoMapSS*" => Some("mako_map_ss_clone".into()),
+            "MakoMapIF*" => Some("mako_map_if_clone".into()),
+            "MakoMapFI*" => Some("mako_map_fi_clone".into()),
+            _ => None,
+        }
+    }
+
     /// True when `init` produces a fresh owning value (caller must free).
     /// Not Ident (alias) or Slice (view into another local).
     /// POD array lits are stack views (`cap==0`) — free is a no-op (still register
@@ -5558,6 +5576,16 @@ impl Codegen {
             "    if (i < 0 || (size_t)i >= a.len) mako_abort(\"struct slice index out of bounds\");"
         );
         let _ = writeln!(self.out, "    return a.data[i];");
+        let _ = writeln!(self.out, "}}");
+        let _ = writeln!(
+            self.out,
+            "static inline {c_name}* mako_arr_{c_name}_get_ptr({arr} a, int64_t i) {{"
+        );
+        let _ = writeln!(
+            self.out,
+            "    if (i < 0 || (size_t)i >= a.len) mako_abort(\"struct slice index out of bounds\");"
+        );
+        let _ = writeln!(self.out, "    return &a.data[i];");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -12521,6 +12549,43 @@ impl Codegen {
             name = mangle(&f.name)
         );
         self.indent = 1;
+
+        // Deep-clone owned fields of `mut` struct params so mutations don't
+        // corrupt the caller's data (C struct copy shares interior pointers).
+        for p in &f.params {
+            if !p.mutable {
+                continue;
+            }
+            if p.name == "self" && is_mut_self_fn {
+                continue; // mut self is a pointer — handled separately
+            }
+            let pty = self.type_expr_c(&p.ty);
+            let frees = self.struct_own_field_frees(&pty);
+            if !frees.is_empty() {
+                let mn = mangle(&p.name);
+                for (fname, _) in &frees {
+                    let fty = self
+                        .structs
+                        .values()
+                        .find(|s| s.c_name == pty)
+                        .or_else(|| self.structs.get(&pty))
+                        .and_then(|s| {
+                            s.fields
+                                .iter()
+                                .find(|(n, _)| n == fname)
+                                .map(|(_, t)| t.clone())
+                        });
+                    if let Some(ref ft) = fty {
+                        if let Some(clone_fn) = Self::own_clone_fn(ft) {
+                            self.emit_line(format_args!(
+                                "{mn}.{fname} = {clone_fn}({mn}.{fname});"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         let ret_void =
             f.ret.is_none() || matches!(f.ret.as_ref(), Some(TypeExpr::Named(n)) if n == "void");
         let stmts = &f.body.stmts;
@@ -14212,6 +14277,29 @@ impl Codegen {
                 }
             }
             Stmt::FieldAssign { base, field, value } => {
+                // Chained index+field: w.routes[0].path = "x"
+                // Use _get_ptr to get an lvalue pointer into the array element.
+                // Type checker guarantees an indexed field-assign base is a struct array.
+                if let Expr::Index { base: arr_base, index } = base {
+                    let (aty, a) = self.emit_expr(arr_base);
+                    if let Some(sn) = aty.strip_prefix("MakoArr_") {
+                        let (_, idx) = self.emit_expr(index);
+                        let (vty, v) = self.emit_expr(value);
+                        let v = self.ensure_slice_owned(&vty, v);
+                        let v = self.prepare_own_store_rhs(value, &vty, v);
+                        let tmp = self.fresh("ifield");
+                        self.emit_line(format_args!("int64_t {tmp} = {idx};"));
+                        let sn = sn.to_string();
+                        let ptr = format!("mako_arr_{sn}_get_ptr({a}, {tmp})");
+                        if let Some(field_free) = Self::own_free_fn(&vty) {
+                            self.emit_line(format_args!(
+                                "{field_free}({ptr}->{field});"
+                            ));
+                        }
+                        self.emit_line(format_args!("{ptr}->{field} = {v};"));
+                        return;
+                    }
+                }
                 let (bty, b) = self.emit_expr(base);
                 let (vty, v) = self.emit_expr(value);
                 // Escape POD stack/views into long-lived struct fields.

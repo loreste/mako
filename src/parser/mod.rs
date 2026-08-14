@@ -2019,14 +2019,14 @@ impl Parser {
         }
     }
 
-    /// Field assignment has historically supported names and nested fields.
-    /// Keep that path restricted: assigning a field on an indexed value would
-    /// require a true field-lvalue emitter rather than mutating a temporary
-    /// struct value. Indexing a field remains supported through IndexAssign.
+    /// Field assignment supports names, nested fields, and indexed elements
+    /// (e.g. `w.routes[0].path = "x"`). The Index case requires the codegen
+    /// to emit a pointer-based element access rather than a by-value copy.
     fn is_field_lvalue_base(expr: &Expr) -> bool {
         match expr {
             Expr::Ident(_) => true,
             Expr::Field { base, .. } => Self::is_field_lvalue_base(base),
+            Expr::Index { base, .. } => Self::is_field_lvalue_base(base),
             _ => false,
         }
     }

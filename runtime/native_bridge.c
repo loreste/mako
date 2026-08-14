@@ -1555,6 +1555,14 @@ MakoNativeString *mako_native_str_trim_space_ptr(MakoNativeString *s) {
     return bridge_take_str(mako_str_trim_space(bridge_borrow_str(s)));
 }
 
+MakoNativeString *mako_native_str_trim_left_ptr(MakoNativeString *s, MakoNativeString *cut) {
+    return bridge_take_str(mako_str_trim_left(bridge_borrow_str(s), bridge_borrow_str(cut)));
+}
+
+MakoNativeString *mako_native_str_trim_right_ptr(MakoNativeString *s, MakoNativeString *cut) {
+    return bridge_take_str(mako_str_trim_right(bridge_borrow_str(s), bridge_borrow_str(cut)));
+}
+
 MakoNativeString *mako_native_sip_call_id_new_ptr(MakoNativeString *host) {
     return bridge_take_str(mako_sip_call_id_new(bridge_borrow_str(host)));
 }
@@ -9738,6 +9746,55 @@ int64_t mako_native_fn_call3(int64_t fbox, int64_t a0, int64_t a1, int64_t a2) {
     if (f->env)
         return ((int64_t (*)(void *, int64_t, int64_t, int64_t))f->fn)(f->env, a0, a1, a2);
     return ((int64_t (*)(int64_t, int64_t, int64_t))f->fn)(a0, a1, a2);
+}
+
+int64_t mako_native_btree_len(int64_t t) {
+    return mako_btree_len((MakoBTree *)(intptr_t)t);
+}
+int64_t mako_native_btree_get_all(int64_t t, int64_t key) {
+    return mako_btree_get_all((MakoBTree *)(intptr_t)t, key);
+}
+int64_t mako_native_btree_range_str_ptr(int64_t t, MakoNativeString *lo, MakoNativeString *hi) {
+    return mako_btree_range_str((MakoBTree *)(intptr_t)t, bridge_borrow_str(lo), bridge_borrow_str(hi));
+}
+int64_t mako_native_store_del(int64_t s, int64_t key) {
+    return mako_store_del((MakoStore *)(intptr_t)s, key);
+}
+
+int64_t mako_native_fn_call4(int64_t fbox, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
+    if (!fbox) return 0;
+    MakoFn *f = (MakoFn *)(intptr_t)fbox;
+    if (f->env)
+        return ((int64_t (*)(void *, int64_t, int64_t, int64_t, int64_t))f->fn)(f->env, a0, a1, a2, a3);
+    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))f->fn)(a0, a1, a2, a3);
+}
+int64_t mako_native_fn_call5(int64_t fbox, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4) {
+    if (!fbox) return 0;
+    MakoFn *f = (MakoFn *)(intptr_t)fbox;
+    if (f->env)
+        return ((int64_t (*)(void *, int64_t, int64_t, int64_t, int64_t, int64_t))f->fn)(f->env, a0, a1, a2, a3, a4);
+    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))f->fn)(a0, a1, a2, a3, a4);
+}
+int64_t mako_native_fn_call6(int64_t fbox, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5) {
+    if (!fbox) return 0;
+    MakoFn *f = (MakoFn *)(intptr_t)fbox;
+    if (f->env)
+        return ((int64_t (*)(void *, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))f->fn)(f->env, a0, a1, a2, a3, a4, a5);
+    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))f->fn)(a0, a1, a2, a3, a4, a5);
+}
+int64_t mako_native_fn_call7(int64_t fbox, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5, int64_t a6) {
+    if (!fbox) return 0;
+    MakoFn *f = (MakoFn *)(intptr_t)fbox;
+    if (f->env)
+        return ((int64_t (*)(void *, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))f->fn)(f->env, a0, a1, a2, a3, a4, a5, a6);
+    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))f->fn)(a0, a1, a2, a3, a4, a5, a6);
+}
+int64_t mako_native_fn_call8(int64_t fbox, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5, int64_t a6, int64_t a7) {
+    if (!fbox) return 0;
+    MakoFn *f = (MakoFn *)(intptr_t)fbox;
+    if (f->env)
+        return ((int64_t (*)(void *, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))f->fn)(f->env, a0, a1, a2, a3, a4, a5, a6, a7);
+    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))f->fn)(a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
 /* ---- residual unknowns ---- */

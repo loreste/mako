@@ -112,3 +112,130 @@ fn TestRepeatedCloneCycle() {
     }
     assert(len(w.routes) == 20)
 }
+
+// Verify by-value pass clones correctly: read-only by-value arg must not
+// corrupt the caller's copy when the callee returns.
+fn count_routes(w: World) -> int {
+    return len(w.routes)
+}
+
+fn TestByValueCloneIntegrity() {
+    let mut orig = World{
+        name: "original",
+        mode: "http",
+        routes: make([]Route, 0, 4),
+        workers: 2,
+    }
+    orig = parse_line(orig, "route")
+    orig = parse_line(orig, "route2")
+
+    // By-value calls clone World; after callee returns, original must survive
+    let n = count_routes(orig)
+    assert(n == 2)
+    let e = doctor_world(orig)
+    assert(e == 0)
+
+    // Original still intact after two by-value clones were created and dropped
+    assert(orig.name == "original")
+    assert(orig.mode == "http")
+    assert(orig.workers == 2)
+    assert(len(orig.routes) == 2)
+    assert(orig.routes[0].path == "/default")
+    assert(orig.routes[1].path == "/api")
+}
+
+// Chained index+field assignment: w.routes[0].path = "x"
+fn TestChainedIndexFieldAssign() {
+    let mut w = World{
+        name: "test",
+        mode: "http",
+        routes: make([]Route, 0, 4),
+        workers: 1,
+    }
+    w = parse_line(w, "route")
+    w = parse_line(w, "route2")
+    w = parse_line(w, "route3")
+
+    assert(w.routes[0].path == "/default")
+    assert(w.routes[1].path == "/api")
+    assert(w.routes[2].path == "/health")
+
+    // Mutate via chained index+field assignment
+    w.routes[0].path = "/changed"
+    w.routes[1].method = "PUT"
+    w.routes[2].backend = "new-backend"
+
+    assert(w.routes[0].path == "/changed")
+    assert(w.routes[1].method == "PUT")
+    assert(w.routes[2].backend == "new-backend")
+
+    // Other fields untouched
+    assert(w.routes[0].method == "GET")
+    assert(w.routes[1].path == "/api")
+    assert(w.routes[2].path == "/health")
+}
+
+// Verify mut param deep-clone: mutating owned fields must not corrupt caller.
+fn mutate_world(mut w: World) -> World {
+    w.name = "mutated"
+    w.mode = "changed"
+    w.workers = 999
+    let r = route_new("/new", "DELETE", "nowhere")
+    w.routes = append(w.routes, r)
+    return w
+}
+
+fn TestMutParamDeepClone() {
+    let mut orig = World{
+        name: "original",
+        mode: "http",
+        routes: make([]Route, 0, 4),
+        workers: 2,
+    }
+    orig = parse_line(orig, "route")
+    orig = parse_line(orig, "route2")
+
+    let cloned = mutate_world(orig)
+
+    // Original must be untouched
+    assert(orig.name == "original")
+    assert(orig.mode == "http")
+    assert(orig.workers == 2)
+    assert(len(orig.routes) == 2)
+    assert(orig.routes[0].path == "/default")
+    assert(orig.routes[1].path == "/api")
+
+    // Clone must reflect mutations
+    assert(cloned.name == "mutated")
+    assert(cloned.workers == 999)
+    assert(len(cloned.routes) == 3)
+    assert(cloned.routes[2].path == "/new")
+}
+
+// Stress: repeated clone+drop cycles to surface UaF/double-free
+fn TestStressCloneDrop() {
+    let mut w = World{
+        name: "stress",
+        mode: "tcp",
+        routes: make([]Route, 0, 4),
+        workers: 0,
+    }
+    for i in 5 {
+        w = parse_line(w, "route")
+        w = parse_line(w, "route2")
+        w = parse_line(w, "route3")
+    }
+    assert(len(w.routes) == 15)
+
+    // 50 clone+drop cycles via by-value call
+    for i in 50 {
+        let e = doctor_world(w)
+        assert(e == 0)
+    }
+
+    // Verify data integrity after all those clones
+    assert(w.name == "stress")
+    assert(len(w.routes) == 15)
+    assert(w.routes[0].path == "/default")
+    assert(w.routes[14].path == "/health")
+}

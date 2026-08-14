@@ -1571,6 +1571,41 @@ fn emit_instruction<'ctx>(
 /// Null-safe deep clone of a heap struct (recursive for nested aggregates and
 /// owned string/slice fields). Result is written through a stack slot so nested
 /// clones do not fight over phi nodes.
+/// Compute (nfields, str_mask, nest_mask, nest_nf_pack, nest_sm_pack) for
+/// the runtime's struct-key clone/drop helpers.
+fn llvm_struct_key_meta(layouts: &[native_ir::StructLayout], sid: u32) -> (i64, i64, i64, i64, i64) {
+    let fields = &layouts[sid as usize].fields;
+    let nfields = fields.len() as i64;
+    let mut str_mask: i64 = 0;
+    let mut nest_mask: i64 = 0;
+    let mut nest_nf_pack: i64 = 0;
+    let mut nest_sm_pack: i64 = 0;
+    let mut nest_i = 0i32;
+    for (i, (_, ty)) in fields.iter().enumerate() {
+        match ty {
+            Type::Str => str_mask |= 1i64 << i,
+            Type::Struct(nid) => {
+                nest_mask |= 1i64 << i;
+                if nest_i < 4 {
+                    let nested = &layouts[*nid as usize].fields;
+                    let nnf = nested.len() as i64;
+                    let mut nsm: i64 = 0;
+                    for (j, (_, nty)) in nested.iter().enumerate() {
+                        if matches!(nty, Type::Str) {
+                            nsm |= 1i64 << j;
+                        }
+                    }
+                    nest_nf_pack |= (nnf & 0xffff) << (nest_i * 16);
+                    nest_sm_pack |= (nsm & 0xffff) << (nest_i * 16);
+                    nest_i += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    (nfields, str_mask, nest_mask, nest_nf_pack, nest_sm_pack)
+}
+
 fn llvm_emit_struct_clone<'ctx>(
     context: &'ctx Context,
     module: &Module<'ctx>,
@@ -1744,11 +1779,13 @@ fn llvm_emit_struct_clone<'ctx>(
             | Type::MapSI
             | Type::MapSS
             | Type::MapIF
-            | Type::MapFI => {
+            | Type::MapFI
+            | Type::MapIPtr(_)
+            | Type::MapSPtr(_) => {
                 let ptr_ty = context.ptr_type(Default::default());
                 let name = match field_ty {
-                    Type::MapII => "mako_native_map_ii_clone_ptr",
-                    Type::MapSI => "mako_native_map_si_clone_ptr",
+                    Type::MapII | Type::MapIPtr(_) => "mako_native_map_ii_clone_ptr",
+                    Type::MapSI | Type::MapSPtr(_) => "mako_native_map_si_clone_ptr",
                     Type::MapSS => "mako_native_map_ss_clone_ptr",
                     Type::MapIF => "mako_native_map_if_clone_ptr",
                     Type::MapFI => "mako_native_map_fi_clone_ptr",
@@ -1761,6 +1798,99 @@ fn llvm_emit_struct_clone<'ctx>(
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmError::new("map clone returned void"))?
+            }
+            Type::StructSlice(sid) => {
+                let ptr_ty = context.ptr_type(Default::default());
+                let i64_ty = context.i64_type();
+                let (nf, sm, nm, nfp, nsp) = llvm_struct_key_meta(layouts, *sid);
+                let clone = external_function(
+                    module,
+                    "mako_native_struct_slice_clone_ptr",
+                    ptr_ty.fn_type(
+                        &[ptr_ty.into(), i64_ty.into(), i64_ty.into(),
+                          i64_ty.into(), i64_ty.into(), i64_ty.into()],
+                        false,
+                    ),
+                );
+                builder
+                    .build_call(
+                        clone,
+                        &[loaded.into(),
+                          i64_ty.const_int(nf as u64, false).into(),
+                          i64_ty.const_int(sm as u64, false).into(),
+                          i64_ty.const_int(nm as u64, false).into(),
+                          i64_ty.const_int(nfp as u64, false).into(),
+                          i64_ty.const_int(nsp as u64, false).into()],
+                        "clone.struct_slice",
+                    )
+                    .map_err(builder_error)?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmError::new("struct slice clone returned void"))?
+            }
+            Type::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) => {
+                let ptr_ty = context.ptr_type(Default::default());
+                let i64_ty = context.i64_type();
+                let vkind: u64 = match vk {
+                    native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::Interface) => 7,
+                    native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::HttpRequest) => 8,
+                    _ => 0,
+                };
+                let clone = external_function(
+                    module,
+                    "mako_native_ptr_slice_clone_typed",
+                    ptr_ty.fn_type(
+                        &[ptr_ty.into(), i64_ty.into(), i64_ty.into(),
+                          i64_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into()],
+                        false,
+                    ),
+                );
+                builder
+                    .build_call(
+                        clone,
+                        &[loaded.into(),
+                          i64_ty.const_int(vkind, false).into(),
+                          i64_ty.const_zero().into(),
+                          i64_ty.const_zero().into(),
+                          i64_ty.const_zero().into(),
+                          i64_ty.const_zero().into(),
+                          i64_ty.const_zero().into()],
+                        "clone.ptr_slice_typed",
+                    )
+                    .map_err(builder_error)?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmError::new("ptr slice clone typed returned void"))?
+            }
+            Type::PtrSlice(_) => {
+                let ptr_ty = context.ptr_type(Default::default());
+                let clone = external_function(
+                    module,
+                    "mako_native_ptr_slice_clone",
+                    ptr_ty.fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(clone, &[loaded.into()], "clone.ptr_slice")
+                    .map_err(builder_error)?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmError::new("ptr slice clone returned void"))?
+            }
+            Type::FloatSlice | Type::ByteSlice | Type::BoolSlice => {
+                let ptr_ty = context.ptr_type(Default::default());
+                let name = match field_ty {
+                    Type::FloatSlice => "mako_native_float_slice_clone_ptr",
+                    Type::ByteSlice => "mako_native_byte_slice_clone_ptr",
+                    Type::BoolSlice => "mako_native_bool_slice_clone_ptr",
+                    _ => unreachable!(),
+                };
+                let clone = external_function(module, name, ptr_ty.fn_type(&[ptr_ty.into()], false));
+                builder
+                    .build_call(clone, &[loaded.into()], "clone.typed_slice")
+                    .map_err(builder_error)?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmError::new("typed slice clone returned void"))?
             }
             _ => loaded,
         };
@@ -1914,14 +2044,16 @@ fn llvm_emit_struct_drop<'ctx>(
             | Type::MapSI
             | Type::MapSS
             | Type::MapIF
-            | Type::MapFI => {
+            | Type::MapFI
+            | Type::MapIPtr(_)
+            | Type::MapSPtr(_) => {
                 let loaded = builder
                     .build_load(llvm_type(context, *field_ty), gep, "drop.map")
                     .map_err(builder_error)?;
                 let ptr_ty = context.ptr_type(Default::default());
                 let name = match field_ty {
-                    Type::MapII => "mako_native_map_ii_drop_ptr",
-                    Type::MapSI => "mako_native_map_si_drop_ptr",
+                    Type::MapII | Type::MapIPtr(_) => "mako_native_map_ii_drop_ptr",
+                    Type::MapSI | Type::MapSPtr(_) => "mako_native_map_si_drop_ptr",
                     Type::MapSS => "mako_native_map_ss_drop_ptr",
                     Type::MapIF => "mako_native_map_if_drop_ptr",
                     Type::MapFI => "mako_native_map_fi_drop_ptr",
@@ -1934,6 +2066,117 @@ fn llvm_emit_struct_drop<'ctx>(
                 );
                 builder
                     .build_call(drop, &[loaded.into()], "drop.map.call")
+                    .map_err(builder_error)?;
+            }
+            Type::StructSlice(sid) => {
+                let loaded = builder
+                    .build_load(llvm_type(context, *field_ty), gep, "drop.struct_slice")
+                    .map_err(builder_error)?;
+                let ptr_ty = context.ptr_type(Default::default());
+                let i64_ty = context.i64_type();
+                let (nf, sm, nm, nfp, nsp) = llvm_struct_key_meta(layouts, *sid);
+                let drop = external_function(
+                    module,
+                    "mako_native_struct_slice_drop_ptr",
+                    context.void_type().fn_type(
+                        &[ptr_ty.into(), i64_ty.into(), i64_ty.into(),
+                          i64_ty.into(), i64_ty.into(), i64_ty.into()],
+                        false,
+                    ),
+                );
+                builder
+                    .build_call(
+                        drop,
+                        &[loaded.into(),
+                          i64_ty.const_int(nf as u64, false).into(),
+                          i64_ty.const_int(sm as u64, false).into(),
+                          i64_ty.const_int(nm as u64, false).into(),
+                          i64_ty.const_int(nfp as u64, false).into(),
+                          i64_ty.const_int(nsp as u64, false).into()],
+                        "drop.struct_slice.call",
+                    )
+                    .map_err(builder_error)?;
+            }
+            Type::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) => {
+                let loaded = builder
+                    .build_load(llvm_type(context, *field_ty), gep, "drop.ptr_slice_typed")
+                    .map_err(builder_error)?;
+                let ptr_ty = context.ptr_type(Default::default());
+                let i64_ty = context.i64_type();
+                let vkind: u64 = match vk {
+                    native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::Interface) => 7,
+                    native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::HttpRequest) => 8,
+                    _ => 0,
+                };
+                let drop = external_function(
+                    module,
+                    "mako_native_ptr_slice_drop_typed",
+                    context.void_type().fn_type(
+                        &[ptr_ty.into(), i64_ty.into(), i64_ty.into(),
+                          i64_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into()],
+                        false,
+                    ),
+                );
+                builder
+                    .build_call(
+                        drop,
+                        &[loaded.into(),
+                          i64_ty.const_int(vkind, false).into(),
+                          i64_ty.const_zero().into(),
+                          i64_ty.const_zero().into(),
+                          i64_ty.const_zero().into(),
+                          i64_ty.const_zero().into(),
+                          i64_ty.const_zero().into()],
+                        "drop.ptr_slice_typed.call",
+                    )
+                    .map_err(builder_error)?;
+            }
+            Type::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::Struct(_) | native_ir::MapValKind::NestedStruct(_)) => {
+                let loaded = builder
+                    .build_load(llvm_type(context, *field_ty), gep, "drop.ptr_slice_struct")
+                    .map_err(builder_error)?;
+                let ptr_ty = context.ptr_type(Default::default());
+                let drop = external_function(
+                    module,
+                    "mako_native_ptr_slice_drop_free_elems",
+                    context.void_type().fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(drop, &[loaded.into()], "drop.ptr_slice_struct.call")
+                    .map_err(builder_error)?;
+            }
+            Type::PtrSlice(_) => {
+                let loaded = builder
+                    .build_load(llvm_type(context, *field_ty), gep, "drop.ptr_slice")
+                    .map_err(builder_error)?;
+                let ptr_ty = context.ptr_type(Default::default());
+                let drop = external_function(
+                    module,
+                    "mako_native_ptr_slice_drop",
+                    context.void_type().fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(drop, &[loaded.into()], "drop.ptr_slice.call")
+                    .map_err(builder_error)?;
+            }
+            Type::FloatSlice | Type::ByteSlice | Type::BoolSlice => {
+                let loaded = builder
+                    .build_load(llvm_type(context, *field_ty), gep, "drop.typed_slice")
+                    .map_err(builder_error)?;
+                let ptr_ty = context.ptr_type(Default::default());
+                let name = match field_ty {
+                    Type::FloatSlice => "mako_native_float_slice_drop_ptr",
+                    Type::ByteSlice => "mako_native_byte_slice_drop_ptr",
+                    Type::BoolSlice => "mako_native_bool_slice_drop_ptr",
+                    _ => unreachable!(),
+                };
+                let drop = external_function(
+                    module,
+                    name,
+                    context.void_type().fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(drop, &[loaded.into()], "drop.typed_slice.call")
                     .map_err(builder_error)?;
             }
             Type::Struct(nested_id) => {

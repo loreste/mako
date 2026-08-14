@@ -1651,6 +1651,64 @@ fn ir_clif_type(ty: IrType) -> Result<cranelift_codegen::ir::Type, NativeError> 
     }
 }
 
+/// Compute the (nfields, str_mask, nest_mask, nest_nf_pack, nest_sm_pack)
+/// metadata tuple that the runtime's struct-key clone/drop helpers expect.
+fn compute_struct_key_meta(ir: &native_ir::Module, sid: u32) -> (i64, i64, i64, i64, i64) {
+    let fields = &ir.structs[sid as usize].fields;
+    let nfields = fields.len() as i64;
+    let mut str_mask: i64 = 0;
+    let mut nest_mask: i64 = 0;
+    let mut nest_nf_pack: i64 = 0;
+    let mut nest_sm_pack: i64 = 0;
+    let mut nest_i = 0i32;
+    for (i, (_, ty)) in fields.iter().enumerate() {
+        match ty {
+            IrType::Str => str_mask |= 1i64 << i,
+            IrType::Struct(nid) => {
+                nest_mask |= 1i64 << i;
+                if nest_i < 4 {
+                    let nested = &ir.structs[*nid as usize].fields;
+                    let nnf = nested.len() as i64;
+                    let mut nsm: i64 = 0;
+                    for (j, (_, nty)) in nested.iter().enumerate() {
+                        if matches!(nty, IrType::Str) {
+                            nsm |= 1i64 << j;
+                        }
+                    }
+                    nest_nf_pack |= (nnf & 0xffff) << (nest_i * 16);
+                    nest_sm_pack |= (nsm & 0xffff) << (nest_i * 16);
+                    nest_i += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    (nfields, str_mask, nest_mask, nest_nf_pack, nest_sm_pack)
+}
+
+/// Declare-on-demand import of a runtime function with the given signature shape
+/// and call it, returning the call instruction for result extraction.
+fn call_runtime_fn(
+    fb: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    name: &str,
+    args: &[Value],
+    has_return: bool,
+) -> Result<cranelift_codegen::ir::Inst, NativeError> {
+    let mut sig = module.make_signature();
+    for _ in args {
+        sig.params.push(AbiParam::new(types::I64));
+    }
+    if has_return {
+        sig.returns.push(AbiParam::new(types::I64));
+    }
+    let id = module
+        .declare_function(name, Linkage::Import, &sig)
+        .map_err(|e| NativeError::new(e.to_string()))?;
+    let f = module.declare_func_in_func(id, &mut fb.func);
+    Ok(fb.ins().call(f, args))
+}
+
 /// Emit a null-safe deep clone of the struct at `base` with layout `struct_id`.
 /// Nested aggregate fields recurse through this helper so any nesting depth is
 /// correct (the architectural per-type clone walk, specialised at emit time).
@@ -1766,6 +1824,64 @@ fn emit_struct_clone(
                 ss_clone,
                 struct_make,
             )?,
+            IrType::StructSlice(sid) => {
+                let (nf, sm, nm, nfp, nsp) = compute_struct_key_meta(ir, *sid);
+                let nf_v = fb.ins().iconst(types::I64, nf);
+                let sm_v = fb.ins().iconst(types::I64, sm);
+                let nm_v = fb.ins().iconst(types::I64, nm);
+                let nfp_v = fb.ins().iconst(types::I64, nfp);
+                let nsp_v = fb.ins().iconst(types::I64, nsp);
+                let call = call_runtime_fn(
+                    fb, module,
+                    "mako_native_struct_slice_clone_ptr",
+                    &[loaded, nf_v, sm_v, nm_v, nfp_v, nsp_v],
+                    true,
+                )?;
+                fb.inst_results(call)[0]
+            }
+            IrType::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) => {
+                let vkind: i64 = match vk {
+                    native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::Interface) => 7,
+                    native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::HttpRequest) => 8,
+                    _ => 0,
+                };
+                let vk_v = fb.ins().iconst(types::I64, vkind);
+                let zero = fb.ins().iconst(types::I64, 0);
+                let call = call_runtime_fn(
+                    fb, module,
+                    "mako_native_ptr_slice_clone_typed",
+                    &[loaded, vk_v, zero, zero, zero, zero, zero],
+                    true,
+                )?;
+                fb.inst_results(call)[0]
+            }
+            IrType::PtrSlice(_) => {
+                let call = call_runtime_fn(
+                    fb, module,
+                    "mako_native_ptr_slice_clone",
+                    &[loaded],
+                    true,
+                )?;
+                fb.inst_results(call)[0]
+            }
+            IrType::MapIPtr(_) => {
+                let call = call_runtime_fn(
+                    fb, module,
+                    "mako_native_map_ii_clone_ptr",
+                    &[loaded],
+                    true,
+                )?;
+                fb.inst_results(call)[0]
+            }
+            IrType::MapSPtr(_) => {
+                let call = call_runtime_fn(
+                    fb, module,
+                    "mako_native_map_si_clone_ptr",
+                    &[loaded],
+                    true,
+                )?;
+                fb.inst_results(call)[0]
+            }
             IrType::FloatSlice | IrType::ByteSlice | IrType::BoolSlice => {
                 let name = match fty {
                     IrType::FloatSlice => "mako_native_float_slice_clone_ptr",
@@ -1886,6 +2002,67 @@ fn emit_struct_drop(
                     slice_drop,
                     ss_drop,
                     struct_drop,
+                )?;
+            }
+            IrType::StructSlice(sid) => {
+                let (nf, sm, nm, nfp, nsp) = compute_struct_key_meta(ir, *sid);
+                let nf_v = fb.ins().iconst(types::I64, nf);
+                let sm_v = fb.ins().iconst(types::I64, sm);
+                let nm_v = fb.ins().iconst(types::I64, nm);
+                let nfp_v = fb.ins().iconst(types::I64, nfp);
+                let nsp_v = fb.ins().iconst(types::I64, nsp);
+                call_runtime_fn(
+                    fb, module,
+                    "mako_native_struct_slice_drop_ptr",
+                    &[loaded, nf_v, sm_v, nm_v, nfp_v, nsp_v],
+                    false,
+                )?;
+            }
+            IrType::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) => {
+                let vkind: i64 = match vk {
+                    native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::Interface) => 7,
+                    native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::HttpRequest) => 8,
+                    _ => 0,
+                };
+                let vk_v = fb.ins().iconst(types::I64, vkind);
+                let zero = fb.ins().iconst(types::I64, 0);
+                call_runtime_fn(
+                    fb, module,
+                    "mako_native_ptr_slice_drop_typed",
+                    &[loaded, vk_v, zero, zero, zero, zero, zero],
+                    false,
+                )?;
+            }
+            IrType::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::Struct(_) | native_ir::MapValKind::NestedStruct(_)) => {
+                call_runtime_fn(
+                    fb, module,
+                    "mako_native_ptr_slice_drop_free_elems",
+                    &[loaded],
+                    false,
+                )?;
+            }
+            IrType::PtrSlice(_) => {
+                call_runtime_fn(
+                    fb, module,
+                    "mako_native_ptr_slice_drop",
+                    &[loaded],
+                    false,
+                )?;
+            }
+            IrType::MapIPtr(_) => {
+                call_runtime_fn(
+                    fb, module,
+                    "mako_native_map_ii_drop_ptr",
+                    &[loaded],
+                    false,
+                )?;
+            }
+            IrType::MapSPtr(_) => {
+                call_runtime_fn(
+                    fb, module,
+                    "mako_native_map_si_drop_ptr",
+                    &[loaded],
+                    false,
                 )?;
             }
             IrType::FloatSlice
