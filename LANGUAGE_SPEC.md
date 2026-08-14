@@ -326,7 +326,7 @@ Slice operations:
 Out-of-bounds access aborts at runtime.
 
 **Writes:** index assign (`s[i] = v`, `s[i:j][k] = v`, nested `m[i][j] = v`) and
-field assign (`p.x = v`, nested `p.a.b = v`) require a **named mutable root**
+field assign (`p.x = v`, nested `p.a.b = v`, chained `s.arr[i].field = v`) require a **named mutable root**
 (`let mut` / `mut self` / `hold let mut`). Temporaries (`f()[0] = v`, `g().x = v`)
 are rejected at typecheck — no runtime check, no silent mutation of dead values.
 
