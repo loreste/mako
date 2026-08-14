@@ -92,11 +92,21 @@ curl -fsSL https://github.com/loreste/mako/releases/download/v0.4.18/install-rel
 
 ## Prerequisites by OS
 
+**Prebuilt release binaries** (recommended — no Rust needed):
+
+| OS | C compiler | Notes |
+|----|------------|-------|
+| **macOS** | **None** | Bundled LLD linker — fully self-contained, no Xcode or clang required |
+| **Linux** | `gcc` or `clang` | Installer auto-installs if missing; `-pthread -ldl` linked automatically |
+| **Windows** | **LLVM clang** on PATH | Install [LLVM](https://llvm.org/) or `choco install llvm` |
+
+**Building from source** (needs Rust):
+
 | OS | Rust | C compiler | Notes |
 |----|------|------------|-------|
-| **macOS** | rustup | Xcode clang | `xcode-select --install` |
-| **Linux** | rustup | `clang` (apt/dnf) | `-pthread -ldl` linked automatically |
-| **Windows** | rustup | **LLVM clang** on PATH | Install [LLVM](https://llvm.org/) or `choco install llvm`; MSVC Build Tools recommended for host libs. Runtime uses Winsock2 (`-lws2_32`), not pthreads. |
+| **macOS** | rustup | Optional (Xcode CLT for C backend) | Native backend works without clang |
+| **Linux** | rustup | `gcc` or `clang` | Required for linking |
+| **Windows** | rustup | **LLVM clang** on PATH | MSVC Build Tools recommended for host libs |
 
 Optional (native only): OpenSSL, libnghttp2, SQLite, libpq, quiche FFI.
 
@@ -123,7 +133,7 @@ What the installer does:
 
 | Step | Detail |
 |------|--------|
-| System deps | Installs **clang** if missing (apt/dnf/pacman/apk/zypper; macOS hints Xcode CLT) |
+| System deps | Linux: installs **gcc/clang** if missing (apt/dnf/pacman/apk/zypper); macOS: none needed |
 | Download | **One** slim platform tarball + `.sha256` (no Rust, no git clone) |
 | Verify | SHA-256 (`sha256sum` / `shasum` / `openssl`) |
 | Install | `PREFIX/bin/mako` + `share/mako/{runtime,std}` (default `~/.local`); runtime includes the native-link support sources |
@@ -133,7 +143,7 @@ What the installer does:
 | Bootstrap needs | Why |
 |-----------------|-----|
 | `curl`, `tar` | fetch + extract |
-| `sudo` (Linux, if no clang) | install clang package |
+| `sudo` (Linux, if no gcc/clang) | install system linker package |
 
 Flags: `--no-deps`, `--no-shell`, `--yes`, `--prefix`, `--version`,
 `--base-url` / `MAKO_RELEASE_BASE_URL` (`file://…` for local smoke).

@@ -7,8 +7,9 @@ understanding the project structure, and setting up your editor.
 
 To build and run Mako programs you need:
 
-- **clang** (via Xcode Command Line Tools on macOS, or `apt install clang` on
-  Linux, or LLVM on Windows)
+- **macOS**: nothing — the release binary is fully self-contained (bundled linker)
+- **Linux**: `gcc` or `clang` for linking (`apt install gcc` or `apt install clang`)
+- **Windows**: LLVM clang on PATH
 - **A POSIX-like shell** (bash/zsh on macOS/Linux; PowerShell on Windows)
 
 Optional dependencies for full standard library support:
@@ -88,8 +89,9 @@ cargo build --release
 mako version
 ```
 
-On Windows, ensure that clang is available in your PATH. The easiest way is to
-install the LLVM toolchain from the official LLVM releases page.
+On Windows, clang must be on PATH. Install via `choco install llvm` or download
+from the [LLVM releases page](https://llvm.org/). On macOS no external tools are
+needed — the release binary ships with a bundled linker.
 
 ### Runtime path override
 
@@ -113,7 +115,7 @@ mako doctor
 This checks:
 
 - The `mako` binary is in PATH and executable
-- clang is available and the version is sufficient
+- System linker is available (Linux/Windows; not needed on macOS)
 - Runtime headers are found at the expected path
 - Optional dependencies (OpenSSL, SQLite, etc.) are detected
 - The standard library path resolves correctly
@@ -138,8 +140,8 @@ mako run hello.mko
 # hello from mako
 ```
 
-That is the entire workflow. `mako run` compiles the source to C, invokes clang,
-and executes the resulting binary in one step.
+That is the entire workflow. `mako run` compiles the source to a native binary
+and executes it in one step.
 
 ## Creating a project with mako init
 
@@ -480,10 +482,11 @@ mako test examples/testing
 
 ## Troubleshooting
 
-**"clang: command not found"**
+**"clang: command not found"** (Linux/Windows only)
 
-Install clang. On macOS: `xcode-select --install`. On Ubuntu/Debian:
-`sudo apt install clang`. On Fedora: `sudo dnf install clang`.
+On macOS, the native backend uses a bundled linker — clang is not needed.
+On Linux: `sudo apt install gcc` (or `clang`). On Fedora: `sudo dnf install gcc`.
+On Windows: install [LLVM](https://llvm.org/) or `choco install llvm`.
 
 **"runtime headers not found"**
 

@@ -109,8 +109,8 @@ records what has real tests and what only verifies its shape.
 remains available via `--backend c` and is used automatically for sanitizers,
 cross-compilation, and emit-c. Both pass 395/395 tests and produce standalone
 binaries. LLVM release builds available with `--backend llvm --release`.
-Both the C and native backends require clang for final linking. Only specially
-built LLVM/LLD configurations avoid the system linker.
+On macOS, the native backend ships with a bundled linker (LLD) — no clang or
+Xcode required. On Linux, `gcc` or `clang` is needed for linking.
 
 **Packages.** `mako pkg` manages dependencies with a lockfile, SHA-256 content
 hashes, and SemVer resolution. Supports path deps, git deps, local registry,
@@ -125,7 +125,7 @@ and inlay hints. VS Code extension.
 
 ## What does not work yet
 
-- Both backends require clang for linking (the installer handles this on Linux)
+- Linux native backend requires `gcc` or `clang` for linking (installer handles this)
 - WASM: WASI Preview 1 only — no sockets, no TLS, no Preview 2/WIT/DOM
 - Sanitizers, cross-compilation, and emit-c auto-fall back to the C backend
 - No debugger product (lldb works with `#line` source mapping, but no IDE integration beyond seeds)

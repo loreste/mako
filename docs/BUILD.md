@@ -1,11 +1,11 @@
-# Mako builds (v0.4.13 tip)
+# Mako builds (v0.5.3)
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — ship small patches often.
 
-Mako compiles packages to **cached native objects** under `.mako/cache/` (or `$MAKO_CACHE`), then links. Unchanged units skip `clang -c`.
-
-**Product tip:** **0.4.5**. Generic monomorphs and channel ptr helpers participate
-in unit fingerprints like any other generated C.
+Mako compiles to native binaries via three backends: **native** (Cranelift, default),
+**c** (clang/gcc), and **llvm** (optimizing). The native backend on macOS ships with a
+bundled linker — no external toolchain required. The C backend uses incremental
+**cached objects** under `.mako/cache/` (or `$MAKO_CACHE`).
 
 ## Layout
 
@@ -25,7 +25,7 @@ Fingerprints include: compiler cache version, **full source + transitive deps**,
 |------------|---------|
 | (default) | Incremental **on** |
 | `--no-incremental` | Bypass caches |
-| `-j N` / `MAKO_JOBS` | Parallel `clang -c` jobs (default: CPU count) |
+| `-j N` / `MAKO_JOBS` | Parallel compilation jobs (default: CPU count) |
 | `MAKO_CACHE` | Override cache root |
 | `MAKO_CACHE_LOG=1` | Print HIT/MISS lines |
 
@@ -37,14 +37,14 @@ compilation uses the verified source snapshot rather than reopening those files.
 
 Independent object units compile in parallel (owned jobs + channels — no shared mutable typechecker). Dependency order for packages is preserved by merging path deps before codegen; object units for one binary are independent.
 
-## Residual clang usage
+## When is a system linker used?
 
-| Step | Clang? |
-|------|--------|
-| Unchanged unit | **No** — reuse `.o` |
-| Changed unit | `clang -c` only |
-| Final binary | `clang`/`ld` link of `.o`s + libs |
-| wasm / `--emit-c` / `--sanitize` / cross `--target` | Monolithic `build_c` path |
+| Backend | macOS | Linux | Windows |
+|---------|-------|-------|---------|
+| **native** (default) | **Bundled LLD** — no system tools | `gcc`/`clang` for linking | `clang` |
+| **c** | `clang` (compile + link) | `gcc`/`clang` | `clang` |
+| **llvm** | **Bundled LLD** | `gcc`/`clang` for linking | `clang` |
+| wasm / `--emit-c` / `--sanitize` / cross | Always uses C backend + system compiler |
 
 ## Backend policy
 

@@ -10,12 +10,14 @@ Mako is a systems and backend language built for **speed first**, with
 **Syntax is Mako’s own**. Safety comes from ownership and arenas — **not a GC**.
 Native performance is a design goal (compiled to C with `-O3 -flto`).
 
-It compiles `.mko` source files to C, then links them via clang into a single
-native binary. Memory safety uses `hold` / `share` and arenas. Concurrency and
-parallelism are language features: structured `crew` / `kick` / `join`, `fan`
-across cores, channels, actors — no free-fire leaks, no async coloring.
+It compiles `.mko` source files directly to native binaries via Cranelift (default),
+or optionally through C or LLVM backends. On macOS, no external toolchain is
+needed — the compiler ships with a bundled linker. Memory safety uses `hold` /
+`share` and arenas. Concurrency and parallelism are language features: structured
+`crew` / `kick` / `join`, `fan` across cores, channels, actors — no free-fire
+leaks, no async coloring.
 
-Mako is currently at version **0.4.0**. This book teaches idiomatic Mako as it
+Mako is currently at version **0.5.3**. This book teaches idiomatic Mako as it
 ships today. Identity checklist: [IDENTITY.md](../../IDENTITY.md).
 
 | Area | Where |

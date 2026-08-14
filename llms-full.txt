@@ -47,7 +47,11 @@ curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-rele
 make install    # installs to ~/.local/bin/mako + ~/.local/share/mako/runtime
 
 # Verify:
-mako --version    # prints "mako version mako0.2.4 <os>/<arch>"
+mako --version    # prints "mako version mako0.5.3 <os>/<arch>"
+
+# macOS: fully self-contained — no clang/Xcode needed.
+# Linux: needs gcc or clang for linking.
+# Windows: needs LLVM clang on PATH.
 
 ================================================================================
 3. BUILD COMMANDS
