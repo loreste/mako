@@ -401,12 +401,11 @@ static inline int64_t mako_cmap_incr(MakoCMap *m, MakoString key, int64_t delta)
 
 /* ---- Composite-key helpers (zero heap allocation) ---- */
 
-/* Build a |-separated key on the stack and look it up. Falls back to malloc
- * for keys > 512 bytes (effectively never in practice). */
+/* Build a |-separated key and look it up. Single malloc per lookup —
+ * cheaper than Mako-level string concat (which clones twice). */
 static inline MakoString cmap_concat2(MakoString a, MakoString b) {
-    char buf[512];
     size_t len = a.len + 1 + b.len;
-    char *p = (len <= sizeof(buf)) ? buf : (char *)malloc(len);
+    char *p = (char *)malloc(len);
     memcpy(p, a.data, a.len);
     p[a.len] = '|';
     memcpy(p + a.len + 1, b.data, b.len);
@@ -414,11 +413,10 @@ static inline MakoString cmap_concat2(MakoString a, MakoString b) {
 }
 
 static inline MakoString cmap_concat3i(MakoString a, MakoString b, int64_t c) {
-    char buf[512];
     char num[21];
     int nlen = snprintf(num, sizeof(num), "%lld", (long long)c);
     size_t len = a.len + 1 + b.len + 1 + (size_t)nlen;
-    char *p = (len <= sizeof(buf)) ? buf : (char *)malloc(len);
+    char *p = (char *)malloc(len);
     memcpy(p, a.data, a.len);
     p[a.len] = '|';
     memcpy(p + a.len + 1, b.data, b.len);
@@ -430,48 +428,47 @@ static inline MakoString cmap_concat3i(MakoString a, MakoString b, int64_t c) {
 static inline int64_t mako_cmap_has2(MakoCMap *m, MakoString a, MakoString b) {
     MakoString key = cmap_concat2(a, b);
     int64_t r = mako_cmap_has(m, key);
-    if (key.data != NULL && key.len > 512) free((void *)key.data);
+    free((void *)key.data);
     return r;
 }
 
 static inline MakoString mako_cmap_get2(MakoCMap *m, MakoString a, MakoString b) {
     MakoString key = cmap_concat2(a, b);
     MakoString r = mako_cmap_get(m, key);
-    if (key.data != NULL && key.len > 512) free((void *)key.data);
+    free((void *)key.data);
     return r;
 }
 
 static inline void mako_cmap_set2(MakoCMap *m, MakoString a, MakoString b, MakoString val) {
     MakoString key = cmap_concat2(a, b);
-    MakoString owned_key = (key.len > 512) ? key : mako_str_clone(key);
-    mako_cmap_set(m, owned_key, val);
+    mako_cmap_set(m, key, val);
 }
 
 static inline int64_t mako_cmap_del2(MakoCMap *m, MakoString a, MakoString b) {
     MakoString key = cmap_concat2(a, b);
     int64_t r = mako_cmap_del(m, key);
-    if (key.data != NULL && key.len > 512) free((void *)key.data);
+    free((void *)key.data);
     return r;
 }
 
 static inline int64_t mako_cmap_has3i(MakoCMap *m, MakoString a, MakoString b, int64_t c) {
     MakoString key = cmap_concat3i(a, b, c);
     int64_t r = mako_cmap_has(m, key);
-    if (key.data != NULL && key.len > 512) free((void *)key.data);
+    free((void *)key.data);
     return r;
 }
 
 static inline MakoString mako_cmap_get3i(MakoCMap *m, MakoString a, MakoString b, int64_t c) {
     MakoString key = cmap_concat3i(a, b, c);
     MakoString r = mako_cmap_get(m, key);
-    if (key.data != NULL && key.len > 512) free((void *)key.data);
+    free((void *)key.data);
     return r;
 }
 
 static inline int64_t mako_cmap_del3i(MakoCMap *m, MakoString a, MakoString b, int64_t c) {
     MakoString key = cmap_concat3i(a, b, c);
     int64_t r = mako_cmap_del(m, key);
-    if (key.data != NULL && key.len > 512) free((void *)key.data);
+    free((void *)key.data);
     return r;
 }
 
