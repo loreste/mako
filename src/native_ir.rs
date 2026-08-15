@@ -25787,6 +25787,20 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
+            // CMap composite-key helpers
+            "cmap_has2" if args.len() == 3 => Some(("mako_native_cmap_has2_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::I64), false)),
+            "cmap_get2" if args.len() == 3 => Some(("mako_native_cmap_get2_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::Str), true)),
+            "cmap_del2" if args.len() == 3 => Some(("mako_native_cmap_del2_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::I64), false)),
+            "cmap_has3i" if args.len() == 4 => Some(("mako_native_cmap_has3i_ptr", &[Type::Opaque, Type::Str, Type::Str, Type::I64], Some(Type::I64), false)),
+            "cmap_get3i" if args.len() == 4 => Some(("mako_native_cmap_get3i_ptr", &[Type::Opaque, Type::Str, Type::Str, Type::I64], Some(Type::Str), true)),
+            "cmap_del3i" if args.len() == 4 => Some(("mako_native_cmap_del3i_ptr", &[Type::Opaque, Type::Str, Type::Str, Type::I64], Some(Type::I64), false)),
+            "cmap_set_int" if args.len() == 3 => Some(("mako_native_cmap_set_int_ptr", &[Type::Opaque, Type::Str, Type::I64], None, false)),
+            "cmap_get_int" if args.len() == 3 => Some(("mako_native_cmap_get_int_ptr", &[Type::Opaque, Type::Str, Type::I64], Some(Type::I64), false)),
+            // UDP reuseport
+            "udp_bind_reuseport" if args.len() == 1 => Some(("mako_native_udp_bind_reuseport", &[Type::I64], Some(Type::I64), false)),
+            "udp_bind_reuseport_addr" if args.len() == 2 => Some(("mako_native_udp_bind_reuseport_addr_ptr", &[Type::Str, Type::I64], Some(Type::I64), false)),
+            // TLS cert reload
+            "tls_reload_cert" if args.len() == 3 => Some(("mako_native_tls_reload_cert_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::I64), false)),
             // UUID/ULID
             "uuid_nil" if args.len() == 0 => Some(("mako_native_uuid_nil", &[], Some(Type::Str), true)),
             "uuid_ns_dns" if args.len() == 0 => Some(("mako_native_uuid_ns_dns", &[], Some(Type::Str), true)),

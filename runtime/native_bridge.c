@@ -1555,6 +1555,74 @@ MakoNativeString *mako_native_str_trim_space_ptr(MakoNativeString *s) {
     return bridge_take_str(mako_str_trim_space(bridge_borrow_str(s)));
 }
 
+/* CMap composite-key helpers */
+int64_t mako_native_cmap_has2_ptr(int64_t m, MakoNativeString *a, MakoNativeString *b) {
+    return mako_cmap_has2((MakoCMap *)(intptr_t)m, bridge_borrow_str(a), bridge_borrow_str(b));
+}
+MakoNativeString *mako_native_cmap_get2_ptr(int64_t m, MakoNativeString *a, MakoNativeString *b) {
+    return bridge_take_str(mako_cmap_get2((MakoCMap *)(intptr_t)m, bridge_borrow_str(a), bridge_borrow_str(b)));
+}
+int64_t mako_native_cmap_del2_ptr(int64_t m, MakoNativeString *a, MakoNativeString *b) {
+    return mako_cmap_del2((MakoCMap *)(intptr_t)m, bridge_borrow_str(a), bridge_borrow_str(b));
+}
+int64_t mako_native_cmap_has3i_ptr(int64_t m, MakoNativeString *a, MakoNativeString *b, int64_t c) {
+    return mako_cmap_has3i((MakoCMap *)(intptr_t)m, bridge_borrow_str(a), bridge_borrow_str(b), c);
+}
+MakoNativeString *mako_native_cmap_get3i_ptr(int64_t m, MakoNativeString *a, MakoNativeString *b, int64_t c) {
+    return bridge_take_str(mako_cmap_get3i((MakoCMap *)(intptr_t)m, bridge_borrow_str(a), bridge_borrow_str(b), c));
+}
+int64_t mako_native_cmap_del3i_ptr(int64_t m, MakoNativeString *a, MakoNativeString *b, int64_t c) {
+    return mako_cmap_del3i((MakoCMap *)(intptr_t)m, bridge_borrow_str(a), bridge_borrow_str(b), c);
+}
+void mako_native_cmap_set_int_ptr(int64_t m, MakoNativeString *key, int64_t val) {
+    mako_cmap_set_int((MakoCMap *)(intptr_t)m, bridge_borrow_str(key), val);
+}
+int64_t mako_native_cmap_get_int_ptr(int64_t m, MakoNativeString *key, int64_t fallback) {
+    return mako_cmap_get_int((MakoCMap *)(intptr_t)m, bridge_borrow_str(key), fallback);
+}
+
+/* UDP reuseport */
+int64_t mako_native_udp_bind_reuseport(int64_t port) {
+    return mako_nb_udp_bind_reuseport(port);
+}
+int64_t mako_native_udp_bind_reuseport_addr_ptr(MakoNativeString *ip, int64_t port) {
+    int64_t fd = mako_udp_bind_addr(bridge_borrow_str(ip), port);
+    if (fd < 0) return -1;
+#if !defined(_WIN32)
+    int flags = fcntl((int)fd, F_GETFL, 0);
+    if (flags < 0 || fcntl((int)fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+        close((int)fd);
+        return -1;
+    }
+#endif
+    return fd;
+}
+
+/* TLS cert reload */
+int64_t mako_native_tls_reload_cert_ptr(int64_t srv, MakoNativeString *cert, MakoNativeString *key) {
+#ifdef MAKO_HAS_OPENSSL
+    if (!srv) return -1;
+    MakoTlsServer *s = (MakoTlsServer *)(intptr_t)srv;
+    MakoString c = bridge_borrow_str(cert);
+    MakoString k = bridge_borrow_str(key);
+    char cbuf[4096], kbuf[4096];
+    if (c.len >= sizeof(cbuf) || k.len >= sizeof(kbuf)) return -2;
+    memcpy(cbuf, c.data, c.len); cbuf[c.len] = 0;
+    memcpy(kbuf, k.data, k.len); kbuf[k.len] = 0;
+    mako_rwmutex_lock(&s->ref_gate);
+    if (SSL_CTX_use_certificate_chain_file(s->ctx, cbuf) != 1 ||
+        SSL_CTX_use_PrivateKey_file(s->ctx, kbuf, SSL_FILETYPE_PEM) != 1) {
+        mako_rwmutex_unlock(&s->ref_gate);
+        return -3;
+    }
+    mako_rwmutex_unlock(&s->ref_gate);
+    return 0;
+#else
+    (void)srv; (void)cert; (void)key;
+    return -1;
+#endif
+}
+
 /* Math built-ins */
 double mako_native_floor_f(double x) { return floor(x); }
 double mako_native_ceil_f(double x) { return ceil(x); }
