@@ -1626,13 +1626,13 @@ int64_t mako_native_tls_reload_cert_ptr(int64_t srv, MakoNativeString *cert, Mak
     if (c.len >= sizeof(cbuf) || k.len >= sizeof(kbuf)) return -2;
     memcpy(cbuf, c.data, c.len); cbuf[c.len] = 0;
     memcpy(kbuf, k.data, k.len); kbuf[k.len] = 0;
-    mako_rwmutex_lock(&s->ref_gate);
+    pthread_mutex_lock(&s->mu);
     if (SSL_CTX_use_certificate_chain_file(s->ctx, cbuf) != 1 ||
         SSL_CTX_use_PrivateKey_file(s->ctx, kbuf, SSL_FILETYPE_PEM) != 1) {
-        mako_rwmutex_unlock(&s->ref_gate);
+        pthread_mutex_unlock(&s->mu);
         return -3;
     }
-    mako_rwmutex_unlock(&s->ref_gate);
+    pthread_mutex_unlock(&s->mu);
     return 0;
 #else
     (void)srv; (void)cert; (void)key;
