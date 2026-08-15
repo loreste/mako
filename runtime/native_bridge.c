@@ -1555,6 +1555,105 @@ MakoNativeString *mako_native_str_trim_space_ptr(MakoNativeString *s) {
     return bridge_take_str(mako_str_trim_space(bridge_borrow_str(s)));
 }
 
+/* Math built-ins */
+double mako_native_floor_f(double x) { return floor(x); }
+double mako_native_ceil_f(double x) { return ceil(x); }
+double mako_native_abs_f(double x) { return fabs(x); }
+double mako_native_clamp_f(double v, double lo, double hi) {
+    if (v < lo) return lo; if (v > hi) return hi; return v;
+}
+double mako_native_math_abs(double x) { return fabs(x); }
+double mako_native_math_pow(double x, double y) { return pow(x, y); }
+double mako_native_math_ceil(double x) { return ceil(x); }
+double mako_native_math_sin(double x) { return sin(x); }
+double mako_native_math_cos(double x) { return cos(x); }
+double mako_native_math_log(double x) { return log(x); }
+double mako_native_math_exp(double x) { return exp(x); }
+double mako_native_lerp(double a, double b, double t) { return a + (b - a) * t; }
+double mako_native_dist2d(double x1, double y1, double x2, double y2) {
+    double dx = x2 - x1, dy = y2 - y1; return sqrt(dx*dx + dy*dy);
+}
+double mako_native_rand_float(void) { return (double)rand() / (double)RAND_MAX; }
+
+/* Circuit breaker */
+int64_t mako_native_breaker_new(int64_t threshold, int64_t timeout_ms, int64_t half_open_max) {
+    return (int64_t)(intptr_t)mako_breaker_new(threshold, timeout_ms, half_open_max);
+}
+int64_t mako_native_breaker_allow(int64_t b) {
+    return mako_breaker_allow((MakoCircuitBreaker *)(intptr_t)b);
+}
+void mako_native_breaker_success(int64_t b) {
+    mako_breaker_success((MakoCircuitBreaker *)(intptr_t)b);
+}
+void mako_native_breaker_failure(int64_t b) {
+    mako_breaker_failure((MakoCircuitBreaker *)(intptr_t)b);
+}
+void mako_native_breaker_reset(int64_t b) {
+    mako_breaker_reset((MakoCircuitBreaker *)(intptr_t)b);
+}
+int64_t mako_native_breaker_state(int64_t b) {
+    return mako_breaker_state((MakoCircuitBreaker *)(intptr_t)b);
+}
+void mako_native_breaker_free(int64_t b) {
+    mako_breaker_free((MakoCircuitBreaker *)(intptr_t)b);
+}
+
+/* Rate limiter */
+int64_t mako_native_ratelimit_new(int64_t rate, int64_t burst) {
+    return (int64_t)(intptr_t)mako_ratelimit_new(rate, burst);
+}
+int64_t mako_native_ratelimit_allow(int64_t rl) {
+    return mako_ratelimit_allow((MakoRateLimiter *)(intptr_t)rl);
+}
+void mako_native_ratelimit_free(int64_t rl) {
+    mako_ratelimit_free((MakoRateLimiter *)(intptr_t)rl);
+}
+int64_t mako_native_ratelimit_remaining(int64_t rl) {
+    return mako_ratelimit_remaining((MakoRateLimiter *)(intptr_t)rl);
+}
+
+/* Consistent hash */
+int64_t mako_native_chash_new(int64_t nodes, int64_t vnodes) {
+    return (int64_t)(intptr_t)mako_chash_new(nodes, vnodes);
+}
+int64_t mako_native_chash_add_node(int64_t ch) {
+    return mako_chash_add_node((MakoCHash *)(intptr_t)ch);
+}
+void mako_native_chash_remove_node(int64_t ch, int64_t node_id) {
+    mako_chash_remove_node((MakoCHash *)(intptr_t)ch, node_id);
+}
+int64_t mako_native_chash_get_ptr(int64_t ch, MakoNativeString *key) {
+    return mako_chash_get((MakoCHash *)(intptr_t)ch, bridge_borrow_str(key));
+}
+int64_t mako_native_chash_node_count(int64_t ch) {
+    return mako_chash_node_count((MakoCHash *)(intptr_t)ch);
+}
+void mako_native_chash_free(int64_t ch) {
+    mako_chash_free((MakoCHash *)(intptr_t)ch);
+}
+
+/* Buffer operations */
+int64_t mako_native_buf_from_string_ptr(MakoNativeString *s) {
+    return (int64_t)(intptr_t)mako_buf_from_string(bridge_borrow_str(s));
+}
+int64_t mako_native_buf_len(int64_t b) { return mako_buf_len((MakoBuf *)(intptr_t)b); }
+int64_t mako_native_buf_pos(int64_t b) { return mako_buf_pos((MakoBuf *)(intptr_t)b); }
+void mako_native_buf_seek(int64_t b, int64_t pos) { mako_buf_seek((MakoBuf *)(intptr_t)b, pos); }
+void mako_native_buf_reset(int64_t b) { mako_buf_reset((MakoBuf *)(intptr_t)b); }
+void mako_native_buf_free(int64_t b) { mako_buf_free((MakoBuf *)(intptr_t)b); }
+MakoNativeString *mako_native_buf_to_string_ptr(int64_t b) {
+    return bridge_take_str(mako_buf_to_string((MakoBuf *)(intptr_t)b));
+}
+MakoNativeString *mako_native_buf_read_str_ptr(int64_t b) {
+    return bridge_take_str(mako_buf_read_str((MakoBuf *)(intptr_t)b));
+}
+MakoNativeString *mako_native_buf_read_bytes_ptr(int64_t b, int64_t n) {
+    return bridge_take_str(mako_buf_read_bytes((MakoBuf *)(intptr_t)b, n));
+}
+void mako_native_buf_write_str_ptr(int64_t b, MakoNativeString *s) {
+    mako_buf_write_str((MakoBuf *)(intptr_t)b, bridge_borrow_str(s));
+}
+
 MakoNativeString *mako_native_base64url_encode_ptr(MakoNativeString *s) {
     return bridge_take_str(mako_base64url_encode(bridge_borrow_str(s)));
 }
