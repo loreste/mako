@@ -401,11 +401,11 @@ fn TestStressSortReverse() {
         a = append(a, 499 - i)
     }
     let s = sort_ints(a)
-    let r = slices_reverse(s)
+    let r = slices_reverse(ints_copy(s))
     assert(r[0] == 499)
     assert(r[499] == 0)
     // Unique on sorted should be identity (all distinct)
-    let u = slices_unique(s)
+    let u = slices_unique(ints_copy(s))
     assert(len(u) == 500)
 }
 
