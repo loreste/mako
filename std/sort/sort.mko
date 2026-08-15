@@ -1,0 +1,37 @@
+// std/sort — sorting and searching for slices
+//
+// Typed sort for int, string, and float slices.
+// All sorts are in-place and return the sorted slice.
+
+pack sort
+
+fn ints(a: []int) -> []int { return sort_ints(a) }
+fn strings(a: []string) -> []string { return sort_strings(a) }
+
+fn ints_reverse(a: []int) -> []int {
+    let sorted = sort_ints(a)
+    return slices_reverse(sorted)
+}
+
+fn strings_reverse(a: []string) -> []string {
+    let sorted = sort_strings(a)
+    return slices_reverse_strs(sorted)
+}
+
+fn is_sorted_ints(a: []int) -> bool {
+    for i in len(a) - 1 {
+        if a[i] > a[i + 1] {
+            return false
+        }
+    }
+    return true
+}
+
+fn is_sorted_strings(a: []string) -> bool {
+    for i in len(a) - 1 {
+        if a[i] > a[i + 1] {
+            return false
+        }
+    }
+    return true
+}

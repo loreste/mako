@@ -4117,6 +4117,7 @@ impl Codegen {
             self.out.push_str("#include \"mako_trace.h\"\n");
             self.out.push_str("#include \"mako_log.h\"\n");
             self.out.push_str("#include \"mako_std.h\"\n");
+            self.out.push_str("#include \"mako_stdlib.h\"\n");
             self.out.push_str("#include \"mako_leak.h\"\n");
             self.out.push_str("#include \"mako_shutdown.h\"\n");
             self.out.push_str("#include \"mako_tls.h\"\n");
@@ -16662,6 +16663,83 @@ impl Codegen {
                         "math_exp" => {
                             let (_, x) = self.emit_expr(&args[0]);
                             return ("double".into(), format!("mako_math_exp({x})"));
+                        }
+                        "math_tan" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            return ("double".into(), format!("mako_math_tan({x})"));
+                        }
+                        "math_asin" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            return ("double".into(), format!("mako_math_asin({x})"));
+                        }
+                        "math_acos" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            return ("double".into(), format!("mako_math_acos({x})"));
+                        }
+                        "math_atan" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            return ("double".into(), format!("mako_math_atan({x})"));
+                        }
+                        "math_atan2" => {
+                            let (_, y) = self.emit_expr(&args[0]);
+                            let (_, x) = self.emit_expr(&args[1]);
+                            return ("double".into(), format!("mako_math_atan2({y}, {x})"));
+                        }
+                        "math_log2" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            return ("double".into(), format!("mako_math_log2({x})"));
+                        }
+                        "math_log10" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            return ("double".into(), format!("mako_math_log10({x})"));
+                        }
+                        "math_round" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            return ("double".into(), format!("mako_math_round({x})"));
+                        }
+                        "math_trunc" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            return ("double".into(), format!("mako_math_trunc({x})"));
+                        }
+                        "math_fmod" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            let (_, y) = self.emit_expr(&args[1]);
+                            return ("double".into(), format!("mako_math_fmod({x}, {y})"));
+                        }
+                        "math_hypot" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            let (_, y) = self.emit_expr(&args[1]);
+                            return ("double".into(), format!("mako_math_hypot({x}, {y})"));
+                        }
+                        "math_min" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return ("double".into(), format!("mako_math_min({a}, {b})"));
+                        }
+                        "math_max" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return ("double".into(), format!("mako_math_max({a}, {b})"));
+                        }
+                        "math_clamp" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            let (_, lo) = self.emit_expr(&args[1]);
+                            let (_, hi) = self.emit_expr(&args[2]);
+                            return ("double".into(), format!("mako_math_clamp({x}, {lo}, {hi})"));
+                        }
+                        "math_is_nan" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_math_is_nan({x})"));
+                        }
+                        "math_is_inf" => {
+                            let (_, x) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_math_is_inf({x})"));
+                        }
+                        "math_inf" => {
+                            return ("double".into(), "mako_math_inf()".into());
+                        }
+                        "math_nan" => {
+                            return ("double".into(), "mako_math_nan()".into());
                         }
                         "ints_contains" => {
                             let (_, a) = self.emit_expr(&args[0]);

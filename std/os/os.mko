@@ -1,7 +1,54 @@
+// std/os — operating system interaction
+//
+// File I/O, environment, process, directory operations.
+// Modeled after Go's os package and Rust's std::fs / std::env.
+
+// ---- Working directory ----
+
 fn getwd() -> string { return getcwd() }
 fn chdir_to(p: string) -> int { return chdir(p) }
+
+// ---- Environment variables ----
+
 fn getenv(k: string) -> string { return env_get(k) }
 fn setenv(k: string, v: string) -> int { return env_set(k, v) }
+fn unsetenv(k: string) -> int { return env_unset(k) }
+fn hasenv(k: string) -> bool { return env_has(k) == 1 }
+fn environ() -> []string { return env_keys() }
+
+// ---- Process ----
+
 fn exit_with(code: int) { exit(code) }
 fn argv() -> []string { return args() }
 fn nargs() -> int { return argc() }
+fn arg(i: int) -> string { return arg_get(i) }
+fn pid() -> int { return syscall_getpid() }
+fn host() -> string { return syscall_hostname() }
+
+// ---- File operations (path-based) ----
+
+fn read_file_contents(path: string) -> string { return read_file(path) }
+fn write_file_contents(path: string, data: string) -> int { return write_file(path, data) }
+fn exists(path: string) -> bool { return file_exists(path) == 1 }
+fn remove(path: string) -> int { return remove_file(path) }
+fn rename_file(from: string, to: string) -> int { return rename(from, to) }
+fn size(path: string) -> int { return path_file_size(path) }
+
+// ---- File descriptor operations ----
+
+fn open(path: string, flags: int) -> int { return file_open(path, flags) }
+fn close(fd: int) -> int { return file_close(fd) }
+fn seek(fd: int, offset: int) -> int { return file_seek(fd, offset) }
+fn truncate(fd: int, size: int) -> int { return file_truncate(fd, size) }
+fn sync(fd: int) -> int { return fsync(fd) }
+fn fsize(fd: int) -> int { return file_size(fd) }
+fn pread_at(fd: int, offset: int, n: int) -> string { return pread(fd, offset, n) }
+fn pwrite_at(fd: int, offset: int, data: string) -> int { return pwrite(fd, offset, data) }
+fn read_exact(fd: int, n: int) -> string { return file_read_exact(fd, n) }
+
+// ---- Directory operations ----
+
+fn mkdir_path(path: string) -> int { return mkdir(path) }
+fn readdir(path: string) -> []string { return read_dir(path) }
+fn join_path(a: string, b: string) -> string { return path_join(a, b) }
+fn temp() -> string { return temp_dir() }

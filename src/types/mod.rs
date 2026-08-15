@@ -1330,6 +1330,78 @@ impl TypeChecker {
             Type::Fn(vec![Type::Float], Box::new(Type::Float)),
         );
         fns.insert(
+            "math_tan".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_asin".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_acos".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_atan".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_atan2".into(),
+            Type::Fn(vec![Type::Float, Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_log2".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_log10".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_round".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_trunc".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_fmod".into(),
+            Type::Fn(vec![Type::Float, Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_hypot".into(),
+            Type::Fn(vec![Type::Float, Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_min".into(),
+            Type::Fn(vec![Type::Float, Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_max".into(),
+            Type::Fn(vec![Type::Float, Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_clamp".into(),
+            Type::Fn(vec![Type::Float, Type::Float, Type::Float], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_is_nan".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "math_is_inf".into(),
+            Type::Fn(vec![Type::Float], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "math_inf".into(),
+            Type::Fn(vec![], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "math_nan".into(),
+            Type::Fn(vec![], Box::new(Type::Float)),
+        );
+        fns.insert(
             "ints_contains".into(),
             Type::Fn(
                 vec![Type::Array(Box::new(Type::Int)), Type::Int],

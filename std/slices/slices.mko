@@ -1,2 +1,78 @@
+// std/slices — slice utilities for int, string, float, and bool slices
+//
+// Modeled after Go's slices package and Rust's slice methods.
+
+// ---- Reverse ----
+
 fn reverse(a: []int) -> []int { return slices_reverse(a) }
+fn reverse_strs(a: []string) -> []string { return slices_reverse_strs(a) }
+
+// ---- Unique (dedup sorted) ----
+
 fn unique(a: []int) -> []int { return slices_unique(a) }
+fn unique_strs(a: []string) -> []string { return slices_unique_strs(a) }
+
+// ---- Search ----
+
+fn contains(a: []int, v: int) -> bool { return ints_contains(a, v) }
+fn contains_str(a: []string, v: string) -> bool { return strings_contains(a, v) }
+fn index_of(a: []int, v: int) -> int { return ints_index(a, v) }
+fn index_of_str(a: []string, v: string) -> int { return strings_index(a, v) }
+
+// ---- Copy ----
+
+fn clone_ints(a: []int) -> []int { return ints_copy(a) }
+fn clone_strs(a: []string) -> []string { return strings_copy(a) }
+
+// ---- Aggregation ----
+
+fn sum(a: []int) -> int {
+    let mut s = 0
+    for i, v in range a {
+        s = s + v
+    }
+    return s
+}
+
+fn min_val(a: []int) -> int {
+    assert(len(a) > 0)
+    let mut m = a[0]
+    for i in len(a) {
+        if a[i] < m { m = a[i] }
+    }
+    return m
+}
+
+fn max_val(a: []int) -> int {
+    assert(len(a) > 0)
+    let mut m = a[0]
+    for i in len(a) {
+        if a[i] > m { m = a[i] }
+    }
+    return m
+}
+
+// ---- Transform ----
+
+fn fill(a: []int, v: int) -> []int {
+    for i in len(a) {
+        a[i] = v
+    }
+    return a
+}
+
+fn equal(a: []int, b: []int) -> bool {
+    if len(a) != len(b) { return false }
+    for i in len(a) {
+        if a[i] != b[i] { return false }
+    }
+    return true
+}
+
+fn equal_strs(a: []string, b: []string) -> bool {
+    if len(a) != len(b) { return false }
+    for i in len(a) {
+        if a[i] != b[i] { return false }
+    }
+    return true
+}

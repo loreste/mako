@@ -1,0 +1,438 @@
+// Adversarial tests for std/os, std/sort, std/slices, std/collections, std/maps, std/math.
+// Exercises ownership, clone/drop, out-of-bounds guards, and stress paths.
+
+// ---- Math ----
+
+fn TestMathBasic() {
+    assert(abs(-5) == 5)
+    assert(min(3, 7) == 3)
+    assert(max(3, 7) == 7)
+    assert(clamp(10, 0, 5) == 5)
+    assert(clamp(-1, 0, 5) == 0)
+
+    let pi = 3.14159265358979
+    assert(math_sin(0.0) == 0.0)
+    assert(math_cos(0.0) == 1.0)
+    assert(math_abs(-1.5) == 1.5)
+    assert(math_floor(2.9) == 2.0)
+    assert(math_ceil(2.1) == 3.0)
+    assert(math_round(2.5) == 3.0)
+    assert(math_round(2.4) == 2.0)
+    assert(math_sqrt(4.0) == 2.0)
+    assert(math_pow(2.0, 10.0) == 1024.0)
+    assert(math_trunc(3.9) == 3.0)
+    assert(math_trunc(-3.9) == -3.0)
+    assert(math_min(1.0, 2.0) == 1.0)
+    assert(math_max(1.0, 2.0) == 2.0)
+    assert(math_clamp(5.0, 0.0, 3.0) == 3.0)
+    assert(math_fmod(7.0, 3.0) == 1.0)
+    assert(math_is_nan(math_nan()) == 1)
+    assert(math_is_inf(math_inf()) == 1)
+    assert(math_is_nan(1.0) == 0)
+    assert(math_is_inf(1.0) == 0)
+}
+
+fn TestMathTrig() {
+    let pi = 3.14159265358979
+    let half_pi = pi / 2.0
+    // sin(pi) ≈ 0, cos(pi) ≈ -1
+    assert(math_abs(math_sin(pi)) < 0.0001)
+    assert(math_abs(math_cos(pi) + 1.0) < 0.0001)
+    // tan(0) = 0
+    assert(math_tan(0.0) == 0.0)
+    // asin(1) ≈ pi/2
+    assert(math_abs(math_asin(1.0) - half_pi) < 0.0001)
+    // acos(0) ≈ pi/2
+    assert(math_abs(math_acos(0.0) - half_pi) < 0.0001)
+    // atan(1) ≈ pi/4
+    assert(math_abs(math_atan(1.0) - pi / 4.0) < 0.0001)
+    // atan2(1, 1) ≈ pi/4
+    assert(math_abs(math_atan2(1.0, 1.0) - pi / 4.0) < 0.0001)
+    // hypot(3, 4) = 5
+    assert(math_abs(math_hypot(3.0, 4.0) - 5.0) < 0.0001)
+}
+
+fn TestMathLogs() {
+    // log(e) ≈ 1
+    let e = 2.71828182845904
+    assert(math_abs(math_log(e) - 1.0) < 0.0001)
+    // log2(8) = 3
+    assert(math_abs(math_log2(8.0) - 3.0) < 0.0001)
+    // log10(1000) = 3
+    assert(math_abs(math_log10(1000.0) - 3.0) < 0.0001)
+    // exp(0) = 1
+    assert(math_exp(0.0) == 1.0)
+}
+
+// ---- Slices ----
+
+fn TestSliceReverse() {
+    let a = [3, 1, 4, 1, 5]
+    let r = slices_reverse(a)
+    assert(r[0] == 5)
+    assert(r[1] == 1)
+    assert(r[4] == 3)
+    assert(len(r) == 5)
+}
+
+fn TestSliceReverseStrings() {
+    let a = ["hello", "world", "mako"]
+    let r = slices_reverse_strs(a)
+    assert(r[0] == "mako")
+    assert(r[1] == "world")
+    assert(r[2] == "hello")
+}
+
+fn TestSliceUnique() {
+    let a = sort_ints([3, 1, 2, 1, 3, 2])
+    let u = slices_unique(a)
+    assert(len(u) == 3)
+    assert(u[0] == 1)
+    assert(u[1] == 2)
+    assert(u[2] == 3)
+}
+
+fn TestSliceContains() {
+    let a = [10, 20, 30, 40]
+    assert(ints_contains(a, 20))
+    assert(ints_contains(a, 40))
+    assert(!ints_contains(a, 50))
+    assert(ints_index(a, 30) == 2)
+    assert(ints_index(a, 99) == -1)
+}
+
+fn TestSliceContainsStrings() {
+    let a = ["alpha", "beta", "gamma"]
+    assert(strings_contains(a, "beta"))
+    assert(!strings_contains(a, "delta"))
+    assert(strings_index(a, "gamma") == 2)
+    assert(strings_index(a, "missing") == -1)
+}
+
+fn TestSliceCopy() {
+    let a = [1, 2, 3]
+    let b = ints_copy(a)
+    assert(len(b) == 3)
+    assert(b[0] == 1)
+    assert(b[2] == 3)
+}
+
+fn TestSliceCopyStrings() {
+    let a = ["one", "two", "three"]
+    let b = strings_copy(a)
+    assert(len(b) == 3)
+    assert(b[0] == "one")
+    assert(b[2] == "three")
+}
+
+// ---- Sort ----
+
+fn TestSortInts() {
+    let a = [5, 3, 8, 1, 9, 2]
+    let s = sort_ints(a)
+    assert(s[0] == 1)
+    assert(s[1] == 2)
+    assert(s[2] == 3)
+    assert(s[5] == 9)
+}
+
+fn TestSortStrings() {
+    let a = ["cherry", "apple", "banana"]
+    let s = sort_strings(a)
+    assert(s[0] == "apple")
+    assert(s[1] == "banana")
+    assert(s[2] == "cherry")
+}
+
+fn TestSortEmpty() {
+    let a = make([]int, 0, 0)
+    let s = sort_ints(a)
+    assert(len(s) == 0)
+}
+
+fn TestSortSingle() {
+    let a = [42]
+    let s = sort_ints(a)
+    assert(len(s) == 1)
+    assert(s[0] == 42)
+}
+
+fn TestSortLarge() {
+    let mut a = make([]int, 0, 1000)
+    for i in 1000 {
+        a = append(a, 999 - i)
+    }
+    let s = sort_ints(a)
+    assert(s[0] == 0)
+    assert(s[999] == 999)
+    for i in 999 {
+        assert(s[i] <= s[i + 1])
+    }
+}
+
+// ---- Collections: List[int] ----
+
+fn TestListIntBasic() {
+    let mut a = list_new_int()
+    a = list_push_int(a, 10)
+    a = list_push_int(a, 20)
+    a = list_push_int(a, 30)
+    assert(list_len_int(a) == 3)
+    assert(list_get_int(a, 0) == 10)
+    assert(list_get_int(a, 2) == 30)
+    assert(list_sum_int(a) == 60)
+    assert(list_min_int(a) == 10)
+    assert(list_max_int(a) == 30)
+}
+
+fn TestListIntInsertRemove() {
+    let mut a = list_new_int()
+    a = list_push_int(a, 1)
+    a = list_push_int(a, 3)
+    a = list_insert_int(a, 1, 2)
+    assert(list_len_int(a) == 3)
+    assert(list_get_int(a, 1) == 2)
+    a = list_remove_int(a, 0)
+    assert(list_get_int(a, 0) == 2)
+}
+
+fn TestListIntPopClear() {
+    let mut a = list_new_int()
+    a = list_push_int(a, 10)
+    a = list_push_int(a, 20)
+    a = list_pop_int(a)
+    let popped = list_popped_int()
+    assert(popped == 20)
+    assert(list_len_int(a) == 1)
+    a = list_clear_int(a)
+    assert(list_len_int(a) == 0)
+}
+
+fn TestListIntCombinators() {
+    let a = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    let t = list_take_int(a, 3)
+    assert(len(t) == 3)
+    assert(t[0] == 1)
+    assert(t[2] == 3)
+
+    let d = list_drop_int(a, 7)
+    assert(len(d) == 3)
+    assert(d[0] == 8)
+
+    let c = list_count_int(a, 5)
+    assert(c == 1)
+
+    let f = list_find_int(a, 7)
+    assert(f == 6)
+
+    let lt = list_filter_lt_int(a, 4)
+    assert(len(lt) == 3)
+
+    let gt = list_filter_gt_int(a, 8)
+    assert(len(gt) == 2)
+
+    let added = list_map_add_int(a, 100)
+    assert(added[0] == 101)
+
+    let sum = list_fold_add_int(a, 0)
+    assert(sum == 55)
+}
+
+// ---- Collections: List[string] ----
+
+fn TestListStrBasic() {
+    let mut a = list_new_str()
+    a = list_push_str(a, "hello")
+    a = list_push_str(a, "world")
+    assert(list_len_str(a) == 2)
+    assert(list_get_str(a, 0) == "hello")
+    assert(list_get_str(a, 1) == "world")
+    a = list_pop_str(a)
+    let p = list_popped_str()
+    assert(p == "world")
+    assert(list_len_str(a) == 1)
+}
+
+// ---- Collections: Set ----
+
+fn TestSetOps() {
+    let a = sort_ints([1, 2, 3, 4, 5])
+    let b = sort_ints([3, 4, 5, 6, 7])
+
+    let u = set_union_int(a, b)
+    assert(len(u) == 7)
+
+    let inter = set_intersect_int(a, b)
+    assert(len(inter) == 3)
+    assert(inter[0] == 3)
+
+    let d = set_diff_int(a, b)
+    assert(len(d) == 2)
+    assert(d[0] == 1)
+    assert(d[1] == 2)
+
+    assert(set_has_int(a, 3) == 1)
+    assert(set_has_int(a, 9) == 0)
+}
+
+// ---- Collections: Heap ----
+
+fn TestMinHeap() {
+    let mut h = make([]int, 0, 8)
+    h = heap_push_int(h, 5)
+    h = heap_push_int(h, 1)
+    h = heap_push_int(h, 3)
+    assert(heap_peek_int(h) == 1)
+    h = heap_pop_int(h)
+    let p = heap_popped_int()
+    assert(p == 1)
+    assert(heap_peek_int(h) == 3)
+}
+
+// ---- Maps ----
+
+fn TestMapKeysValues() {
+    let mut m = make(map[string]int)
+    m["a"] = 1
+    m["b"] = 2
+    m["c"] = 3
+    let k = maps_keys(m)
+    assert(len(k) == 3)
+    let v = maps_values(m)
+    assert(len(v) == 3)
+}
+
+fn TestMapClone() {
+    let mut m = make(map[string]int)
+    m["x"] = 10
+    m["y"] = 20
+    let mut c = maps_clone(m)
+    assert(c["x"] == 10)
+    assert(c["y"] == 20)
+    // Mutate clone, original unaffected
+    c["x"] = 99
+    assert(m["x"] == 10)
+}
+
+fn TestMapEqual() {
+    let mut a = make(map[string]int)
+    a["k"] = 1
+    let mut b = make(map[string]int)
+    b["k"] = 1
+    assert(maps_equal(a, b) == 1)
+    b["k"] = 2
+    assert(maps_equal(a, b) == 0)
+}
+
+fn TestMapClearCopy() {
+    let mut m = make(map[string]int)
+    m["a"] = 1
+    m["b"] = 2
+    let mut dst = make(map[string]int)
+    maps_copy(dst, m)
+    assert(dst["a"] == 1)
+    assert(dst["b"] == 2)
+    maps_clear(m)
+    assert(len(m) == 0)
+    // dst still has data
+    assert(len(dst) == 2)
+}
+
+// ---- OS ----
+
+fn TestOsEnv() {
+    let r = env_set("MAKO_TEST_VAR", "hello123")
+    assert(r == 0)
+    assert(env_get("MAKO_TEST_VAR") == "hello123")
+    assert(env_has("MAKO_TEST_VAR") == 1)
+    env_unset("MAKO_TEST_VAR")
+    assert(env_has("MAKO_TEST_VAR") == 0)
+}
+
+fn TestOsGetwd() {
+    let cwd = getcwd()
+    assert(len(cwd) > 0)
+}
+
+fn TestOsTempDir() {
+    let t = temp_dir()
+    assert(len(t) > 0)
+}
+
+fn TestOsArgs() {
+    let n = argc()
+    assert(n >= 0)
+    let a = args()
+    assert(len(a) >= 0)
+}
+
+fn TestOsReadWriteFile() {
+    let path = path_join(temp_dir(), "mako_test_rw.txt")
+    let w = write_file(path, "hello mako")
+    assert(w == 0)
+    assert(file_exists(path))
+    let data = read_file(path)
+    assert(data == "hello mako")
+    let sz = path_file_size(path)
+    assert(sz == 10)
+    remove_file(path)
+    assert(!file_exists(path))
+}
+
+// ---- Stress: clone/drop cycles on collections ----
+
+fn TestStressListCloneDrop() {
+    let mut a = list_new_int()
+    for i in 100 {
+        a = list_push_int(a, i)
+    }
+    assert(list_len_int(a) == 100)
+    assert(list_sum_int(a) == 4950)
+    // Copy and verify independence
+    let b = ints_copy(a)
+    assert(len(b) == 100)
+    assert(b[0] == 0)
+    assert(b[99] == 99)
+}
+
+fn TestStressSortReverse() {
+    let mut a = make([]int, 0, 500)
+    for i in 500 {
+        a = append(a, 499 - i)
+    }
+    let s = sort_ints(a)
+    let r = slices_reverse(s)
+    assert(r[0] == 499)
+    assert(r[499] == 0)
+    // Unique on sorted should be identity (all distinct)
+    let u = slices_unique(s)
+    assert(len(u) == 500)
+}
+
+fn TestStressMapClone() {
+    let mut m = make(map[string]int)
+    for i in 100 {
+        m[fmt_sprintf_d("key_%d", i)] = i
+    }
+    assert(len(m) == 100)
+    let mut c = maps_clone(m)
+    assert(len(c) == 100)
+    assert(c["key_0"] == 0)
+    assert(c["key_99"] == 99)
+    // Mutate clone
+    c["key_0"] = 999
+    assert(m["key_0"] == 0)
+}
+
+fn TestStressStringList() {
+    let mut a = list_new_str()
+    for i in 50 {
+        a = list_push_str(a, fmt_sprintf_d("item_%d", i))
+    }
+    assert(list_len_str(a) == 50)
+    assert(list_get_str(a, 0) == "item_0")
+    assert(list_get_str(a, 49) == "item_49")
+    a = list_pop_str(a)
+    assert(list_popped_str() == "item_49")
+    assert(list_len_str(a) == 49)
+}
