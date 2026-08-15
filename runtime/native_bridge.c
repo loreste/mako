@@ -1598,6 +1598,23 @@ int64_t mako_native_udp_bind_reuseport_addr_ptr(MakoNativeString *ip, int64_t po
     return fd;
 }
 
+/* TLS server handle pool */
+int64_t mako_native_tls_srv_pool_accept(int64_t srv, int64_t fd) {
+    return mako_tls_srv_pool_accept((void *)(intptr_t)srv, fd);
+}
+int64_t mako_native_tls_srv_pool_send_ptr(int64_t handle, MakoNativeString *data) {
+    return mako_tls_srv_pool_send(handle, bridge_borrow_str(data));
+}
+MakoNativeString *mako_native_tls_srv_pool_recv_ptr(int64_t handle, int64_t max) {
+    return bridge_take_str(mako_tls_srv_pool_recv(handle, max));
+}
+int64_t mako_native_tls_srv_pool_fd(int64_t handle) {
+    return mako_tls_srv_pool_fd(handle);
+}
+int64_t mako_native_tls_srv_pool_close(int64_t handle) {
+    return mako_tls_srv_pool_close(handle);
+}
+
 /* TLS cert reload */
 int64_t mako_native_tls_reload_cert_ptr(int64_t srv, MakoNativeString *cert, MakoNativeString *key) {
 #ifdef MAKO_HAS_OPENSSL

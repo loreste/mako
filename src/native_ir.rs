@@ -25799,6 +25799,12 @@ impl<'a> FunctionLowerer<'a> {
             // UDP reuseport
             "udp_bind_reuseport" if args.len() == 1 => Some(("mako_native_udp_bind_reuseport", &[Type::I64], Some(Type::I64), false)),
             "udp_bind_reuseport_addr" if args.len() == 2 => Some(("mako_native_udp_bind_reuseport_addr_ptr", &[Type::Str, Type::I64], Some(Type::I64), false)),
+            // TLS server handle pool
+            "tls_srv_pool_accept" if args.len() == 2 => Some(("mako_native_tls_srv_pool_accept", &[Type::Opaque, Type::I64], Some(Type::I64), false)),
+            "tls_srv_pool_send" if args.len() == 2 => Some(("mako_native_tls_srv_pool_send_ptr", &[Type::I64, Type::Str], Some(Type::I64), false)),
+            "tls_srv_pool_recv" if args.len() == 2 => Some(("mako_native_tls_srv_pool_recv_ptr", &[Type::I64, Type::I64], Some(Type::Str), true)),
+            "tls_srv_pool_fd" if args.len() == 1 => Some(("mako_native_tls_srv_pool_fd", &[Type::I64], Some(Type::I64), false)),
+            "tls_srv_pool_close" if args.len() == 1 => Some(("mako_native_tls_srv_pool_close", &[Type::I64], Some(Type::I64), false)),
             // TLS cert reload
             "tls_reload_cert" if args.len() == 3 => Some(("mako_native_tls_reload_cert_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::I64), false)),
             // UUID/ULID

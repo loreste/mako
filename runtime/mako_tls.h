@@ -4855,6 +4855,154 @@ static inline int64_t mako_tls_pool_close(int64_t handle) {
     return 0;
 }
 
+/* ---- Server-side TLS handle pool ----
+ * Mirrors the client pool but for accepted inbound connections.
+ * Handles are int64 — safe to store in maps, arrays, channels. */
+
+#define MAKO_TLS_SRV_POOL_MAX 1024
+typedef struct {
+    void *conn;        /* MakoTlsConn* */
+    int fd;
+    int used;
+    int dying;
+    int inflight;
+    uint32_t gen;
+} MakoTlsSrvSlot;
+
+static MakoTlsSrvSlot mako_tls_srv_slots[MAKO_TLS_SRV_POOL_MAX];
+static pthread_mutex_t mako_tls_srv_mu = MAKO_MUTEX_INIT;
+
+static inline int64_t mako_tls_srv_pack(int slot, uint32_t gen) {
+    if (gen == 0) gen = 1;
+    return (int64_t)((uint64_t)((slot + 1) & 0xffff) | ((uint64_t)gen << 16));
+}
+static inline int mako_tls_srv_slot(int64_t h) {
+    int id = (int)((uint64_t)h & 0xffff);
+    if (id <= 0 || id > MAKO_TLS_SRV_POOL_MAX) return -1;
+    return id - 1;
+}
+static inline uint32_t mako_tls_srv_gen(int64_t h) {
+    return (uint32_t)((uint64_t)h >> 16);
+}
+
+static inline void mako_tls_srv_end_io(int slot, uint32_t gen) {
+    void *conn = NULL;
+    pthread_mutex_lock(&mako_tls_srv_mu);
+    MakoTlsSrvSlot *s = &mako_tls_srv_slots[slot];
+    if (s->gen == gen) {
+        s->inflight--;
+        if (s->dying && s->inflight <= 0) {
+            conn = s->conn;
+            memset(s, 0, sizeof(*s));
+            s->gen = gen;
+        }
+    }
+    pthread_mutex_unlock(&mako_tls_srv_mu);
+    if (conn) mako_tls_conn_close(conn);
+}
+
+/* Accept a TLS connection on a server context. Returns an int handle. */
+static inline int64_t mako_tls_srv_pool_accept(void *server, int64_t fd) {
+    void *conn = mako_tls_accept(server, fd);
+    if (!conn) return -1;
+    int64_t handle = -1;
+    pthread_mutex_lock(&mako_tls_srv_mu);
+    for (int i = 0; i < MAKO_TLS_SRV_POOL_MAX; i++) {
+        if (!mako_tls_srv_slots[i].used && !mako_tls_srv_slots[i].dying) {
+            MakoTlsSrvSlot *s = &mako_tls_srv_slots[i];
+            s->conn = conn;
+            s->fd = (int)fd;
+            s->used = 1;
+            s->dying = 0;
+            s->inflight = 0;
+            s->gen++;
+            handle = mako_tls_srv_pack(i, s->gen);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&mako_tls_srv_mu);
+    if (handle < 0) mako_tls_conn_close(conn); /* pool full */
+    return handle;
+}
+
+static inline int64_t mako_tls_srv_pool_fd(int64_t handle) {
+    int slot = mako_tls_srv_slot(handle);
+    if (slot < 0) return -1;
+    pthread_mutex_lock(&mako_tls_srv_mu);
+    MakoTlsSrvSlot *s = &mako_tls_srv_slots[slot];
+    int64_t fd = -1;
+    if (s->used && !s->dying && mako_tls_srv_gen(handle) == s->gen)
+        fd = (int64_t)s->fd;
+    pthread_mutex_unlock(&mako_tls_srv_mu);
+    return fd;
+}
+
+static inline int64_t mako_tls_srv_pool_send(int64_t handle, MakoString data) {
+    int slot = mako_tls_srv_slot(handle);
+    if (slot < 0 || !data.data) return -1;
+    pthread_mutex_lock(&mako_tls_srv_mu);
+    MakoTlsSrvSlot *s = &mako_tls_srv_slots[slot];
+    void *conn = NULL; uint32_t gen = 0;
+    if (s->used && !s->dying && mako_tls_srv_gen(handle) == s->gen && s->conn) {
+        conn = s->conn; gen = s->gen; s->inflight++;
+    }
+    pthread_mutex_unlock(&mako_tls_srv_mu);
+    if (!conn) return -1;
+    size_t off = 0; int64_t rc = -1;
+    while (off < data.len) {
+        MakoString part = {data.data + off, data.len - off};
+        int64_t n = mako_tls_write(conn, part);
+        if (n <= 0) { rc = -1; goto out; }
+        off += (size_t)n;
+    }
+    rc = (int64_t)off;
+out:
+    mako_tls_srv_end_io(slot, gen);
+    return rc;
+}
+
+static inline MakoString mako_tls_srv_pool_recv(int64_t handle, int64_t max) {
+    int slot = mako_tls_srv_slot(handle);
+    if (slot < 0) return mako_str_from_cstr("");
+    if (max <= 0) return mako_str_from_cstr("");
+    if (max > 4 * 1024 * 1024) max = 4 * 1024 * 1024;
+    pthread_mutex_lock(&mako_tls_srv_mu);
+    MakoTlsSrvSlot *s = &mako_tls_srv_slots[slot];
+    void *conn = NULL; uint32_t gen = 0;
+    if (s->used && !s->dying && mako_tls_srv_gen(handle) == s->gen && s->conn) {
+        conn = s->conn; gen = s->gen; s->inflight++;
+    }
+    pthread_mutex_unlock(&mako_tls_srv_mu);
+    if (!conn) return mako_str_from_cstr("");
+    MakoString out = mako_tls_read(conn, max);
+    mako_tls_srv_end_io(slot, gen);
+    return out;
+}
+
+static inline int64_t mako_tls_srv_pool_close(int64_t handle) {
+    int slot = mako_tls_srv_slot(handle);
+    if (slot < 0) return -1;
+    void *conn = NULL;
+    pthread_mutex_lock(&mako_tls_srv_mu);
+    MakoTlsSrvSlot *s = &mako_tls_srv_slots[slot];
+    if (!s->used || s->dying || mako_tls_srv_gen(handle) != s->gen) {
+        pthread_mutex_unlock(&mako_tls_srv_mu);
+        return -1;
+    }
+    if (s->inflight > 0) {
+        s->used = 0; s->dying = 1;
+        pthread_mutex_unlock(&mako_tls_srv_mu);
+        return 0;
+    }
+    conn = s->conn;
+    uint32_t gen = s->gen;
+    memset(s, 0, sizeof(*s));
+    s->gen = gen;
+    pthread_mutex_unlock(&mako_tls_srv_mu);
+    if (conn) mako_tls_conn_close(conn);
+    return 0;
+}
+
 #else /* !MAKO_TLS_REAL */
 
 /* Socket-style TLS server API — unavailable without a linked TLS backend. */
@@ -4975,6 +5123,12 @@ static inline MakoString mako_tls_pool_recv(int64_t handle, int64_t max) {
 }
 static inline int64_t mako_tls_pool_fd(int64_t handle) { (void)handle; return -1; }
 static inline int64_t mako_tls_pool_close(int64_t handle) { (void)handle; return -1; }
+/* Server pool stubs (no TLS) */
+static inline int64_t mako_tls_srv_pool_accept(void *s, int64_t fd) { (void)s; (void)fd; return -1; }
+static inline int64_t mako_tls_srv_pool_send(int64_t h, MakoString d) { (void)h; (void)d; return -1; }
+static inline MakoString mako_tls_srv_pool_recv(int64_t h, int64_t m) { (void)h; (void)m; return mako_str_from_cstr(""); }
+static inline int64_t mako_tls_srv_pool_fd(int64_t h) { (void)h; return -1; }
+static inline int64_t mako_tls_srv_pool_close(int64_t h) { (void)h; return -1; }
 static inline MakoString mako_https_request(
     MakoString method, MakoString url, MakoString body, MakoString content_type,
     MakoString ca_pem, int64_t timeout_ms
