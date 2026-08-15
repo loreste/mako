@@ -25787,6 +25787,33 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
+            // UUID/ULID
+            "uuid_nil" if args.len() == 0 => Some(("mako_native_uuid_nil", &[], Some(Type::Str), true)),
+            "uuid_ns_dns" if args.len() == 0 => Some(("mako_native_uuid_ns_dns", &[], Some(Type::Str), true)),
+            "uuid_ns_url" if args.len() == 0 => Some(("mako_native_uuid_ns_url", &[], Some(Type::Str), true)),
+            "uuid_ns_oid" if args.len() == 0 => Some(("mako_native_uuid_ns_oid", &[], Some(Type::Str), true)),
+            "ulid_new" if args.len() == 0 => Some(("mako_native_ulid_new", &[], Some(Type::Str), true)),
+            // TLS handshake helpers
+            "tls_derive_secret" if args.len() == 3 => Some(("mako_native_tls_derive_secret_hex_ptr", &[Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
+            "tls_client_handshake_traffic_secret" if args.len() == 2 => Some(("mako_native_tls_client_handshake_traffic_secret_hex_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
+            "tls_server_handshake_traffic_secret" if args.len() == 2 => Some(("mako_native_tls_server_handshake_traffic_secret_hex_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
+            "tls_client_application_traffic_secret" if args.len() == 2 => Some(("mako_native_tls_client_application_traffic_secret_hex_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
+            "tls_server_application_traffic_secret" if args.len() == 2 => Some(("mako_native_tls_server_application_traffic_secret_hex_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
+            "tls_finished_verify_data" if args.len() == 2 => Some(("mako_native_tls_finished_verify_data_hex_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
+            "tls_encrypted_extensions" if args.len() == 0 => Some(("mako_native_tls_encrypted_extensions_ptr", &[], Some(Type::Str), true)),
+            "tls_serve" if args.len() == 1 => Some(("mako_native_tls_serve_once", &[Type::I64], Some(Type::I64), false)),
+            // SMTP
+            "smtp_mock_last_message" if args.len() == 0 => Some(("mako_native_smtp_mock_last_message", &[], Some(Type::Str), true)),
+            "smtp_mock_last_rcpt" if args.len() == 0 => Some(("mako_native_smtp_mock_last_rcpt", &[], Some(Type::Str), true)),
+            "smtp_starttls" if args.len() == 0 => Some(("mako_native_smtp_starttls_available", &[], Some(Type::I64), false)),
+            // LLM
+            "llm_embed" if args.len() == 2 => Some(("mako_native_llm_embed_body_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
+            // WebSocket
+            "ws_echo" if args.len() == 1 => Some(("mako_native_ws_echo_once", &[Type::I64], Some(Type::I64), false)),
+            // Syscall
+            "syscall_errno_str" if args.len() == 0 => Some(("mako_native_syscall_errno_str", &[], Some(Type::Str), true)),
+            // Tasks
+            "tasks_inspect_json" if args.len() == 0 => Some(("mako_native_tasks_inspect_json_ptr", &[], Some(Type::Str), true)),
             // Math
             "abs_f" if args.len() == 1 => Some(("mako_native_abs_f", &[Type::F64], Some(Type::F64), false)),
             "ceil_f" if args.len() == 1 => Some(("mako_native_ceil_f", &[Type::F64], Some(Type::F64), false)),
