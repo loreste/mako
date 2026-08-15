@@ -498,11 +498,12 @@ enum Commands {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
-    /// Refresh an installed Mako prefix from a source checkout
+    /// Update Mako to the latest release (or refresh from a source checkout)
     Update {
-        /// Source checkout containing scripts/install.sh or scripts/install.ps1
-        #[arg(long, default_value = ".")]
-        from: PathBuf,
+        /// Source checkout containing scripts/install.sh or scripts/install.ps1.
+        /// If omitted or not a source checkout, fetches the latest release from GitHub.
+        #[arg(long)]
+        from: Option<PathBuf>,
         /// Install prefix to refresh (default: $HOME/.local)
         #[arg(long)]
         prefix: Option<PathBuf>,
@@ -1173,6 +1174,72 @@ fn cmd_update(from: &Path, prefix: Option<&Path>, skip_build: bool) -> Result<()
     Ok(())
 }
 
+/// Self-update by downloading the latest release from GitHub.
+fn cmd_self_update(prefix: Option<&Path>) -> Result<(), ()> {
+    let current = env!("CARGO_PKG_VERSION");
+    println!("mako update");
+    println!("  current: {current}");
+
+    // Determine platform artifact name.
+    let artifact = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "mako-aarch64-apple-darwin",
+        ("macos", "x86_64") => "mako-x86_64-apple-darwin",
+        ("linux", "x86_64") => "mako-x86_64-unknown-linux-gnu",
+        ("linux", "aarch64") => "mako-aarch64-unknown-linux-gnu",
+        ("windows", "x86_64") => "mako-x86_64-pc-windows-msvc",
+        (os, arch) => {
+            emit_plain_error(&format!("update: unsupported platform {os}/{arch}"));
+            return Err(());
+        }
+    };
+
+    // Check for install-release.sh (Unix) or fall back to curl-based download.
+    let prefix_arg = prefix
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| {
+            std::env::var("HOME")
+                .map(|h| format!("{h}/.local"))
+                .unwrap_or_else(|_| "/usr/local".to_string())
+        });
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Download and run the release installer.
+        let url = "https://github.com/loreste/mako/releases/latest/download/install-release.sh";
+        println!("  fetching: {url}");
+        let mut cmd = Command::new("bash");
+        cmd.arg("-c").arg(format!(
+            "curl -fsSL '{url}' | bash -s -- --prefix '{prefix_arg}' --artifact '{artifact}' --yes"
+        ));
+        let status = cmd.status().map_err(|e| {
+            emit_plain_error(&format!("update: failed to run installer: {e}"));
+        })?;
+        if !status.success() {
+            emit_plain_error(&format!(
+                "update: installer exited {}",
+                status.code().unwrap_or(-1)
+            ));
+            return Err(());
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        emit_plain_error(
+            "update: self-update on Windows is not yet supported. \
+             Download the latest .zip from https://github.com/loreste/mako/releases",
+        );
+        return Err(());
+    }
+
+    // Print new version.
+    let _ = Command::new(Path::new(&prefix_arg).join("bin/mako"))
+        .arg("--version")
+        .status();
+    println!("update: complete");
+    Ok(())
+}
+
 fn command_on_path(cmd: &str) -> bool {
     Command::new(cmd)
         .arg("--version")
@@ -1465,7 +1532,13 @@ fn run(cli: Cli) -> Result<(), ()> {
             from,
             prefix,
             skip_build,
-        } => cmd_update(&from, prefix.as_deref(), skip_build),
+        } => {
+            if let Some(ref from) = from {
+                cmd_update(from, prefix.as_deref(), skip_build)
+            } else {
+                cmd_self_update(prefix.as_deref())
+            }
+        }
         Commands::Doctor => cmd_doctor(),
         Commands::Deploy { cmd } => match cmd {
             DeployCmd::Docker {
