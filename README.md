@@ -8,7 +8,9 @@ no VM, nothing extra to install next to them at runtime.
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
-[mako-lang.com](https://mako-lang.com) · [Changelog](CHANGELOG.md) · [Roadmap](docs/ROADMAP.md) · [Status](docs/STATUS.md)
+[mako-lang.com](https://mako-lang.com) · [Product focus](docs/PRODUCT_FOCUS.md) ·
+[Maturity](docs/MATURITY.md) · [Benchmarks](docs/BENCHMARK_PLAN.md) ·
+[Changelog](CHANGELOG.md) · [Roadmap](docs/ROADMAP.md) · [Status](docs/STATUS.md)
 
 ---
 
@@ -78,6 +80,13 @@ mako build --release main.mko -o hello
 
 ## What actually works
 
+**Product focus.** Mako's wedge is safe, fast backend services with structured
+concurrency: HTTP/TCP services, `Result`/`Option`, ownership checks, request
+arenas, bounded channels, native binaries, and repeatable benchmark gates. Domain
+tracks such as SIP, storage, GPU, plugins, and local AI are useful proving
+grounds, but they are not the core product promise until promoted in
+[MATURITY.md](docs/MATURITY.md).
+
 **Language.** Static types with local inference. `Result[T, E]` and `Option[T]`
 with `?` propagation. Pattern matching. Enums with payloads. Generics
 (monomorphized). Interfaces (structural, like Go). Closures. Tuples and
@@ -134,6 +143,7 @@ and inlay hints. VS Code extension.
 - Package registry is public but has few packages; signing lacks key rotation and revocation
 - Windows: ~21 test fixtures fail (filesystem semantics, signals, crypto paths); HTTP engine incomplete
 - Package security model is not independently audited
+- Domain tracks marked as seed/prototype are not production product promises
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
 
@@ -221,6 +231,9 @@ A focused concurrency subset is exercised under TSan.
 | [Standard Library](docs/STDLIB.md) | What's included |
 | [CLI Reference](docs/CLI.md) | Commands and flags |
 | [Examples](docs/EXAMPLES.md) | Runnable programs |
+| [Product Focus](docs/PRODUCT_FOCUS.md) | The one workflow Mako is optimizing first |
+| [Maturity](docs/MATURITY.md) | Stable Alpha vs Experimental vs Prototype |
+| [Benchmark Plan](docs/BENCHMARK_PLAN.md) | Repeatable backend-service performance gates |
 | [Performance](docs/PERFORMANCE.md) | Benchmarks (including where Mako is slower) |
 | [Soundness](docs/SOUNDNESS.md) | Memory safety program |
 | [Security](docs/SECURITY.md) | Safety model |

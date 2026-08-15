@@ -2414,12 +2414,22 @@ impl Codegen {
             Stmt::Expr(e) | Stmt::Return(Some(e)) | Stmt::Assign { value: e, .. } => {
                 Self::expr_has_tuple(e)
             }
-            Stmt::If { then_block, else_block, .. } => {
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
                 Self::body_has_tuple(then_block)
-                    || else_block.as_ref().map_or(false, |b| Self::body_has_tuple(b))
+                    || else_block
+                        .as_ref()
+                        .map_or(false, |b| Self::body_has_tuple(b))
             }
-            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. }
-            | Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body }
+            Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::CFor { body, .. }
+            | Stmt::Crew { body, .. }
+            | Stmt::Arena { body, .. }
+            | Stmt::Unsafe { body }
             | Stmt::Defer { body } => Self::body_has_tuple(body),
             _ => false,
         }
@@ -2566,169 +2576,661 @@ impl Codegen {
     ///
     /// Must stay sorted: looked up with `binary_search`.
     const OWNED_STRING_BUILTINS: &'static [&'static str] = &[
-        "aes_ctr", "aes_gcm_open", "aes_gcm_seal", "arg_get", "auth_token_subject",
-        "avro_encode_array_long", "avro_encode_bool", "avro_encode_long", "avro_encode_null",
-        "bin_encode_int", "binary_put_u16be", "binary_put_u16le", "binary_put_u32be",
-        "binary_put_u32le", "binary_put_u64be", "binary_put_u64le", "buf_read",
-        "buf_read_bytes", "buf_read_line", "buf_read_str", "builder_string",
-        "bytes_buffer_string", "cache_get", "cassandra_select", "cbor_encode_array_int",
-        "cbor_encode_bool", "cbor_encode_int", "cbor_encode_null", "chacha20_poly1305_open",
-        "chacha20_poly1305_seal", "chan_select_value_str", "clickhouse_select", "cmap_get",
-        "cookie_get", "cookie_make", "csrf_token", "dap_request_command", "dap_stopped_event",
-        "debug_file", "diameter_avp_at", "diameter_avp_find", "diameter_avp_find_vendor",
-        "diameter_avp_put_str", "diameter_avp_put_u32", "diameter_avp_str",
-        "diameter_build_cea", "diameter_build_cer", "diameter_build_dpa", "diameter_build_dpr",
-        "diameter_build_dwa", "diameter_build_dwr", "diameter_conn_take_out",
-        "diameter_e2e_key", "diameter_header_build", "diameter_mgr_take_out",
-        "diameter_msg_build", "diameter_session_key", "diameter_set_e2e", "diameter_set_hbh",
-        "diameter_tcm_take_out", "diameter_txn_key", "dns_join_host_port", "dns_lookup_all",
-        "dns_lookup_ipv4", "dns_lookup_ipv6", "dns_naptr_lookup", "dns_normalize_host",
-        "dns_split_host", "dns_srv_lookup", "dtls_export_srtp_keys", "dtls_local_fingerprint",
-        "dtls_peer_fingerprint", "dtls_recv", "dtls_srtp_profile", "duration_string",
-        "embed_file", "env_get",
-        "env_get_or", "error_as_tag", "exec_output", "ffi_abi_name", "file_read_exact",
-        "flag_string", "fmt_errorf", "fmt_errorf2", "fmt_sprint", "fmt_sprint2", "fmt_sprint3",
-        "fmt_sprintf", "fmt_sprintf2", "fmt_sprintf3", "fmt_sprintf4", "fmt_sprintf_d",
-        "fmt_sprintf_dd", "fmt_sprintf_f", "fmt_sprintln", "fmt_sprintln2", "fsm_rule",
-        "fsm_transition", "game_udp_recv", "game_udp_sender_addr", "getcwd",
-        "gfx_backend_name", "gif_decode_rgb", "gif_decode_rgb_lzw", "gif_encode_rgb",
-        "gif_encode_rgb_lzw", "gob_encode_int", "gob_encode_map_ss", "gob_encode_strs",
-        "gob_encode_struct", "gpu_backend", "gpu_buf_read", "gpu_device_backend",
-        "gpu_device_name", "gpu_device_vendor", "graphql_arg", "graphql_data", "graphql_data2",
-        "graphql_error", "graphql_field", "graphql_fields", "graphql_operation_name",
-        "graphql_query_from_body", "graphql_request_vars", "graphql_variables_from_body",
-        "grpc_content_type", "grpc_encode_message", "grpc_http2_client_stream_flow",
-        "grpc_http2_response_payload", "grpc_http2_stream_data", "grpc_http2_stream_two",
-        "grpc_http2_unary", "grpc_http2_unary_payload", "grpc_http2_unary_response_status",
-        "grpc_message_payload", "grpc_service_handle", "grpc_service_methods",
-        "grpc_service_name", "grpc_status_trailer", "grpc_unary_name", "gzip_compress",
-        "gzip_decompress", "h3_stream_authority", "h3_stream_body", "h3_stream_method",
-        "h3_stream_path", "h3_stream_read", "hex_to_bytes", "hkdf_sha256", "hmac_sha1",
-        "hmac_sha1_raw", "hmac_sha256", "hmac_sha256_raw", "hpack_decoded_name",
-        "hpack_decoded_value", "hpack_dyn_name", "hpack_dyn_name_at", "hpack_dyn_value",
-        "hpack_dyn_value_at", "hpack_encode_indexed", "hpack_encode_literal",
-        "hpack_literal_name", "hpack_literal_value", "hpack_static_name", "hpack_static_value",
-        "html_escape", "html_template_execute", "html_template_execute2",
-        "html_template_execute3", "html_template_if", "html_template_nested",
-        "html_template_range", "html_template_with", "http2_client_preface",
-        "http2_concat_frames", "http2_conn_auto_settings_ack", "http2_conn_goaway",
-        "http2_conn_header_block", "http2_conn_pump", "http2_empty_settings", "http2_frame_at",
-        "http2_frame_payload", "http2_header_block", "http2_response_ct",
-        "http2_server_preface", "http2_settings_ack", "http2_settings_max_concurrent",
-        "http2_stream_body", "http_compress_if_accepted", "http_content_encoding",
-        "http_decode_chunked", "http_forward", "http_forward_body", "http_forward_headers",
-        "http_get", "http_get_timeout", "http_last_header", "http_parsed_body",
-        "http_parsed_header", "http_parsed_headers", "http_parsed_host", "http_parsed_method",
-        "http_parsed_path", "http_post", "http_post_timeout", "http_request_body",
-        "http_request_ct", "http_request_method", "http_request_path", "http_route_param",
-        "https_get", "https_last_header", "https_post", "httptest_get", "httptest_header",
-        "jpeg_decode_gray", "jpeg_encode_gray", "jpeg_encode_gray_baseline",
-        "jpeg_encode_gray_dct", "jpeg_encode_gray_huff", "jpeg_encode_gray_jfif",
-        "jpeg_huff_block", "json_array_get_string", "json_array_ints3", "json_array_push_int",
-        "json_array_push_string", "json_array_strings2", "json_get_object", "json_get_string",
-        "json_i", "json_merge", "json_nest", "json_object", "json_object_from_map_ss",
-        "json_path_string", "json_si", "json_ss", "jwt_payload", "jwt_sign_es256", "lb_pick2",
-        "lb_pick3", "llm_api_key", "llm_ask", "llm_base_url", "llm_body_force_stream",
-        "llm_body_with_tools", "llm_chat", "llm_chat_body", "llm_chat_retry",
-        "llm_chat_stream", "llm_content", "llm_default_model", "llm_embed", "llm_embed_body",
-        "llm_embeddings", "llm_error_message", "llm_finish_reason", "llm_https_post",
-        "llm_json_extract", "llm_message", "llm_messages_append", "llm_redact_key",
-        "llm_sse_data", "llm_sse_delta", "llm_stream_append", "llm_system_user",
-        "llm_tool_call_args", "llm_tool_call_name", "lookup_host", "mail_header_get",
-        "mail_msg_build", "mail_msg_envelope_from", "mail_msg_rcpt_at", "mail_parse_address",
-        "mail_simple", "metrics_export", "metrics_export_prom", "middleware_trace",
-        "mime_type", "mmap_read", "model_tensor_name", "msgpack_encode_array_int",
-        "msgpack_encode_bool", "msgpack_encode_int", "msgpack_encode_nil",
-        "multipart_boundary", "multipart_file_content_type", "multipart_file_name",
-        "multipart_file_value", "multipart_form_value", "mysql_driver_name", "nb_read",
-        "nb_udp_recv", "nghttp2_get", "nghttp2_get_two", "nghttp2_post", "oidc_discovery",
-        "oidc_token", "open_at_rest", "open_file_at_rest", "openapi_doc", "openapi_doc_full",
-        "openapi_info", "openapi_operation", "openapi_paths_merge", "openapi_route",
-        "page_read", "path_base", "path_clean", "path_dir", "path_ext", "path_join",
-        "pb_encode_bytes", "pb_encode_field_varint", "pb_encode_key", "pb_encode_nested",
-        "pb_encode_repeated_varint", "pb_encode_simple", "pb_encode_sint", "pb_encode_varint",
-        "pb_nested_inner", "pb_simple_name", "pbkdf2_sha256", "peer_table_host",
-        "pem_extract_block", "pem_load_file", "plugin_api_version", "plugin_kind",
-        "plugin_last_error_str", "plugin_last_log", "plugin_manifest_artifact",
-        "plugin_manifest_lib_path", "plugin_name", "plugin_path", "plugin_version",
-        "pman_read_page", "png_decode_gray", "png_encode_gray", "png_encode_rgb", "pread",
-        "profile_http_route", "profile_pprof_http_body", "profile_samples_pprof_text",
-        "quic_crypto_data", "quic_crypto_payload", "quic_dcid", "quic_header_protect_apply",
-        "quic_header_protect_remove", "quic_header_protection_mask", "quic_hkdf_expand_label",
-        "quic_initial_client_hp", "quic_initial_client_iv", "quic_initial_client_key",
-        "quic_initial_client_secret", "quic_initial_hp_mask", "quic_initial_packet_protect",
-        "quic_initial_packet_unprotect", "quic_initial_protect", "quic_initial_unprotect",
-        "quic_payload_crypto_data", "quic_scid", "quic_stream_data", "quiche_h3_get",
-        "quiche_h3_get_two", "quiche_h3_post", "quiche_handshake", "quiche_version",
-        "random_bytes", "readlink", "realpath", "redis_conn_del", "redis_conn_exists",
-        "redis_conn_get", "redis_conn_llen", "redis_conn_lpush", "redis_conn_ping",
-        "redis_conn_rpop", "redis_conn_set", "redis_del", "redis_exists", "redis_get",
-        "redis_llen", "redis_lpush", "redis_ping", "redis_rpop", "redis_set",
-        "reflect_kind_of_int", "reflect_kind_of_string", "reflect_struct_field_name",
-        "reflect_struct_field_type", "reflect_type_name_at", "reflect_type_of_int",
-        "reflect_type_of_string", "reflect_type_schema", "reflect_value_field_at",
-        "reflect_value_get", "reflect_value_schema", "reflect_value_string_int",
-        "reflect_value_string_str", "regex_capture", "regex_find", "regex_quote_meta",
-        "regex_replace", "regex_replace_all", "replay_append", "reqctx_get", "router_match",
-        "router_match_path", "router_param", "rpc_method", "rpc_payload", "rtp_pack",
-        "rtp_payload", "scram_cbind_b64", "scram_client_final_without_proof",
-        "scram_gs2_header", "scram_plus_client_final_bare", "scram_tls_unique_cbind",
-        "sctp_getladdrs", "sctp_getpaddrs", "sctp_local_addr", "sctp_peer_addr", "sctp_read",
-        "sctp_read_n", "sctp_recv_stream", "sdp_append_line", "sdp_attr", "sdp_attr_candidate",
-        "sdp_attr_fmtp", "sdp_attr_rtpmap", "sdp_build_audio", "sdp_build_av",
-        "sdp_connection", "sdp_connection_addr", "sdp_direction", "sdp_media",
-        "sdp_media_attr", "sdp_media_connection", "sdp_media_connection_addr",
-        "sdp_media_direction", "sdp_media_formats", "sdp_media_proto", "sdp_media_type",
-        "sdp_origin", "sdp_origin_addr", "sdp_replace_connection_addr",
-        "sdp_replace_media_port", "sdp_session_name", "sdp_set_media_direction", "sdp_timing",
-        "sdp_version", "seal_at_rest", "session_cancel_token", "session_id_new", "sg_gather2",
-        "sg_gather3", "sg_slice", "sha1", "sha256", "sha256_raw", "sha512", "sip_addr_tag",
-        "sip_auth_param", "sip_authorization_digest", "sip_body", "sip_branch",
-        "sip_call_id_new", "sip_contact_value", "sip_cseq_value", "sip_dialog_id",
-        "sip_digest_response_ha1", "sip_ensure_to_tag", "sip_from_value", "sip_header",
-        "sip_header_line", "sip_header_n", "sip_headers_append", "sip_insert_via",
-        "sip_method", "sip_msg_fix_top_via", "sip_msg_response_host", "sip_prepend_header",
-        "sip_proxy_authenticate", "sip_reason", "sip_record_route", "sip_reply",
-        "sip_reply_with_to_tag", "sip_request_uri", "sip_strip_via", "sip_tag", "sip_to_value",
-        "sip_txn_key", "sip_udp_recv", "sip_uri_build", "sip_uri_host", "sip_uri_scheme",
-        "sip_uri_user", "sip_version", "sip_via_add_received", "sip_via_branch",
-        "sip_via_fix_source", "sip_via_host", "sip_via_maddr", "sip_via_received",
-        "sip_via_response_addr", "sip_via_response_host", "sip_via_transport", "sip_via_value",
-        "sip_via_value_nat", "sip_via_value_rport", "sip_view_copy", "sip_www_authenticate",
-        "slog_redact", "smtp_auth_plain", "smtp_format_message", "smtp_last_reply",
-        "smtp_mock_last_from", "smtp_mock_last_message", "smtp_mock_last_rcpt",
-        "snap_apply_delta", "snap_diff", "snap_encode2", "snap_encode4", "sql_query_str",
-        "sql_query_str2", "sql_query_str3", "sql_query_str4", "sql_rows_str",
-        "sqlite_query_text", "sse_event", "sse_retry", "stack_trace", "str_join",
-        "str_replace", "str_to_lower", "str_to_owned", "str_to_upper", "str_trim",
-        "str_trim_left", "str_trim_right", "str_trim_space", "syscall_errno_str",
-        "syscall_hostname", "syscall_read", "syscall_readlink", "syscall_uname_machine",
-        "syscall_uname_release", "syscall_uname_sysname", "tar_first_name", "tcp_local_addr",
-        "tcp_peer_addr", "tcp_read", "tcp_read_n", "temp_dir", "temp_file", "template_execute",
-        "time_format", "time_format_clock", "time_format_date", "time_format_local",
-        "time_format_offset", "tls_aead_open", "tls_aead_seal", "tls_certificate",
-        "tls_certificate_der", "tls_certificate_verify", "tls_certificate_verify_sig",
-        "tls_client_application_traffic_secret", "tls_client_handshake_traffic_secret",
-        "tls_client_hello", "tls_client_hello_random", "tls_conn_alpn", "tls_conn_version",
-        "tls_derive_secret", "tls_encrypted_extensions", "tls_finished",
-        "tls_finished_verify_data", "tls_get", "tls_get_insecure", "tls_grpc_stream",
-        "tls_grpc_unary", "tls_h2_get", "tls_h2_get_twice", "tls_h2_mux", "tls_h2_post",
-        "tls_h2_settings_exchange", "tls_h2_window_get", "tls_handshake_ok",
-        "tls_handshake_version", "tls_peer_cn", "tls_pool_recv", "tls_post", "tls_read",
-        "tls_read_nb", "tls_record_appdata_open", "tls_record_appdata_open_seq",
-        "tls_record_appdata_seal", "tls_record_appdata_seal_seq",
-        "tls_server_application_traffic_secret", "tls_server_handshake_traffic_secret",
-        "tls_server_hello", "tls_server_hello_random", "tls_unique", "tmpl_execute",
-        "tmpl_html", "tmpl_html_execute", "tmpl_text", "tok_token", "toml_escape",
-        "toml_get_in", "toml_get_string", "toml_merge", "toml_pair", "toml_pair_bool",
-        "toml_pair_int", "toml_section", "trace_current", "trace_export_otlp_pb", "trace_id",
-        "trace_span_id", "udp_last_sender", "udp_last_sender_host", "udp_recv",
-        "udp_recv_from", "ulid_string", "unix_read", "url_host", "url_path", "url_query",
-        "url_query_escape", "url_scheme", "utf8_encode_rune", "uuid_bytes", "uuid_string",
-        "uuid_string_upper", "uuid_urn", "wal_read_at", "watch_poll", "ws_accept_key",
-        "ws_client_recv", "ws_recv", "wss_client_recv", "wss_pool_recv", "wss_server_recv",
-        "xml_escape", "xml_tag_text", "xor_bytes", "yaml_escape", "yaml_get_string",
-        "yaml_merge", "yaml_pair", "yaml_pair_bool", "yaml_pair_int", "zip_first_name",
+        "aes_ctr",
+        "aes_gcm_open",
+        "aes_gcm_seal",
+        "arg_get",
+        "auth_token_subject",
+        "avro_encode_array_long",
+        "avro_encode_bool",
+        "avro_encode_long",
+        "avro_encode_null",
+        "bin_encode_int",
+        "binary_put_u16be",
+        "binary_put_u16le",
+        "binary_put_u32be",
+        "binary_put_u32le",
+        "binary_put_u64be",
+        "binary_put_u64le",
+        "buf_read",
+        "buf_read_bytes",
+        "buf_read_line",
+        "buf_read_str",
+        "builder_string",
+        "bytes_buffer_string",
+        "cache_get",
+        "cassandra_select",
+        "cbor_encode_array_int",
+        "cbor_encode_bool",
+        "cbor_encode_int",
+        "cbor_encode_null",
+        "chacha20_poly1305_open",
+        "chacha20_poly1305_seal",
+        "chan_select_value_str",
+        "clickhouse_select",
+        "cmap_get",
+        "cookie_get",
+        "cookie_make",
+        "csrf_token",
+        "dap_request_command",
+        "dap_stopped_event",
+        "debug_file",
+        "diameter_avp_at",
+        "diameter_avp_find",
+        "diameter_avp_find_vendor",
+        "diameter_avp_put_str",
+        "diameter_avp_put_u32",
+        "diameter_avp_str",
+        "diameter_build_cea",
+        "diameter_build_cer",
+        "diameter_build_dpa",
+        "diameter_build_dpr",
+        "diameter_build_dwa",
+        "diameter_build_dwr",
+        "diameter_conn_take_out",
+        "diameter_e2e_key",
+        "diameter_header_build",
+        "diameter_mgr_take_out",
+        "diameter_msg_build",
+        "diameter_session_key",
+        "diameter_set_e2e",
+        "diameter_set_hbh",
+        "diameter_tcm_take_out",
+        "diameter_txn_key",
+        "dns_join_host_port",
+        "dns_lookup_all",
+        "dns_lookup_ipv4",
+        "dns_lookup_ipv6",
+        "dns_naptr_lookup",
+        "dns_normalize_host",
+        "dns_split_host",
+        "dns_srv_lookup",
+        "dtls_export_srtp_keys",
+        "dtls_local_fingerprint",
+        "dtls_peer_fingerprint",
+        "dtls_recv",
+        "dtls_srtp_profile",
+        "duration_string",
+        "embed_file",
+        "env_get",
+        "env_get_or",
+        "error_as_tag",
+        "exec_output",
+        "ffi_abi_name",
+        "file_read_exact",
+        "flag_string",
+        "fmt_errorf",
+        "fmt_errorf2",
+        "fmt_sprint",
+        "fmt_sprint2",
+        "fmt_sprint3",
+        "fmt_sprintf",
+        "fmt_sprintf2",
+        "fmt_sprintf3",
+        "fmt_sprintf4",
+        "fmt_sprintf_d",
+        "fmt_sprintf_dd",
+        "fmt_sprintf_f",
+        "fmt_sprintln",
+        "fmt_sprintln2",
+        "fsm_rule",
+        "fsm_transition",
+        "game_udp_recv",
+        "game_udp_sender_addr",
+        "getcwd",
+        "gfx_backend_name",
+        "gif_decode_rgb",
+        "gif_decode_rgb_lzw",
+        "gif_encode_rgb",
+        "gif_encode_rgb_lzw",
+        "gob_encode_int",
+        "gob_encode_map_ss",
+        "gob_encode_strs",
+        "gob_encode_struct",
+        "gpu_backend",
+        "gpu_buf_read",
+        "gpu_device_backend",
+        "gpu_device_name",
+        "gpu_device_vendor",
+        "graphql_arg",
+        "graphql_data",
+        "graphql_data2",
+        "graphql_error",
+        "graphql_field",
+        "graphql_fields",
+        "graphql_operation_name",
+        "graphql_query_from_body",
+        "graphql_request_vars",
+        "graphql_variables_from_body",
+        "grpc_content_type",
+        "grpc_encode_message",
+        "grpc_http2_client_stream_flow",
+        "grpc_http2_response_payload",
+        "grpc_http2_stream_data",
+        "grpc_http2_stream_two",
+        "grpc_http2_unary",
+        "grpc_http2_unary_payload",
+        "grpc_http2_unary_response_status",
+        "grpc_message_payload",
+        "grpc_service_handle",
+        "grpc_service_methods",
+        "grpc_service_name",
+        "grpc_status_trailer",
+        "grpc_unary_name",
+        "gzip_compress",
+        "gzip_decompress",
+        "h3_stream_authority",
+        "h3_stream_body",
+        "h3_stream_method",
+        "h3_stream_path",
+        "h3_stream_read",
+        "hex_to_bytes",
+        "hkdf_sha256",
+        "hmac_sha1",
+        "hmac_sha1_raw",
+        "hmac_sha256",
+        "hmac_sha256_raw",
+        "hpack_decoded_name",
+        "hpack_decoded_value",
+        "hpack_dyn_name",
+        "hpack_dyn_name_at",
+        "hpack_dyn_value",
+        "hpack_dyn_value_at",
+        "hpack_encode_indexed",
+        "hpack_encode_literal",
+        "hpack_literal_name",
+        "hpack_literal_value",
+        "hpack_static_name",
+        "hpack_static_value",
+        "html_escape",
+        "html_template_execute",
+        "html_template_execute2",
+        "html_template_execute3",
+        "html_template_if",
+        "html_template_nested",
+        "html_template_range",
+        "html_template_with",
+        "http2_client_preface",
+        "http2_concat_frames",
+        "http2_conn_auto_settings_ack",
+        "http2_conn_goaway",
+        "http2_conn_header_block",
+        "http2_conn_pump",
+        "http2_empty_settings",
+        "http2_frame_at",
+        "http2_frame_payload",
+        "http2_header_block",
+        "http2_response_ct",
+        "http2_server_preface",
+        "http2_settings_ack",
+        "http2_settings_max_concurrent",
+        "http2_stream_body",
+        "http_compress_if_accepted",
+        "http_content_encoding",
+        "http_decode_chunked",
+        "http_forward",
+        "http_forward_body",
+        "http_forward_headers",
+        "http_get",
+        "http_get_timeout",
+        "http_last_header",
+        "http_parsed_body",
+        "http_parsed_header",
+        "http_parsed_headers",
+        "http_parsed_host",
+        "http_parsed_method",
+        "http_parsed_path",
+        "http_post",
+        "http_post_timeout",
+        "http_request_body",
+        "http_request_ct",
+        "http_request_method",
+        "http_request_path",
+        "http_route_param",
+        "https_get",
+        "https_last_header",
+        "https_post",
+        "httptest_get",
+        "httptest_header",
+        "jpeg_decode_gray",
+        "jpeg_encode_gray",
+        "jpeg_encode_gray_baseline",
+        "jpeg_encode_gray_dct",
+        "jpeg_encode_gray_huff",
+        "jpeg_encode_gray_jfif",
+        "jpeg_huff_block",
+        "json_array_get_string",
+        "json_array_ints3",
+        "json_array_push_int",
+        "json_array_push_string",
+        "json_array_strings2",
+        "json_get_object",
+        "json_get_string",
+        "json_i",
+        "json_merge",
+        "json_nest",
+        "json_object",
+        "json_object_from_map_ss",
+        "json_path_string",
+        "json_si",
+        "json_ss",
+        "jwt_payload",
+        "jwt_sign_es256",
+        "lb_pick2",
+        "lb_pick3",
+        "llm_api_key",
+        "llm_ask",
+        "llm_base_url",
+        "llm_body_force_stream",
+        "llm_body_with_tools",
+        "llm_chat",
+        "llm_chat_body",
+        "llm_chat_retry",
+        "llm_chat_stream",
+        "llm_content",
+        "llm_default_model",
+        "llm_embed",
+        "llm_embed_body",
+        "llm_embeddings",
+        "llm_error_message",
+        "llm_finish_reason",
+        "llm_https_post",
+        "llm_json_extract",
+        "llm_message",
+        "llm_messages_append",
+        "llm_redact_key",
+        "llm_sse_data",
+        "llm_sse_delta",
+        "llm_stream_append",
+        "llm_system_user",
+        "llm_tool_call_args",
+        "llm_tool_call_name",
+        "lookup_host",
+        "mail_header_get",
+        "mail_msg_build",
+        "mail_msg_envelope_from",
+        "mail_msg_rcpt_at",
+        "mail_parse_address",
+        "mail_simple",
+        "metrics_export",
+        "metrics_export_prom",
+        "middleware_trace",
+        "mime_type",
+        "mmap_read",
+        "model_tensor_name",
+        "msgpack_encode_array_int",
+        "msgpack_encode_bool",
+        "msgpack_encode_int",
+        "msgpack_encode_nil",
+        "multipart_boundary",
+        "multipart_file_content_type",
+        "multipart_file_name",
+        "multipart_file_value",
+        "multipart_form_value",
+        "mysql_driver_name",
+        "nb_read",
+        "nb_udp_recv",
+        "nghttp2_get",
+        "nghttp2_get_two",
+        "nghttp2_post",
+        "oidc_discovery",
+        "oidc_token",
+        "open_at_rest",
+        "open_file_at_rest",
+        "openapi_doc",
+        "openapi_doc_full",
+        "openapi_info",
+        "openapi_operation",
+        "openapi_paths_merge",
+        "openapi_route",
+        "page_read",
+        "path_base",
+        "path_clean",
+        "path_dir",
+        "path_ext",
+        "path_join",
+        "pb_encode_bytes",
+        "pb_encode_field_varint",
+        "pb_encode_key",
+        "pb_encode_nested",
+        "pb_encode_repeated_varint",
+        "pb_encode_simple",
+        "pb_encode_sint",
+        "pb_encode_varint",
+        "pb_nested_inner",
+        "pb_simple_name",
+        "pbkdf2_sha256",
+        "peer_table_host",
+        "pem_extract_block",
+        "pem_load_file",
+        "plugin_api_version",
+        "plugin_kind",
+        "plugin_last_error_str",
+        "plugin_last_log",
+        "plugin_manifest_artifact",
+        "plugin_manifest_lib_path",
+        "plugin_name",
+        "plugin_path",
+        "plugin_version",
+        "pman_read_page",
+        "png_decode_gray",
+        "png_encode_gray",
+        "png_encode_rgb",
+        "pread",
+        "profile_http_route",
+        "profile_pprof_http_body",
+        "profile_samples_pprof_text",
+        "quic_crypto_data",
+        "quic_crypto_payload",
+        "quic_dcid",
+        "quic_header_protect_apply",
+        "quic_header_protect_remove",
+        "quic_header_protection_mask",
+        "quic_hkdf_expand_label",
+        "quic_initial_client_hp",
+        "quic_initial_client_iv",
+        "quic_initial_client_key",
+        "quic_initial_client_secret",
+        "quic_initial_hp_mask",
+        "quic_initial_packet_protect",
+        "quic_initial_packet_unprotect",
+        "quic_initial_protect",
+        "quic_initial_unprotect",
+        "quic_payload_crypto_data",
+        "quic_scid",
+        "quic_stream_data",
+        "quiche_h3_get",
+        "quiche_h3_get_two",
+        "quiche_h3_post",
+        "quiche_handshake",
+        "quiche_version",
+        "random_bytes",
+        "readlink",
+        "realpath",
+        "redis_conn_del",
+        "redis_conn_exists",
+        "redis_conn_get",
+        "redis_conn_llen",
+        "redis_conn_lpush",
+        "redis_conn_ping",
+        "redis_conn_rpop",
+        "redis_conn_set",
+        "redis_del",
+        "redis_exists",
+        "redis_get",
+        "redis_llen",
+        "redis_lpush",
+        "redis_ping",
+        "redis_rpop",
+        "redis_set",
+        "reflect_kind_of_int",
+        "reflect_kind_of_string",
+        "reflect_struct_field_name",
+        "reflect_struct_field_type",
+        "reflect_type_name_at",
+        "reflect_type_of_int",
+        "reflect_type_of_string",
+        "reflect_type_schema",
+        "reflect_value_field_at",
+        "reflect_value_get",
+        "reflect_value_schema",
+        "reflect_value_string_int",
+        "reflect_value_string_str",
+        "regex_capture",
+        "regex_find",
+        "regex_quote_meta",
+        "regex_replace",
+        "regex_replace_all",
+        "replay_append",
+        "reqctx_get",
+        "router_match",
+        "router_match_path",
+        "router_param",
+        "rpc_method",
+        "rpc_payload",
+        "rtp_pack",
+        "rtp_payload",
+        "scram_cbind_b64",
+        "scram_client_final_without_proof",
+        "scram_gs2_header",
+        "scram_plus_client_final_bare",
+        "scram_tls_unique_cbind",
+        "sctp_getladdrs",
+        "sctp_getpaddrs",
+        "sctp_local_addr",
+        "sctp_peer_addr",
+        "sctp_read",
+        "sctp_read_n",
+        "sctp_recv_stream",
+        "sdp_append_line",
+        "sdp_attr",
+        "sdp_attr_candidate",
+        "sdp_attr_fmtp",
+        "sdp_attr_rtpmap",
+        "sdp_build_audio",
+        "sdp_build_av",
+        "sdp_connection",
+        "sdp_connection_addr",
+        "sdp_direction",
+        "sdp_media",
+        "sdp_media_attr",
+        "sdp_media_connection",
+        "sdp_media_connection_addr",
+        "sdp_media_direction",
+        "sdp_media_formats",
+        "sdp_media_proto",
+        "sdp_media_type",
+        "sdp_origin",
+        "sdp_origin_addr",
+        "sdp_replace_connection_addr",
+        "sdp_replace_media_port",
+        "sdp_session_name",
+        "sdp_set_media_direction",
+        "sdp_timing",
+        "sdp_version",
+        "seal_at_rest",
+        "session_cancel_token",
+        "session_id_new",
+        "sg_gather2",
+        "sg_gather3",
+        "sg_slice",
+        "sha1",
+        "sha256",
+        "sha256_raw",
+        "sha512",
+        "sip_addr_tag",
+        "sip_auth_param",
+        "sip_authorization_digest",
+        "sip_body",
+        "sip_branch",
+        "sip_call_id_new",
+        "sip_contact_value",
+        "sip_cseq_value",
+        "sip_dialog_id",
+        "sip_digest_response_ha1",
+        "sip_ensure_to_tag",
+        "sip_from_value",
+        "sip_header",
+        "sip_header_line",
+        "sip_header_n",
+        "sip_headers_append",
+        "sip_insert_via",
+        "sip_method",
+        "sip_msg_fix_top_via",
+        "sip_msg_response_host",
+        "sip_prepend_header",
+        "sip_proxy_authenticate",
+        "sip_reason",
+        "sip_record_route",
+        "sip_reply",
+        "sip_reply_with_to_tag",
+        "sip_request_uri",
+        "sip_strip_via",
+        "sip_tag",
+        "sip_to_value",
+        "sip_txn_key",
+        "sip_udp_recv",
+        "sip_uri_build",
+        "sip_uri_host",
+        "sip_uri_scheme",
+        "sip_uri_user",
+        "sip_version",
+        "sip_via_add_received",
+        "sip_via_branch",
+        "sip_via_fix_source",
+        "sip_via_host",
+        "sip_via_maddr",
+        "sip_via_received",
+        "sip_via_response_addr",
+        "sip_via_response_host",
+        "sip_via_transport",
+        "sip_via_value",
+        "sip_via_value_nat",
+        "sip_via_value_rport",
+        "sip_view_copy",
+        "sip_www_authenticate",
+        "slog_redact",
+        "smtp_auth_plain",
+        "smtp_format_message",
+        "smtp_last_reply",
+        "smtp_mock_last_from",
+        "smtp_mock_last_message",
+        "smtp_mock_last_rcpt",
+        "snap_apply_delta",
+        "snap_diff",
+        "snap_encode2",
+        "snap_encode4",
+        "sql_query_str",
+        "sql_query_str2",
+        "sql_query_str3",
+        "sql_query_str4",
+        "sql_rows_str",
+        "sqlite_query_text",
+        "sse_event",
+        "sse_retry",
+        "stack_trace",
+        "str_join",
+        "str_replace",
+        "str_to_lower",
+        "str_to_owned",
+        "str_to_upper",
+        "str_trim",
+        "str_trim_left",
+        "str_trim_right",
+        "str_trim_space",
+        "syscall_errno_str",
+        "syscall_hostname",
+        "syscall_read",
+        "syscall_readlink",
+        "syscall_uname_machine",
+        "syscall_uname_release",
+        "syscall_uname_sysname",
+        "tar_first_name",
+        "tcp_local_addr",
+        "tcp_peer_addr",
+        "tcp_read",
+        "tcp_read_n",
+        "temp_dir",
+        "temp_file",
+        "template_execute",
+        "time_format",
+        "time_format_clock",
+        "time_format_date",
+        "time_format_local",
+        "time_format_offset",
+        "tls_aead_open",
+        "tls_aead_seal",
+        "tls_certificate",
+        "tls_certificate_der",
+        "tls_certificate_verify",
+        "tls_certificate_verify_sig",
+        "tls_client_application_traffic_secret",
+        "tls_client_handshake_traffic_secret",
+        "tls_client_hello",
+        "tls_client_hello_random",
+        "tls_conn_alpn",
+        "tls_conn_version",
+        "tls_derive_secret",
+        "tls_encrypted_extensions",
+        "tls_finished",
+        "tls_finished_verify_data",
+        "tls_get",
+        "tls_get_insecure",
+        "tls_grpc_stream",
+        "tls_grpc_unary",
+        "tls_h2_get",
+        "tls_h2_get_twice",
+        "tls_h2_mux",
+        "tls_h2_post",
+        "tls_h2_settings_exchange",
+        "tls_h2_window_get",
+        "tls_handshake_ok",
+        "tls_handshake_version",
+        "tls_peer_cn",
+        "tls_pool_recv",
+        "tls_post",
+        "tls_read",
+        "tls_read_nb",
+        "tls_record_appdata_open",
+        "tls_record_appdata_open_seq",
+        "tls_record_appdata_seal",
+        "tls_record_appdata_seal_seq",
+        "tls_server_application_traffic_secret",
+        "tls_server_handshake_traffic_secret",
+        "tls_server_hello",
+        "tls_server_hello_random",
+        "tls_unique",
+        "tmpl_execute",
+        "tmpl_html",
+        "tmpl_html_execute",
+        "tmpl_text",
+        "tok_token",
+        "toml_escape",
+        "toml_get_in",
+        "toml_get_string",
+        "toml_merge",
+        "toml_pair",
+        "toml_pair_bool",
+        "toml_pair_int",
+        "toml_section",
+        "trace_current",
+        "trace_export_otlp_pb",
+        "trace_id",
+        "trace_span_id",
+        "udp_last_sender",
+        "udp_last_sender_host",
+        "udp_recv",
+        "udp_recv_from",
+        "ulid_string",
+        "unix_read",
+        "url_host",
+        "url_path",
+        "url_query",
+        "url_query_escape",
+        "url_scheme",
+        "utf8_encode_rune",
+        "uuid_bytes",
+        "uuid_string",
+        "uuid_string_upper",
+        "uuid_urn",
+        "wal_read_at",
+        "watch_poll",
+        "ws_accept_key",
+        "ws_client_recv",
+        "ws_recv",
+        "wss_client_recv",
+        "wss_pool_recv",
+        "wss_server_recv",
+        "xml_escape",
+        "xml_tag_text",
+        "xor_bytes",
+        "yaml_escape",
+        "yaml_get_string",
+        "yaml_merge",
+        "yaml_pair",
+        "yaml_pair_bool",
+        "yaml_pair_int",
+        "zip_first_name",
         "zip_read_file",
     ];
 
@@ -3980,10 +4482,7 @@ impl Codegen {
 
     fn emit_str_array_lit(&mut self, elems: &[Expr]) -> (String, String) {
         let tmp = self.fresh("sarr");
-        let vals: Vec<String> = elems
-            .iter()
-            .map(|e| self.emit_str_arg(e))
-            .collect();
+        let vals: Vec<String> = elems.iter().map(|e| self.emit_str_arg(e)).collect();
         let lit = self.fresh("slit");
         let body = if vals.is_empty() {
             "{NULL, 0}".to_string()
@@ -4489,18 +4988,50 @@ impl Codegen {
         inc.push_str("#include \"mako_cmap.h\"\n");
         // Optional headers — only when the program uses their functions.
         let conditional: &[(&[&str], &str)] = &[
-            (&["mako_tls_", "tls_", "ssl_", "jwt_", "hmac_", "x509_", "pem_", "scram_"], "mako_tls.h"),
+            (
+                &[
+                    "mako_tls_",
+                    "tls_",
+                    "ssl_",
+                    "jwt_",
+                    "hmac_",
+                    "x509_",
+                    "pem_",
+                    "scram_",
+                ],
+                "mako_tls.h",
+            ),
             (&["mako_dtls_", "dtls_"], "mako_dtls.h"),
             (&["mako_llm_", "llm_"], "mako_llm.h"),
             (&["mako_sip_", "sip_"], "mako_sip.h"),
             (&["mako_nghttp2", "nghttp2_"], "mako_nghttp2.h"),
             (&["mako_quiche", "quiche_", "h3_"], "mako_quiche.h"),
             (&["mako_ws_", "ws_", "websocket_"], "mako_ws.h"),
-            (&["mako_sql_", "sql_", "sqlite_", "pg_", "redis_", "mysql_"], "mako_db.h"),
-            (&["mako_dio_", "dio_", "direct_io", "wal_", "page_", "btree_", "multistore_", "store_", "kv_", "fs_store"], "mako_dio.h"),
+            (
+                &["mako_sql_", "sql_", "sqlite_", "pg_", "redis_", "mysql_"],
+                "mako_db.h",
+            ),
+            (
+                &[
+                    "mako_dio_",
+                    "dio_",
+                    "direct_io",
+                    "wal_",
+                    "page_",
+                    "btree_",
+                    "multistore_",
+                    "store_",
+                    "kv_",
+                    "fs_store",
+                ],
+                "mako_dio.h",
+            ),
             (&["mako_domain_", "domain_"], "mako_domain.h"),
             (&["mako_sctp_", "sctp_"], "mako_sctp.h"),
-            (&["mako_timer_", "timer_heap_", "timer_last_"], "mako_timer.h"),
+            (
+                &["mako_timer_", "timer_heap_", "timer_last_"],
+                "mako_timer.h",
+            ),
             (&["mako_peer_", "peer_table_"], "mako_peer.h"),
             (&["mako_diameter_", "diameter_"], "mako_diameter.h"),
             (&["mako_evloop", "evloop_"], "mako_evloop.h"),
@@ -4510,7 +5041,10 @@ impl Codegen {
             (&["mako_tok_", "tok_", "bpe_"], "mako_tok.h"),
             (&["mako_smtp_", "smtp_", "mail_"], "mako_mail.h"),
             (&["mako_template_", "template_"], "mako_template.h"),
-            (&["mako_cloud_", "cloud_", "s3_", "base64url"], "mako_cloud.h"),
+            (
+                &["mako_cloud_", "cloud_", "s3_", "base64url"],
+                "mako_cloud.h",
+            ),
             (&["mako_httpengine", "httpengine_"], "mako_httpengine.h"),
         ];
         for (prefixes, header) in conditional {
@@ -4579,10 +5113,7 @@ impl Codegen {
             let mut string_slot = 0usize;
             for kind in fields {
                 if *kind == "string" {
-                    let _ = writeln!(
-                        self.out,
-                        "        mako_str_free(v.s{string_slot});"
-                    );
+                    let _ = writeln!(self.out, "        mako_str_free(v.s{string_slot});");
                     string_slot += 1;
                 }
             }
@@ -5592,9 +6123,18 @@ impl Codegen {
             self.out,
             "static inline {arr} mako_arr_{c_name}_clone({arr} a) {{"
         );
-        let _ = writeln!(self.out, "    if (a.len == 0) {{ {arr} e = {{0}}; return e; }}");
-        let _ = writeln!(self.out, "    {arr} out = mako_arr_{c_name}_make((int64_t)a.len, (int64_t)a.len);");
-        let _ = writeln!(self.out, "    memcpy(out.data, a.data, a.len * sizeof(a.data[0]));");
+        let _ = writeln!(
+            self.out,
+            "    if (a.len == 0) {{ {arr} e = {{0}}; return e; }}"
+        );
+        let _ = writeln!(
+            self.out,
+            "    {arr} out = mako_arr_{c_name}_make((int64_t)a.len, (int64_t)a.len);"
+        );
+        let _ = writeln!(
+            self.out,
+            "    memcpy(out.data, a.data, a.len * sizeof(a.data[0]));"
+        );
         let _ = writeln!(self.out, "    return out;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -5963,15 +6503,9 @@ impl Codegen {
             vals.push((format!("arr_{ctag}"), format!("MakoArr_{ctag}")));
             // Outer of []chan for [][]chan
             if self.want_arr_elem(&format!("arr_{ctag}")) {
-                self.emit_nested_arr_helpers(
-                    &format!("arr_{ctag}"),
-                    &format!("MakoArr_{ctag}"),
-                );
+                self.emit_nested_arr_helpers(&format!("arr_{ctag}"), &format!("MakoArr_{ctag}"));
             }
-            vals.push((
-                format!("arr_arr_{ctag}"),
-                format!("MakoArr_arr_{ctag}"),
-            ));
+            vals.push((format!("arr_arr_{ctag}"), format!("MakoArr_arr_{ctag}")));
         }
         // Outer arrays for maps_values — only when the nested type is actually used.
         for (vt, vc) in &vals {
@@ -11302,7 +11836,9 @@ impl Codegen {
                 "Buf" => "MakoBuf*".into(),
                 "GameUDP" => "MakoGameUDP*".into(),
                 "Http2Conn" => "MakoHttp2Conn*".into(),
-                "TlsServer" | "TlsClient" | "TlsConn" | "Watcher" => "void*".into(),
+                "OpaqueHandle" | "TlsServer" | "TlsClient" | "TlsConn" | "Watcher" => {
+                    "void*".into()
+                }
                 "DtlsCtx" | "DtlsConn" => "void*".into(),
                 "CHash" => "MakoCHash*".into(),
                 "RateLimiter" => "MakoRateLimiter*".into(),
@@ -12021,8 +12557,9 @@ impl Codegen {
                     if mutated.contains(src_name) {
                         // Cell holds the live value; free string payload then cell.
                         if cty == "MakoString" {
-                            drop_frees
-                                .push_str(&format!("    if (e->{field}) mako_str_free(*(e->{field}));\n"));
+                            drop_frees.push_str(&format!(
+                                "    if (e->{field}) mako_str_free(*(e->{field}));\n"
+                            ));
                         }
                         drop_frees.push_str(&format!("    free(e->{field});\n"));
                     } else if cty == "MakoString" {
@@ -12046,9 +12583,7 @@ impl Codegen {
                     let val = mangle(src_name);
                     if mutated.contains(src_name) {
                         let cell = self.fresh("cell");
-                        self.line(&format!(
-                            "{cty} *{cell} = ({cty}*)malloc(sizeof({cty}));"
-                        ));
+                        self.line(&format!("{cty} *{cell} = ({cty}*)malloc(sizeof({cty}));"));
                         self.line(&format!("if (!{cell}) {{ fprintf(stderr, \"mako: OOM in mut capture\\n\"); abort(); }}"));
                         if cty == "MakoString" {
                             self.line(&format!("*{cell} = mako_str_clone({val});"));
@@ -13082,7 +13617,10 @@ impl Codegen {
                             self.line(&format!("double {} = {val}->vals[{i}];", mangle(b)));
                             self.locals.insert(b.clone(), "double".into());
                         } else if let Some(opty) = self.opaque_map_vals.get(&val).cloned() {
-                            self.line(&format!("{opty} {} = ({opty})(intptr_t){val}->vals[{i}];", mangle(b)));
+                            self.line(&format!(
+                                "{opty} {} = ({opty})(intptr_t){val}->vals[{i}];",
+                                mangle(b)
+                            ));
                             self.locals.insert(b.clone(), opty);
                         } else {
                             self.line(&format!("int64_t {} = {val}->vals[{i}];", mangle(b)));
@@ -13143,19 +13681,13 @@ impl Codegen {
                         [] => {}
                         [a] => {
                             if a != "_" {
-                                self.line(&format!(
-                                    "{elem_c} {} = {vtmp}.value;",
-                                    mangle(a)
-                                ));
+                                self.line(&format!("{elem_c} {} = {vtmp}.value;", mangle(a)));
                                 self.locals.insert(a.clone(), elem_c.into());
                             }
                         }
                         [_, b] => {
                             if b != "_" {
-                                self.line(&format!(
-                                    "{elem_c} {} = {vtmp}.value;",
-                                    mangle(b)
-                                ));
+                                self.line(&format!("{elem_c} {} = {vtmp}.value;", mangle(b)));
                                 self.locals.insert(b.clone(), elem_c.into());
                             }
                         }
@@ -13285,7 +13817,9 @@ impl Codegen {
             ));
             self.locals.insert(name.to_string(), "int64_t".into());
         } else if let Some(opty) = self.opaque_arr_elems.get(arr).cloned() {
-            self.line(&format!("{opty} {cname} = ({opty})(intptr_t){arr}.data[{idx}];"));
+            self.line(&format!(
+                "{opty} {cname} = ({opty})(intptr_t){arr}.data[{idx}];"
+            ));
             self.locals.insert(name.to_string(), opty);
         } else {
             self.line(&format!("int64_t {cname} = {arr}.data[{idx}];"));
@@ -13342,6 +13876,7 @@ impl Codegen {
                 // function that modifies it. Only `const` declarations are propagated.
                 // Keep the C variable name consistent with its uses (Ident emission
                 // also mangles), so a name colliding with a C keyword stays valid.
+                let source_name = name.clone();
                 let name = mangle(name);
                 let name = &name;
                 let as_bytes = matches!(
@@ -13512,7 +14047,10 @@ impl Codegen {
                         self.job_ok_kinds.insert(name.clone(), ok);
                     }
                 }
-                self.locals.insert(name.clone(), ty.clone());
+                self.locals.insert(source_name.clone(), ty.clone());
+                if source_name != *name {
+                    self.locals.insert(name.clone(), ty.clone());
+                }
                 self.note_own_bind_scope(&mangle(name));
                 // Annotated lets: Result/Option nest metadata from the type.
                 if let Some(ann_ty) = ann {
@@ -14025,10 +14563,18 @@ impl Codegen {
                         if fn_name == "append" && !args.is_empty() {
                             if let Expr::Ident(arg0) = &args[0] {
                                 arg0 == name
-                            } else { false }
-                        } else { false }
-                    } else { false }
-                } else { false };
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 let (vty, val) = self.emit_expr(value);
                 let val = if let Some(exp) = self.locals.get(name).cloned() {
                     if exp.starts_with("MakoIface_") && vty != exp {
@@ -14318,7 +14864,11 @@ impl Codegen {
                 // Chained index+field: w.routes[0].path = "x"
                 // Use _get_ptr to get an lvalue pointer into the array element.
                 // Type checker guarantees an indexed field-assign base is a struct array.
-                if let Expr::Index { base: arr_base, index } = base {
+                if let Expr::Index {
+                    base: arr_base,
+                    index,
+                } = base
+                {
                     let (aty, a) = self.emit_expr(arr_base);
                     if let Some(sn) = aty.strip_prefix("MakoArr_") {
                         let (_, idx) = self.emit_expr(index);
@@ -14330,9 +14880,7 @@ impl Codegen {
                         let sn = sn.to_string();
                         let ptr = format!("mako_arr_{sn}_get_ptr({a}, {tmp})");
                         if let Some(field_free) = Self::own_free_fn(&vty) {
-                            self.emit_line(format_args!(
-                                "{field_free}({ptr}->{field});"
-                            ));
+                            self.emit_line(format_args!("{field_free}({ptr}->{field});"));
                         }
                         self.emit_line(format_args!("{ptr}->{field} = {v};"));
                         return;
@@ -14368,8 +14916,8 @@ impl Codegen {
                 );
                 if let Expr::Ident(base_name) = base {
                     let mn = mangle(base_name);
-                    if let Some(field_free) = Self::own_free_fn(&vty)
-                        .filter(|_| !consumes_old_field)
+                    if let Some(field_free) =
+                        Self::own_free_fn(&vty).filter(|_| !consumes_old_field)
                     {
                         if self.own_cond_flags.contains(&mn) {
                             self.emit_line(format_args!(
@@ -14904,12 +15452,11 @@ impl Codegen {
                 } else {
                     self.emit_expr(left)
                 };
-                let (rt, rv) =
-                    if *op == BinOp::Add && matches!(right.as_ref(), Expr::String(_)) {
-                        ("MakoString".into(), self.emit_str_arg(right))
-                    } else {
-                        self.emit_expr(right)
-                    };
+                let (rt, rv) = if *op == BinOp::Add && matches!(right.as_ref(), Expr::String(_)) {
+                    ("MakoString".into(), self.emit_str_arg(right))
+                } else {
+                    self.emit_expr(right)
+                };
                 if *op == BinOp::Add && lt == "MakoString" {
                     let tmp = self.fresh("s");
                     // Use concat_own (realloc) when the left side is a fresh temp
@@ -14935,9 +15482,7 @@ impl Codegen {
                     if right_is_owned {
                         let rtmp = self.fresh("cr");
                         self.emit_line(format_args!("MakoString {rtmp} = {rv};"));
-                        self.emit_line(format_args!(
-                            "MakoString {tmp} = {fn_name}({lv}, {rtmp});"
-                        ));
+                        self.emit_line(format_args!("MakoString {tmp} = {fn_name}({lv}, {rtmp});"));
                         self.emit_line(format_args!("mako_str_free({rtmp});"));
                     } else {
                         self.emit_line(format_args!("MakoString {tmp} = {fn_name}({lv}, {rv});"));
@@ -15070,6 +15615,15 @@ impl Codegen {
                         // Will attach to the returned temp if caller binds it via Let —
                         // also attach to any fresh temp created below by recording after emit.
                         let _ = ec; // used in Let path via fn_result_err_enum lookup
+                    }
+                    if name == "opaque_wrap" || name == "OpaqueHandle" {
+                        let (_, v) = self.emit_expr(&args[0]);
+                        return ("void*".into(), format!("(void*)(intptr_t){v}"));
+                    }
+                    if let Some(target) = name.strip_prefix("opaque_unwrap__") {
+                        let (_, v) = self.emit_expr(&args[0]);
+                        let cty = self.type_expr_c(&TypeExpr::Named(target.into()));
+                        return (cty.clone(), format!("({cty})(intptr_t){v}"));
                     }
                     match name.as_str() {
                         "print" => {
@@ -17043,6 +17597,82 @@ impl Codegen {
                             self.line(&format!("int64_t {tmp} = mako_cmap_del({m}, {k});"));
                             return ("int64_t".into(), tmp);
                         }
+                        "cmap_has2" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("ch2");
+                            self.line(&format!("int64_t {tmp} = mako_cmap_has2({m}, {a}, {b});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "cmap_get2" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("cg2");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_cmap_get2({m}, {a}, {b});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "cmap_del2" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("cd2");
+                            self.line(&format!("int64_t {tmp} = mako_cmap_del2({m}, {a}, {b});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "cmap_has3i" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let (_, c) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("ch3i");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_cmap_has3i({m}, {a}, {b}, {c});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "cmap_get3i" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let (_, c) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("cg3i");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_cmap_get3i({m}, {a}, {b}, {c});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "cmap_del3i" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let (_, c) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("cd3i");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_cmap_del3i({m}, {a}, {b}, {c});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "cmap_set_int" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, v) = self.emit_expr(&args[2]);
+                            self.line(&format!("mako_cmap_set_int({m}, {k}, {v});"));
+                            return ("void".into(), "/*void*/".into());
+                        }
+                        "cmap_get_int" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, f) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("cgi");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_cmap_get_int({m}, {k}, {f});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
                         "cmap_len" => {
                             let (_, m) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("cl");
@@ -18150,7 +18780,10 @@ impl Codegen {
                         }
                         "gfx_event_mouse_button" => {
                             let (_, w) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_gfx_event_mouse_button({w})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_gfx_event_mouse_button({w})"),
+                            );
                         }
                         "gfx_is_open" => {
                             let (_, w) = self.emit_expr(&args[0]);
@@ -18435,6 +19068,15 @@ impl Codegen {
                             let (_, p) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("nubr");
                             self.line(&format!("int64_t {tmp} = mako_nb_udp_bind_reuseport({p});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "nb_udp_bind_reuseport_addr" => {
+                            let (_, ip) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("nubra");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_nb_udp_bind_reuseport_addr({ip}, {p});"
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "nb_udp_recv" => {
@@ -18772,7 +19414,31 @@ impl Codegen {
                             let (_, p) = self.emit_expr(&args[0]);
                             let (_, k) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("jse");
-                            self.line(&format!("MakoString {tmp} = mako_jwt_sign_es256({p}, {k});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_jwt_sign_es256({p}, {k});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "jwt_sign_es256_header" | "jwt_sign_custom" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, h) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("jseh");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_jwt_sign_es256_header({p}, {k}, {h});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "base64url_encode" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("b64u");
+                            self.line(&format!("MakoString {tmp} = mako_base64url_encode({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "base64url_decode" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("b64ud");
+                            self.line(&format!("MakoString {tmp} = mako_base64url_decode({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "jwt_verify" => {
@@ -23116,9 +23782,7 @@ impl Codegen {
                         "graphql_fields" => {
                             let (_, q) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("gfl");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_graphql_fields({q});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_graphql_fields({q});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mq_new" => {
@@ -23132,27 +23796,19 @@ impl Codegen {
                             let (_, id) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let (_, c) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_mq_declare({id}, {n}, {c})"),
-                            );
+                            return ("int64_t".into(), format!("mako_mq_declare({id}, {n}, {c})"));
                         }
                         "mq_publish" => {
                             let (_, id) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let (_, b) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_mq_publish({id}, {n}, {b})"),
-                            );
+                            return ("int64_t".into(), format!("mako_mq_publish({id}, {n}, {b})"));
                         }
                         "mq_try_take" => {
                             let (_, id) = self.emit_expr(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("mqt");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_mq_try_take({id}, {n});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_mq_try_take({id}, {n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mq_len" => {
@@ -23176,19 +23832,13 @@ impl Codegen {
                             let (_, id) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
                             let (_, c) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_nats_sub({id}, {s}, {c})"),
-                            );
+                            return ("int64_t".into(), format!("mako_nats_sub({id}, {s}, {c})"));
                         }
                         "nats_pub" => {
                             let (_, id) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
                             let (_, b) = self.emit_expr(&args[2]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_nats_pub({id}, {s}, {b})"),
-                            );
+                            return ("int64_t".into(), format!("mako_nats_pub({id}, {s}, {b})"));
                         }
                         "nats_try_next" => {
                             let (_, id) = self.emit_expr(&args[0]);
@@ -23224,16 +23874,12 @@ impl Codegen {
                         }
                         "nats_connect_frame" => {
                             let tmp = self.fresh("ncf");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_nats_connect_frame();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_nats_connect_frame();"));
                             return ("MakoString".into(), tmp);
                         }
                         "nats_ping_frame" => {
                             let tmp = self.fresh("nping");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_nats_ping_frame();"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_nats_ping_frame();"));
                             return ("MakoString".into(), tmp);
                         }
                         "redis_mq_new" => {
@@ -23273,20 +23919,14 @@ impl Codegen {
                         "redis_mq_llen" => {
                             let (_, id) = self.emit_expr(&args[0]);
                             let (_, k) = self.emit_expr(&args[1]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_redis_mq_llen({id}, {k})"),
-                            );
+                            return ("int64_t".into(), format!("mako_redis_mq_llen({id}, {k})"));
                         }
                         "graphql_schema_new" => {
                             return ("int64_t".into(), "mako_graphql_schema_new()".into());
                         }
                         "graphql_schema_free" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_graphql_schema_free({id})"),
-                            );
+                            return ("int64_t".into(), format!("mako_graphql_schema_free({id})"));
                         }
                         "graphql_schema_add_type" => {
                             let (_, id) = self.emit_expr(&args[0]);
@@ -23303,9 +23943,7 @@ impl Codegen {
                             let (_, r) = self.emit_expr(&args[3]);
                             return (
                                 "int64_t".into(),
-                                format!(
-                                    "mako_graphql_schema_add_field({id}, {t}, {f}, {r})"
-                                ),
+                                format!("mako_graphql_schema_add_field({id}, {t}, {f}, {r})"),
                             );
                         }
                         "graphql_schema_set_resolver" => {
@@ -23314,9 +23952,7 @@ impl Codegen {
                             let (_, j) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
-                                format!(
-                                    "mako_graphql_schema_set_resolver({id}, {f}, {j})"
-                                ),
+                                format!("mako_graphql_schema_set_resolver({id}, {f}, {j})"),
                             );
                         }
                         "graphql_schema_has_type" => {
@@ -23344,8 +23980,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_schema_resolve" => {
-                            let free_q =
-                                self.expr_is_scope_drop_safe(&args[1], "MakoString");
+                            let free_q = self.expr_is_scope_drop_safe(&args[1], "MakoString");
                             let (_, id) = self.emit_expr(&args[0]);
                             let (_, q) = self.emit_expr(&args[1]);
                             let qtmp = self.fresh("gqq");
@@ -23408,17 +24043,11 @@ impl Codegen {
                         }
                         "grpc_service_new" => {
                             let (_, n) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_grpc_service_new({n})"),
-                            );
+                            return ("int64_t".into(), format!("mako_grpc_service_new({n})"));
                         }
                         "grpc_service_free" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_grpc_service_free({id})"),
-                            );
+                            return ("int64_t".into(), format!("mako_grpc_service_free({id})"));
                         }
                         "grpc_service_add_method" => {
                             let (_, id) = self.emit_expr(&args[0]);
@@ -23458,9 +24087,7 @@ impl Codegen {
                         "grpc_service_name" => {
                             let (_, id) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("gsn");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_grpc_service_name({id});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_grpc_service_name({id});"));
                             return ("MakoString".into(), tmp);
                         }
                         "time_offset_named" => {
@@ -28977,9 +29604,7 @@ impl Codegen {
                             let (_, k) = self.emit_expr(&args[4]);
                             return (
                                 "void*".into(),
-                                format!(
-                                    "mako_wss_client_connect({cli}, {h}, {p}, {path}, {k})"
-                                ),
+                                format!("mako_wss_client_connect({cli}, {h}, {p}, {path}, {k})"),
                             );
                         }
                         "wss_client_connect_insecure" => {
@@ -28989,9 +29614,7 @@ impl Codegen {
                             let (_, k) = self.emit_expr(&args[3]);
                             return (
                                 "void*".into(),
-                                format!(
-                                    "mako_wss_client_connect_insecure({h}, {p}, {path}, {k})"
-                                ),
+                                format!("mako_wss_client_connect_insecure({h}, {p}, {path}, {k})"),
                             );
                         }
                         "wss_client_connect_ca" => {
@@ -29002,26 +29625,24 @@ impl Codegen {
                             let (_, ca) = self.emit_expr(&args[4]);
                             return (
                                 "void*".into(),
-                                format!(
-                                    "mako_wss_client_connect_ca({h}, {p}, {path}, {k}, {ca})"
-                                ),
+                                format!("mako_wss_client_connect_ca({h}, {p}, {path}, {k}, {ca})"),
                             );
                         }
                         "wss_client_connect_headers" => {
-                let (_, h) = self.emit_expr(&args[0]);
-                let (_, p) = self.emit_expr(&args[1]);
-                let (_, path) = self.emit_expr(&args[2]);
-                let (_, k) = self.emit_expr(&args[3]);
-                let (_, ca) = self.emit_expr(&args[4]);
-                let (_, extra) = self.emit_expr(&args[5]);
-                return (
-                    "void*".into(),
-                    format!(
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, p) = self.emit_expr(&args[1]);
+                            let (_, path) = self.emit_expr(&args[2]);
+                            let (_, k) = self.emit_expr(&args[3]);
+                            let (_, ca) = self.emit_expr(&args[4]);
+                            let (_, extra) = self.emit_expr(&args[5]);
+                            return (
+                                "void*".into(),
+                                format!(
                         "mako_wss_client_connect_ca_h({h}, {p}, {path}, {k}, {ca}, {extra})"
                     ),
-                );
-            }
-            "wss_client_send_text" => {
+                            );
+                        }
+                        "wss_client_send_text" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
                             return (
@@ -29065,17 +29686,11 @@ impl Codegen {
                         }
                         "wss_client_close" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_wss_client_close({c})"),
-                            );
+                            return ("int64_t".into(), format!("mako_wss_client_close({c})"));
                         }
                         "wss_server_upgrade" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            return (
-                                "int64_t".into(),
-                                format!("mako_wss_server_upgrade({c})"),
-                            );
+                            return ("int64_t".into(), format!("mako_wss_server_upgrade({c})"));
                         }
                         "wss_server_send_text" => {
                             let (_, c) = self.emit_expr(&args[0]);
@@ -29653,7 +30268,10 @@ impl Codegen {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let (_, ca) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_tls_pool_open({h}, {p}, {ca})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tls_pool_open({h}, {p}, {ca})"),
+                            );
                         }
                         "tls_pool_open_timeout" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -29674,7 +30292,9 @@ impl Codegen {
                             let (_, ms) = self.emit_expr(&args[5]);
                             return (
                                 "int64_t".into(),
-                                format!("mako_tls_pool_open_mtls({h}, {p}, {ca}, {cert}, {key}, {ms})"),
+                                format!(
+                                    "mako_tls_pool_open_mtls({h}, {p}, {ca}, {cert}, {key}, {ms})"
+                                ),
                             );
                         }
                         "tls_pool_open_mtls_full" => {
@@ -29693,7 +30313,10 @@ impl Codegen {
                         "tls_pool_set_timeout" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, ms) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_tls_pool_set_timeout({h}, {ms})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_tls_pool_set_timeout({h}, {ms})"),
+                            );
                         }
                         "timer_heap_new" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -29708,12 +30331,18 @@ impl Codegen {
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
-                            return ("int64_t".into(), format!("mako_timer_heap_arm({a0}, {a1}, {a2}, {a3})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_timer_heap_arm({a0}, {a1}, {a2}, {a3})"),
+                            );
                         }
                         "timer_heap_cancel" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_timer_heap_cancel({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_timer_heap_cancel({a0}, {a1})"),
+                            );
                         }
                         "timer_heap_next" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -29722,7 +30351,10 @@ impl Codegen {
                         "timer_heap_pop_due1" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_timer_heap_pop_due1({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_timer_heap_pop_due1({a0}, {a1})"),
+                            );
                         }
                         "timer_last_kind" => {
                             return ("int64_t".into(), format!("mako_timer_last_kind()"));
@@ -29754,51 +30386,78 @@ impl Codegen {
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
                             let (_, a5) = self.emit_expr(&args[5]);
-                            return ("int64_t".into(), format!("mako_peer_table_add({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_add({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"),
+                            );
                         }
                         "peer_table_set_conn" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_peer_table_set_conn({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_set_conn({a0}, {a1}, {a2})"),
+                            );
                         }
                         "peer_table_get_conn" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_peer_table_get_conn({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_get_conn({a0}, {a1})"),
+                            );
                         }
                         "peer_table_set_state" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_peer_table_set_state({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_set_state({a0}, {a1}, {a2})"),
+                            );
                         }
                         "peer_table_get_state" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_peer_table_get_state({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_get_state({a0}, {a1})"),
+                            );
                         }
                         "peer_table_touch" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_peer_table_touch({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_touch({a0}, {a1}, {a2})"),
+                            );
                         }
                         "peer_table_last_ms" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_peer_table_last_ms({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_last_ms({a0}, {a1})"),
+                            );
                         }
                         "peer_table_route_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_peer_table_route_add({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_route_add({a0}, {a1}, {a2})"),
+                            );
                         }
                         "peer_table_route_lookup" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_peer_table_route_lookup({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_route_lookup({a0}, {a1})"),
+                            );
                         }
                         "peer_table_count" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -29812,18 +30471,26 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_peer_table_host({a0}, {a1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_peer_table_host({a0}, {a1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "peer_table_port" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_peer_table_port({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_port({a0}, {a1})"),
+                            );
                         }
                         "peer_table_transport" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_peer_table_transport({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_transport({a0}, {a1})"),
+                            );
                         }
                         "peer_table_capacity" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -29832,14 +30499,20 @@ impl Codegen {
                         "peer_table_alive" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_peer_table_alive({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_peer_table_alive({a0}, {a1})"),
+                            );
                         }
                         "diameter_limits_set" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
-                            return ("int64_t".into(), format!("mako_diameter_limits_set({a0}, {a1}, {a2}, {a3})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_limits_set({a0}, {a1}, {a2}, {a3})"),
+                            );
                         }
                         "diameter_limits_max_msg" => {
                             return ("int64_t".into(), format!("mako_diameter_limits_max_msg()"));
@@ -29848,7 +30521,10 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_diameter_limits_inbuf()"));
                         }
                         "diameter_limits_inq_bytes" => {
-                            return ("int64_t".into(), format!("mako_diameter_limits_inq_bytes()"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_limits_inq_bytes()"),
+                            );
                         }
                         "diameter_limits_reasm_ms" => {
                             return ("int64_t".into(), format!("mako_diameter_limits_reasm_ms()"));
@@ -29856,13 +30532,19 @@ impl Codegen {
                         "diameter_tcm_set_run_budget" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_set_run_budget({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_set_run_budget({a0}, {a1})"),
+                            );
                         }
                         "sctp_set_streams" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_sctp_set_streams({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_set_streams({a0}, {a1}, {a2})"),
+                            );
                         }
                         "sctp_get_streams" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -29873,38 +30555,56 @@ impl Codegen {
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
-                            return ("int64_t".into(), format!("mako_sctp_send_ex({a0}, {a1}, {a2}, {a3})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_send_ex({a0}, {a1}, {a2}, {a3})"),
+                            );
                         }
                         "sctp_set_heartbeat" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_sctp_set_heartbeat({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_set_heartbeat({a0}, {a1}, {a2})"),
+                            );
                         }
                         "sctp_set_rto" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
-                            return ("int64_t".into(), format!("mako_sctp_set_rto({a0}, {a1}, {a2}, {a3})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_set_rto({a0}, {a1}, {a2}, {a3})"),
+                            );
                         }
                         "sctp_bindx_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_sctp_bindx_add({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_bindx_add({a0}, {a1}, {a2})"),
+                            );
                         }
                         "sctp_bindx_rem" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_sctp_bindx_rem({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_bindx_rem({a0}, {a1}, {a2})"),
+                            );
                         }
                         "sctp_connectx" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_sctp_connectx({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_connectx({a0}, {a1}, {a2})"),
+                            );
                         }
                         "sctp_getpaddrs" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -29922,14 +30622,20 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_sctp_set_primary({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_set_primary({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_tcm_new" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_new({a0}, {a1}, {a2}, {a3})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_new({a0}, {a1}, {a2}, {a3})"),
+                            );
                         }
                         "diameter_tcm_free" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -29939,13 +30645,19 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_set_origin({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_set_origin({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_tcm_set_watchdog" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_set_watchdog({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_set_watchdog({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_tcm_peer_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -29960,42 +30672,66 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_route_add({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_route_add({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_tcm_route_lookup" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_route_lookup({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_route_lookup({a0}, {a1})"),
+                            );
                         }
                         "diameter_tcm_arm" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_arm({a0}, {a1}, {a2}, {a3})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_arm({a0}, {a1}, {a2}, {a3})"),
+                            );
                         }
                         "diameter_tcm_cancel" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_cancel({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_cancel({a0}, {a1})"),
+                            );
                         }
                         "diameter_tcm_poll_deadline" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_poll_deadline({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_poll_deadline({a0}, {a1})"),
+                            );
                         }
                         "diameter_tcm_run_due" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_run_due({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_run_due({a0}, {a1})"),
+                            );
                         }
                         "diameter_tcm_peer_count" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_peer_count({a0})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_peer_count({a0})"),
+                            );
                         }
                         "diameter_tcm_timer_count" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_timer_count({a0})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_timer_count({a0})"),
+                            );
                         }
                         "diameter_tcm_drops" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30005,20 +30741,28 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_inject_in({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_inject_in({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_tcm_take_out" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_diameter_tcm_take_out({a0}, {a1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_diameter_tcm_take_out({a0}, {a1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_tcm_handle_io" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_tcm_handle_io({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_tcm_handle_io({a0}, {a1}, {a2})"),
+                            );
                         }
                         "tls_pool_send" => {
                             let (_, c) = self.emit_expr(&args[0]);
@@ -30050,7 +30794,10 @@ impl Codegen {
                         "sctp_listen_addr" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_sctp_listen_addr({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_listen_addr({a0}, {a1})"),
+                            );
                         }
                         "sctp_accept" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30065,7 +30812,10 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_sctp_connect_timeout({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_connect_timeout({a0}, {a1}, {a2})"),
+                            );
                         }
                         "sctp_close" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30079,7 +30829,10 @@ impl Codegen {
                         "sctp_set_timeout" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_sctp_set_timeout({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_set_timeout({a0}, {a1})"),
+                            );
                         }
                         "sctp_write" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30121,13 +30874,18 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_sctp_send_stream({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_sctp_send_stream({a0}, {a1}, {a2})"),
+                            );
                         }
                         "sctp_recv_stream" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_sctp_recv_stream({a0}, {a1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_sctp_recv_stream({a0}, {a1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "sctp_last_stream" => {
@@ -30145,7 +30903,10 @@ impl Codegen {
                         }
                         "diameter_msg_complete" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_diameter_msg_complete({a0})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_msg_complete({a0})"),
+                            );
                         }
                         "diameter_msg_needed" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30153,7 +30914,10 @@ impl Codegen {
                         }
                         "diameter_first_message_len" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_diameter_first_message_len({a0})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_first_message_len({a0})"),
+                            );
                         }
                         "diameter_version" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30217,14 +30981,18 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_diameter_set_hbh({a0}, {a1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_diameter_set_hbh({a0}, {a1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_set_e2e" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_diameter_set_e2e({a0}, {a1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_diameter_set_e2e({a0}, {a1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_avp_encode" => {
@@ -30258,14 +31026,18 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_diameter_avp_at({a0}, {a1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_diameter_avp_at({a0}, {a1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_avp_find" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_diameter_avp_find({a0}, {a1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_diameter_avp_find({a0}, {a1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_avp_find_vendor" => {
@@ -30294,20 +31066,26 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_diameter_txn_key({a0}, {a1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_diameter_txn_key({a0}, {a1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_e2e_key" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_diameter_e2e_key({a0}, {a1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_diameter_e2e_key({a0}, {a1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_session_key" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_diameter_session_key({a0});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_diameter_session_key({a0});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_hbh_new" => {
@@ -30386,7 +31164,10 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_conn_set_origin({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_conn_set_origin({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_conn_state" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30395,12 +31176,18 @@ impl Codegen {
                         "diameter_conn_set_state" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_conn_set_state({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_conn_set_state({a0}, {a1})"),
+                            );
                         }
                         "diameter_conn_feed" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_conn_feed({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_conn_feed({a0}, {a1})"),
+                            );
                         }
                         "diameter_conn_pop" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30410,22 +31197,33 @@ impl Codegen {
                         }
                         "diameter_conn_pending" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_diameter_conn_pending({a0})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_conn_pending({a0})"),
+                            );
                         }
                         "diameter_conn_queue_out" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_conn_queue_out({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_conn_queue_out({a0}, {a1})"),
+                            );
                         }
                         "diameter_conn_take_out" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_diameter_conn_take_out({a0});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_diameter_conn_take_out({a0});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_conn_next_hbh" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_diameter_conn_next_hbh({a0})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_conn_next_hbh({a0})"),
+                            );
                         }
                         "diameter_conn_register" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30433,23 +31231,37 @@ impl Codegen {
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
-                            return ("int64_t".into(), format!("mako_diameter_conn_register({a0}, {a1}, {a2}, {a3}, {a4})"));
+                            return (
+                                "int64_t".into(),
+                                format!(
+                                    "mako_diameter_conn_register({a0}, {a1}, {a2}, {a3}, {a4})"
+                                ),
+                            );
                         }
                         "diameter_conn_match" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_conn_match({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_conn_match({a0}, {a1})"),
+                            );
                         }
                         "diameter_conn_expire" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_conn_expire({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_conn_expire({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_conn_on_cea" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_conn_on_cea({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_conn_on_cea({a0}, {a1})"),
+                            );
                         }
                         "diameter_pool_open" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30457,17 +31269,26 @@ impl Codegen {
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
-                            return ("int64_t".into(), format!("mako_diameter_pool_open({a0}, {a1}, {a2}, {a3}, {a4})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_pool_open({a0}, {a1}, {a2}, {a3}, {a4})"),
+                            );
                         }
                         "diameter_pool_acquire" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_diameter_pool_acquire({a0})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_pool_acquire({a0})"),
+                            );
                         }
                         "diameter_pool_release" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_pool_release({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_pool_release({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_pool_close" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30488,13 +31309,19 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_mgr_set_origin({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_mgr_set_origin({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_mgr_set_watchdog" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_mgr_set_watchdog({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_mgr_set_watchdog({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_peer_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30503,17 +31330,28 @@ impl Codegen {
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
                             let (_, a5) = self.emit_expr(&args[5]);
-                            return ("int64_t".into(), format!("mako_diameter_peer_add({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+                            return (
+                                "int64_t".into(),
+                                format!(
+                                    "mako_diameter_peer_add({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"
+                                ),
+                            );
                         }
                         "diameter_peer_remove" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_peer_remove({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_peer_remove({a0}, {a1})"),
+                            );
                         }
                         "diameter_peer_state" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_peer_state({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_peer_state({a0}, {a1})"),
+                            );
                         }
                         "diameter_peer_count" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30522,50 +31360,77 @@ impl Codegen {
                         "diameter_peer_fd" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_peer_fd({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_peer_fd({a0}, {a1})"),
+                            );
                         }
                         "diameter_peer_attach_fd" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_peer_attach_fd({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_peer_attach_fd({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_peer_mark_open" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_peer_mark_open({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_peer_mark_open({a0}, {a1})"),
+                            );
                         }
                         "diameter_peer_mark_closed" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_peer_mark_closed({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_peer_mark_closed({a0}, {a1})"),
+                            );
                         }
                         "diameter_route_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_route_add({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_route_add({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_route_remove" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_route_remove({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_route_remove({a0}, {a1})"),
+                            );
                         }
                         "diameter_route_lookup" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_route_lookup({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_route_lookup({a0}, {a1})"),
+                            );
                         }
                         "diameter_mgr_pick_failover" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_mgr_pick_failover({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_mgr_pick_failover({a0}, {a1})"),
+                            );
                         }
                         "diameter_mgr_handle_io" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_mgr_handle_io({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_mgr_handle_io({a0}, {a1}, {a2})"),
+                            );
                         }
                         "diameter_mgr_poll" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30576,7 +31441,10 @@ impl Codegen {
                         "diameter_mgr_tick" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_diameter_mgr_tick({a0}, {a1})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_mgr_tick({a0}, {a1})"),
+                            );
                         }
                         "diameter_mgr_request" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30585,7 +31453,12 @@ impl Codegen {
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
                             let (_, a5) = self.emit_expr(&args[5]);
-                            return ("int64_t".into(), format!("mako_diameter_mgr_request({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"));
+                            return (
+                                "int64_t".into(),
+                                format!(
+                                    "mako_diameter_mgr_request({a0}, {a1}, {a2}, {a3}, {a4}, {a5})"
+                                ),
+                            );
                         }
                         "diameter_mgr_flush" => {
                             let (_, a0) = self.emit_expr(&args[0]);
@@ -30595,14 +31468,19 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
-                            self.line(&format!("MakoString {tmp} = mako_diameter_mgr_take_out({a0}, {a1});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_diameter_mgr_take_out({a0}, {a1});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_mgr_inject_in" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_diameter_mgr_inject_in({a0}, {a1}, {a2})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_diameter_mgr_inject_in({a0}, {a1}, {a2})"),
+                            );
                         }
                         "wss_pool_open_ca" => {
                             let (_, h) = self.emit_expr(&args[0]);
@@ -30610,14 +31488,20 @@ impl Codegen {
                             let (_, path) = self.emit_expr(&args[2]);
                             let (_, key) = self.emit_expr(&args[3]);
                             let (_, ca) = self.emit_expr(&args[4]);
-                            return ("int64_t".into(), format!("mako_wss_pool_open_ca({h}, {p}, {path}, {key}, {ca})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_pool_open_ca({h}, {p}, {path}, {key}, {ca})"),
+                            );
                         }
                         "wss_pool_open_insecure" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let (_, path) = self.emit_expr(&args[2]);
                             let (_, key) = self.emit_expr(&args[3]);
-                            return ("int64_t".into(), format!("mako_wss_pool_open_insecure({h}, {p}, {path}, {key})"));
+                            return (
+                                "int64_t".into(),
+                                format!("mako_wss_pool_open_insecure({h}, {p}, {path}, {key})"),
+                            );
                         }
                         "wss_pool_send" => {
                             let (_, c) = self.emit_expr(&args[0]);
@@ -30861,9 +31745,7 @@ impl Codegen {
                             let (_, k) = self.emit_expr(&args[1]);
                             let (_, s) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("dctx");
-                            self.line(&format!(
-                                "void *{tmp} = mako_dtls_ctx_new({c}, {k}, {s});"
-                            ));
+                            self.line(&format!("void *{tmp} = mako_dtls_ctx_new({c}, {k}, {s});"));
                             return ("void*".into(), tmp);
                         }
                         "dtls_ctx_free" => {
@@ -30886,9 +31768,7 @@ impl Codegen {
                             let (_, ctx) = self.emit_expr(&args[0]);
                             let (_, fd) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dac");
-                            self.line(&format!(
-                                "void *{tmp} = mako_dtls_accept({ctx}, {fd});"
-                            ));
+                            self.line(&format!("void *{tmp} = mako_dtls_accept({ctx}, {fd});"));
                             return ("void*".into(), tmp);
                         }
                         "dtls_send" => {
@@ -30941,9 +31821,7 @@ impl Codegen {
                         "dtls_srtp_profile" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("dsp");
-                            self.line(&format!(
-                                "MakoString {tmp} = mako_dtls_srtp_profile({c});"
-                            ));
+                            self.line(&format!("MakoString {tmp} = mako_dtls_srtp_profile({c});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tls_read_nb" => {
@@ -30971,6 +31849,41 @@ impl Codegen {
                             let tmp = self.fresh("twr");
                             self.line(&format!("int64_t {tmp} = mako_tls_write({c}, {d});"));
                             return ("int64_t".into(), tmp);
+                        }
+                        "tls_server_pool_accept" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let (_, fd) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tspa");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_tls_srv_pool_accept({s}, {fd});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "tls_server_pool_fd" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tls_srv_pool_fd({h})"));
+                        }
+                        "tls_server_pool_write" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, d) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tspw");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_tls_srv_pool_send({h}, {d});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "tls_server_pool_read" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tspr");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_tls_srv_pool_recv({h}, {n});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "tls_server_pool_close" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tls_srv_pool_close({h})"));
                         }
                         "tls_conn_alpn" => {
                             let (_, c) = self.emit_expr(&args[0]);
@@ -33157,8 +34070,7 @@ impl Codegen {
                                 continue;
                             }
                             if Self::own_free_fn(fty).is_some() {
-                                let cloned =
-                                    self.clone_own_val(fty, &format!("{tmp}.{fname}"));
+                                let cloned = self.clone_own_val(fty, &format!("{tmp}.{fname}"));
                                 self.line(&format!("{tmp}.{fname} = {cloned};"));
                             }
                         }
@@ -33576,10 +34488,7 @@ impl Codegen {
                         let tmp = self.fresh("earr");
                         let lit = self.fresh("elit");
                         self.line(&format!("{c_elem} {lit}[] = {{ {} }};", vals.join(", ")));
-                        self.line(&format!(
-                            "{outer} {tmp} = {ctor}({lit}, {});",
-                            elems.len()
-                        ));
+                        self.line(&format!("{outer} {tmp} = {ctor}({lit}, {});", elems.len()));
                         return (outer.to_string(), tmp);
                     }
                     // Element is itself a slice (`[a]` where a is []int): build
@@ -34070,13 +34979,20 @@ impl Codegen {
                         _ => {
                             // Opaque handles as values: pick map type by key, store as int64_t.
                             let (mt, fnp) = match k.as_ref() {
-                                TypeExpr::Named(kk) if kk == "int" || kk == "int64" || kk == "int32"
-                                    || kk == "int8" || kk == "uint64" || kk == "byte" =>
-                                    ("MakoMapII", "mako_map_ii"),
-                                TypeExpr::Named(kk) if kk == "float" || kk == "float64" =>
-                                    ("MakoMapFI", "mako_map_fi"),
-                                TypeExpr::Named(kk) if kk == "bool" =>
-                                    ("MakoMapBI", "mako_map_bi"),
+                                TypeExpr::Named(kk)
+                                    if kk == "int"
+                                        || kk == "int64"
+                                        || kk == "int32"
+                                        || kk == "int8"
+                                        || kk == "uint64"
+                                        || kk == "byte" =>
+                                {
+                                    ("MakoMapII", "mako_map_ii")
+                                }
+                                TypeExpr::Named(kk) if kk == "float" || kk == "float64" => {
+                                    ("MakoMapFI", "mako_map_fi")
+                                }
+                                TypeExpr::Named(kk) if kk == "bool" => ("MakoMapBI", "mako_map_bi"),
                                 _ => ("MakoMapSI", "mako_map_si"),
                             };
                             // Record opaque value type for index/iterate casts.
@@ -34272,7 +35188,9 @@ impl Codegen {
                 if bty == "MakoMapSI*" {
                     if let Some(opty) = self.opaque_map_vals.get(&b).cloned() {
                         let out = self.fresh("omg");
-                        self.line(&format!("{opty} {out} = ({opty})(intptr_t)mako_map_si_get({b}, {i});"));
+                        self.line(&format!(
+                            "{opty} {out} = ({opty})(intptr_t)mako_map_si_get({b}, {i});"
+                        ));
                         return (opty, out);
                     }
                     return ("int64_t".into(), format!("mako_map_si_get({b}, {i})"));
@@ -34280,7 +35198,9 @@ impl Codegen {
                 if bty == "MakoMapII*" {
                     if let Some(opty) = self.opaque_map_vals.get(&b).cloned() {
                         let out = self.fresh("omg");
-                        self.line(&format!("{opty} {out} = ({opty})(intptr_t)mako_map_ii_get({b}, {i});"));
+                        self.line(&format!(
+                            "{opty} {out} = ({opty})(intptr_t)mako_map_ii_get({b}, {i});"
+                        ));
                         return (opty, out);
                     }
                     return ("int64_t".into(), format!("mako_map_ii_get({b}, {i})"));
@@ -34451,7 +35371,9 @@ impl Codegen {
                 // Cast int64_t back to opaque handle type if known.
                 if let Some(opty) = self.opaque_arr_elems.get(&b).cloned() {
                     let out = self.fresh("oh");
-                    self.line(&format!("{opty} {out} = ({opty})(intptr_t){b}.data[{tmp}];"));
+                    self.line(&format!(
+                        "{opty} {out} = ({opty})(intptr_t){b}.data[{tmp}];"
+                    ));
                     return (opty, out);
                 }
                 ("int64_t".into(), format!("{b}.data[{tmp}]"))
@@ -35303,9 +36225,7 @@ impl Codegen {
                     }
                     "fields" if rty == "MakoString" => {
                         let tmp = self.fresh("gfs");
-                        self.line(&format!(
-                            "MakoString {tmp} = mako_graphql_fields({rv});"
-                        ));
+                        self.line(&format!("MakoString {tmp} = mako_graphql_fields({rv});"));
                         ("MakoString".into(), tmp)
                     }
                     "has" | "has_field" if rty == "MakoString" => {
@@ -35318,36 +36238,28 @@ impl Codegen {
                     "arg" if rty == "MakoString" => {
                         let (_, n) = self.emit_expr(&args[0]);
                         let tmp = self.fresh("gar");
-                        self.line(&format!(
-                            "MakoString {tmp} = mako_graphql_arg({rv}, {n});"
-                        ));
+                        self.line(&format!("MakoString {tmp} = mako_graphql_arg({rv}, {n});"));
                         ("MakoString".into(), tmp)
                     }
                     "data" if rty == "MakoString" => {
                         let (_, f) = self.emit_expr(&args[0]);
                         let (_, j) = self.emit_expr(&args[1]);
                         let tmp = self.fresh("gdt");
-                        self.line(&format!(
-                            "MakoString {tmp} = mako_graphql_data({f}, {j});"
-                        ));
+                        self.line(&format!("MakoString {tmp} = mako_graphql_data({f}, {j});"));
                         ("MakoString".into(), tmp)
                     }
                     "error" if rty == "MakoString" => {
                         let (_, m) = self.emit_expr(&args[0]);
                         let tmp = self.fresh("ger");
-                        self.line(&format!(
-                            "MakoString {tmp} = mako_graphql_error({m});"
-                        ));
+                        self.line(&format!("MakoString {tmp} = mako_graphql_error({m});"));
                         ("MakoString".into(), tmp)
                     }
-                    "is_query" if rty == "MakoString" => (
-                        "int64_t".into(),
-                        format!("mako_graphql_is_query({rv})"),
-                    ),
-                    "is_mutation" if rty == "MakoString" => (
-                        "int64_t".into(),
-                        format!("mako_graphql_is_mutation({rv})"),
-                    ),
+                    "is_query" if rty == "MakoString" => {
+                        ("int64_t".into(), format!("mako_graphql_is_query({rv})"))
+                    }
+                    "is_mutation" if rty == "MakoString" => {
+                        ("int64_t".into(), format!("mako_graphql_is_mutation({rv})"))
+                    }
                     "cancel" => {
                         self.line(&format!("mako_nursery_cancel(&{rv});"));
                         ("void".into(), "/*void*/".into())
@@ -39166,6 +40078,15 @@ mod ownership_tests {
     use crate::lexer::Lexer;
     use crate::parser::Parser;
 
+    fn with_codegen_test_stack(f: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(f)
+            .expect("spawn codegen test")
+            .join()
+            .expect("run codegen test");
+    }
+
     #[test]
     fn only_owned_string_expressions_can_transfer_map_keys() {
         let int_string_call = Expr::Call {
@@ -39224,7 +40145,8 @@ mod ownership_tests {
 
     #[test]
     fn drops_owned_read_file_results_at_loop_scope_exit() {
-        let source = r#"
+        with_codegen_test_stack(|| {
+            let source = r#"
 fn main() {
     var i = 0
     while i < 3 {
@@ -39234,18 +40156,19 @@ fn main() {
     }
 }
 "#;
-        let tokens = Lexer::new(source).tokenize().expect("lex");
-        let program = Parser::new(tokens).parse().expect("parse");
-        let generated = Codegen::new().emit(&program);
+            let tokens = Lexer::new(source).tokenize().expect("lex");
+            let program = Parser::new(tokens).parse().expect("parse");
+            let generated = Codegen::new().emit(&program);
 
-        assert!(
-            generated.contains("mako_str_free(got);"),
-            "loop-local read_file result must be dropped:\n{generated}"
-        );
-        assert!(
-            generated.contains("mako_read_file(mako_str_view("),
-            "literal path arguments must be non-owning views:\n{generated}"
-        );
+            assert!(
+                generated.contains("mako_str_free(got);"),
+                "loop-local read_file result must be dropped:\n{generated}"
+            );
+            assert!(
+                generated.contains("mako_read_file(mako_str_view("),
+                "literal path arguments must be non-owning views:\n{generated}"
+            );
+        });
     }
 
     #[test]

@@ -1,0 +1,5 @@
+fn TestNbUdpBindReuseportEphemeralPort() {
+    let fd = nb_udp_bind_reuseport(0)
+    assert(fd >= 0)
+    assert_eq(nb_close(fd), 0)
+}

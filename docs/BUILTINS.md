@@ -828,6 +828,8 @@ Tests: `examples/testing/dtls_test.mko` · interop: `scripts/dtls-smoke.sh`
 |----------|-----------|-------------|
 | `base64_encode` | `base64_encode(data: string) -> string` | Encode data as base64 |
 | `base64_decode` | `base64_decode(data: string) -> string` | Decode base64 data |
+| `base64url_encode` | `base64url_encode(data: string) -> string` | Encode data as RFC 4648 URL-safe base64 without padding |
+| `base64url_decode` | `base64url_decode(data: string) -> string` | Decode URL-safe base64; returns empty on invalid input |
 | `base32_encode` | `base32_encode(data: string) -> string` | Encode data as base32 |
 | `hex_encode` | `hex_encode(data: string) -> string` | Encode data as hexadecimal |
 | `hex_decode` | `hex_decode(data: string) -> string` | Decode hexadecimal data |
@@ -1111,6 +1113,10 @@ Tests: `crew_fan_test.mko`, `job_join_typed_test.mko`, `fan_struct_test.mko`, `f
 | `cmap_get` | `cmap_get(m: CMap, key: string) -> string` | Get a value by key |
 | `cmap_has` | `cmap_has(m: CMap, key: string) -> int` | Check if a key exists |
 | `cmap_del` | `cmap_del(m: CMap, key: string) -> int` | Delete a key |
+| `cmap_has2` / `cmap_get2` / `cmap_del2` | `(m: CMap, a: string, b: string) -> int/string/int` | Composite key helpers for `a\|b` |
+| `cmap_has3i` / `cmap_get3i` / `cmap_del3i` | `(m: CMap, a: string, b: string, c: int) -> int/string/int` | Composite key helpers for `a\|b\|c` |
+| `cmap_set_int` | `cmap_set_int(m: CMap, key: string, val: int) -> void` | Store an integer value as a decimal string |
+| `cmap_get_int` | `cmap_get_int(m: CMap, key: string, default: int) -> int` | Load an integer value or return `default` |
 | `cmap_len` | `cmap_len(m: CMap) -> int` | Return the number of entries |
 | `cmap_incr` | `cmap_incr(m: CMap, key: string, delta: int) -> int` | Atomically increment a numeric value |
 
@@ -1144,6 +1150,8 @@ separate calls do not establish ordering across tasks.
 | `nb_read` | `nb_read(fd: int) -> string` | Non-blocking read |
 | `nb_write` | `nb_write(fd: int, data: string) -> int` | Non-blocking write |
 | `nb_udp_bind` | `nb_udp_bind(port: int) -> int` | Bind a non-blocking UDP socket |
+| `nb_udp_bind_reuseport` | `nb_udp_bind_reuseport(port: int) -> int` | Bind a non-blocking UDP socket with `SO_REUSEPORT` when supported |
+| `nb_udp_bind_reuseport_addr` | `nb_udp_bind_reuseport_addr(ip: string, port: int) -> int` | Bind a non-blocking UDP socket to an address with `SO_REUSEPORT` when supported |
 | `nb_udp_recv` | `nb_udp_recv(fd: int) -> string` | Non-blocking UDP receive |
 | `nb_close` | `nb_close(fd: int) -> int` | Close a non-blocking fd |
 
@@ -1299,6 +1307,8 @@ or a dedicated reply socket — do not share one `GameUDP` handle across workers
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `jwt_sign` | `jwt_sign(payload: string, secret: string) -> string` | Sign a JWT payload |
+| `jwt_sign_es256_header` | `jwt_sign_es256_header(payload: string, private_key_pem: string, header_json: string) -> string` | Sign ES256 using caller-supplied protected header JSON; header must declare `alg: "ES256"` |
+| `jwt_sign_custom` | `jwt_sign_custom(payload: string, private_key_pem: string, header_json: string) -> string` | Alias for `jwt_sign_es256_header` |
 | `jwt_verify` | `jwt_verify(token: string, secret: string) -> int` | Verify an HS256 JWT; the header algorithm must be exactly `HS256` |
 | `jwt_verify_rs256` | `jwt_verify_rs256(token: string, public_key_pem: string) -> int` | Verify an RS256 JWT with a PEM `PUBLIC KEY` (RSA >= 2048 bits) |
 | `jwt_verify_jwks` | `jwt_verify_jwks(token: string, jwks_json: string) -> int` | Verify RS256 using exactly one matching `kid` in a JWKS; rejects ambiguous or non-signing keys |
@@ -1670,6 +1680,17 @@ Tests: `examples/testing/proxy_pool_test.mko`, `examples/testing/proxy_edge_test
 
 ## 37. TLS
 
+### Opaque Handles
+
+`OpaqueHandle` is an erased, pointer-sized runtime handle for storing concrete
+opaque values such as `TlsConn` in maps and slices. It does not own or free the
+underlying resource.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `opaque_wrap` / `OpaqueHandle` | `(handle) -> OpaqueHandle` | Erase a concrete opaque handle for collection storage |
+| `opaque_unwrap[T]` | `(handle: OpaqueHandle) -> T` | Recover the concrete handle type at the call site |
+
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `tls_hs_reset` | `tls_hs_reset() -> int` | Reset the TLS handshake state machine |
@@ -1715,6 +1736,20 @@ Use `tls_accept_start` + `tls_handshake_step` (or poll on `tls_conn_fd` with wan
 | `tls_peer_cn` | `tls_peer_cn(conn: TlsConn) -> string` | Peer certificate CN (or `""`) |
 | `tls_conn_close` | `tls_conn_close(conn: TlsConn) -> int` | Close a TLS connection |
 | `tls_server_free` | `tls_server_free(srv: TlsServer) -> int` | Free a TLS server context |
+
+### TLS server handle pool
+
+Integer handle wrappers for server-side TLS connections. They are useful when a
+Mako program needs to store or multiplex accepted TLS connections in CMap or
+integer-keyed event-loop state without exposing raw pointers.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `tls_server_pool_accept` | `tls_server_pool_accept(srv: TlsServer, fd: int) -> int` | Accept a TLS connection and return an integer pool handle |
+| `tls_server_pool_fd` | `tls_server_pool_fd(handle: int) -> int` | Borrow the underlying TCP fd for polling |
+| `tls_server_pool_write` | `tls_server_pool_write(handle: int, data: string) -> int` | Write plaintext through a pooled TLS connection |
+| `tls_server_pool_read` | `tls_server_pool_read(handle: int, max: int) -> string` | Read plaintext from a pooled TLS connection |
+| `tls_server_pool_close` | `tls_server_pool_close(handle: int) -> int` | Close and release a pooled TLS connection |
 
 ### Socket-style TLS client
 

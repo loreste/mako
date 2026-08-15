@@ -2,25 +2,27 @@
 
 Batteries for **web and backends**, with naming conventions adapted to Mako.
 
-**Product tip:** **0.4.0**. Core stdlib packages (`io`, `encoding/json`,
+**Product tip:** **0.5.4**. Core stdlib packages (`io`, `encoding/json`,
 `context`, `collections`, `net/http`, `database/sql`) are now written in
 idiomatic Mako with generics and `mut self`. Lower-level surface remains
 builtins over C runtime headers.
 
-Call builtins directly (`str_split`, `path_join`, …) **or** import std packages:
+Call builtins directly (`str_split`, `path_join`, …) **or** pull std packages:
 
 ```mko
-import "strings"
-import "path"
-import "sync"
+pull "strings"
+pull "path"
+pull "sync"
 
 let s = strings.concat(strings.split("a,b", ","), "-")
 let p = path.clean("/a/../b")
 let m = sync.rwmutex()
 ```
 
-Bare names like `import "strings"` resolve under `std/` (override with `MAKO_STD`)
-and auto-alias so `strings.split` works. Relative `import "./x.mko"` unchanged.
+Bare names like `pull "strings"` resolve under `std/` (override with `MAKO_STD`)
+and auto-alias so `strings.split` works. Relative `pull "./x.mko"` is unchanged.
+The old `import` spelling remains compatibility sugar, not the preferred docs
+surface.
 Note: method names that are keywords (`join`, `match`, …) use aliases
 (`concat`, `matches`, `join_path`).
 
@@ -73,8 +75,8 @@ symbol-for-symbol parity with Go or any optional platform integration.
 | `dtls` | **Done** | DTLS 1.2 over UDP + SRTP key export + fingerprints (WebRTC building block) |
 | `diameter` | **Optional pack** | RFC 6733 codec + optional managers; one protocol over general primitives |
 | `collections` | **Done** | List[T]=[]T + set/heap/ring/stack/queue/stats |
-| `graphql` | **Done seed** | HTTP body query/vars, field list, data/error JSON ([MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md)) |
-| `messaging` | **Done seed** | In-process message queues `mq_*` ([MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md)) |
+| `graphql` | **Prototype** | HTTP body query/vars, field list, data/error JSON ([MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md)) |
+| `messaging` | **Prototype** | In-process message queues `mq_*` ([MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md)) |
 | `embed` | **Done** | helper (not compile-time) |
 
 Runtime: `mako_rt.h` + `mako_goext.h` (Waves 1–9). Tests: `goext_wave{,3,4,5,6,7,8,9}_test.mko`.
@@ -283,7 +285,7 @@ Tests: `examples/testing/buf_test.mko`. Header: `runtime/mako_buf.h`.
 String manipulation and byte buffer utilities.
 
 ```mko
-import "strings"
+pull "strings"
 ```
 
 | Builtin | Role |
@@ -396,8 +398,8 @@ fn main() {
 File system operations, path manipulation, environment, and process control.
 
 ```mko
-import "path"
-import "os"
+pull "path"
+pull "os"
 ```
 
 | Builtin | Role |
@@ -1685,7 +1687,7 @@ Pull: `pull "uuid"` → `std/uuid/uuid.mko` re-exports. Prefer builtins on the h
 
 | Area | Mako today |
 |------|------------|
-| `strings` package import | Done — `import "strings"` → `std/strings/` (also path, fmt, sync, …) |
+| `strings` package pull | Done — `pull "strings"` → `std/strings/` (also path, fmt, sync, …); `import` remains compat sugar |
 | `bufio.Reader/Writer` | Done |
 | `net/http.Request` typed | Done (`HttpRequest`) |
 | `database/sql` one API | Done (`sql_*`; string params, last_insert/rows, multi-row cursor + bulk col; MySQL query still seed) |

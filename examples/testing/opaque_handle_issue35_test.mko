@@ -1,0 +1,22 @@
+fn TestOpaqueHandleCollectionsIssue35() {
+    let conn = tls_accept_start(tls_server_new("", ""), -1)
+    let h: OpaqueHandle = opaque_wrap(conn)
+    let direct: OpaqueHandle = tls_accept_start(tls_server_new("", ""), -1)
+
+    let mut conns = make(map[string]OpaqueHandle)
+    conns["one"] = h
+    let got = opaque_unwrap[TlsConn](conns["one"])
+    assert_eq(tls_conn_fd(got), -1)
+    let _ = tls_conn_close(got)
+
+    let mut xs = make([]OpaqueHandle, 0)
+    xs = append(xs, OpaqueHandle(tls_accept_start(tls_server_new("", ""), -1)))
+    assert_eq(len(xs), 1)
+    let got2 = opaque_unwrap[TlsConn](xs[0])
+    assert_eq(tls_conn_fd(got2), -1)
+    let _ = tls_conn_close(got2)
+
+    let got3 = opaque_unwrap[TlsConn](direct)
+    assert_eq(tls_conn_fd(got3), -1)
+    let _ = tls_conn_close(got3)
+}

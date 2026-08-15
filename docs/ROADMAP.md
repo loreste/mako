@@ -11,6 +11,26 @@ Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configu
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
 **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).  
 **Native plan detail:** [NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md).
+**Product focus:** [PRODUCT_FOCUS.md](PRODUCT_FOCUS.md) · **Maturity taxonomy:** [MATURITY.md](MATURITY.md) · **Benchmarks:** [BENCHMARK_PLAN.md](BENCHMARK_PLAN.md).
+
+---
+
+## 0.5.x focus reset
+
+The next product pass should narrow instead of broaden:
+
+1. Make the backend-service workflow boringly reliable: HTTP/TCP, TLS, JSON,
+   SQL, logs/metrics, graceful shutdown, `crew`/channels, request arenas.
+2. Promote docs from "done/seed" wording into the maturity labels in
+   [MATURITY.md](MATURITY.md).
+3. Move builtin registration out of the giant typechecker in coherent groups.
+4. Publish repeatable backend-service benchmark results only through the method
+   in [BENCHMARK_PLAN.md](BENCHMARK_PLAN.md).
+5. Keep `pull`, `pack`, `fn`, `let`, `crew`, `kick`, and `join` as the public
+   surface; keep Go-style forms as migration sugar.
+
+Domain tracks remain valuable proving grounds, but they should not set release
+scope unless they harden the backend-service path.
 
 ---
 
@@ -898,10 +918,11 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
 ---
 
-## Product focus (contract)
+## Product focus (legacy tracker)
 
-General-purpose **backend and infrastructure first**; telecom is one domain track,
-not the language identity.
+Source of truth: [PRODUCT_FOCUS.md](PRODUCT_FOCUS.md). General-purpose
+**backend and infrastructure first**; telecom and other domain tracks are proving
+grounds, not the language identity.
 
 | # | Focus | State |
 |---|--------|--------|

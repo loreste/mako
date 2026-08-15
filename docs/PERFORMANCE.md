@@ -15,6 +15,11 @@ today is three microkernels — fib, slice, map. HTTP, JSON, allocation
 pressure, concurrent channels are in progress and not yet published with a
 method anyone can re-run cleanly.
 
+The backend-service benchmark plan is tracked in [BENCHMARK_PLAN.md](BENCHMARK_PLAN.md).
+Use `sh scripts/product-bench.sh` as the suite wrapper. Results from individual
+scripts are local experiments unless they include the hardware, build,
+workload, load-generator, and result fields listed there.
+
 Bias toward the fast design. Convenience that costs belongs off the hot path
 or behind an opt-in. Measure vs hand-C and Rust per workload
 ([SPEED_SAFE.md](SPEED_SAFE.md)); bump baselines when you meant to change
@@ -33,6 +38,9 @@ Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how
 Don’t invent numbers. Re-run locally:
 
 ```bash
+# Backend-service suite wrapper:
+sh scripts/product-bench.sh
+
 # Microbenchmarks (fib, slice, map):
 ./scripts/bench-gate.sh
 ./scripts/bench-gate.sh 1.5   # stricter threshold

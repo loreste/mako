@@ -10,6 +10,13 @@ focused concurrency suite under TSan · [The Mako Book](book/).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
+Product focus: [PRODUCT_FOCUS.md](PRODUCT_FOCUS.md) · maturity labels:
+[MATURITY.md](MATURITY.md) · benchmark method: [BENCHMARK_PLAN.md](BENCHMARK_PLAN.md).
+
+**Scope note:** this file records implementation evidence. It does not mean
+every listed seed is a production product promise. Use [MATURITY.md](MATURITY.md)
+to distinguish Stable Alpha, Experimental, and Prototype areas.
+
 ---
 
 ## Completion estimate (honest)

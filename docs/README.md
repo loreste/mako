@@ -13,6 +13,8 @@ you need below.
 | [Ergonomics](ERGONOMICS.md) | Quality-of-life features (f-strings, struct update, loop forms) |
 | [Keywords](KEYWORDS.md) | All reserved words |
 | [Identity](IDENTITY.md) | Why Mako looks the way it does |
+| [Product Focus](PRODUCT_FOCUS.md) | The backend-service workflow Mako is optimizing first |
+| [Maturity](MATURITY.md) | Stable Alpha vs Experimental vs Prototype labels |
 
 ## Build and run
 
@@ -45,6 +47,7 @@ you need below.
 | Doc | What's in it |
 |-----|-------------|
 | [Performance](PERFORMANCE.md) | Benchmarks, including where Mako is slower |
+| [Benchmark Plan](BENCHMARK_PLAN.md) | Repeatable backend-service benchmark suite and publish rules |
 | [Speed](SPEED.md) | How the compiler and runtime are structured for speed |
 
 ## Debugging and testing

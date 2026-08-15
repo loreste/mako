@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `OpaqueHandle` is now usable for erased opaque handle storage in maps and
+  slices. `opaque_wrap(handle)`, `OpaqueHandle(handle)`, direct annotated
+  assignment, and `opaque_unwrap[T](handle)` are supported on C and native
+  backends.
+- 0.5.4 C/native builtin exposure now includes the `base64url_*`,
+  `jwt_sign_es256_header`/`jwt_sign_custom`, CMap composite/int,
+  `nb_udp_bind_reuseport_addr`, and `tls_server_pool_*` names requested by #36.
+
 ## 0.5.4 — 2026-08-15 (stdlib expansion, TLS server pool, self-contained macOS)
 
 ### New features
@@ -34,6 +42,9 @@
 
 ### Bug fixes
 
+- Native bridge `tls_reload_cert` now calls the canonical runtime reload helper
+  instead of referencing the removed `MakoTlsServer.ref_gate` field, fixing
+  native links for programs that include the TLS bridge.
 - Struct clone/drop for all owned field types in Cranelift + LLVM backends (#32).
 - C backend `mut` struct param deep-clone for all owned types.
 - Chained index+field assignment (`w.routes[0].path = "x"`).

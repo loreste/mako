@@ -1,0 +1,20 @@
+fn accept_ip(s: string) -> int {
+    if str_eq(s, "127.0.0.1") { return 1 }
+    return 0
+}
+
+fn TestReservedLocalStringLenAndShortCircuit() {
+    let bind = str_trim_space(" 127.0.0.1 ")
+    if len(bind) > 0 && accept_ip(bind) == 1 {
+        assert_eq_str(bind, "127.0.0.1")
+    } else {
+        assert(false)
+    }
+}
+
+fn TestStdlibSensitiveLocalStringLen() {
+    let read = "abc"
+    let index = str_trim_space(" xyz ")
+    assert_eq(len(read), 3)
+    assert_eq(len(index), 3)
+}

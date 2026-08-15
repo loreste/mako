@@ -1190,7 +1190,10 @@ impl Parser {
             lines.push(line);
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(Block { stmts, source_lines: lines.into_boxed_slice() })
+        Ok(Block {
+            stmts,
+            source_lines: lines.into_boxed_slice(),
+        })
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -1625,7 +1628,10 @@ impl Parser {
             if matches!(self.peek_kind(), TokenKind::If) {
                 // else if → wrap as block with single if stmt
                 let inner = self.parse_if()?;
-                Some(Block { stmts: vec![inner], source_lines: vec![0].into_boxed_slice() })
+                Some(Block {
+                    stmts: vec![inner],
+                    source_lines: vec![0].into_boxed_slice(),
+                })
             } else {
                 Some(self.parse_block()?)
             }
@@ -1918,6 +1924,26 @@ impl Parser {
                 }
                 TokenKind::LBracket => {
                     self.bump();
+                    if matches!(&expr, Expr::Ident(name) if name == "opaque_unwrap") {
+                        let ty = self.parse_type()?;
+                        self.expect(TokenKind::RBracket)?;
+                        self.expect(TokenKind::LParen)?;
+                        let arg = self.parse_expr()?;
+                        self.expect(TokenKind::RParen)?;
+                        let type_name = match ty {
+                            TypeExpr::Named(name) => name,
+                            other => {
+                                return Err(self.err(format!(
+                                    "opaque_unwrap expects a named handle type, got {other}"
+                                )));
+                            }
+                        };
+                        expr = Expr::Call {
+                            callee: Box::new(Expr::Ident(format!("opaque_unwrap__{type_name}"))),
+                            args: vec![arg],
+                        };
+                        continue;
+                    }
                     let idx_saved = std::mem::replace(&mut self.no_struct_lit, false);
                     // Index `a[i]` or slice `a[low:high]` / `a[low:high:max]` / `a[:]` / `a[i:]` / `a[:j]`
                     if matches!(self.peek_kind(), TokenKind::Colon) {
@@ -2769,7 +2795,10 @@ impl Parser {
                     // Degenerate empty switch → no-op.
                     init: None,
                     cond: Expr::Bool(false),
-                    then_block: Block { stmts: vec![], source_lines: Box::default() },
+                    then_block: Block {
+                        stmts: vec![],
+                        source_lines: Box::default(),
+                    },
                     else_block: None,
                 },
                 _ => body_stmts.remove(0),
@@ -2780,7 +2809,10 @@ impl Parser {
         Ok(Stmt::If {
             init: None,
             cond: Expr::Bool(true),
-            then_block: Block { stmts: prelude, source_lines: vec![0].into_boxed_slice() },
+            then_block: Block {
+                stmts: prelude,
+                source_lines: vec![0].into_boxed_slice(),
+            },
             else_block: None,
         })
     }
@@ -2838,7 +2870,13 @@ impl Parser {
             false
         };
         let n = stmts.len();
-        Ok((Block { stmts, source_lines: vec![0; n].into_boxed_slice() }, falls))
+        Ok((
+            Block {
+                stmts,
+                source_lines: vec![0; n].into_boxed_slice(),
+            },
+            falls,
+        ))
     }
 
     fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {

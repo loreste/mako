@@ -1586,16 +1586,7 @@ int64_t mako_native_udp_bind_reuseport(int64_t port) {
     return mako_nb_udp_bind_reuseport(port);
 }
 int64_t mako_native_udp_bind_reuseport_addr_ptr(MakoNativeString *ip, int64_t port) {
-    int64_t fd = mako_udp_bind_addr(bridge_borrow_str(ip), port);
-    if (fd < 0) return -1;
-#if !defined(_WIN32)
-    int flags = fcntl((int)fd, F_GETFL, 0);
-    if (flags < 0 || fcntl((int)fd, F_SETFL, flags | O_NONBLOCK) != 0) {
-        close((int)fd);
-        return -1;
-    }
-#endif
-    return fd;
+    return mako_nb_udp_bind_reuseport_addr(bridge_borrow_str(ip), port);
 }
 
 /* TLS server handle pool */
@@ -1618,22 +1609,11 @@ int64_t mako_native_tls_srv_pool_close(int64_t handle) {
 /* TLS cert reload */
 int64_t mako_native_tls_reload_cert_ptr(int64_t srv, MakoNativeString *cert, MakoNativeString *key) {
 #ifdef MAKO_HAS_OPENSSL
-    if (!srv) return -1;
-    MakoTlsServer *s = (MakoTlsServer *)(intptr_t)srv;
-    MakoString c = bridge_borrow_str(cert);
-    MakoString k = bridge_borrow_str(key);
-    char cbuf[4096], kbuf[4096];
-    if (c.len >= sizeof(cbuf) || k.len >= sizeof(kbuf)) return -2;
-    memcpy(cbuf, c.data, c.len); cbuf[c.len] = 0;
-    memcpy(kbuf, k.data, k.len); kbuf[k.len] = 0;
-    mako_rwmutex_lock(&s->ref_gate);
-    if (SSL_CTX_use_certificate_chain_file(s->ctx, cbuf) != 1 ||
-        SSL_CTX_use_PrivateKey_file(s->ctx, kbuf, SSL_FILETYPE_PEM) != 1) {
-        mako_rwmutex_unlock(&s->ref_gate);
-        return -3;
-    }
-    mako_rwmutex_unlock(&s->ref_gate);
-    return 0;
+    return mako_tls_server_reload(
+        (void *)(intptr_t)srv,
+        bridge_borrow_str(cert),
+        bridge_borrow_str(key)
+    );
 #else
     (void)srv; (void)cert; (void)key;
     return -1;
@@ -3096,6 +3076,10 @@ int64_t mako_native_jwt_verify_jwks_ptr(MakoNativeString *a0, MakoNativeString *
 
 MakoNativeString *mako_native_jwt_sign_es256_ptr(MakoNativeString *a0, MakoNativeString *a1) {
     return bridge_take_str(mako_jwt_sign_es256(bridge_borrow_str(a0), bridge_borrow_str(a1)));
+}
+
+MakoNativeString *mako_native_jwt_sign_es256_header_ptr(MakoNativeString *a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return bridge_take_str(mako_jwt_sign_es256_header(bridge_borrow_str(a0), bridge_borrow_str(a1), bridge_borrow_str(a2)));
 }
 
 int64_t mako_native_jwt_verify_es256_ptr(MakoNativeString *a0, MakoNativeString *a1) {
