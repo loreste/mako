@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## 0.5.4 — 2026-08-15 (stdlib expansion, TLS server pool, self-contained macOS)
+
+### New features
+
+- **TLS server handle pool** — `tls_srv_pool_accept/send/recv/fd/close` API
+  returning int handles for server-side TLS connections. 1024-slot ABA-safe
+  table with inflight I/O tracking. Eliminates need for extern "C" bridge
+  code when multiplexing TLS connections (#33).
+- **CMap composite-key helpers** — `cmap_has2/get2/del2`, `cmap_has3i/get3i/del3i`,
+  `cmap_set_int/get_int`. Zero-allocation stack-buffer key construction for
+  high-throughput concurrent map lookups (#33).
+- **UDP SO_REUSEPORT** — `udp_bind_reuseport(port)` and
+  `udp_bind_reuseport_addr(ip, port)` for multi-worker kernel-distributed
+  UDP ingress (#33).
+- **TLS cert hot-reload** — `tls_reload_cert(srv, cert, key)` for Let's Encrypt
+  rotation without restart (#33).
+- **Complete math stdlib** — 40+ functions: trig (sin/cos/tan/asin/acos/atan/atan2),
+  logs (log/log2/log10/exp), rounding (round/trunc/floor/ceil), classification
+  (is_nan/is_inf/inf/nan), float min/max/clamp/fmod/hypot.
+- **Expanded stdlib packages** — std/os (file I/O, env, process), std/sort,
+  std/slices (reverse/unique/contains/copy/sum/min/max), std/collections
+  (list/set/heap/queue/ring), std/maps.
+- **Self-contained macOS release** — bundled LLD linker, no clang or Xcode needed.
+- **`mako update`** — self-update from GitHub releases without source checkout.
+- **base64url_encode/decode** — RFC 4648 §5 URL-safe base64.
+- **Indirect call arity 4–8** — function pointers and closures support up to 8 args.
+- **150+ built-in function registrations** — math, encoding, crypto, buffer,
+  circuit breaker, rate limiter, consistent hash, debug, TLS, SIP, SMTP, etc.
+- **28 new adversarial stdlib tests** — all ASan-verified.
+
+### Bug fixes
+
+- Struct clone/drop for all owned field types in Cranelift + LLVM backends (#32).
+- C backend `mut` struct param deep-clone for all owned types.
+- Chained index+field assignment (`w.routes[0].path = "x"`).
+
 ## 0.5.3 — 2026-08-14 (native backend completeness & memory safety)
 
 ### Bug fixes

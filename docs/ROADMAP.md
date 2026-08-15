@@ -1,11 +1,11 @@
 # Mako roadmap
 
-**Product version:** **0.5.3** (tip) · last tagged **v0.5.3** · Last sync: **2026-08-14**.  
+**Product version:** **0.5.4** (tip) · last tagged **v0.5.4** · Last sync: **2026-08-15**.  
 **Suite:** **406** Mako tests on `examples/testing` (C + native backends) + 140
 Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configured.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.3`** published; tip train **0.5.3**.
+**Release:** tag **`v0.5.4`** published; tip train **0.5.4**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -34,6 +34,7 @@ Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configu
 | **0.5.1** | DTLS 1.2 + SRTP key export · DCE underscore fix · native stdout flush | **Shipped** |
 | **0.5.2** | Runtime trust & production concurrency soaks | **Shipped** |
 | **0.5.3** | Native backend completeness & struct memory safety | **Shipped** — struct clone/drop, chained assign, mut param safety |
+| **0.5.4** | Stdlib expansion, TLS server pool, self-contained macOS | **Shipped** — math, os, sort, collections, CMap, UDP reuseport, bundled LLD |
 | **0.5.x** | Further patches on 0.5 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
 
@@ -52,6 +53,7 @@ Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configu
 0.5.1       toolchain/IDE
 0.5.2       runtime trust
 0.5.3       native backend completeness & memory safety
+0.5.4       stdlib expansion, TLS server pool, self-contained macOS
 0.5.x       patches
 1.0         stability freeze
 ```
@@ -424,7 +426,7 @@ Production backends can rely on **structured concurrency + ownership** under str
 
 ## 0.5.x — Patch trains
 
-Use **0.5.3+** only for:
+Use **0.5.4+** only for:
 
 - Perf regressions / install breakage after 0.5.0–0.5.2.
 - Portability fixes (new triple, WASM polish).
