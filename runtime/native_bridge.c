@@ -1555,6 +1555,30 @@ MakoNativeString *mako_native_str_trim_space_ptr(MakoNativeString *s) {
     return bridge_take_str(mako_str_trim_space(bridge_borrow_str(s)));
 }
 
+MakoNativeString *mako_native_base64url_encode_ptr(MakoNativeString *s) {
+    return bridge_take_str(mako_base64url_encode(bridge_borrow_str(s)));
+}
+
+MakoNativeString *mako_native_base64url_decode_ptr(MakoNativeString *s) {
+    return bridge_take_str(mako_base64url_decode(bridge_borrow_str(s)));
+}
+
+MakoNativeString *mako_native_json_si_ptr(MakoNativeString *k1, MakoNativeString *v1, MakoNativeString *k2, int64_t v2) {
+    return bridge_take_str(mako_json_si(bridge_borrow_str(k1), bridge_borrow_str(v1), bridge_borrow_str(k2), v2));
+}
+
+MakoNativeString *mako_native_json_ss_ptr(MakoNativeString *k1, MakoNativeString *v1, MakoNativeString *k2, MakoNativeString *v2) {
+    return bridge_take_str(mako_json_ss(bridge_borrow_str(k1), bridge_borrow_str(v1), bridge_borrow_str(k2), bridge_borrow_str(v2)));
+}
+
+MakoNativeString *mako_native_toml_escape_ptr(MakoNativeString *s) {
+    return bridge_take_str(mako_toml_escape(bridge_borrow_str(s)));
+}
+
+MakoNativeString *mako_native_yaml_escape_ptr(MakoNativeString *s) {
+    return bridge_take_str(mako_yaml_escape(bridge_borrow_str(s)));
+}
+
 MakoNativeString *mako_native_str_trim_left_ptr(MakoNativeString *s, MakoNativeString *cut) {
     return bridge_take_str(mako_str_trim_left(bridge_borrow_str(s), bridge_borrow_str(cut)));
 }

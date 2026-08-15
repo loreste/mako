@@ -9255,6 +9255,40 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     return Ok((out, Type::Str, true));
                 }
+                if function == "base64url_encode" && args.len() == 1 {
+                    let (v, ty, owned) = self.lower_expr(&args[0])?;
+                    if ty != Type::Str {
+                        return Err(IrError::new("native IR: base64url_encode expects string"));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_base64url_encode_ptr".into(),
+                        args: vec![v],
+                        ret: Some(Type::Str),
+                    });
+                    if owned {
+                        self.emit(Inst::DropString { value: v });
+                    }
+                    return Ok((out, Type::Str, true));
+                }
+                if function == "base64url_decode" && args.len() == 1 {
+                    let (v, ty, owned) = self.lower_expr(&args[0])?;
+                    if ty != Type::Str {
+                        return Err(IrError::new("native IR: base64url_decode expects string"));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_base64url_decode_ptr".into(),
+                        args: vec![v],
+                        ret: Some(Type::Str),
+                    });
+                    if owned {
+                        self.emit(Inst::DropString { value: v });
+                    }
+                    return Ok((out, Type::Str, true));
+                }
                 if function == "read_file" && args.len() == 1 {
                     let (v, ty, owned) = self.lower_expr(&args[0])?;
                     if ty != Type::Str {
@@ -16028,6 +16062,30 @@ impl<'a> FunctionLowerer<'a> {
             "json_nest" if args.len() == 2 => Some((
                 "mako_native_json_nest_ptr",
                 &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "json_si" if args.len() == 4 => Some((
+                "mako_native_json_si_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "json_ss" if args.len() == 4 => Some((
+                "mako_native_json_ss_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "toml_escape" if args.len() == 1 => Some((
+                "mako_native_toml_escape_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "yaml_escape" if args.len() == 1 => Some((
+                "mako_native_yaml_escape_ptr",
+                &[Type::Str],
                 Some(Type::Str),
                 true,
             )),

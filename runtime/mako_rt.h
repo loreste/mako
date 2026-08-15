@@ -7660,6 +7660,60 @@ static inline MakoString mako_base64_decode(MakoString s) {
     return (MakoString){o, j};
 }
 
+static inline MakoString mako_base64url_encode(MakoString s) {
+    static const char *T =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    size_t n = s.len;
+    size_t out_len = 4 * ((n + 2) / 3);
+    char *o = (char *)malloc(out_len + 1);
+    size_t j = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        unsigned int v = (unsigned char)s.data[i] << 16;
+        if (i + 1 < n) v |= (unsigned char)s.data[i + 1] << 8;
+        if (i + 2 < n) v |= (unsigned char)s.data[i + 2];
+        o[j++] = T[(v >> 18) & 63];
+        o[j++] = T[(v >> 12) & 63];
+        o[j++] = (i + 1 < n) ? T[(v >> 6) & 63] : '=';
+        o[j++] = (i + 2 < n) ? T[v & 63] : '=';
+    }
+    /* Strip trailing '=' padding (base64url convention). */
+    while (j > 0 && o[j - 1] == '=') j--;
+    o[j] = 0;
+    return (MakoString){o, j};
+}
+
+static inline int mako_b64url_val(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '-') return 62;
+    if (c == '_') return 63;
+    return -1;
+}
+
+static inline MakoString mako_base64url_decode(MakoString s) {
+    size_t n = s.len;
+    size_t cap = n / 4 * 3 + 4;
+    char *o = (char *)malloc(cap + 1);
+    size_t j = 0;
+    unsigned int buf = 0;
+    int bits = 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = s.data[i];
+        if (c == '=' || c == '\n' || c == '\r') continue;
+        int v = mako_b64url_val(c);
+        if (v < 0) continue;
+        buf = (buf << 6) | (unsigned)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            o[j++] = (char)((buf >> bits) & 0xff);
+        }
+    }
+    o[j] = 0;
+    return (MakoString){o, j};
+}
+
 static int mako_cmp_i64(const void *a, const void *b) {
     int64_t x = *(const int64_t *)a;
     int64_t y = *(const int64_t *)b;
