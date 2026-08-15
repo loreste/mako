@@ -1573,6 +1573,24 @@ double mako_native_lerp(double a, double b, double t) { return a + (b - a) * t; 
 double mako_native_dist2d(double x1, double y1, double x2, double y2) {
     double dx = x2 - x1, dy = y2 - y1; return sqrt(dx*dx + dy*dy);
 }
+double mako_native_math_tan(double x) { return tan(x); }
+double mako_native_math_asin(double x) { return asin(x); }
+double mako_native_math_acos(double x) { return acos(x); }
+double mako_native_math_atan(double x) { return atan(x); }
+double mako_native_math_atan2(double y, double x) { return atan2(y, x); }
+double mako_native_math_log2(double x) { return log2(x); }
+double mako_native_math_log10(double x) { return log10(x); }
+double mako_native_math_round(double x) { return round(x); }
+double mako_native_math_min(double a, double b) { return a < b ? a : b; }
+double mako_native_math_max(double a, double b) { return a > b ? a : b; }
+double mako_native_math_clamp(double x, double lo, double hi) { return x < lo ? lo : (x > hi ? hi : x); }
+double mako_native_math_hypot(double x, double y) { return hypot(x, y); }
+double mako_native_math_fmod(double x, double y) { return fmod(x, y); }
+double mako_native_math_trunc(double x) { return trunc(x); }
+int64_t mako_native_math_is_nan(double x) { return isnan(x) ? 1 : 0; }
+int64_t mako_native_math_is_inf(double x) { return isinf(x) ? 1 : 0; }
+double mako_native_math_inf(void) { return (double)INFINITY; }
+double mako_native_math_nan(void) { return (double)NAN; }
 double mako_native_rand_float(void) { return (double)rand() / (double)RAND_MAX; }
 
 /* Circuit breaker */

@@ -1,10 +1,47 @@
+// std/math — math functions for Mako
+//
+// Integer functions use the built-in abs/min/max/clamp.
+// Float functions delegate to the C math library (libm).
+
+// Integer helpers
 fn iabs(x: int) -> int { return abs(x) }
 fn imin(a: int, b: int) -> int { return min(a, b) }
 fn imax(a: int, b: int) -> int { return max(a, b) }
 fn iclamp(x: int, lo: int, hi: int) -> int { return clamp(x, lo, hi) }
+
+// Basic float operations
 fn sqrt(x: float) -> float { return math_sqrt(x) }
 fn floor(x: float) -> float { return math_floor(x) }
 fn ceil(x: float) -> float { return math_ceil(x) }
+fn round(x: float) -> float { return math_round(x) }
+fn trunc(x: float) -> float { return math_trunc(x) }
+fn fabs(x: float) -> float { return math_abs(x) }
+fn fmod(x: float, y: float) -> float { return math_fmod(x, y) }
+
+// Powers and logarithms
 fn pow(x: float, y: float) -> float { return math_pow(x, y) }
+fn exp(x: float) -> float { return math_exp(x) }
+fn log(x: float) -> float { return math_log(x) }
+fn log2(x: float) -> float { return math_log2(x) }
+fn log10(x: float) -> float { return math_log10(x) }
+fn hypot(x: float, y: float) -> float { return math_hypot(x, y) }
+
+// Trigonometry
 fn sin(x: float) -> float { return math_sin(x) }
 fn cos(x: float) -> float { return math_cos(x) }
+fn tan(x: float) -> float { return math_tan(x) }
+fn asin(x: float) -> float { return math_asin(x) }
+fn acos(x: float) -> float { return math_acos(x) }
+fn atan(x: float) -> float { return math_atan(x) }
+fn atan2(y: float, x: float) -> float { return math_atan2(y, x) }
+
+// Float min/max/clamp
+fn fmin(a: float, b: float) -> float { return math_min(a, b) }
+fn fmax(a: float, b: float) -> float { return math_max(a, b) }
+fn fclamp(x: float, lo: float, hi: float) -> float { return math_clamp(x, lo, hi) }
+
+// Classification
+fn is_nan(x: float) -> bool { return math_is_nan(x) == 1 }
+fn is_inf(x: float) -> bool { return math_is_inf(x) == 1 }
+fn inf() -> float { return math_inf() }
+fn nan() -> float { return math_nan() }

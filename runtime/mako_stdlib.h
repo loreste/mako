@@ -588,6 +588,24 @@ static inline double mako_math_sin(double x) { return sin(x); }
 static inline double mako_math_cos(double x) { return cos(x); }
 static inline double mako_math_log(double x) { return log(x); }
 static inline double mako_math_exp(double x) { return exp(x); }
+static inline double mako_math_tan(double x) { return tan(x); }
+static inline double mako_math_asin(double x) { return asin(x); }
+static inline double mako_math_acos(double x) { return acos(x); }
+static inline double mako_math_atan(double x) { return atan(x); }
+static inline double mako_math_atan2(double y, double x) { return atan2(y, x); }
+static inline double mako_math_log2(double x) { return log2(x); }
+static inline double mako_math_log10(double x) { return log10(x); }
+static inline double mako_math_round(double x) { return round(x); }
+static inline double mako_math_min(double a, double b) { return a < b ? a : b; }
+static inline double mako_math_max(double a, double b) { return a > b ? a : b; }
+static inline double mako_math_clamp(double x, double lo, double hi) { return x < lo ? lo : (x > hi ? hi : x); }
+static inline double mako_math_hypot(double x, double y) { return hypot(x, y); }
+static inline double mako_math_fmod(double x, double y) { return fmod(x, y); }
+static inline double mako_math_trunc(double x) { return trunc(x); }
+static inline int64_t mako_math_is_nan(double x) { return isnan(x) ? 1 : 0; }
+static inline int64_t mako_math_is_inf(double x) { return isinf(x) ? 1 : 0; }
+static inline double mako_math_inf(void) { return (double)INFINITY; }
+static inline double mako_math_nan(void) { return (double)NAN; }
 
 /* ---- collections ---- */
 
