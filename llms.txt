@@ -4,7 +4,7 @@
 > Longer reference: https://mako-lang.com/llms-full.txt
 > Repo: https://github.com/loreste/mako
 
-Version **0.5.4** (alpha). Compiled language, `.mko` sources, native (Cranelift) + C + LLVM backends, no GC.
+Version **0.5.5** (alpha). Compiled language, `.mko` sources, native (Cranelift) + C + LLVM backends, no GC.
 Ownership model actively hardened. Safety validated through sanitizer testing
 but not proven complete — `unsafe`, the C runtime, and FFI are outside the model.
 

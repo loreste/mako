@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.5.5 — 2026-08-16 (CI fixes, OpaqueHandle, backend regressions)
+
+### Bug fixes
+
+- **fix: C backend MakoString/MakoIntArray type mismatch (#34).** Reserved names
+  like `bind`/`read`/`index` now preserve correct type metadata in the C backend.
+- **fix: CMap composite-key stack-use-after-return.** `cmap_concat2`/`concat3i`
+  used a stack buffer that went out of scope — always malloc now (ASan verified).
+- **fix: TLS reload cert mutex.** Used `pthread_mutex` (`mu`) instead of
+  non-existent `rwmutex` (`ref_gate`) — fixes Linux CI compile error.
+- **fix: stdlib gate.** `slices.fill` mut param, `os.exists` bool return,
+  removed string ordering comparison in `sort`.
+
+### New features
+
+- **OpaqueHandle type (#35).** Opaque values can now be stored in maps and arrays.
+- **Missing builtins (#36).** `base64url_encode/decode`, `jwt_sign_es256_header`,
+  `jwt_sign_custom`, CMap composite-key helpers, `nb_udp_bind_reuseport_addr`,
+  `tls_server_pool_*` aliases.
+
 ## 0.5.4 — 2026-08-15 (stdlib expansion, TLS server pool, self-contained macOS)
 
 ### New features
