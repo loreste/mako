@@ -1,0 +1,4 @@
+[env]
+# The builtin function table and deep codegen walks need more stack than
+# the default 8 MB in debug-mode test threads.
+RUST_MIN_STACK = "16777216"

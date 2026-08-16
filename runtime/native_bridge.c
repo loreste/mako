@@ -1598,6 +1598,11 @@ int64_t mako_native_udp_bind_reuseport_addr_ptr(MakoNativeString *ip, int64_t po
     return fd;
 }
 
+/* JWT custom header */
+MakoNativeString *mako_native_jwt_sign_es256_header_ptr(MakoNativeString *a0, MakoNativeString *a1, MakoNativeString *a2) {
+    return bridge_take_str(mako_jwt_sign_es256_header(bridge_borrow_str(a0), bridge_borrow_str(a1), bridge_borrow_str(a2)));
+}
+
 /* TLS server handle pool */
 int64_t mako_native_tls_srv_pool_accept(int64_t srv, int64_t fd) {
     return mako_tls_srv_pool_accept((void *)(intptr_t)srv, fd);

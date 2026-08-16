@@ -19133,6 +19133,118 @@ impl Codegen {
                             self.line(&format!("MakoString {tmp} = mako_base64_decode({s});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "base64url_encode" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("b64ue");
+                            self.line(&format!("MakoString {tmp} = mako_base64url_encode({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "base64url_decode" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("b64ud");
+                            self.line(&format!("MakoString {tmp} = mako_base64url_decode({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "jwt_sign_es256_header" | "jwt_sign_custom" => {
+                            let (_, payload) = self.emit_expr(&args[0]);
+                            let (_, key) = self.emit_expr(&args[1]);
+                            let (_, header) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("jwt");
+                            self.line(&format!("MakoString {tmp} = mako_jwt_sign_es256_header({payload}, {key}, {header});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "cmap_has2" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_cmap_has2((MakoCMap*){m}, {a}, {b})"));
+                        }
+                        "cmap_get2" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("cg2");
+                            self.line(&format!("MakoString {tmp} = mako_cmap_get2((MakoCMap*){m}, {a}, {b});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "cmap_del2" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_cmap_del2((MakoCMap*){m}, {a}, {b})"));
+                        }
+                        "cmap_has3i" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let (_, c) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_cmap_has3i((MakoCMap*){m}, {a}, {b}, {c})"));
+                        }
+                        "cmap_get3i" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let (_, c) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("cg3");
+                            self.line(&format!("MakoString {tmp} = mako_cmap_get3i((MakoCMap*){m}, {a}, {b}, {c});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "cmap_del3i" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let (_, c) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_cmap_del3i((MakoCMap*){m}, {a}, {b}, {c})"));
+                        }
+                        "cmap_set_int" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, v) = self.emit_expr(&args[2]);
+                            self.line(&format!("mako_cmap_set_int((MakoCMap*){m}, {k}, {v});"));
+                            return ("void".into(), "/*void*/".into());
+                        }
+                        "cmap_get_int" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let (_, fb) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_cmap_get_int((MakoCMap*){m}, {k}, {fb})"));
+                        }
+                        "nb_udp_bind_reuseport_addr" => {
+                            let (_, ip) = self.emit_expr(&args[0]);
+                            let (_, port) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_nb_udp_bind_reuseport_addr({ip}, {port})"));
+                        }
+                        "tls_server_pool_accept" => {
+                            let (_, srv) = self.emit_expr(&args[0]);
+                            let (_, fd) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_tls_srv_pool_accept({srv}, {fd})"));
+                        }
+                        "tls_server_pool_write" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, d) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_tls_srv_pool_send({h}, {d})"));
+                        }
+                        "tls_server_pool_read" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("tsr");
+                            self.line(&format!("MakoString {tmp} = mako_tls_srv_pool_recv({h}, {m});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "tls_server_pool_fd" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tls_srv_pool_fd({h})"));
+                        }
+                        "tls_server_pool_close" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_tls_srv_pool_close({h})"));
+                        }
+                        "tls_reload_cert" => {
+                            let (_, srv) = self.emit_expr(&args[0]);
+                            let (_, cert) = self.emit_expr(&args[1]);
+                            let (_, key) = self.emit_expr(&args[2]);
+                            return ("int64_t".into(), format!("mako_tls_server_reload({srv}, {cert}, {key})"));
+                        }
                         "sort_ints" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("si");

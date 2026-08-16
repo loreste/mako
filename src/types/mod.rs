@@ -3459,6 +3459,31 @@ impl TypeChecker {
             "base64_decode".into(),
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
+        // base64url
+        fns.insert("base64url_encode".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("base64url_decode".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        // JWT custom header
+        fns.insert("jwt_sign_es256_header".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
+        fns.insert("jwt_sign_custom".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
+        // CMap composite-key helpers
+        fns.insert("cmap_has2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Int)));
+        fns.insert("cmap_get2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::String)));
+        fns.insert("cmap_del2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Int)));
+        fns.insert("cmap_has3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert("cmap_get3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::String)));
+        fns.insert("cmap_del3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert("cmap_set_int".into(), Type::Fn(vec![Type::CMap, Type::String, Type::Int], Box::new(Type::Void)));
+        fns.insert("cmap_get_int".into(), Type::Fn(vec![Type::CMap, Type::String, Type::Int], Box::new(Type::Int)));
+        // UDP reuseport
+        fns.insert("nb_udp_bind_reuseport_addr".into(), Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)));
+        // TLS server pool
+        fns.insert("tls_server_pool_accept".into(), Type::Fn(vec![Type::Named("TlsServer".into()), Type::Int], Box::new(Type::Int)));
+        fns.insert("tls_server_pool_read".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)));
+        fns.insert("tls_server_pool_write".into(), Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)));
+        fns.insert("tls_server_pool_fd".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("tls_server_pool_close".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        // TLS cert reload
+        fns.insert("tls_reload_cert".into(), Type::Fn(vec![Type::Named("TlsServer".into()), Type::String, Type::String], Box::new(Type::Int)));
         fns.insert(
             "sort_ints".into(),
             Type::Fn(

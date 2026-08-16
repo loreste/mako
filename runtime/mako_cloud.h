@@ -848,6 +848,105 @@ static inline MakoString mako_jwt_sign_es256(MakoString payload, MakoString priv
 #endif
 }
 
+/* Sign an ES256 JWT with a custom header (e.g. STIR/SHAKEN PASSporT). */
+static inline MakoString mako_jwt_sign_es256_header(
+    MakoString payload, MakoString private_key_pem, MakoString header_json
+) {
+#if !defined(MAKO_CLOUD_OPENSSL)
+    (void)payload; (void)private_key_pem; (void)header_json;
+    return mako_str_from_cstr("");
+#else
+    if (!header_json.data || header_json.len == 0 || header_json.len > 4096
+        || !payload.data || payload.len > 6000 || !private_key_pem.data
+        || private_key_pem.len == 0 || private_key_pem.len > 16384)
+        return mako_str_from_cstr("");
+
+    char hdr_b64[8192], pay_b64[8192];
+    size_t hdr_b64_len = mako_b64url_encode(
+        (const uint8_t *)header_json.data, header_json.len, hdr_b64, sizeof(hdr_b64));
+    size_t pay_b64_len = mako_b64url_encode(
+        (const uint8_t *)payload.data, payload.len, pay_b64, sizeof(pay_b64));
+    if (hdr_b64_len == 0 || pay_b64_len == 0) return mako_str_from_cstr("");
+
+    size_t input_len = hdr_b64_len + 1 + pay_b64_len;
+    char *input = (char *)malloc(input_len + 1);
+    if (!input) return mako_str_from_cstr("");
+    memcpy(input, hdr_b64, hdr_b64_len);
+    input[hdr_b64_len] = '.';
+    memcpy(input + hdr_b64_len + 1, pay_b64, pay_b64_len);
+    input[input_len] = 0;
+
+    BIO *bio = BIO_new_mem_buf(private_key_pem.data, (int)private_key_pem.len);
+    EVP_PKEY *pkey = bio ? PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL) : NULL;
+    if (bio) BIO_free(bio);
+    if (!pkey || EVP_PKEY_base_id(pkey) != EVP_PKEY_EC
+        || EVP_PKEY_get_bits(pkey) != 256) {
+        if (pkey) EVP_PKEY_free(pkey);
+        free(input);
+        return mako_str_from_cstr("");
+    }
+
+    EC_KEY *ec = EVP_PKEY_get1_EC_KEY(pkey);
+    const EC_GROUP *group = ec ? EC_KEY_get0_group(ec) : NULL;
+    int curve = group ? EC_GROUP_get_curve_name(group) : NID_undef;
+    if (ec) EC_KEY_free(ec);
+    if (curve != NID_X9_62_prime256v1) {
+        EVP_PKEY_free(pkey);
+        free(input);
+        return mako_str_from_cstr("");
+    }
+
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    size_t der_len = 0;
+    unsigned char *der = NULL;
+    int ok = ctx && EVP_DigestSignInit(ctx, NULL, EVP_sha256(), NULL, pkey) == 1
+        && EVP_DigestSignUpdate(ctx, input, input_len) == 1
+        && EVP_DigestSignFinal(ctx, NULL, &der_len) == 1;
+    if (ok) {
+        der = (unsigned char *)malloc(der_len);
+        ok = der && EVP_DigestSignFinal(ctx, der, &der_len) == 1;
+    }
+
+    unsigned char raw_sig[64];
+    memset(raw_sig, 0, sizeof(raw_sig));
+    if (ok) {
+        const unsigned char *der_ptr = der;
+        ECDSA_SIG *ecdsa = d2i_ECDSA_SIG(NULL, &der_ptr, (long)der_len);
+        const BIGNUM *r = NULL;
+        const BIGNUM *s = NULL;
+        if (ecdsa) ECDSA_SIG_get0(ecdsa, &r, &s);
+        ok = ecdsa && r && s
+            && BN_num_bits(r) <= 256 && BN_num_bits(s) <= 256
+            && BN_bn2binpad(r, raw_sig, 32) == 32
+            && BN_bn2binpad(s, raw_sig + 32, 32) == 32;
+        if (ecdsa) ECDSA_SIG_free(ecdsa);
+    }
+
+    char sig_b64[128];
+    size_t sig_b64_len = ok
+        ? mako_b64url_encode(raw_sig, sizeof(raw_sig), sig_b64, sizeof(sig_b64)) : 0;
+    size_t total = input_len + 1 + sig_b64_len;
+    char *token = ok && sig_b64_len > 0 ? (char *)malloc(total + 1) : NULL;
+    if (token) {
+        memcpy(token, input, input_len);
+        token[input_len] = '.';
+        memcpy(token + input_len + 1, sig_b64, sig_b64_len);
+        token[total] = 0;
+    }
+
+    OPENSSL_cleanse(raw_sig, sizeof(raw_sig));
+    if (der) {
+        OPENSSL_cleanse(der, der_len);
+        free(der);
+    }
+    if (ctx) EVP_MD_CTX_free(ctx);
+    EVP_PKEY_free(pkey);
+    OPENSSL_cleanse(input, input_len + 1);
+    free(input);
+    return token ? (MakoString){token, total} : mako_str_from_cstr("");
+#endif
+}
+
 /* Verify an ES256 JWT against a PEM-encoded P-256 public key. */
 static inline int64_t mako_jwt_verify_es256(MakoString token, MakoString public_key_pem) {
 #if !defined(MAKO_CLOUD_OPENSSL)

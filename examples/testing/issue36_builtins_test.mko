@@ -1,0 +1,42 @@
+fn TestBase64UrlBuiltins() {
+    let encoded = base64url_encode("hello")
+    assert_eq_str(encoded, "aGVsbG8")
+    assert_eq_str(base64url_decode(encoded), "hello")
+}
+
+fn TestJwtCustomHeaderRejectsBadKey() {
+    let header = "{\"alg\":\"ES256\",\"ppt\":\"shaken\",\"typ\":\"passport\",\"x5u\":\"https://example.test/cert.pem\"}"
+    let token = jwt_sign_es256_header("{\"sub\":\"alice\"}", "not-a-p256-private-key", header)
+    assert_eq_str(token, "")
+    let token2 = jwt_sign_custom("{\"sub\":\"alice\"}", "not-a-p256-private-key", header)
+    assert_eq_str(token2, "")
+}
+
+fn TestCMapCompositeAndIntBuiltins() {
+    let cache = cmap_new()
+    cmap_set(cache, "pre|suf", "value")
+    assert_eq(cmap_has2(cache, "pre", "suf"), 1)
+    assert_eq_str(cmap_get2(cache, "pre", "suf"), "value")
+    assert_eq(cmap_del2(cache, "pre", "suf"), 1)
+    assert_eq(cmap_has2(cache, "pre", "suf"), 0)
+
+    cmap_set(cache, "pre|mid|7", "triple")
+    assert_eq(cmap_has3i(cache, "pre", "mid", 7), 1)
+    assert_eq_str(cmap_get3i(cache, "pre", "mid", 7), "triple")
+    assert_eq(cmap_del3i(cache, "pre", "mid", 7), 1)
+
+    cmap_set_int(cache, "n", 42)
+    assert_eq(cmap_get_int(cache, "n", -1), 42)
+    assert_eq(cmap_get_int(cache, "missing", -1), -1)
+}
+
+fn TestTlsServerPoolBuiltins() {
+    let srv = tls_server_new("", "")
+    let handle = tls_server_pool_accept(srv, -1)
+    assert_eq(handle, -1)
+    assert_eq(tls_server_pool_fd(handle), -1)
+    assert_eq(tls_server_pool_write(handle, "x"), -1)
+    assert_eq_str(tls_server_pool_read(handle, 8), "")
+    assert_eq(tls_server_pool_close(handle), -1)
+    let _ = tls_server_free(srv)
+}
