@@ -404,24 +404,23 @@ static inline int64_t mako_cmap_incr(MakoCMap *m, MakoString key, int64_t delta)
 /* Build a |-separated key and look it up. Single malloc per lookup —
  * cheaper than Mako-level string concat (which clones twice). */
 static inline MakoString cmap_concat2(MakoString a, MakoString b) {
-    size_t len = a.len + 1 + b.len;
-    char *p = (char *)malloc(len);
-    memcpy(p, a.data, a.len);
-    p[a.len] = '|';
-    memcpy(p + a.len + 1, b.data, b.len);
+    size_t len = a.len + b.len;
+    char *p = (char *)malloc(len + 1);
+    if (a.len) memcpy(p, a.data, a.len);
+    if (b.len) memcpy(p + a.len, b.data, b.len);
+    p[len] = '\0';
     return (MakoString){p, len};
 }
 
 static inline MakoString cmap_concat3i(MakoString a, MakoString b, int64_t c) {
     char num[21];
     int nlen = snprintf(num, sizeof(num), "%lld", (long long)c);
-    size_t len = a.len + 1 + b.len + 1 + (size_t)nlen;
-    char *p = (char *)malloc(len);
-    memcpy(p, a.data, a.len);
-    p[a.len] = '|';
-    memcpy(p + a.len + 1, b.data, b.len);
-    p[a.len + 1 + b.len] = '|';
-    memcpy(p + a.len + 1 + b.len + 1, num, (size_t)nlen);
+    size_t len = a.len + b.len + (size_t)nlen;
+    char *p = (char *)malloc(len + 1);
+    if (a.len) memcpy(p, a.data, a.len);
+    if (b.len) memcpy(p + a.len, b.data, b.len);
+    memcpy(p + a.len + b.len, num, (size_t)nlen);
+    p[len] = '\0';
     return (MakoString){p, len};
 }
 
@@ -489,6 +488,20 @@ static inline int64_t mako_cmap_get_int(MakoCMap *m, MakoString key, int64_t fal
     memcpy(buf, v.data, cp);
     buf[cp] = 0;
     return strtoll(buf, NULL, 10);
+}
+
+/* Composite-key int helpers — prefix+suffix concatenated, value parsed as int. */
+static inline int64_t mako_cmap_get_int2(MakoCMap *m, MakoString a, MakoString b, int64_t fallback) {
+    MakoString key = cmap_concat2(a, b);
+    int64_t r = mako_cmap_get_int(m, key, fallback);
+    free((void *)key.data);
+    return r;
+}
+
+static inline void mako_cmap_set_int2(MakoCMap *m, MakoString a, MakoString b, int64_t val) {
+    MakoString key = cmap_concat2(a, b);
+    mako_cmap_set_int(m, key, val);
+    free((void *)key.data);
 }
 
 #endif /* MAKO_CMAP_H */

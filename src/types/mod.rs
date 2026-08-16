@@ -1710,6 +1710,22 @@ impl TypeChecker {
                 Box::new(Type::Int),
             ),
         );
+        // CMap composite-key helpers
+        fns.insert("cmap_has2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Int)));
+        fns.insert("cmap_get2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::String)));
+        fns.insert("cmap_del2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Int)));
+        fns.insert("cmap_has3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert("cmap_get3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::String)));
+        fns.insert("cmap_del3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert("cmap_get_int".into(), Type::Fn(vec![Type::CMap, Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert("cmap_set_int".into(), Type::Fn(vec![Type::CMap, Type::String, Type::Int], Box::new(Type::Void)));
+        fns.insert("cmap_get_int2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert("cmap_set_int2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Void)));
+        // UDP reuseport addr
+        fns.insert("nb_udp_bind_reuseport_addr".into(), Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)));
+        // JWT with custom header (STIR/SHAKEN PASSporT)
+        fns.insert("jwt_sign_es256_header".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
+        fns.insert("jwt_sign_custom".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
         // Direct I/O (mako_dio.h)
         fns.insert(
             "file_open".into(),

@@ -19209,6 +19209,21 @@ impl Codegen {
                             let (_, fb) = self.emit_expr(&args[2]);
                             return ("int64_t".into(), format!("mako_cmap_get_int((MakoCMap*){m}, {k}, {fb})"));
                         }
+                        "cmap_get_int2" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let (_, fb) = self.emit_expr(&args[3]);
+                            return ("int64_t".into(), format!("mako_cmap_get_int2((MakoCMap*){m}, {a}, {b}, {fb})"));
+                        }
+                        "cmap_set_int2" => {
+                            let (_, m) = self.emit_expr(&args[0]);
+                            let (_, a) = self.emit_expr(&args[1]);
+                            let (_, b) = self.emit_expr(&args[2]);
+                            let (_, v) = self.emit_expr(&args[3]);
+                            self.line(&format!("mako_cmap_set_int2((MakoCMap*){m}, {a}, {b}, {v});"));
+                            return ("void".into(), "/*void*/".into());
+                        }
                         "nb_udp_bind_reuseport_addr" => {
                             let (_, ip) = self.emit_expr(&args[0]);
                             let (_, port) = self.emit_expr(&args[1]);
