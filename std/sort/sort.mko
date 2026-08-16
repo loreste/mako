@@ -27,11 +27,5 @@ fn is_sorted_ints(a: []int) -> bool {
     return true
 }
 
-fn is_sorted_strings(a: []string) -> bool {
-    for i in len(a) - 1 {
-        if a[i] > a[i + 1] {
-            return false
-        }
-    }
-    return true
-}
+// ponytail: no is_sorted_strings — Mako lacks string ordering (</>)
+// Add when str_compare(a, b) -> int is available as a builtin.

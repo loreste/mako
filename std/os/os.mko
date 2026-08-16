@@ -29,7 +29,7 @@ fn host() -> string { return syscall_hostname() }
 
 fn read_file_contents(path: string) -> string { return read_file(path) }
 fn write_file_contents(path: string, data: string) -> int { return write_file(path, data) }
-fn exists(path: string) -> bool { return file_exists(path) == 1 }
+fn exists(path: string) -> bool { return file_exists(path) }
 fn remove(path: string) -> int { return remove_file(path) }
 fn rename_file(from: string, to: string) -> int { return rename(from, to) }
 fn size(path: string) -> int { return path_file_size(path) }

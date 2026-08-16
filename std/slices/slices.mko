@@ -54,7 +54,7 @@ fn max_val(a: []int) -> int {
 
 // ---- Transform ----
 
-fn fill(a: []int, v: int) -> []int {
+fn fill(mut a: []int, v: int) -> []int {
     for i in len(a) {
         a[i] = v
     }
