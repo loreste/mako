@@ -32722,6 +32722,14 @@ impl Codegen {
                             if ty == "MakoStrBuilder*" {
                                 return ("int64_t".into(), format!("mako_str_builder_len({v})"));
                             }
+                            // Safety: if the expression resolved to MakoString
+                            // through a path emit_expr didn't track, use str_len
+                            // instead of crashing with a type mismatch (issue #34).
+                            if ty == "MakoString"
+                                || self.locals.get(&v).map(|t| t.as_str()) == Some("MakoString")
+                            {
+                                return ("int64_t".into(), format!("mako_str_len({v})"));
+                            }
                             return ("int64_t".into(), format!("mako_array_len({v})"));
                         }
                         "delete" => {
