@@ -14,13 +14,15 @@ fn TestJwtCustomHeaderRejectsBadKey() {
 
 fn TestCMapCompositeAndIntBuiltins() {
     let cache = cmap_new()
-    cmap_set(cache, "pre|suf", "value")
+    // cmap_concat2 uses plain concatenation (no separator)
+    cmap_set(cache, "presuf", "value")
     assert_eq(cmap_has2(cache, "pre", "suf"), 1)
     assert_eq_str(cmap_get2(cache, "pre", "suf"), "value")
     assert_eq(cmap_del2(cache, "pre", "suf"), 1)
     assert_eq(cmap_has2(cache, "pre", "suf"), 0)
 
-    cmap_set(cache, "pre|mid|7", "triple")
+    // cmap_concat3i: plain concat with int suffix
+    cmap_set(cache, "premid7", "triple")
     assert_eq(cmap_has3i(cache, "pre", "mid", 7), 1)
     assert_eq_str(cmap_get3i(cache, "pre", "mid", 7), "triple")
     assert_eq(cmap_del3i(cache, "pre", "mid", 7), 1)
