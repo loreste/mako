@@ -14183,11 +14183,15 @@ impl<'a> FunctionLowerer<'a> {
                             "native IR: interface method `{fn_name}` arg type mismatch"
                         )));
                     }
-                    if t.is_heap() {
+                    if t.is_heap() && !t.is_shared_handle() {
+                        // By-value: callee owns its parameter.
                         if !o {
                             v = self.emit_clone(v, t);
+                        } else if let Expr::Ident(name) = arg {
+                            self.heap_owned.insert(name.clone(), false);
                         }
-                        temps.push((v, t));
+                    } else if t.is_shared_handle() {
+                        // shared handles: no clone, no drop
                     } else if o {
                         temps.push((v, t));
                     }
@@ -14276,6 +14280,14 @@ impl<'a> FunctionLowerer<'a> {
                     v = self.emit_clone(v, t);
                 }
                 temps.push((v, t));
+            } else if t.is_heap() && !t.is_shared_handle() {
+                // By-value: callee owns its parameter.  Clone borrows;
+                // transfer owned temps (no post-call drop).
+                if !o {
+                    v = self.emit_clone(v, t);
+                } else if let Expr::Ident(name) = arg {
+                    self.heap_owned.insert(name.clone(), false);
+                }
             } else if o {
                 temps.push((v, t));
             }
@@ -31001,10 +31013,13 @@ impl<'a> FunctionLowerer<'a> {
             if t.is_shared_handle() {
                 // leave owned flag alone; no temp drop
             } else if t.is_heap() {
+                // By-value: callee owns its parameter.
                 if !o {
                     v = self.emit_clone(v, t);
+                } else if let Expr::Ident(name) = arg {
+                    self.heap_owned.insert(name.clone(), false);
                 }
-                temps.push((v, t));
+                // No post-call drop — callee is responsible.
             } else if o {
                 temps.push((v, t));
             }
