@@ -531,6 +531,23 @@ impl Type {
         )
     }
 
+    /// String/slice types whose headers may be consumed by runtime APIs
+    /// (strings_copy, append, list_push, etc.).  Only these need by-value
+    /// clone+transfer when passed to user functions.
+    fn is_consumable_header(self) -> bool {
+        matches!(
+            self,
+            Type::Str
+                | Type::IntSlice
+                | Type::FloatSlice
+                | Type::ByteSlice
+                | Type::BoolSlice
+                | Type::StrSlice
+                | Type::StructSlice(_)
+                | Type::PtrSlice(_)
+        )
+    }
+
     /// Pointer-sized machine value (can ride in i64 slots / chan[int] mailbox).
     fn is_ptr_sized(self) -> bool {
         matches!(
@@ -2775,12 +2792,12 @@ impl<'a> FunctionLowerer<'a> {
             });
             locals.insert(param.name.clone(), (slot, ty));
             if ty.is_heap() {
-                // Heap parameters own the value the caller passed: the
-                // caller either transferred an owned local or cloned a
-                // borrow.  Struct params are an exception — the caller
-                // passes an owned copy and drops it post-call, so the
-                // callee still borrows.
-                let owns = !matches!(ty, Type::Struct(_)) && !ty.is_shared_handle();
+                // Consumable-header params (strings, slices) own the value
+                // the caller passed: the caller either transferred an owned
+                // local or cloned a borrow.  All other heap params
+                // (structs, maps, handles) remain borrows — the caller
+                // passes an owned copy and drops it post-call.
+                let owns = ty.is_consumable_header();
                 heap_owned.insert(param.name.clone(), owns);
             }
         }
@@ -10633,7 +10650,7 @@ impl<'a> FunctionLowerer<'a> {
                         continue;
                     }
                     let _ = arg_expr;
-                    if actual.is_heap() && !actual.is_shared_handle() {
+                    if actual.is_consumable_header() {
                         // By-value semantics: the callee owns its parameter
                         // and may consume it via a consuming API
                         // (strings_copy, append, etc.).  Clone a borrowed
@@ -14183,15 +14200,17 @@ impl<'a> FunctionLowerer<'a> {
                             "native IR: interface method `{fn_name}` arg type mismatch"
                         )));
                     }
-                    if t.is_heap() && !t.is_shared_handle() {
-                        // By-value: callee owns its parameter.
+                    if t.is_consumable_header() {
                         if !o {
                             v = self.emit_clone(v, t);
                         } else if let Expr::Ident(name) = arg {
                             self.heap_owned.insert(name.clone(), false);
                         }
-                    } else if t.is_shared_handle() {
-                        // shared handles: no clone, no drop
+                    } else if t.is_heap() {
+                        if !o {
+                            v = self.emit_clone(v, t);
+                        }
+                        temps.push((v, t));
                     } else if o {
                         temps.push((v, t));
                     }
@@ -14280,9 +14299,7 @@ impl<'a> FunctionLowerer<'a> {
                     v = self.emit_clone(v, t);
                 }
                 temps.push((v, t));
-            } else if t.is_heap() && !t.is_shared_handle() {
-                // By-value: callee owns its parameter.  Clone borrows;
-                // transfer owned temps (no post-call drop).
+            } else if t.is_consumable_header() {
                 if !o {
                     v = self.emit_clone(v, t);
                 } else if let Expr::Ident(name) = arg {
@@ -31012,14 +31029,17 @@ impl<'a> FunctionLowerer<'a> {
             // (e.g. sync.rlock(m) must not opaque_drop m).
             if t.is_shared_handle() {
                 // leave owned flag alone; no temp drop
-            } else if t.is_heap() {
-                // By-value: callee owns its parameter.
+            } else if t.is_consumable_header() {
                 if !o {
                     v = self.emit_clone(v, t);
                 } else if let Expr::Ident(name) = arg {
                     self.heap_owned.insert(name.clone(), false);
                 }
-                // No post-call drop — callee is responsible.
+            } else if t.is_heap() {
+                if !o {
+                    v = self.emit_clone(v, t);
+                }
+                temps.push((v, t));
             } else if o {
                 temps.push((v, t));
             }
