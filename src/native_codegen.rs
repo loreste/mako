@@ -1522,20 +1522,26 @@ pub fn compile_ir_with_overflow(
                         );
                     }
                     IrInst::StructClone { out, base, struct_id } => {
-                        // Per-layout deep clone: recurse into nested aggregates
-                        // and owned fields. Null base (inactive enum slot) → null.
-                        let cloned = emit_struct_clone(
-                            &mut fb,
-                            &mut module,
-                            ir,
-                            *struct_id,
-                            vals[base],
-                            string_clone,
-                            slice_clone,
-                            ss_clone,
-                            struct_make,
-                        )?;
-                        vals.insert(*out, cloned);
+                        if f.name.starts_with("__mako.") {
+                            // Inside helper functions: inline the clone (no recursion risk).
+                            let cloned = emit_struct_clone(
+                                &mut fb, &mut module, ir, *struct_id, vals[base],
+                                string_clone, slice_clone, ss_clone, struct_make,
+                            )?;
+                            vals.insert(*out, cloned);
+                        } else {
+                            // In user functions: call the helper to avoid block explosion.
+                            let helper_name = format!("__mako.clone_struct.{struct_id}");
+                            let mut sig = module.make_signature();
+                            sig.params.push(AbiParam::new(types::I64));
+                            sig.returns.push(AbiParam::new(types::I64));
+                            let helper_id = module
+                                .declare_function(&helper_name, Linkage::Local, &sig)
+                                .map_err(|e| NativeError::new(e.to_string()))?;
+                            let helper_ref = module.declare_func_in_func(helper_id, &mut fb.func);
+                            let call = fb.ins().call(helper_ref, &[vals[base]]);
+                            vals.insert(*out, fb.inst_results(call)[0]);
+                        }
                     }
                     IrInst::EnumMake { out, enum_id, tag, slot_base, payload } => {
                         // struct_make calloc's a zeroed block; store the tag and
@@ -1555,18 +1561,23 @@ pub fn compile_ir_with_overflow(
                         vals.insert(*out, ptr);
                     }
                     IrInst::DropStruct { value, struct_id } => {
-                        // Per-layout recursive drop (null-safe).
-                        emit_struct_drop(
-                            &mut fb,
-                            &mut module,
-                            ir,
-                            *struct_id,
-                            vals[value],
-                            string_drop,
-                            slice_drop,
-                            ss_drop,
-                            struct_drop,
-                        )?;
+                        if f.name.starts_with("__mako.") {
+                            // Inside helper functions: inline the drop.
+                            emit_struct_drop(
+                                &mut fb, &mut module, ir, *struct_id, vals[value],
+                                string_drop, slice_drop, ss_drop, struct_drop,
+                            )?;
+                        } else {
+                            // In user functions: call the helper to avoid block explosion.
+                            let helper_name = format!("__mako.drop_struct.{struct_id}");
+                            let mut sig = module.make_signature();
+                            sig.params.push(AbiParam::new(types::I64));
+                            let helper_id = module
+                                .declare_function(&helper_name, Linkage::Local, &sig)
+                                .map_err(|e| NativeError::new(e.to_string()))?;
+                            let helper_ref = module.declare_func_in_func(helper_id, &mut fb.func);
+                            fb.ins().call(helper_ref, &[vals[value]]);
+                        }
                     }
                 }
             }

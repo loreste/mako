@@ -841,6 +841,10 @@ fn struct_drop_helper_name(id: u32) -> String {
     format!("__mako.drop_struct.{id}")
 }
 
+fn struct_clone_helper_name(id: u32) -> String {
+    format!("__mako.clone_struct.{id}")
+}
+
 fn struct_drop_helper(id: u32) -> Function {
     let value = Value(0);
     Function {
@@ -856,6 +860,26 @@ fn struct_drop_helper(id: u32) -> Function {
         }],
         entry: BlockId(0),
         next_value: 1,
+    }
+}
+
+fn struct_clone_helper(id: u32) -> Function {
+    let value = Value(0);
+    let out = Value(1);
+    Function {
+        name: struct_clone_helper_name(id),
+        params: vec![("value".into(), value, Type::Struct(id))],
+        ret: Some(Type::Struct(id)),
+        blocks: vec![BasicBlock {
+            instructions: vec![Inst::StructClone {
+                out,
+                base: value,
+                struct_id: id,
+            }],
+            terminator: Some(Terminator::Return(Some(out))),
+        }],
+        entry: BlockId(0),
+        next_value: 2,
     }
 }
 
@@ -2539,7 +2563,8 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
     }
     functions.extend(kick_stubs);
     validate_struct_key_metadata(&structs)?;
-    let mut drop_helpers = functions
+    // Collect all struct IDs that need clone/drop helpers.
+    let mut helper_ids: Vec<u32> = functions
         .iter()
         .flat_map(|function| &function.blocks)
         .flat_map(|block| &block.instructions)
@@ -2547,12 +2572,15 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
             Inst::FuncAddr { function, .. } => function
                 .strip_prefix("__mako.drop_struct.")
                 .and_then(|id| id.parse::<u32>().ok()),
+            Inst::StructClone { struct_id, .. } => Some(*struct_id),
+            Inst::DropStruct { struct_id, .. } => Some(*struct_id),
             _ => None,
         })
-        .collect::<Vec<_>>();
-    drop_helpers.sort_unstable();
-    drop_helpers.dedup();
-    functions.extend(drop_helpers.into_iter().map(struct_drop_helper));
+        .collect();
+    helper_ids.sort_unstable();
+    helper_ids.dedup();
+    functions.extend(helper_ids.iter().map(|id| struct_drop_helper(*id)));
+    functions.extend(helper_ids.iter().map(|id| struct_clone_helper(*id)));
     // Dedupe by name (monomorph + kick edge cases).
     {
         let mut seen = std::collections::HashSet::new();
