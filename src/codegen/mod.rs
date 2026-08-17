@@ -19145,6 +19145,24 @@ impl Codegen {
                             self.line(&format!("MakoString {tmp} = mako_base64url_decode({s});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "p256_keygen" => {
+                            let (_, path) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("p256kg");
+                            self.line(&format!("int64_t {tmp} = mako_p256_keygen({path});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "p256_public_jwk" => {
+                            let (_, key) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("p256jwk");
+                            self.line(&format!("MakoString {tmp} = mako_p256_public_jwk({key});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "p256_jwk_thumbprint" => {
+                            let (_, key) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("p256th");
+                            self.line(&format!("MakoString {tmp} = mako_p256_jwk_thumbprint({key});"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "jwt_sign_es256_header" | "jwt_sign_custom" => {
                             let (_, payload) = self.emit_expr(&args[0]);
                             let (_, key) = self.emit_expr(&args[1]);

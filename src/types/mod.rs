@@ -1724,6 +1724,9 @@ impl TypeChecker {
         // UDP reuseport addr
         fns.insert("nb_udp_bind_reuseport_addr".into(), Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)));
         // JWT with custom header (STIR/SHAKEN PASSporT)
+        fns.insert("p256_keygen".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("p256_public_jwk".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("p256_jwk_thumbprint".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
         fns.insert("jwt_sign_es256_header".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
         fns.insert("jwt_sign_custom".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
         // Direct I/O (mako_dio.h)
@@ -3478,6 +3481,10 @@ impl TypeChecker {
         // base64url
         fns.insert("base64url_encode".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
         fns.insert("base64url_decode".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        // P-256 helpers for native ACME / ES256 account keys
+        fns.insert("p256_keygen".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
+        fns.insert("p256_public_jwk".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert("p256_jwk_thumbprint".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
         // JWT custom header
         fns.insert("jwt_sign_es256_header".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
         fns.insert("jwt_sign_custom".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));

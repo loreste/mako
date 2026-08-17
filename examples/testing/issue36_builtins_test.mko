@@ -42,3 +42,27 @@ fn TestTlsServerPoolBuiltins() {
     assert_eq(tls_server_pool_close(handle), -1)
     let _ = tls_server_free(srv)
 }
+
+fn TestP256AcmeBuiltins() {
+    let path = path_join(temp_dir(), "mako_p256_acme_account.pem")
+    let _ = remove_file(path)
+
+    assert_eq(p256_keygen(path), 0)
+    let key_pem = read_file(path)
+    assert(str_contains(key_pem, "BEGIN PRIVATE KEY"))
+
+    let jwk = p256_public_jwk(key_pem)
+    assert(str_contains(jwk, "\"crv\":\"P-256\""))
+    assert(str_contains(jwk, "\"kty\":\"EC\""))
+    assert(str_contains(jwk, "\"x\":\""))
+    assert(str_contains(jwk, "\"y\":\""))
+
+    let thumbprint = p256_jwk_thumbprint(key_pem)
+    assert(str_len(thumbprint) > 30)
+
+    let header = "{\"alg\":\"ES256\",\"nonce\":\"nonce\",\"url\":\"https://acme.example/new-acct\",\"jwk\":" + jwk + "}"
+    let token = jwt_sign_es256_header("{\"termsOfServiceAgreed\":true}", key_pem, header)
+    assert(str_count(token, ".") == 2)
+
+    let _ = remove_file(path)
+}

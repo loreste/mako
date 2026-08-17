@@ -749,6 +749,108 @@ static inline MakoString mako_jwt_sign(MakoString payload, MakoString secret) {
     return (MakoString){token, total};
 }
 
+
+/* Generate a P-256 private key PEM for ACME ES256 account signatures. */
+static inline int64_t mako_p256_keygen(MakoString path) {
+#if !defined(MAKO_CLOUD_OPENSSL)
+    (void)path;
+    return -1;
+#else
+    if (!path.data || path.len == 0 || path.len > 4096) return -1;
+    char pbuf[4096];
+    size_t plen = path.len < sizeof(pbuf) - 1 ? path.len : sizeof(pbuf) - 1;
+    memcpy(pbuf, path.data, plen);
+    pbuf[plen] = 0;
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+    EVP_PKEY *pkey = NULL;
+    int ok = ctx
+        && EVP_PKEY_keygen_init(ctx) == 1
+        && EVP_PKEY_CTX_set_ec_paramgen_curve_nid(ctx, NID_X9_62_prime256v1) == 1
+        && EVP_PKEY_keygen(ctx, &pkey) == 1;
+    FILE *f = ok ? fopen(pbuf, "wb") : NULL;
+    ok = ok && f && PEM_write_PrivateKey(f, pkey, NULL, NULL, 0, NULL, NULL) == 1;
+    if (f) fclose(f);
+    if (pkey) EVP_PKEY_free(pkey);
+    if (ctx) EVP_PKEY_CTX_free(ctx);
+    return ok ? 0 : -1;
+#endif
+}
+
+static inline int mako_p256_jwk_xy_(MakoString private_key_pem, char x64[64], char y64[64]) {
+#if !defined(MAKO_CLOUD_OPENSSL)
+    (void)private_key_pem; (void)x64; (void)y64;
+    return 0;
+#else
+    if (!private_key_pem.data || private_key_pem.len == 0 || private_key_pem.len > 16384) return 0;
+    BIO *bio = BIO_new_mem_buf(private_key_pem.data, (int)private_key_pem.len);
+    EVP_PKEY *pkey = bio ? PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL) : NULL;
+    if (bio) BIO_free(bio);
+    if (!pkey || EVP_PKEY_base_id(pkey) != EVP_PKEY_EC || EVP_PKEY_get_bits(pkey) != 256) {
+        if (pkey) EVP_PKEY_free(pkey);
+        return 0;
+    }
+    EC_KEY *ec = EVP_PKEY_get1_EC_KEY(pkey);
+    const EC_GROUP *group = ec ? EC_KEY_get0_group(ec) : NULL;
+    const EC_POINT *point = ec ? EC_KEY_get0_public_key(ec) : NULL;
+    int curve = group ? EC_GROUP_get_curve_name(group) : NID_undef;
+    BIGNUM *x = BN_new();
+    BIGNUM *y = BN_new();
+    unsigned char xb[32], yb[32];
+    memset(xb, 0, sizeof(xb));
+    memset(yb, 0, sizeof(yb));
+    int ok = curve == NID_X9_62_prime256v1 && group && point && x && y
+        && EC_POINT_get_affine_coordinates(group, point, x, y, NULL) == 1
+        && BN_num_bits(x) <= 256 && BN_num_bits(y) <= 256
+        && BN_bn2binpad(x, xb, 32) == 32
+        && BN_bn2binpad(y, yb, 32) == 32;
+    if (ok) {
+        size_t xl = mako_b64url_encode(xb, sizeof(xb), x64, 64);
+        size_t yl = mako_b64url_encode(yb, sizeof(yb), y64, 64);
+        ok = xl > 0 && yl > 0;
+    }
+    if (x) BN_free(x);
+    if (y) BN_free(y);
+    if (ec) EC_KEY_free(ec);
+    EVP_PKEY_free(pkey);
+    return ok;
+#endif
+}
+
+/* Return canonical public JWK JSON for a P-256 private key PEM. */
+static inline MakoString mako_p256_public_jwk(MakoString private_key_pem) {
+    char x64[64], y64[64];
+    memset(x64, 0, sizeof(x64));
+    memset(y64, 0, sizeof(y64));
+    if (!mako_p256_jwk_xy_(private_key_pem, x64, y64)) return mako_str_from_cstr("");
+    size_t need = strlen(x64) + strlen(y64) + 64;
+    char *out = (char *)malloc(need);
+    if (!out) return mako_str_from_cstr("");
+    int n = snprintf(out, need, "{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"%s\",\"y\":\"%s\"}", x64, y64);
+    if (n <= 0 || (size_t)n >= need) {
+        free(out);
+        return mako_str_from_cstr("");
+    }
+    return (MakoString){out, (size_t)n};
+}
+
+/* RFC 7638 thumbprint for ACME JWK: base64url(SHA256(canonical JWK)). */
+static inline MakoString mako_p256_jwk_thumbprint(MakoString private_key_pem) {
+    MakoString jwk = mako_p256_public_jwk(private_key_pem);
+    if (!jwk.data || jwk.len == 0) return mako_str_from_cstr("");
+    MakoString raw = mako_sha256_raw(jwk);
+    char enc[96];
+    memset(enc, 0, sizeof(enc));
+    size_t el = mako_b64url_encode((const uint8_t *)raw.data, raw.len, enc, sizeof(enc));
+    mako_str_free(jwk);
+    mako_str_free(raw);
+    if (el == 0) return mako_str_from_cstr("");
+    char *out = (char *)malloc(el + 1);
+    if (!out) return mako_str_from_cstr("");
+    memcpy(out, enc, el);
+    out[el] = 0;
+    return (MakoString){out, el};
+}
+
 /* Sign a JWT payload with ES256 using a PEM-encoded P-256 private key.
  * JWT ES256 signatures are the fixed-width R || S form, not DER. */
 static inline MakoString mako_jwt_sign_es256(MakoString payload, MakoString private_key_pem) {

@@ -16874,6 +16874,24 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
+            "p256_keygen" if args.len() == 1 => Some((
+                "mako_native_p256_keygen_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "p256_public_jwk" if args.len() == 1 => Some((
+                "mako_native_p256_public_jwk_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "p256_jwk_thumbprint" if args.len() == 1 => Some((
+                "mako_native_p256_jwk_thumbprint_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
             "hmac_sha256" if args.len() == 2 => Some((
                 "mako_native_hmac_sha256_ptr",
                 &[Type::Str, Type::Str],

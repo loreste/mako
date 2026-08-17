@@ -1298,6 +1298,9 @@ or a dedicated reply socket — do not share one `GameUDP` handle across workers
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `p256_keygen` | `p256_keygen(path: string) -> int` | Generate a P-256 private key PEM at path |
+| `p256_public_jwk` | `p256_public_jwk(private_key_pem: string) -> string` | Export canonical public JWK JSON for a P-256 private key |
+| `p256_jwk_thumbprint` | `p256_jwk_thumbprint(private_key_pem: string) -> string` | RFC 7638 base64url SHA-256 thumbprint for the public JWK |
 | `jwt_sign` | `jwt_sign(payload: string, secret: string) -> string` | Sign a JWT payload |
 | `jwt_verify` | `jwt_verify(token: string, secret: string) -> int` | Verify an HS256 JWT; the header algorithm must be exactly `HS256` |
 | `jwt_verify_rs256` | `jwt_verify_rs256(token: string, public_key_pem: string) -> int` | Verify an RS256 JWT with a PEM `PUBLIC KEY` (RSA >= 2048 bits) |
