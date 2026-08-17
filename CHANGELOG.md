@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.5.6 — 2026-08-17 (native backend ownership fix)
+
+### Bug fixes
+
+- **fix: native backend double-free on heap arguments to user functions.**
+  Strings, slices, and maps passed to user-defined functions were shared by
+  raw pointer between caller and callee. If the callee consumed the argument
+  (e.g. via `strings_copy` or `append`), the caller's local became dangling
+  and was freed again at scope exit — causing SIGSEGV or heap corruption in
+  large programs. The caller now clones borrowed heap arguments before
+  passing, and the callee owns its parameters (matching C backend
+  pass-by-value semantics).
+
 ## 0.5.5 — 2026-08-16 (CI fixes, OpaqueHandle, backend regressions)
 
 ### Bug fixes

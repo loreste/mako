@@ -51,6 +51,7 @@ See [ROADMAP.md](ROADMAP.md) version map. Tip after `v0.4.5`:
 0.5.3  native backend completeness & memory safety
 0.5.4  stdlib expansion, TLS server pool, self-contained macOS
 0.5.5  CI fixes, OpaqueHandle, backend regressions
+0.5.6  fix native backend heap argument ownership across function calls
 0.5.x  further patches as needed
 1.0    stability freeze
 ```

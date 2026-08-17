@@ -2775,11 +2775,13 @@ impl<'a> FunctionLowerer<'a> {
             });
             locals.insert(param.name.clone(), (slot, ty));
             if ty.is_heap() {
-                // Heap parameters are borrows. The caller retains ownership
-                // (for structs the caller passes an owned copy it drops).
-                // `mut self` still borrows the caller's pointer — mutations
-                // go through the shared heap block.
-                heap_owned.insert(param.name.clone(), false);
+                // Heap parameters own the value the caller passed: the
+                // caller either transferred an owned local or cloned a
+                // borrow.  Struct params are an exception — the caller
+                // passes an owned copy and drops it post-call, so the
+                // callee still borrows.
+                let owns = !matches!(ty, Type::Struct(_)) && !ty.is_shared_handle();
+                heap_owned.insert(param.name.clone(), owns);
             }
         }
         Ok(Self {
@@ -10631,13 +10633,25 @@ impl<'a> FunctionLowerer<'a> {
                         continue;
                     }
                     let _ = arg_expr;
+                    if actual.is_heap() && !actual.is_shared_handle() {
+                        // By-value semantics: the callee owns its parameter
+                        // and may consume it via a consuming API
+                        // (strings_copy, append, etc.).  Clone a borrowed
+                        // value so the caller's original stays valid; pass
+                        // an owned value directly (ownership transfers to
+                        // the callee).  No post-call drop — the callee is
+                        // responsible for the parameter's lifetime.
+                        if !owned {
+                            value = self.emit_clone(value, actual);
+                        } else if let Expr::Ident(name) = arg_expr {
+                            // Transfer: caller relinquishes ownership.
+                            self.heap_owned.insert(name.clone(), false);
+                        }
+                        lowered.push(value);
+                        continue;
+                    }
                     lowered.push(value);
                     if owned && !actual.is_shared_handle() {
-                        // An owned string/slice temporary is handed to the callee
-                        // as a borrow (a parameter is never freed by the callee)
-                        // and dropped here after the call returns — no clone, so
-                        // nothing leaks. Shared handles (Opaque/chan) escape or
-                        // alias; post-call drop would double-free.
                         temporary_owned.push((value, actual));
                     }
                 }
@@ -32357,7 +32371,8 @@ mod tests {
         // Each owned tuple element is cloned into its binding, and the owned
         // tuple temp is dropped once (recursively freeing its two strings).
         let clones = insts.iter().filter(|i| matches!(i, Inst::StringClone { .. })).count();
-        assert_eq!(clones, 2, "both owned string bindings are cloned out");
+        // 2 for destructured bindings + 1 for the string arg passed to split()
+        assert_eq!(clones, 3, "string bindings cloned out + arg clone");
         assert_eq!(
             insts.iter().filter(|i| matches!(i, Inst::DropStruct { .. })).count(),
             1,
