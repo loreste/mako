@@ -151,7 +151,7 @@ jobs:
       - name: Default test suite (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
-        run: cargo run --quiet --release -- test examples/testing
+        run: cargo run --quiet --release -- test examples/testing --backend c
         env:
           MAKO_TEST_TIMEOUT_SECS: "90"
           MAKO_LIVE_TLS: ""
