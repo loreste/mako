@@ -1,3 +1,6 @@
+// std/net/url — URL parsing and encoding.
+// Modeled after Go's net/url package.
+
 fn query_escape(s: string) -> string { return url_query_escape(s) }
 fn scheme(u: string) -> string { return url_scheme(u) }
 fn host(u: string) -> string { return url_host(u) }

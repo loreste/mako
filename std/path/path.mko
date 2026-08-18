@@ -1,6 +1,11 @@
+// std/path — path manipulation.
+// Modeled after Go's path and path/filepath packages.
+
 fn join_path(a: string, b: string) -> string { return path_join(a, b) }
 fn clean(p: string) -> string { return path_clean(p) }
 fn base(p: string) -> string { return path_base(p) }
 fn dir(p: string) -> string { return path_dir(p) }
 fn ext(p: string) -> string { return path_ext(p) }
 fn is_abs(p: string) -> bool { return path_is_abs(p) }
+fn file_size(p: string) -> int { return path_file_size(p) }
+fn size(p: string) -> int { return path_size(p) }

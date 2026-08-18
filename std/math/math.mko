@@ -1,24 +1,39 @@
-// std/math — math functions for Mako
-//
-// Integer functions use the built-in abs/min/max/clamp.
-// Float functions delegate to the C math library (libm).
+// std/math — math functions.
+// Modeled after Go's math package.
 
-// Integer helpers
+// ---- Constants (as functions, since Mako has no const float) ----
+
+fn pi() -> float { return 3.141592653589793 }
+fn e() -> float { return 2.718281828459045 }
+fn phi() -> float { return 1.618033988749895 }
+fn sqrt2() -> float { return 1.4142135623730951 }
+fn ln2() -> float { return 0.6931471805599453 }
+fn ln10() -> float { return 2.302585092994046 }
+fn max_int() -> int { return 9223372036854775807 }
+fn min_int() -> int { return -9223372036854775807 }
+
+// ---- Integer helpers ----
+
 fn iabs(x: int) -> int { return abs(x) }
 fn imin(a: int, b: int) -> int { return min(a, b) }
 fn imax(a: int, b: int) -> int { return max(a, b) }
 fn iclamp(x: int, lo: int, hi: int) -> int { return clamp(x, lo, hi) }
 
-// Basic float operations
+// ---- Basic float operations ----
+
 fn sqrt(x: float) -> float { return math_sqrt(x) }
 fn floor(x: float) -> float { return math_floor(x) }
 fn ceil(x: float) -> float { return math_ceil(x) }
 fn round(x: float) -> float { return math_round(x) }
 fn trunc(x: float) -> float { return math_trunc(x) }
+fn fabs2(x: float) -> float { return math_abs(x) }
 fn fabs(x: float) -> float { return math_abs(x) }
+fn mod(x: float, y: float) -> float { return math_fmod(x, y) }
 fn fmod(x: float, y: float) -> float { return math_fmod(x, y) }
+fn remainder(x: float, y: float) -> float { return math_fmod(x, y) }
 
-// Powers and logarithms
+// ---- Powers and logarithms ----
+
 fn pow(x: float, y: float) -> float { return math_pow(x, y) }
 fn exp(x: float) -> float { return math_exp(x) }
 fn log(x: float) -> float { return math_log(x) }
@@ -26,7 +41,8 @@ fn log2(x: float) -> float { return math_log2(x) }
 fn log10(x: float) -> float { return math_log10(x) }
 fn hypot(x: float, y: float) -> float { return math_hypot(x, y) }
 
-// Trigonometry
+// ---- Trigonometry ----
+
 fn sin(x: float) -> float { return math_sin(x) }
 fn cos(x: float) -> float { return math_cos(x) }
 fn tan(x: float) -> float { return math_tan(x) }
@@ -35,13 +51,39 @@ fn acos(x: float) -> float { return math_acos(x) }
 fn atan(x: float) -> float { return math_atan(x) }
 fn atan2(y: float, x: float) -> float { return math_atan2(y, x) }
 
-// Float min/max/clamp
+// ---- Float min/max/clamp ----
+
 fn fmin(a: float, b: float) -> float { return math_min(a, b) }
 fn fmax(a: float, b: float) -> float { return math_max(a, b) }
 fn fclamp(x: float, lo: float, hi: float) -> float { return math_clamp(x, lo, hi) }
 
-// Classification
+// ---- Classification ----
+
 fn is_nan(x: float) -> bool { return math_is_nan(x) == 1 }
 fn is_inf(x: float) -> bool { return math_is_inf(x) == 1 }
 fn inf() -> float { return math_inf() }
 fn nan() -> float { return math_nan() }
+
+// ---- Integer math ----
+
+fn max_power_of_two(n: int) -> int {
+    var p = 1
+    while p * 2 <= n { p = p * 2 }
+    return p
+}
+
+fn gcd(a: int, b: int) -> int {
+    var x = iabs(a)
+    var y = iabs(b)
+    while y != 0 {
+        let t = y
+        y = x % y
+        x = t
+    }
+    return x
+}
+
+fn lcm(a: int, b: int) -> int {
+    if a == 0 || b == 0 { return 0 }
+    return iabs(a) / gcd(a, b) * iabs(b)
+}

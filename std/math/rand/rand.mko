@@ -1,3 +1,14 @@
+// std/math/rand — pseudo-random number generation.
+// Modeled after Go's math/rand package.
+
 fn seed(s: int) { rand_seed(s) }
 fn intn(n: int) -> int { return rand_intn(n) }
+fn float64() -> float { return rand_float() }
 fn float() -> float { return rand_float() }
+
+fn int_range(lo: int, hi: int) -> int {
+    if hi <= lo { return lo }
+    return lo + rand_intn(hi - lo)
+}
+
+// ponytail: shuffle needs mutable slice; defer to future stdlib

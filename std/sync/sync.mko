@@ -1,12 +1,31 @@
+// std/sync — synchronization primitives.
+// Modeled after Go's sync package.
+
+// ---- Mutex ----
+
 fn mutex() -> Mutex { return mutex_new() }
 fn lock(m: Mutex) { mutex_lock(m) }
 fn unlock(m: Mutex) { mutex_unlock(m) }
+
+// ---- RWMutex ----
+
 fn rwmutex() -> RWMutex { return rwmutex_new() }
 fn rlock(m: RWMutex) { rwmutex_rlock(m) }
 fn runlock(m: RWMutex) { rwmutex_runlock(m) }
 fn wlock(m: RWMutex) { rwmutex_lock(m) }
 fn wunlock(m: RWMutex) { rwmutex_unlock(m) }
+
+// ---- WaitGroup ----
+
 fn wait_group() -> WaitGroup { return wait_group_new() }
 fn add(wg: WaitGroup, n: int) { wait_group_add(wg, n) }
 fn done(wg: WaitGroup) { wait_group_done(wg) }
 fn wait(wg: WaitGroup) { wait_group_wait(wg) }
+
+// ---- Atomic ----
+
+fn atomic_new(val: int) -> int { return atomic_new(val) }
+fn atomic_load(a: int) -> int { return atomic_load(a) }
+fn atomic_store(a: int, val: int) { atomic_store(a, val) }
+fn atomic_add(a: int, delta: int) -> int { return atomic_add(a, delta) }
+fn atomic_cas(a: int, old: int, newv: int) -> int { return atomic_cas(a, old, newv) }

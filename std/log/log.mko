@@ -1,5 +1,19 @@
+// std/log — structured logging.
+
 fn info(msg: string) { log_info(msg) }
 fn warn(msg: string) { log_warn(msg) }
 fn error(msg: string) { log_error(msg) }
 fn debug(msg: string) { log_debug(msg) }
 fn kv(level: string, key: string, val: string) { log_kv(level, key, val) }
+
+// Convenience: info with key-value context
+fn info_kv(key: string, val: string) { log_kv("info", key, val) }
+fn warn_kv(key: string, val: string) { log_kv("warn", key, val) }
+fn error_kv(key: string, val: string) { log_kv("error", key, val) }
+fn debug_kv(key: string, val: string) { log_kv("debug", key, val) }
+
+// Formatted logging
+fn infof(fmt: string, arg: string) { log_info(fmt_sprintf(fmt, arg)) }
+fn warnf(fmt: string, arg: string) { log_warn(fmt_sprintf(fmt, arg)) }
+fn errorf(fmt: string, arg: string) { log_error(fmt_sprintf(fmt, arg)) }
+fn debugf(fmt: string, arg: string) { log_debug(fmt_sprintf(fmt, arg)) }
