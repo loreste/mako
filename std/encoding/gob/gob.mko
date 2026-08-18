@@ -1,10 +1,7 @@
-fn encode_string(s: string) -> string { return gob_encode_string(s) }
-fn decode_string(g: string) -> string { return gob_decode_string(g) }
+// std/encoding/gob — Go binary encoding.
 fn encode_int(v: int) -> string { return gob_encode_int(v) }
-fn decode_int(g: string) -> int { return gob_decode_int(g) }
-fn encode_map(m: map[string]string) -> string { return gob_encode_map_ss(m) }
-fn decode_map(g: string) -> map[string]string { return gob_decode_map_ss(g) }
-fn encode_struct(v: ReflectValue) -> string { return gob_encode_struct(v) }
-fn decode_struct(g: string) -> ReflectValue { return gob_decode_struct(g) }
-fn encode_strs(a: []string) -> string { return gob_encode_strs(a) }
-fn decode_strs(g: string) -> []string { return gob_decode_strs(g) }
+fn decode_int(data: string) -> int { return gob_decode_int(data) }
+fn encode_string(s: string) -> string { return gob_encode_string(s) }
+fn decode_string(data: string) -> string { return gob_decode_string(data) }
+fn encode_strs(v: []string) -> string { return gob_encode_strs(v) }
+fn decode_strs(data: string) -> []string { return gob_decode_strs(data) }

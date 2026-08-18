@@ -1,0 +1,2 @@
+// std/crypto/sha512 — SHA-512 hash.
+fn sum(data: string) -> string { return sha512(data) }

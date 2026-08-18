@@ -1,4 +1,7 @@
-// std/os/signal — seed (process signal hooks)
-fn notify_ready() -> bool {
-    return true
-}
+// std/os/signal — signal handling.
+fn notify(sig: int) -> int { return signal_notify(sig) }
+fn watch(sig: string) -> int { return signal_watch(sig) }
+fn ignore(sig: string) -> int { return signal_ignore(sig) }
+fn received() -> int { return signal_received() }
+fn fired(name: string) -> int { return signal_fired(name) }
+fn on_term() -> int { return signal_on_term() }

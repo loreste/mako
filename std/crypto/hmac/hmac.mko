@@ -1,0 +1,5 @@
+// std/crypto/hmac — HMAC message authentication.
+fn sha256(key: string, message: string) -> string { return hmac_sha256(key, message) }
+fn sha256_raw(key: string, message: string) -> string { return hmac_sha256_raw(key, message) }
+fn sha1(key: string, message: string) -> string { return hmac_sha1(key, message) }
+fn sha1_raw(key: string, message: string) -> string { return hmac_sha1_raw(key, message) }

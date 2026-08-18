@@ -1,0 +1,2 @@
+// std/embed — embed files at compile time.
+fn file(path: string) -> string { return embed_file(path) }

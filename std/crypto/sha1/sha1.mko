@@ -1,0 +1,2 @@
+// std/crypto/sha1 — SHA-1 hash (legacy, prefer SHA-256).
+fn sum(data: string) -> string { return sha1(data) }

@@ -1,0 +1,4 @@
+// std/crypto/aes — AES encryption.
+fn gcm_seal(key: string, nonce: string, plaintext: string, aad: string) -> string { return aes_gcm_seal(key, nonce, plaintext, aad) }
+fn gcm_open(key: string, nonce: string, ciphertext: string, aad: string) -> string { return aes_gcm_open(key, nonce, ciphertext, aad) }
+fn ctr(key: string, iv: string, data: string) -> string { return aes_ctr(key, iv, data) }

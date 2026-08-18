@@ -1,0 +1,4 @@
+// std/runtime — process runtime info.
+fn cpu_user_us() -> int { return process_cpu_user_us() }
+fn cpu_sys_us() -> int { return process_cpu_sys_us() }
+fn rss_bytes() -> int { return process_rss_bytes() }

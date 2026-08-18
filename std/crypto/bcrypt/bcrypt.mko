@@ -1,0 +1,4 @@
+// std/crypto/bcrypt — bcrypt password hashing.
+fn available() -> bool { return bcrypt_available() == 1 }
+fn hash(password: string, cost: int) -> string { return bcrypt_hash(password, cost) }
+fn verify(hashed: string, password: string) -> bool { return bcrypt_verify(hashed, password) == 1 }

@@ -1,0 +1,4 @@
+// std/crypto/argon2 — Argon2id password hashing.
+fn available() -> bool { return argon2_available() == 1 }
+fn hash(password: string) -> string { return argon2id_hash(password) }
+fn verify(password: string, hashed: string) -> bool { return argon2id_verify(password, hashed) == 1 }

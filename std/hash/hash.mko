@@ -1,0 +1,8 @@
+// std/hash — common hash functions.
+fn sha256(data: string) -> string { return sha256(data) }
+fn sha512(data: string) -> string { return sha512(data) }
+fn sha1(data: string) -> string { return sha1(data) }
+fn hmac_sha256(key: string, msg: string) -> string { return hmac_sha256(key, msg) }
+fn hmac_sha1(key: string, msg: string) -> string { return hmac_sha1(key, msg) }
+fn hkdf(secret: string, salt: string, info: string, length: int) -> string { return hkdf_sha256(secret, salt, info, length) }
+fn constant_eq(a: string, b: string) -> bool { return crypto_eq(a, b) == 1 }

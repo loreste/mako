@@ -1,2 +1,3 @@
-fn output(cmd: string) -> string { return exec_output(cmd) }
+// std/os/exec — run external commands.
 fn run(cmd: string) -> int { return exec_run(cmd) }
+fn output(cmd: string) -> string { return exec_output(cmd) }

@@ -1,0 +1,3 @@
+// std/crypto/sha256 — SHA-256 hash.
+fn sum(data: string) -> string { return sha256(data) }
+fn sum_raw(data: string) -> string { return sha256_raw(data) }
