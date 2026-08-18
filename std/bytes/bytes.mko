@@ -1,5 +1,40 @@
+// std/bytes — byte buffer and byte-level operations.
+// Modeled after Go's bytes package.
+
+// ---- Buffer ----
+
 fn buffer() -> BytesBuffer { return bytes_buffer() }
 fn write(b: BytesBuffer, s: string) { bytes_buffer_write(b, s) }
 fn string(b: BytesBuffer) -> string { return bytes_buffer_string(b) }
-fn len(b: BytesBuffer) -> int { return bytes_buffer_len(b) }
+fn buf_len(b: BytesBuffer) -> int { return bytes_buffer_len(b) }
 fn reset(b: BytesBuffer) { bytes_buffer_reset(b) }
+
+// ---- Byte slice operations ----
+
+fn to_hex(data: string) -> string { return bytes_to_hex(data) }
+fn as_str(data: []byte) -> string { return bytes_as_str(data) }
+fn view(s: string, start: int, end: int) -> []byte { return bytes_view(s, start, end) }
+fn is_view(data: []byte) -> bool { return bytes_is_view(data) == 1 }
+
+// ---- Search ----
+
+fn contains(data: string, sub: string) -> bool { return str_contains(data, sub) }
+fn has_prefix(data: string, prefix: string) -> bool { return str_has_prefix(data, prefix) }
+fn has_suffix(data: string, suffix: string) -> bool { return str_has_suffix(data, suffix) }
+fn index(data: string, sub: string) -> int { return str_index(data, sub) }
+fn count(data: string, sub: string) -> int { return str_count(data, sub) }
+
+// ---- Transform ----
+
+fn to_lower(data: string) -> string { return str_to_lower(data) }
+fn to_upper(data: string) -> string { return str_to_upper(data) }
+fn trim_space(data: string) -> string { return str_trim_space(data) }
+fn repeat(data: string, n: int) -> string { return str_repeat(data, n) }
+fn replace(data: string, old: string, newv: string) -> string { return str_replace(data, old, newv) }
+
+// ---- Compare ----
+
+fn equal(a: string, b: string) -> bool { return a == b }
+fn equal_fold(a: string, b: string) -> bool {
+    return str_to_lower(a) == str_to_lower(b)
+}

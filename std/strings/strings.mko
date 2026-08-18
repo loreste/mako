@@ -1,18 +1,50 @@
-// std/strings — wrappers so `import "strings"` → `strings.split(...)` etc.
+// std/strings — Go-compatible string operations.
+
+// ---- Search ----
+
 fn contains(hay: string, needle: string) -> bool { return str_contains(hay, needle) }
 fn has_prefix(s: string, pref: string) -> bool { return str_has_prefix(s, pref) }
 fn has_suffix(s: string, suf: string) -> bool { return str_has_suffix(s, suf) }
 fn index(hay: string, needle: string) -> int { return str_index(hay, needle) }
 fn last_index(hay: string, needle: string) -> int { return str_last_index(hay, needle) }
-fn trim(s: string, cutset: string) -> string { return str_trim(s, cutset) }
-fn trim_space(s: string) -> string { return str_trim_space(s) }
+fn count(s: string, sub: string) -> int { return str_count(s, sub) }
+
+fn index_byte(s: string, b: int) -> int {
+    var i = 0
+    while i < str_len(s) {
+        if str_byte_at(s, i) == b { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn equal_fold(a: string, b: string) -> bool {
+    return str_to_lower(a) == str_to_lower(b)
+}
+
+// ---- Transform ----
+
 fn to_lower(s: string) -> string { return str_to_lower(s) }
 fn to_upper(s: string) -> string { return str_to_upper(s) }
 fn repeat(s: string, n: int) -> string { return str_repeat(s, n) }
 fn replace(s: string, old: string, newv: string) -> string { return str_replace(s, old, newv) }
+fn replace_all(s: string, old: string, newv: string) -> string { return str_replace(s, old, newv) }
+
+// ---- Trim ----
+
+fn trim(s: string, cutset: string) -> string { return str_trim(s, cutset) }
+fn trim_space(s: string) -> string { return str_trim_space(s) }
+fn trim_left(s: string, cutset: string) -> string { return str_trim_left(s, cutset) }
+fn trim_right(s: string, cutset: string) -> string { return str_trim_right(s, cutset) }
+
+// ---- Split / Join ----
+
 fn split(s: string, sep: string) -> []string { return str_split(s, sep) }
 fn fields(s: string) -> []string { return str_fields(s) }
 fn concat(parts: []string, sep: string) -> string { return str_join(parts, sep) }
+fn join_parts(parts: []string, sep: string) -> string { return str_join(parts, sep) }
 fn cut(s: string, sep: string) -> []string { return str_cut(s, sep) }
-fn count(s: string, sub: string) -> int { return str_count(s, sub) }
+
+// ---- Builder ----
+
 fn builder() -> StrBuilder { return str_builder() }

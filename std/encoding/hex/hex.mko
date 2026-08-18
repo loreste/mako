@@ -1,2 +1,12 @@
+// std/encoding/hex — hexadecimal encoding/decoding.
+// Modeled after Go's encoding/hex package.
+
 fn encode(s: string) -> string { return hex_encode(s) }
 fn decode(s: string) -> string { return hex_decode(s) }
+fn encode_to_string(s: string) -> string { return hex_encode(s) }
+fn decode_string(s: string) -> string { return hex_decode(s) }
+
+fn encoded_len(n: int) -> int { return n * 2 }
+fn decoded_len(n: int) -> int { return n / 2 }
+
+fn dump(data: string) -> string { return hex_encode(data) }
