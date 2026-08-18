@@ -36,14 +36,14 @@ fn size(path: string) -> int { return path_file_size(path) }
 
 // ---- File descriptor operations ----
 
-fn open(path: string, flags: int) -> int { return file_open(path, flags) }
+fn open(path: string, mode: int) -> int { return file_open(path, mode, 0) }
 fn close(fd: int) -> int { return file_close(fd) }
-fn seek(fd: int, offset: int) -> int { return file_seek(fd, offset) }
+fn seek(fd: int, offset: int) -> int { return file_seek(fd, offset, 0) }
 fn truncate(fd: int, size: int) -> int { return file_truncate(fd, size) }
 fn sync(fd: int) -> int { return fsync(fd) }
 fn fsize(fd: int) -> int { return file_size(fd) }
 fn pread_at(fd: int, offset: int, n: int) -> string { return pread(fd, offset, n) }
-fn pwrite_at(fd: int, offset: int, data: string) -> int { return pwrite(fd, offset, data) }
+fn pwrite_at(fd: int, offset: int, data: string) -> int { return pwrite(fd, data, offset) }
 fn read_exact(fd: int, n: int) -> string { return file_read_exact(fd, n) }
 
 // ---- Directory operations ----
