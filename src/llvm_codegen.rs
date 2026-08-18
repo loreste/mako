@@ -912,6 +912,48 @@ fn emit_instruction<'ctx>(
             };
             values.insert(*out, result.into());
         }
+        Inst::StringCompare {
+            out,
+            left,
+            right,
+            op,
+        } => {
+            let string_type = llvm_type(context, Type::Str);
+            let compare_function = external_function(
+                module,
+                "mako_native_str_compare",
+                context
+                    .i64_type()
+                    .fn_type(&[string_type.into(), string_type.into()], false),
+            );
+            let cmp_val = builder
+                .build_call(
+                    compare_function,
+                    &[values[left].into(), values[right].into()],
+                    "string.compare",
+                )
+                .map_err(builder_error)?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| LlvmError::new("string compare returned void"))?
+                .into_int_value();
+            let pred = match op {
+                BinOp::Lt => IntPredicate::SLT,
+                BinOp::Le => IntPredicate::SLE,
+                BinOp::Gt => IntPredicate::SGT,
+                BinOp::Ge => IntPredicate::SGE,
+                _ => IntPredicate::EQ,
+            };
+            let result = builder
+                .build_int_compare(
+                    pred,
+                    cmp_val,
+                    context.i64_type().const_zero(),
+                    "string.cmp.result",
+                )
+                .map_err(builder_error)?;
+            values.insert(*out, result.into());
+        }
         Inst::PrintString { value } => {
             let string_type = llvm_type(context, Type::Str);
             let print = external_function(

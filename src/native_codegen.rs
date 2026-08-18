@@ -910,6 +910,7 @@ pub fn compile_ir_with_overflow(
     let string_clone = declare_string_ptr_fn(&mut module, "mako_native_string_clone_ptr", 1, true)?;
     let string_concat = declare_string_ptr_fn(&mut module, "mako_native_string_concat_ptr", 2, true)?;
     let string_equal = declare_bool_return_fn(&mut module, "mako_native_string_equal_ptr", 2)?;
+    let string_compare = declare_string_ptr_fn(&mut module, "mako_native_str_compare_ptr", 2, true)?;
     let string_print = declare_void_ptr_fn(&mut module, "mako_native_string_print_ptr", 1)?;
     let string_drop = declare_void_ptr_fn(&mut module, "mako_native_string_drop_ptr", 1)?;
     let int_to_string =
@@ -1350,6 +1351,21 @@ pub fn compile_ir_with_overflow(
                         let call = fb.ins().call(reference, &[vals[left], vals[right]]);
                         let result = fb.inst_results(call)[0];
                         vals.insert(*out, if *negated { fb.ins().bxor_imm(result, 1) } else { result });
+                    }
+                    IrInst::StringCompare { out, left, right, op } => {
+                        let reference = module.declare_func_in_func(string_compare, &mut fb.func);
+                        let call = fb.ins().call(reference, &[vals[left], vals[right]]);
+                        let cmp_val = fb.inst_results(call)[0];
+                        let zero = fb.ins().iconst(types::I64, 0);
+                        let cc = match op {
+                            BinOp::Lt => IntCC::SignedLessThan,
+                            BinOp::Le => IntCC::SignedLessThanOrEqual,
+                            BinOp::Gt => IntCC::SignedGreaterThan,
+                            BinOp::Ge => IntCC::SignedGreaterThanOrEqual,
+                            _ => IntCC::Equal,
+                        };
+                        let result = fb.ins().icmp(cc, cmp_val, zero);
+                        vals.insert(*out, result);
                     }
                     IrInst::PrintString { value } => {
                         let reference = module.declare_func_in_func(string_print, &mut fb.func);
