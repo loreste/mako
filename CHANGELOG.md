@@ -2,6 +2,79 @@
 
 ## Unreleased
 
+## 0.5.7 — 2026-08-18 (stdlib expansion, string ops, Go parity push)
+
+### Compiler
+
+- **`str_slice(s, start, end)` builtin** — substring extraction, both backends.
+- **String comparison operators** — `<`, `>`, `<=`, `>=` via strcmp.
+- **`str_compare(a, b)` builtin** — returns -1/0/1.
+
+### Standard library (wave 3 — remaining memory-safe surface)
+
+- **New packs:** `crypto/rand` (CSPRNG over `random_bytes`), `crypto/hkdf`
+  (RFC 5869 SHA-256 C), `crypto/pbkdf2` (HMAC-SHA256 C), `testing/quick`
+  (seeded property checks; predicates return `int` 1/0 — native cannot
+  lower `fn(...) -> bool` callbacks), `testing/fstest` (in-memory MapFS;
+  empty names rejected), `testing/slogtest`, `image` (Point / half-open
+  Rectangle), `regexp/syntax` (literal/meta + `quote`),
+  `net/http/httptrace` (event log).
+- **Filled:** `context.with_value` / `value` (string-pair chain; later
+  key shadows; packed `key\\tval\\n` so it persists across backends),
+  `math/rand.shuffle` / `perm`, `time.load_location` / `in_named` /
+  `location_known` (fixed-offset table, not IANA tzdb).
+- **Tests:** `stdlib_parity_wave3_test` (C + native) — HKDF RFC 5869 A.1,
+  EST = −18000, perm is a permutation of `0..n-1`, context shadow,
+  image half-open bounds, fstest overwrite/empty name.
+- **stdlib-gate:** 144 package files type-check.
+
+### Standard library (gap close — memory-safe, low-latency)
+
+Closed the remaining application-stdlib gaps that can stay memory-safe.
+Compress/hash hot paths are C (zlib/flate/LZW/SHA3/MD5). No `unsafe`,
+`weak`, `go/*`, or `debug/*` binary parsers.
+
+- **compress:** `flate` (raw DEFLATE), `zlib` (RFC 1950), `lzw` (9–12 bit),
+  `bzip2` (optional libbz2).
+- **crypto:** `md5`, `sha3` (SHA3-256), `subtle` (constant-time eq),
+  `ecdsa` (ES256), `rsa` (RS256 verify + DigestInfo).
+- **Also:** `math/big.Rat`, `hash/crc64`, `hash/maphash`, `expvar`,
+  `unique`, `iter`, `image/color`, `image/draw`, `net/textproto`,
+  `net/rpc` (JSON-RPC 2.0), `net/http/cookiejar`, `net/http/httputil`,
+  `testing/iotest`, `encoding/asn1` (DER integers), `log/syslog` (PRI lines).
+- **Tests:** `stdlib_parity_gap_test`, `stdlib_parity_adversarial_test` (C + native).
+- **Adversarial fixes:** CRC-64 moved to C (Mako `uint64` `>>` is arithmetic on
+  the sign bit, so a bit-by-bit CRC in Mako cannot match Go). Cookie jar
+  refuses single-label hosts (`com` no longer matches `ex.com`). JSON-RPC
+  escapes `"` / `\` in method/message. `rsa.can_sign()` is 0 (verify only).
+  `unique` documents content-set, not pointer identity. ASN.1 uses `[]byte`
+  so 0x80–0xFF are not UTF-8. LZW no longer inserts a prefix-`-1` entry for
+  the first byte.
+
+### Standard library (Go-equivalent wave)
+
+Mako-shaped equivalents of the Go standard library — snake_case, no
+panic-on-OOB, `Result` instead of nil. Not a syntax clone.
+
+- **New packs:** `cmp`, `math/bits`, `math/cmplx`, `math/big`,
+  `unicode/utf16`, `encoding/ascii85`, `encoding/pem`,
+  `mime/quotedprintable`, `hash/crc32`, `hash/adler32`, `hash/fnv`,
+  `text/tabwriter`, `text/scanner`, `io/fs`, `os/env`, `os/user`,
+  `net/netip`, `index/suffixarray`.
+- **Filled gaps:** `strings` (cut/split_n/fields_fn/quote-adjacent
+  search), `bytes` ([]byte index/compare/clone), `slices`
+  (binary_search/compact/insert/delete), `path`/`filepath` (glob
+  `matches`, rel/abs/volume), `io` (Limit/Section/copy_n), `os`
+  (expand_env/lookup/uid/home), `strconv` (quote/unquote), `time`
+  (`parse_duration`), `bufio.scan_lines`, `sync.once`, `net`
+  host/port, `maps.has_key`/`remove`, `sort.search_*`.
+- **Tests:** `stdlib_parity_core_test`, `stdlib_parity_packs_test`,
+  `stdlib_parity_io_test`, `stdlib_parity_os_test`,
+  `stdlib_parity_net_test`, `stdlib_parity_time_sync_test`.
+- **Out of scope on purpose:** `unsafe`, `go/*` toolchain, `debug/*`
+  binary formats, `weak` (GC), `compress/{flate,zlib,bzip2,lzw}`
+  (need codecs), public-key `crypto/{rsa,ecdsa}` product surface.
+
 ## 0.5.6 — 2026-08-17 (native backend ownership fix)
 
 ### Bug fixes
