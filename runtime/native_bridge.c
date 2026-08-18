@@ -8187,6 +8187,52 @@ MakoNativeString *mako_native_gzip_compress_ptr(MakoNativeString *a0) {
     return ret;
 }
 
+MakoNativeString *mako_native_flate_compress_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_flate_compress(bridge_borrow_str(a0)));
+}
+MakoNativeString *mako_native_flate_decompress_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_flate_decompress(bridge_borrow_str(a0)));
+}
+int64_t mako_native_flate_available(void) { return mako_flate_available(); }
+
+MakoNativeString *mako_native_zlib_compress_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_zlib_compress(bridge_borrow_str(a0)));
+}
+MakoNativeString *mako_native_zlib_decompress_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_zlib_decompress(bridge_borrow_str(a0)));
+}
+int64_t mako_native_zlib_available(void) { return mako_zlib_available(); }
+
+MakoNativeString *mako_native_bzip2_compress_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_bzip2_compress(bridge_borrow_str(a0)));
+}
+MakoNativeString *mako_native_bzip2_decompress_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_bzip2_decompress(bridge_borrow_str(a0)));
+}
+int64_t mako_native_bzip2_available(void) { return mako_bzip2_available(); }
+
+MakoNativeString *mako_native_lzw_compress_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_lzw_compress(bridge_borrow_str(a0)));
+}
+MakoNativeString *mako_native_lzw_decompress_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_lzw_decompress(bridge_borrow_str(a0)));
+}
+
+MakoNativeString *mako_native_sha3_256_hex_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_sha3_256_hex(bridge_borrow_str(a0)));
+}
+MakoNativeString *mako_native_sha3_256_raw_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_sha3_256_raw(bridge_borrow_str(a0)));
+}
+
+MakoNativeString *mako_native_md5_hex_ptr(MakoNativeString *a0) {
+    return bridge_take_str(mako_sip_md5_hex(bridge_borrow_str(a0)));
+}
+
+int64_t mako_native_crc64_ecma(MakoNativeString *a0) {
+    return (int64_t)mako_crc64_ecma(bridge_borrow_str(a0));
+}
+
 int64_t mako_native_rand_intn(int64_t a0) {
     int64_t ret=(int64_t)mako_rand_intn(a0);
     return ret;

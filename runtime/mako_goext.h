@@ -6530,3 +6530,383 @@ static inline void mako_map_bb_free(MakoMapBB *m) {
     free(m->vals);
     free(m);
 }
+
+/* CRC-64/ECMA as used by Go hash/crc64 (poly 0xC96C5795D7870F42). */
+static inline uint64_t mako_crc64_ecma(MakoString s) {
+    static const uint64_t poly = 0xC96C5795D7870F42ULL;
+    uint64_t crc = ~0ULL;
+    const unsigned char *p = (const unsigned char *)(s.data ? s.data : "");
+    size_t n = s.len;
+    for (size_t i = 0; i < n; i++) {
+        crc ^= (uint64_t)p[i];
+        for (int b = 0; b < 8; b++) {
+            if (crc & 1ULL)
+                crc = (crc >> 1) ^ poly;
+            else
+                crc >>= 1;
+        }
+    }
+    return ~crc;
+}
+
+/* ---- compress/flate (raw DEFLATE, RFC 1951) — zlib when linked ---- */
+static inline MakoString mako_flate_compress(MakoString s) {
+    unsigned char *out = NULL;
+    size_t outlen = 0;
+    const unsigned char *in = (const unsigned char *)(s.data ? s.data : "");
+    if (mako_zip_deflate_raw(in, s.len, &out, &outlen) != 0 || !out)
+        return mako_str_from_cstr("");
+    return (MakoString){(char *)out, outlen};
+}
+
+static inline MakoString mako_flate_decompress(MakoString s) {
+    unsigned char *out = NULL;
+    size_t outlen = 0;
+    const unsigned char *in = (const unsigned char *)(s.data ? s.data : "");
+    if (mako_zip_inflate_raw(in, s.len, &out, &outlen, s.len * 4 + 64) != 0 || !out)
+        return mako_str_from_cstr("");
+    return (MakoString){(char *)out, outlen};
+}
+
+static inline int64_t mako_flate_available(void) {
+    return mako_zip_deflate_available();
+}
+
+/* zlib wrapper is gzip_compress/uncompress (RFC 1950). Alias for naming. */
+static inline MakoString mako_zlib_compress(MakoString s) { return mako_gzip_compress(s); }
+static inline MakoString mako_zlib_decompress(MakoString s) { return mako_gzip_decompress(s); }
+static inline int64_t mako_zlib_available(void) { return mako_gzip_available(); }
+
+/* ---- compress/bzip2 (libbz2 when linked) ---- */
+static inline int64_t mako_bzip2_available(void) {
+#if defined(MAKO_BZ2) || defined(MAKO_HAS_BZ2)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+static inline MakoString mako_bzip2_compress(MakoString s) {
+#if defined(MAKO_BZ2) || defined(MAKO_HAS_BZ2)
+    unsigned int dest_len = (unsigned int)(s.len + s.len / 100 + 600);
+    if (dest_len < 256) dest_len = 256;
+    char *out = (char *)malloc(dest_len + 1);
+    if (!out) return mako_str_from_cstr("");
+    unsigned int n = dest_len;
+    int rc = BZ2_bzBuffToBuffCompress(out, &n, (char *)(s.data ? s.data : ""),
+                                      (unsigned int)s.len, 9, 0, 30);
+    if (rc != BZ_OK) { free(out); return mako_str_from_cstr(""); }
+    out[n] = 0;
+    return (MakoString){out, (size_t)n};
+#else
+    (void)s;
+    return mako_str_from_cstr("");
+#endif
+}
+
+static inline MakoString mako_bzip2_decompress(MakoString s) {
+#if defined(MAKO_BZ2) || defined(MAKO_HAS_BZ2)
+    unsigned int dest_len = (unsigned int)(s.len * 8 + 256);
+    if (dest_len < 256) dest_len = 256;
+    for (int attempt = 0; attempt < 6; attempt++) {
+        char *out = (char *)malloc((size_t)dest_len + 1);
+        if (!out) return mako_str_from_cstr("");
+        unsigned int n = dest_len;
+        int rc = BZ2_bzBuffToBuffDecompress(out, &n, (char *)(s.data ? s.data : ""),
+                                            (unsigned int)s.len, 0, 0);
+        if (rc == BZ_OK) {
+            out[n] = 0;
+            return (MakoString){out, (size_t)n};
+        }
+        free(out);
+        if (rc != BZ_OUTBUFF_FULL) return mako_str_from_cstr("");
+        dest_len *= 2;
+    }
+    return mako_str_from_cstr("");
+#else
+    (void)s;
+    return mako_str_from_cstr("");
+#endif
+}
+
+/* ---- SHA3-256 (Keccak-f[1600], FIPS 202) ---- */
+static inline void mako_keccakf(uint64_t st[25]) {
+    static const uint64_t RC[24] = {
+        0x0000000000000001ULL, 0x0000000000008082ULL, 0x800000000000808aULL,
+        0x8000000080008000ULL, 0x000000000000808bULL, 0x0000000080000001ULL,
+        0x8000000080008081ULL, 0x8000000000008009ULL, 0x000000000000008aULL,
+        0x0000000000000088ULL, 0x0000000080008009ULL, 0x000000008000000aULL,
+        0x000000008000808bULL, 0x800000000000008bULL, 0x8000000000008089ULL,
+        0x8000000000008003ULL, 0x8000000000008002ULL, 0x8000000000000080ULL,
+        0x000000000000800aULL, 0x800000008000000aULL, 0x8000000080008081ULL,
+        0x8000000000008080ULL, 0x0000000080000001ULL, 0x8000000080008008ULL};
+    static const int ROT[24] = {
+        1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 2, 14,
+        27, 41, 56, 8, 25, 43, 62, 18, 39, 61, 20, 44};
+    static const int PIL[24] = {
+        10, 7, 11, 17, 18, 3, 5, 16, 8, 21, 24, 4,
+        15, 23, 19, 13, 12, 2, 20, 14, 22, 9, 6, 1};
+    for (int round = 0; round < 24; round++) {
+        uint64_t bc[5];
+        for (int i = 0; i < 5; i++)
+            bc[i] = st[i] ^ st[i + 5] ^ st[i + 10] ^ st[i + 15] ^ st[i + 20];
+        for (int i = 0; i < 5; i++) {
+            uint64_t t = bc[(i + 4) % 5] ^ ((bc[(i + 1) % 5] << 1) | (bc[(i + 1) % 5] >> 63));
+            for (int j = 0; j < 25; j += 5) st[j + i] ^= t;
+        }
+        uint64_t t = st[1];
+        for (int i = 0; i < 24; i++) {
+            int j = PIL[i];
+            bc[0] = st[j];
+            st[j] = (t << ROT[i]) | (t >> (64 - ROT[i]));
+            t = bc[0];
+        }
+        for (int j = 0; j < 25; j += 5) {
+            for (int i = 0; i < 5; i++) bc[i] = st[j + i];
+            for (int i = 0; i < 5; i++)
+                st[j + i] = bc[i] ^ ((~bc[(i + 1) % 5]) & bc[(i + 2) % 5]);
+        }
+        st[0] ^= RC[round];
+    }
+}
+
+static inline MakoString mako_sha3_256_raw(MakoString s) {
+    uint64_t st[25];
+    memset(st, 0, sizeof(st));
+    const uint8_t *in = (const uint8_t *)(s.data ? s.data : "");
+    size_t len = s.len;
+    const size_t rsiz = 136; /* 1088-bit rate / 8 */
+    uint8_t temp[200];
+    memset(temp, 0, sizeof(temp));
+    while (len >= rsiz) {
+        for (size_t i = 0; i < rsiz; i++)
+            ((uint8_t *)st)[i] ^= in[i];
+        mako_keccakf(st);
+        in += rsiz;
+        len -= rsiz;
+    }
+    memcpy(temp, in, len);
+    temp[len++] = 0x06; /* SHA3 domain */
+    temp[rsiz - 1] |= 0x80;
+    for (size_t i = 0; i < rsiz; i++)
+        ((uint8_t *)st)[i] ^= temp[i];
+    mako_keccakf(st);
+    char *out = (char *)malloc(33);
+    if (!out) return mako_str_from_cstr("");
+    memcpy(out, st, 32);
+    out[32] = 0;
+    return (MakoString){out, 32};
+}
+
+static inline MakoString mako_sha3_256_hex(MakoString s) {
+    MakoString raw = mako_sha3_256_raw(s);
+    char *hex = (char *)malloc(65);
+    if (!hex) { mako_str_free(raw); return mako_str_from_cstr(""); }
+    static const char *h = "0123456789abcdef";
+    const uint8_t *p = (const uint8_t *)(raw.data ? raw.data : "");
+    for (int i = 0; i < 32; i++) {
+        hex[i * 2] = h[(p[i] >> 4) & 0xf];
+        hex[i * 2 + 1] = h[p[i] & 0xf];
+    }
+    hex[64] = 0;
+    mako_str_free(raw);
+    return (MakoString){hex, 64};
+}
+
+/* ---- LZW (GIF-style 9–12 bit codes, 8-bit alphabet) ---- */
+static inline int mako_lzw_put(uint8_t **out, size_t *olen, size_t *cap,
+                               uint32_t *acc, int *accbits, int nbits, int code) {
+    *acc |= ((uint32_t)code) << *accbits;
+    *accbits += nbits;
+    while (*accbits >= 8) {
+        if (*olen + 1 >= *cap) {
+            *cap *= 2;
+            uint8_t *nbuf = (uint8_t *)realloc(*out, *cap);
+            if (!nbuf) return -1;
+            *out = nbuf;
+        }
+        (*out)[(*olen)++] = (uint8_t)(*acc & 0xff);
+        *acc >>= 8;
+        *accbits -= 8;
+    }
+    return 0;
+}
+
+static inline int mako_lzw_get(const uint8_t *in, size_t n, size_t *ip,
+                               uint32_t *acc, int *accbits, int nbits) {
+    while (*accbits < nbits) {
+        if (*ip >= n) return -1;
+        *acc |= ((uint32_t)in[(*ip)++]) << *accbits;
+        *accbits += 8;
+    }
+    int code = (int)(*acc & ((1u << nbits) - 1));
+    *acc >>= nbits;
+    *accbits -= nbits;
+    return code;
+}
+
+static inline int mako_lzw_first(const int *prefix, int code) {
+    int guard = 0;
+    while (code >= 256) {
+        if (code >= 4096 || guard++ > 4096) return -1;
+        code = prefix[code];
+        if (code < 0) return -1;
+    }
+    return code;
+}
+
+static inline int mako_lzw_emit(uint8_t **out, size_t *olen, size_t *cap,
+                                const int *prefix, const int *suff, int next, int code) {
+    uint8_t stack[4096];
+    int sp = 0;
+    int guard = 0;
+    while (code >= 256) {
+        if (code >= next || sp >= 4095 || guard++ > 4096) return -1;
+        stack[sp++] = (uint8_t)suff[code];
+        code = prefix[code];
+        if (code < 0) return -1;
+    }
+    stack[sp++] = (uint8_t)code;
+    while (sp > 0) {
+        if (*olen + 1 >= *cap) {
+            *cap *= 2;
+            uint8_t *nbuf = (uint8_t *)realloc(*out, *cap);
+            if (!nbuf) return -1;
+            *out = nbuf;
+        }
+        (*out)[(*olen)++] = stack[--sp];
+    }
+    return 0;
+}
+
+static inline MakoString mako_lzw_compress(MakoString s) {
+    const uint8_t *in = (const uint8_t *)(s.data ? s.data : "");
+    size_t n = s.len;
+    size_t cap = n + n / 2 + 64;
+    if (cap < 64) cap = 64;
+    uint8_t *out = (uint8_t *)malloc(cap);
+    if (!out) return mako_str_from_cstr("");
+    size_t olen = 0;
+    uint32_t acc = 0;
+    int accbits = 0;
+    int nbits = 9;
+    int next = 258;
+    int prefix[4096];
+    int suff[4096];
+    for (int i = 0; i < 256; i++) { prefix[i] = -1; suff[i] = i; }
+    if (mako_lzw_put(&out, &olen, &cap, &acc, &accbits, nbits, 256) != 0) {
+        free(out);
+        return mako_str_from_cstr("");
+    }
+    int w = -1;
+    for (size_t i = 0; i < n; i++) {
+        int c = in[i];
+        int found = -1;
+        if (w >= 0) {
+            for (int k = 258; k < next; k++) {
+                if (prefix[k] == w && suff[k] == c) { found = k; break; }
+            }
+        }
+        if (found >= 0) {
+            w = found;
+        } else {
+            if (w >= 0) {
+                if (mako_lzw_put(&out, &olen, &cap, &acc, &accbits, nbits, w) != 0) {
+                    free(out);
+                    return mako_str_from_cstr("");
+                }
+                if (next < 4096) {
+                    prefix[next] = w;
+                    suff[next] = c;
+                    next++;
+                    if (next == (1 << nbits) && nbits < 12) nbits++;
+                }
+            }
+            w = c;
+        }
+    }
+    if (w >= 0) {
+        if (mako_lzw_put(&out, &olen, &cap, &acc, &accbits, nbits, w) != 0) {
+            free(out);
+            return mako_str_from_cstr("");
+        }
+    }
+    if (mako_lzw_put(&out, &olen, &cap, &acc, &accbits, nbits, 257) != 0) {
+        free(out);
+        return mako_str_from_cstr("");
+    }
+    if (accbits > 0) {
+        if (olen + 1 >= cap) {
+            cap += 8;
+            uint8_t *nbuf = (uint8_t *)realloc(out, cap);
+            if (!nbuf) { free(out); return mako_str_from_cstr(""); }
+            out = nbuf;
+        }
+        out[olen++] = (uint8_t)(acc & 0xff);
+    }
+    return (MakoString){(char *)out, olen};
+}
+
+static inline MakoString mako_lzw_decompress(MakoString s) {
+    const uint8_t *in = (const uint8_t *)(s.data ? s.data : "");
+    size_t n = s.len;
+    size_t ip = 0;
+    uint32_t acc = 0;
+    int accbits = 0;
+    int nbits = 9;
+    int next = 258;
+    int prefix[4096];
+    int suff[4096];
+    for (int i = 0; i < 256; i++) { prefix[i] = -1; suff[i] = i; }
+    size_t cap = n * 4 + 64;
+    if (cap < 64) cap = 64;
+    uint8_t *out = (uint8_t *)malloc(cap);
+    if (!out) return mako_str_from_cstr("");
+    size_t olen = 0;
+    int prev = -1;
+    for (;;) {
+        int code = mako_lzw_get(in, n, &ip, &acc, &accbits, nbits);
+        if (code < 0) break;
+        if (code == 256) {
+            next = 258;
+            nbits = 9;
+            prev = -1;
+            continue;
+        }
+        if (code == 257) break;
+        int fb;
+        if (code < next) {
+            if (mako_lzw_emit(&out, &olen, &cap, prefix, suff, next, code) != 0) {
+                free(out);
+                return mako_str_from_cstr("");
+            }
+            fb = mako_lzw_first(prefix, code);
+        } else if (code == next && prev >= 0) {
+            fb = mako_lzw_first(prefix, prev);
+            if (fb < 0) { free(out); return mako_str_from_cstr(""); }
+            if (mako_lzw_emit(&out, &olen, &cap, prefix, suff, next, prev) != 0) {
+                free(out);
+                return mako_str_from_cstr("");
+            }
+            if (olen + 1 >= cap) {
+                cap *= 2;
+                uint8_t *nbuf = (uint8_t *)realloc(out, cap);
+                if (!nbuf) { free(out); return mako_str_from_cstr(""); }
+                out = nbuf;
+            }
+            out[olen++] = (uint8_t)fb;
+        } else {
+            free(out);
+            return mako_str_from_cstr("");
+        }
+        if (fb < 0) { free(out); return mako_str_from_cstr(""); }
+        if (prev >= 0 && next < 4096) {
+            prefix[next] = prev;
+            suff[next] = fb;
+            next++;
+            if (next == (1 << nbits) && nbits < 12) nbits++;
+        }
+        prev = (code < next) ? code : (next - 1);
+    }
+    return (MakoString){(char *)out, olen};
+}

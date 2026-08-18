@@ -2602,7 +2602,10 @@ impl Codegen {
         "grpc_http2_unary", "grpc_http2_unary_payload", "grpc_http2_unary_response_status",
         "grpc_message_payload", "grpc_service_handle", "grpc_service_methods",
         "grpc_service_name", "grpc_status_trailer", "grpc_unary_name", "gzip_compress",
-        "gzip_decompress", "h3_stream_authority", "h3_stream_body", "h3_stream_method",
+        "gzip_decompress", "flate_compress", "flate_decompress", "zlib_compress",
+        "zlib_decompress", "bzip2_compress", "bzip2_decompress", "lzw_compress",
+        "lzw_decompress", "sha3_256_hex", "sha3_256_raw", "md5_hex",
+        "h3_stream_authority", "h3_stream_body", "h3_stream_method",
         "h3_stream_path", "h3_stream_read", "hex_to_bytes", "hkdf_sha256", "hmac_sha1",
         "hmac_sha1_raw", "hmac_sha256", "hmac_sha256_raw", "hpack_decoded_name",
         "hpack_decoded_value", "hpack_dyn_name", "hpack_dyn_name_at", "hpack_dyn_value",
@@ -25872,6 +25875,88 @@ impl Codegen {
                         }
                         "gzip_available" => {
                             return ("int64_t".into(), "mako_gzip_available()".into());
+                        }
+                        "flate_compress" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("fl");
+                            self.line(&format!("MakoString {tmp} = mako_flate_compress({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "flate_decompress" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("fld");
+                            self.line(&format!("MakoString {tmp} = mako_flate_decompress({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "flate_available" => {
+                            return ("int64_t".into(), "mako_flate_available()".into());
+                        }
+                        "zlib_compress" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("zl");
+                            self.line(&format!("MakoString {tmp} = mako_zlib_compress({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "zlib_decompress" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("zld");
+                            self.line(&format!("MakoString {tmp} = mako_zlib_decompress({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "zlib_available" => {
+                            return ("int64_t".into(), "mako_zlib_available()".into());
+                        }
+                        "bzip2_compress" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("bz");
+                            self.line(&format!("MakoString {tmp} = mako_bzip2_compress({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "bzip2_decompress" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("bzd");
+                            self.line(&format!("MakoString {tmp} = mako_bzip2_decompress({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "bzip2_available" => {
+                            return ("int64_t".into(), "mako_bzip2_available()".into());
+                        }
+                        "lzw_compress" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("lzw");
+                            self.line(&format!("MakoString {tmp} = mako_lzw_compress({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "lzw_decompress" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("lzwd");
+                            self.line(&format!("MakoString {tmp} = mako_lzw_decompress({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sha3_256_hex" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("s3");
+                            self.line(&format!("MakoString {tmp} = mako_sha3_256_hex({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "sha3_256_raw" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("s3r");
+                            self.line(&format!("MakoString {tmp} = mako_sha3_256_raw({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "md5_hex" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("md5");
+                            self.line(&format!("MakoString {tmp} = mako_sip_md5_hex({s});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "crc64_ecma" => {
+                            let (_, s) = self.emit_expr(&args[0]);
+                            return (
+                                "int64_t".into(),
+                                format!("(int64_t)mako_crc64_ecma({s})"),
+                            );
                         }
                         "tar_write_file" => {
                             let (_, p) = self.emit_expr(&args[0]);
