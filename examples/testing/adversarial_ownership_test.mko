@@ -1,0 +1,124 @@
+// Adversarial ownership tests for the native backend.
+
+fn pass_through(s: string) -> string {
+    return s + ""
+}
+
+fn chain_a(s: string) -> string { return pass_through(s) }
+fn chain_b(s: string) -> string { return chain_a(s) }
+fn chain_c(s: string) -> string { return chain_b(s) }
+
+fn consume_slice(parts: []string) -> int {
+    let copy = strings_copy(parts)
+    return len(copy)
+}
+
+fn TestDeepChain() {
+    let s = "hello" + " " + "world"
+    let r = chain_c(s)
+    assert_eq_str(r, "hello world")
+    assert_eq_str(s, "hello world")
+}
+
+fn TestDoublePassSameLocal() {
+    let s = "test" + "ing"
+    let a = pass_through(s)
+    let b = pass_through(s)
+    assert_eq_str(a, "testing")
+    assert_eq_str(b, "testing")
+    assert_eq_str(s, "testing")
+}
+
+fn TestConsumeInsideCallee() {
+    let parts = str_split("1,2,3,4,5", ",")
+    let n = consume_slice(parts)
+    assert_eq(n, 5)
+    assert_eq(len(parts), 5)
+    assert_eq_str(parts[0], "1")
+    assert_eq_str(parts[4], "5")
+}
+
+fn TestDoubleConsumeAcrossCalls() {
+    let parts = str_split("a-b-c", "-")
+    let n1 = consume_slice(parts)
+    let n2 = consume_slice(parts)
+    assert_eq(n1, 3)
+    assert_eq(n2, 3)
+    assert_eq(len(parts), 3)
+}
+
+fn append_item(items: []string, item: string) -> []string {
+    return append(items, item)
+}
+
+fn TestNestedAppendAcrossFunction() {
+    var items = make([]string, 0, 4)
+    items = append_item(items, "one")
+    items = append_item(items, "two")
+    items = append_item(items, "three")
+    assert_eq(len(items), 3)
+    assert_eq_str(items[0], "one")
+    assert_eq_str(items[2], "three")
+}
+
+fn conditional_append(items: []string, val: string, flag: int) -> []string {
+    if flag == 1 {
+        return append(items, val + "!")
+    } else {
+        return append(items, val + "?")
+    }
+}
+
+fn TestConditionalAppendAcrossFunction() {
+    var xs = make([]string, 0, 4)
+    xs = conditional_append(xs, "a", 1)
+    xs = conditional_append(xs, "b", 0)
+    xs = conditional_append(xs, "c", 1)
+    assert_eq(len(xs), 3)
+    assert_eq_str(xs[0], "a!")
+    assert_eq_str(xs[1], "b?")
+    assert_eq_str(xs[2], "c!")
+}
+
+fn concat3(a: string, b: string, c: string) -> string {
+    return a + b + c
+}
+
+fn TestMultipleStringArgs() {
+    let x = "hello" + ""
+    let y = " cruel" + ""
+    let z = " world" + ""
+    let r = concat3(x, y, z)
+    assert_eq_str(r, "hello cruel world")
+    assert_eq_str(x, "hello")
+    assert_eq_str(y, " cruel")
+    assert_eq_str(z, " world")
+}
+
+fn TestStringLiteralArg() {
+    let r = pass_through("static literal")
+    assert_eq_str(r, "static literal")
+}
+
+fn make_greeting(name: string) -> string {
+    return "Hello, " + name + "!"
+}
+
+fn shout(s: string) -> string {
+    return str_to_upper(s)
+}
+
+fn TestChainedReturns() {
+    let greeting = make_greeting("Ada")
+    let shouted = shout(greeting)
+    assert_eq_str(shouted, "HELLO, ADA!")
+    assert_eq_str(greeting, "Hello, Ada!")
+}
+
+fn TestSliceDoublePass() {
+    let parts = str_split("x:y:z", ":")
+    let n = consume_slice(parts)
+    assert_eq(n, 3)
+    assert_eq(len(parts), 3)
+    assert_eq_str(parts[0], "x")
+}
