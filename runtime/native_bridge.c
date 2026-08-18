@@ -1547,6 +1547,10 @@ int64_t mako_native_grpc_unary_id_ptr(MakoNativeString *s) {
     return mako_grpc_unary_id(bridge_borrow_str(s));
 }
 
+int64_t mako_native_str_compare_ptr(MakoNativeString *a, MakoNativeString *b) {
+    return mako_str_compare(bridge_borrow_str(a), bridge_borrow_str(b));
+}
+
 MakoNativeString *mako_native_str_trim_ptr(MakoNativeString *s, MakoNativeString *cut) {
     return bridge_take_str(mako_str_trim(bridge_borrow_str(s), bridge_borrow_str(cut)));
 }

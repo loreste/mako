@@ -1764,6 +1764,19 @@ static inline int64_t mako_rune_count(MakoString s) {
     return n;
 }
 
+/// Lexicographic comparison: returns -1, 0, or 1.
+static inline int64_t mako_str_compare(MakoString a, MakoString b) {
+    size_t min_len = a.len < b.len ? a.len : b.len;
+    if (min_len > 0) {
+        int r = memcmp(a.data, b.data, min_len);
+        if (r < 0) return -1;
+        if (r > 0) return 1;
+    }
+    if (a.len < b.len) return -1;
+    if (a.len > b.len) return 1;
+    return 0;
+}
+
 static inline bool mako_str_eq(MakoString a, MakoString b) {
     if (a.len != b.len) return false;
     /* memcmp is declared non-null in both args even for n == 0, and an empty

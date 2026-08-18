@@ -2700,7 +2700,7 @@ impl Codegen {
         "snap_apply_delta", "snap_diff", "snap_encode2", "snap_encode4", "sql_query_str",
         "sql_query_str2", "sql_query_str3", "sql_query_str4", "sql_rows_str",
         "sqlite_query_text", "sse_event", "sse_retry", "stack_trace", "str_join",
-        "str_replace", "str_to_lower", "str_to_owned", "str_to_upper", "str_trim",
+        "str_replace", "str_slice", "str_to_lower", "str_to_owned", "str_to_upper", "str_trim",
         "str_trim_left", "str_trim_right", "str_trim_space", "syscall_errno_str",
         "syscall_hostname", "syscall_read", "syscall_readlink", "syscall_uname_machine",
         "syscall_uname_release", "syscall_uname_sysname", "tar_first_name", "tcp_local_addr",
@@ -14864,8 +14864,8 @@ impl Codegen {
                 }
                 // Zero-copy string comparisons: when comparing against a
                 // string literal, use mako_str_view (no malloc) for the
-                // literal side. This is safe because str_eq only reads.
-                if *op == BinOp::Eq || *op == BinOp::Ne {
+                // literal side. This is safe because str_eq / str_compare only reads.
+                if matches!(op, BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge) {
                     let l_is_lit = matches!(left.as_ref(), Expr::String(_));
                     let r_is_lit = matches!(right.as_ref(), Expr::String(_));
                     if l_is_lit || r_is_lit {
@@ -14881,11 +14881,14 @@ impl Codegen {
                         } else {
                             self.emit_expr(right).1
                         };
-                        let eq = format!("mako_str_eq({lv}, {rv})");
-                        return if *op == BinOp::Eq {
-                            ("bool".into(), eq)
-                        } else {
-                            ("bool".into(), format!("(!{eq})"))
+                        return match op {
+                            BinOp::Eq => ("bool".into(), format!("mako_str_eq({lv}, {rv})")),
+                            BinOp::Ne => ("bool".into(), format!("(!mako_str_eq({lv}, {rv}))")),
+                            BinOp::Lt => ("bool".into(), format!("(mako_str_compare({lv}, {rv}) < 0)")),
+                            BinOp::Le => ("bool".into(), format!("(mako_str_compare({lv}, {rv}) <= 0)")),
+                            BinOp::Gt => ("bool".into(), format!("(mako_str_compare({lv}, {rv}) > 0)")),
+                            BinOp::Ge => ("bool".into(), format!("(mako_str_compare({lv}, {rv}) >= 0)")),
+                            _ => unreachable!(),
                         };
                     }
                 }
@@ -14954,6 +14957,19 @@ impl Codegen {
                     } else {
                         ("bool".into(), format!("(!{eq})"))
                     };
+                }
+                if matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge)
+                    && lt == "MakoString"
+                    && rt == "MakoString"
+                {
+                    let c_op = match op {
+                        BinOp::Lt => "<",
+                        BinOp::Le => "<=",
+                        BinOp::Gt => ">",
+                        BinOp::Ge => ">=",
+                        _ => unreachable!(),
+                    };
+                    return ("bool".into(), format!("(mako_str_compare({lv}, {rv}) {c_op} 0)"));
                 }
                 // Named structs / enums: structural mako_eq_Type (strings by content).
                 if (*op == BinOp::Eq || *op == BinOp::Ne)
@@ -15762,6 +15778,11 @@ impl Codegen {
                             let b = self.emit_str_arg(&args[1]);
                             return ("bool".into(), format!("mako_str_eq({a}, {b})"));
                         }
+                        "str_compare" => {
+                            let a = self.emit_str_arg(&args[0]);
+                            let b = self.emit_str_arg(&args[1]);
+                            return ("int64_t".into(), format!("mako_str_compare({a}, {b})"));
+                        }
                         "str_contains" => {
                             let a = self.emit_str_arg(&args[0]);
                             let b = self.emit_str_arg(&args[1]);
@@ -15862,6 +15883,14 @@ impl Codegen {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_str_last_index({a}, {b})"));
+                        }
+                        "str_slice" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            let (_, c) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("sl");
+                            self.line(&format!("MakoString {tmp} = mako_str_slice({a}, {b}, {c});"));
+                            return ("MakoString".into(), tmp);
                         }
                         "str_trim" => {
                             let (_, a) = self.emit_expr(&args[0]);

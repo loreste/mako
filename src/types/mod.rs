@@ -570,6 +570,10 @@ impl TypeChecker {
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Bool)),
         );
         fns.insert(
+            "str_compare".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "str_contains".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Bool)),
         );
@@ -642,6 +646,10 @@ impl TypeChecker {
         fns.insert(
             "str_last_index".into(),
             Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "str_slice".into(),
+            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::String)),
         );
         fns.insert(
             "str_trim".into(),
@@ -16685,6 +16693,7 @@ fns.insert(
                             || (lt == Type::UInt64 && rt == Type::UInt64)
                             || (lt == Type::Byte && rt == Type::Byte)
                             || (lt == Type::Float && rt == Type::Float)
+                            || (lt == Type::String && rt == Type::String)
                         {
                             Ok(Type::Bool)
                         } else if is_int_family(&lt) && is_int_family(&rt) && lt != rt {

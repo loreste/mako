@@ -683,6 +683,13 @@ pub enum Inst {
         right: Value,
         negated: bool,
     },
+    /// Lexicographic string comparison: out = mako_str_compare(left, right).
+    StringCompare {
+        out: Value,
+        left: Value,
+        right: Value,
+        op: BinOp,
+    },
     PrintString {
         value: Value,
     },
@@ -7498,6 +7505,14 @@ impl<'a> FunctionLowerer<'a> {
                             right,
                             negated: *op == BinOp::Ne,
                         }),
+                        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                            self.emit(Inst::StringCompare {
+                                out,
+                                left,
+                                right,
+                                op: *op,
+                            });
+                        }
                         _ => {
                             return Err(IrError::new("native IR: string operation not implemented"))
                         }
@@ -9030,6 +9045,27 @@ impl<'a> FunctionLowerer<'a> {
                         self.emit(Inst::DropString { value: b });
                     }
                     return Ok((out, Type::I1, false));
+                }
+                if function == "str_compare" && args.len() == 2 {
+                    let (a, at, ao) = self.lower_expr(&args[0])?;
+                    let (b, bt, bo) = self.lower_expr(&args[1])?;
+                    if at != Type::Str || bt != Type::Str {
+                        return Err(IrError::new("native IR: str_compare expects strings"));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_str_compare_ptr".into(),
+                        args: vec![a, b],
+                        ret: Some(Type::I64),
+                    });
+                    if ao {
+                        self.emit(Inst::DropString { value: a });
+                    }
+                    if bo {
+                        self.emit(Inst::DropString { value: b });
+                    }
+                    return Ok((out, Type::I64, false));
                 }
                 if function == "str_contains" && args.len() == 2 {
                     let (a, at, ao) = self.lower_expr(&args[0])?;
@@ -17256,6 +17292,12 @@ impl<'a> FunctionLowerer<'a> {
                 &[Type::I64, Type::I64],
                 Some(Type::I64),
                 false,
+            )),
+            "str_slice" if args.len() == 3 => Some((
+                "mako_native_str_slice_ptr",
+                &[Type::Str, Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
             )),
             "str_trim" if args.len() == 2 => Some((
                 "mako_native_str_trim_ptr",
@@ -29816,6 +29858,12 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "str_eq" if args.len() == 2 => Some((
                 "mako_native_str_eq_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "str_compare" if args.len() == 2 => Some((
+                "mako_native_str_compare_ptr",
                 &[Type::Str, Type::Str],
                 Some(Type::I64),
                 false,

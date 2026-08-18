@@ -29,6 +29,24 @@ fn to_upper(s: string) -> string { return str_to_upper(s) }
 fn repeat(s: string, n: int) -> string { return str_repeat(s, n) }
 fn replace(s: string, old: string, newv: string) -> string { return str_replace(s, old, newv) }
 fn replace_all(s: string, old: string, newv: string) -> string { return str_replace(s, old, newv) }
+fn slice(s: string, start: int, end: int) -> string { return str_slice(s, start, end) }
+
+fn title(s: string) -> string {
+    if str_len(s) == 0 { return "" }
+    var result = str_to_upper(str_slice(s, 0, 1))
+    var i = 1
+    while i < str_len(s) {
+        let prev = str_byte_at(s, i - 1)
+        let ch = str_slice(s, i, i + 1)
+        if prev == 32 || prev == 9 || prev == 10 {
+            result = result + str_to_upper(ch)
+        } else {
+            result = result + ch
+        }
+        i = i + 1
+    }
+    return result
+}
 
 // ---- Trim ----
 
@@ -37,6 +55,20 @@ fn trim_space(s: string) -> string { return str_trim_space(s) }
 fn trim_left(s: string, cutset: string) -> string { return str_trim_left(s, cutset) }
 fn trim_right(s: string, cutset: string) -> string { return str_trim_right(s, cutset) }
 
+fn trim_prefix(s: string, prefix: string) -> string {
+    if str_has_prefix(s, prefix) {
+        return str_slice(s, str_len(prefix), str_len(s))
+    }
+    return s
+}
+
+fn trim_suffix(s: string, suffix: string) -> string {
+    if str_has_suffix(s, suffix) {
+        return str_slice(s, 0, str_len(s) - str_len(suffix))
+    }
+    return s
+}
+
 // ---- Split / Join ----
 
 fn split(s: string, sep: string) -> []string { return str_split(s, sep) }
@@ -44,6 +76,10 @@ fn fields(s: string) -> []string { return str_fields(s) }
 fn concat(parts: []string, sep: string) -> string { return str_join(parts, sep) }
 fn join_parts(parts: []string, sep: string) -> string { return str_join(parts, sep) }
 fn cut(s: string, sep: string) -> []string { return str_cut(s, sep) }
+
+// ---- Comparison ----
+
+fn compare(a: string, b: string) -> int { return str_compare(a, b) }
 
 // ---- Builder ----
 
