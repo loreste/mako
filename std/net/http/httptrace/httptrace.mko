@@ -1,0 +1,62 @@
+// std/net/http/httptrace — client-trace event log (Go net/http/httptrace).
+// Records names only; does not hook the HTTP client.
+
+struct ClientTrace {
+    events: []string
+}
+
+fn new_trace() -> ClientTrace {
+    return ClientTrace { events: make([]string, 0) }
+}
+
+fn dns_start(mut t: ClientTrace, host: string) -> ClientTrace {
+    t.events = append(t.events, "dns_start:" + host)
+    return t
+}
+
+fn dns_done(mut t: ClientTrace, err: string) -> ClientTrace {
+    if str_len(err) == 0 {
+        t.events = append(t.events, "dns_done")
+    } else {
+        t.events = append(t.events, "dns_done:" + err)
+    }
+    return t
+}
+
+fn got_conn(mut t: ClientTrace) -> ClientTrace {
+    t.events = append(t.events, "got_conn")
+    return t
+}
+
+fn wrote_headers(mut t: ClientTrace) -> ClientTrace {
+    t.events = append(t.events, "wrote_headers")
+    return t
+}
+
+fn wrote_request(mut t: ClientTrace) -> ClientTrace {
+    t.events = append(t.events, "wrote_request")
+    return t
+}
+
+fn got_first_response_byte(mut t: ClientTrace) -> ClientTrace {
+    t.events = append(t.events, "got_first_response_byte")
+    return t
+}
+
+fn count(t: ClientTrace) -> int { return len(t.events) }
+
+fn last(t: ClientTrace) -> string {
+    let n = len(t.events)
+    if n == 0 { return "" }
+    return t.events[n - 1]
+}
+
+fn has(t: ClientTrace, name: string) -> bool {
+    let mut i = 0
+    while i < len(t.events) {
+        if t.events[i] == name { return true }
+        if str_has_prefix(t.events[i], name + ":") { return true }
+        i = i + 1
+    }
+    return false
+}

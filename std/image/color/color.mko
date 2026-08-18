@@ -1,0 +1,43 @@
+// std/image/color — RGBA (Go image/color). Channels 0–255.
+
+struct RGBA {
+    r: int
+    g: int
+    b: int
+    a: int
+}
+
+fn rgba(r: int, g: int, b: int, a: int) -> RGBA {
+    return RGBA { r: clamp8(r), g: clamp8(g), b: clamp8(b), a: clamp8(a) }
+}
+
+fn rgb(r: int, g: int, b: int) -> RGBA { return rgba(r, g, b, 255) }
+
+fn clamp8(x: int) -> int {
+    if x < 0 { return 0 }
+    if x > 255 { return 255 }
+    return x
+}
+
+fn pack(c: RGBA) -> int {
+    return (c.a << 24) | (c.r << 16) | (c.g << 8) | c.b
+}
+
+fn unpack(p: int) -> RGBA {
+    return RGBA {
+        r: (p >> 16) & 255,
+        g: (p >> 8) & 255,
+        b: p & 255,
+        a: (p >> 24) & 255,
+    }
+}
+
+fn eq(a: RGBA, b: RGBA) -> bool {
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a
+}
+
+fn gray(c: RGBA) -> int {
+    return (c.r * 299 + c.g * 587 + c.b * 114) / 1000
+}
+
+fn nrgba_model() -> int { return 1 }

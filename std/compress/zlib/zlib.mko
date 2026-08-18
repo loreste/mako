@@ -1,0 +1,6 @@
+// std/compress/zlib — zlib wrapper (RFC 1950).
+// Same C path as gzip_compress (zlib compress2). Low latency.
+
+fn compress(s: string) -> string { return zlib_compress(s) }
+fn decompress(s: string) -> string { return zlib_decompress(s) }
+fn available() -> int { return zlib_available() }

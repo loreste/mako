@@ -1,0 +1,43 @@
+// std/io/fs — file-info and walk helpers.
+// Go equivalent: io/fs. Walk is path-based (no DirEntry objects).
+
+struct FileInfo {
+    name: string
+    size: int
+    dir: bool
+}
+
+fn stat(path: string) -> FileInfo {
+    return FileInfo {
+        name: path_base(path),
+        size: path_file_size(path),
+        dir: is_dir(path),
+    }
+}
+
+fn exists(path: string) -> bool { return file_exists(path) }
+fn is_dir_path(path: string) -> bool { return is_dir(path) }
+fn read_dir_names(path: string) -> []string { return read_dir(path) }
+fn walk(root: string) -> []string { return filepath_walk(root) }
+fn walk_n(root: string, depth: int) -> []string { return filepath_walk_n(root, depth) }
+
+fn valid_path(p: string) -> bool {
+    if str_len(p) == 0 { return false }
+    if p == "." { return true }
+    if str_has_prefix(p, "/") { return false }
+    if str_contains(p, "\\") { return false }
+    let parts = str_split(p, "/")
+    let mut i = 0
+    while i < len(parts) {
+        let part = parts[i]
+        if str_len(part) == 0 { return false }
+        if part == "." || part == ".." { return false }
+        i = i + 1
+    }
+    return true
+}
+
+fn skip_dir() -> string { return "skip-dir" }
+fn err_not_exist() -> string { return "file does not exist" }
+fn err_exist() -> string { return "file already exists" }
+fn err_permission() -> string { return "permission denied" }

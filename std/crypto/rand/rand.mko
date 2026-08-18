@@ -1,0 +1,18 @@
+// std/crypto/rand — CSPRNG (Go crypto/rand).
+// Backed by random_bytes / random_int. Empty on n<=0.
+
+fn read(n: int) -> string {
+    if n <= 0 { return "" }
+    return random_bytes(n)
+}
+
+fn int_n(n: int) -> int {
+    if n <= 0 { return 0 }
+    return random_int(0, n)
+}
+
+fn prime_hint(bits: int) -> int {
+    // Not a prime generator — length hint only. RSA keygen stays out.
+    if bits < 0 { return 0 }
+    return bits
+}

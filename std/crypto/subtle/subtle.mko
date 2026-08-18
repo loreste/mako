@@ -1,0 +1,6 @@
+// std/crypto/subtle — constant-time helpers.
+// Go equivalent: crypto/subtle.ConstantTimeCompare.
+
+fn constant_eq(a: string, b: string) -> int { return crypto_eq(a, b) }
+fn constant_eq_ok(a: string, b: string) -> bool { return crypto_eq(a, b) == 1 }
+fn xor(a: string, b: string) -> string { return xor_bytes(a, b) }

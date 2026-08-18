@@ -1,0 +1,52 @@
+// std/iter — sequence helpers (Go iter.Seq equivalent as slices).
+// Low-latency: operate on []int / []string in place.
+
+fn count(n: int) -> []int {
+    if n <= 0 { return make([]int, 0) }
+    let mut out = make([]int, 0, n)
+    let mut i = 0
+    while i < n {
+        out = append(out, i)
+        i = i + 1
+    }
+    return out
+}
+
+fn take(a: []int, n: int) -> []int {
+    if n <= 0 { return make([]int, 0) }
+    if n >= len(a) { return ints_copy(a) }
+    let mut out = make([]int, 0, n)
+    let mut i = 0
+    while i < n {
+        out = append(out, a[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn drop(a: []int, n: int) -> []int {
+    if n <= 0 { return ints_copy(a) }
+    if n >= len(a) { return make([]int, 0) }
+    let mut out = make([]int, 0, len(a) - n)
+    let mut i = n
+    while i < len(a) {
+        out = append(out, a[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn chain(a: []int, b: []int) -> []int {
+    let mut out = make([]int, 0, len(a) + len(b))
+    let mut i = 0
+    while i < len(a) {
+        out = append(out, a[i])
+        i = i + 1
+    }
+    i = 0
+    while i < len(b) {
+        out = append(out, b[i])
+        i = i + 1
+    }
+    return out
+}

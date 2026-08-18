@@ -1,6 +1,6 @@
-// std/slices — slice utilities for int, string, float, and bool slices
-//
-// Modeled after Go's slices package and Rust's slice methods.
+// std/slices — slice utilities for int and string slices.
+// Go equivalent: slices. Out-of-range indexes clamp or no-op;
+// they never panic.
 
 // ---- Reverse ----
 
@@ -18,6 +18,26 @@ fn contains(a: []int, v: int) -> bool { return ints_contains(a, v) }
 fn contains_str(a: []string, v: string) -> bool { return strings_contains(a, v) }
 fn index_of(a: []int, v: int) -> int { return ints_index(a, v) }
 fn index_of_str(a: []string, v: string) -> int { return strings_index(a, v) }
+
+fn index(a: []int, v: int) -> int { return ints_index(a, v) }
+
+fn contains_fn(a: []int, pred: fn(int) -> bool) -> bool {
+    let mut i = 0
+    while i < len(a) {
+        if pred(a[i]) { return true }
+        i = i + 1
+    }
+    return false
+}
+
+fn index_fn(a: []int, pred: fn(int) -> bool) -> int {
+    let mut i = 0
+    while i < len(a) {
+        if pred(a[i]) { return i }
+        i = i + 1
+    }
+    return -1
+}
 
 // ---- Copy ----
 
@@ -75,4 +95,178 @@ fn equal_strs(a: []string, b: []string) -> bool {
         if a[i] != b[i] { return false }
     }
     return true
+}
+
+fn compare(a: []int, b: []int) -> int {
+    let mut i = 0
+    let n = len(a)
+    let m = len(b)
+    let mut lim = n
+    if m < lim { lim = m }
+    while i < lim {
+        if a[i] < b[i] { return -1 }
+        if a[i] > b[i] { return 1 }
+        i = i + 1
+    }
+    if n < m { return -1 }
+    if n > m { return 1 }
+    return 0
+}
+
+fn is_sorted(a: []int) -> bool {
+    if len(a) < 2 { return true }
+    let mut i = 1
+    while i < len(a) {
+        if a[i] < a[i - 1] { return false }
+        i = i + 1
+    }
+    return true
+}
+
+fn is_sorted_strs(a: []string) -> bool {
+    if len(a) < 2 { return true }
+    let mut i = 1
+    while i < len(a) {
+        if str_compare(a[i - 1], a[i]) > 0 { return false }
+        i = i + 1
+    }
+    return true
+}
+
+fn binary_search(a: []int, v: int) -> (int, bool) {
+    let mut lo = 0
+    let mut hi = len(a)
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2
+        if a[mid] < v {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
+    }
+    if lo < len(a) {
+        if a[lo] == v { return (lo, true) }
+    }
+    return (lo, false)
+}
+
+fn compact(a: []int) -> []int {
+    if len(a) == 0 { return ints_copy(a) }
+    let mut out = make([]int, 0, len(a))
+    out = append(out, a[0])
+    let mut i = 1
+    while i < len(a) {
+        if a[i] != a[i - 1] {
+            out = append(out, a[i])
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn delete_at(a: []int, i: int) -> []int {
+    return delete_range(a, i, i + 1)
+}
+
+fn delete_range(a: []int, i: int, j: int) -> []int {
+    let n = len(a)
+    let mut lo = i
+    let mut hi = j
+    if lo < 0 { lo = 0 }
+    if hi > n { hi = n }
+    if lo >= hi { return ints_copy(a) }
+    let mut out = make([]int, 0, n - (hi - lo))
+    let mut k = 0
+    while k < lo {
+        out = append(out, a[k])
+        k = k + 1
+    }
+    k = hi
+    while k < n {
+        out = append(out, a[k])
+        k = k + 1
+    }
+    return out
+}
+
+fn insert(a: []int, i: int, v: int) -> []int {
+    let n = len(a)
+    let mut at = i
+    if at < 0 { at = 0 }
+    if at > n { at = n }
+    let mut out = make([]int, 0, n + 1)
+    let mut k = 0
+    while k < at {
+        out = append(out, a[k])
+        k = k + 1
+    }
+    out = append(out, v)
+    while k < n {
+        out = append(out, a[k])
+        k = k + 1
+    }
+    return out
+}
+
+fn concat(a: []int, b: []int) -> []int {
+    let mut out = make([]int, 0, len(a) + len(b))
+    let mut i = 0
+    while i < len(a) {
+        out = append(out, a[i])
+        i = i + 1
+    }
+    i = 0
+    while i < len(b) {
+        out = append(out, b[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn clip(a: []int) -> []int { return ints_copy(a) }
+
+fn grow(a: []int, n: int) -> []int {
+    if n <= 0 { return ints_copy(a) }
+    let mut out = ints_copy(a)
+    let mut i = 0
+    while i < n {
+        out = append(out, 0)
+        i = i + 1
+    }
+    return out
+}
+
+fn replace(a: []int, i: int, j: int, v: []int) -> []int {
+    let head = delete_range(a, i, j)
+    // insert v at clamped i
+    let mut at = i
+    if at < 0 { at = 0 }
+    if at > len(head) { at = len(head) }
+    let mut out = make([]int, 0, len(head) + len(v))
+    let mut k = 0
+    while k < at {
+        out = append(out, head[k])
+        k = k + 1
+    }
+    let mut p = 0
+    while p < len(v) {
+        out = append(out, v[p])
+        p = p + 1
+    }
+    while k < len(head) {
+        out = append(out, head[k])
+        k = k + 1
+    }
+    return out
+}
+
+fn repeat_n(v: int, n: int) -> []int {
+    if n <= 0 { return make([]int, 0) }
+    let mut out = make([]int, 0, n)
+    let mut i = 0
+    while i < n {
+        out = append(out, v)
+        i = i + 1
+    }
+    return out
 }

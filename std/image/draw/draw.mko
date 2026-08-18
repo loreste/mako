@@ -1,0 +1,14 @@
+// std/image/draw — over-blend two packed RGBA pixels (Go image/draw.Over).
+
+fn over(dst: int, src: int) -> int {
+    let da = (dst >> 24) & 255
+    let sa = (src >> 24) & 255
+    let inv = 255 - sa
+    let a = sa + (da * inv) / 255
+    let r = ((src >> 16) & 255) * sa / 255 + ((dst >> 16) & 255) * inv / 255
+    let g = ((src >> 8) & 255) * sa / 255 + ((dst >> 8) & 255) * inv / 255
+    let b = (src & 255) * sa / 255 + (dst & 255) * inv / 255
+    return (a << 24) | (r << 16) | (g << 8) | b
+}
+
+fn src(src_px: int) -> int { return src_px }

@@ -1,0 +1,13 @@
+// std/unique — intern *set* for strings (Go unique.Handle[string] shape).
+// Caller owns the map. This does not promise pointer identity — Mako
+// strings are owned values; intern records that a content was seen.
+
+fn handle(s: string) -> string { return "" + s }
+
+fn intern(mut seen: map[string]int, s: string) -> (string, map[string]int) {
+    if has(seen, s) { return (s, seen) }
+    seen[s] = 1
+    return ("" + s, seen)
+}
+
+fn has_interned(seen: map[string]int, s: string) -> bool { return has(seen, s) }

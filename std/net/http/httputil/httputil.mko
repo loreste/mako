@@ -1,0 +1,14 @@
+// std/net/http/httputil — reverse-proxy and dump helpers.
+// Go equivalent: net/http/httputil. Uses existing C forward/parse.
+
+fn dump_request(raw: string) -> string { return raw }
+
+fn dump_response(status: int, body: string) -> string {
+    return "HTTP/1.1 " + format_int(status) + "\r\n\r\n" + body
+}
+
+fn reverse_proxy(host: string, port: int, method: string, path: string, body: string) -> string {
+    return http_forward(host, port, method, path, body)
+}
+
+fn available() -> int { return 1 }

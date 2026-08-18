@@ -1,0 +1,217 @@
+// White-hat adversarial tests: memory safety, ownership, boundaries.
+
+// ---- String boundary attacks ----
+
+fn TestEmptyStringOps() {
+    assert_eq_str(str_slice("", 0, 0), "")
+    assert_eq_str(str_slice("abc", 5, 10), "")
+    assert_eq(str_compare("", ""), 0)
+    assert_eq(str_compare("", "a"), -1)
+    assert_eq(str_len(""), 0)
+    assert_eq(str_index("", "x"), -1)
+}
+
+fn TestLargeStringConcat() {
+    var s = ""
+    var i = 0
+    while i < 1000 {
+        s = s + "x"
+        i = i + 1
+    }
+    assert_eq(str_len(s), 1000)
+    let sliced = str_slice(s, 500, 600)
+    assert_eq(str_len(sliced), 100)
+}
+
+fn TestStringComparisonEdges() {
+    assert("" < "a")
+    assert("a" < "b")
+    assert("z" > "a")
+    assert("abc" < "abd")
+    assert("abc" <= "abc")
+    assert("abc" >= "abc")
+}
+
+// ---- Ownership stress: same string to many calls ----
+
+fn eat_string(s: string) -> int { return str_len(s) }
+
+fn TestOwnershipStress() {
+    let s = "shared" + " " + "string"
+    var total = 0
+    var i = 0
+    while i < 100 {
+        total = total + eat_string(s)
+        i = i + 1
+    }
+    assert_eq(total, 1300)
+    assert_eq_str(s, "shared string")
+}
+
+// ---- Slice ownership chain ----
+
+fn build_list(n: int) -> []int {
+    var xs = make([]int, 0, 4)
+    var i = 0
+    while i < n {
+        xs = append(xs, i * i)
+        i = i + 1
+    }
+    return xs
+}
+
+fn sum_list(xs: []int) -> int {
+    var total = 0
+    var i = 0
+    while i < len(xs) {
+        total = total + xs[i]
+        i = i + 1
+    }
+    return total
+}
+
+fn TestSliceOwnershipChain() {
+    let xs = build_list(10)
+    let s1 = sum_list(xs)
+    let s2 = sum_list(xs)
+    assert_eq(s1, s2)
+    assert_eq(s1, 285)
+    assert_eq(len(xs), 10)
+}
+
+// ---- Double-consume string slice (Leba pattern) ----
+
+fn consume_parts(parts: []string) -> string {
+    let copy = strings_copy(parts)
+    return str_join(copy, "-")
+}
+
+fn TestDoubleConsumeStringSlice() {
+    let parts = str_split("a,b,c,d,e", ",")
+    let r1 = consume_parts(parts)
+    let r2 = consume_parts(parts)
+    assert_eq_str(r1, "a-b-c-d-e")
+    assert_eq_str(r2, "a-b-c-d-e")
+    assert_eq(len(parts), 5)
+}
+
+// ---- Struct field string ownership ----
+
+struct Config {
+    host: string
+    port: int
+    tags: []string
+}
+
+fn process_config(c: Config) -> string {
+    return c.host + ":" + int_to_string(c.port)
+}
+
+fn TestStructFieldOwnership() {
+    let c = Config { host: "localhost", port: 8080, tags: ["a", "b"] }
+    let r1 = process_config(c)
+    let r2 = process_config(c)
+    assert_eq_str(r1, "localhost:8080")
+    assert_eq_str(r2, "localhost:8080")
+    assert_eq_str(c.host, "localhost")
+    assert_eq(len(c.tags), 2)
+}
+
+// ---- Nested function calls with heap args ----
+
+fn inner(s: string) -> string { return str_to_upper(s) }
+fn middle(s: string) -> string { return inner(s) + "!" }
+fn outer(s: string) -> string { return middle(s) + "?" }
+
+fn TestNestedHeapArgChain() {
+    let s = "hello" + ""
+    let r = outer(s)
+    assert_eq_str(r, "HELLO!?")
+    assert_eq_str(s, "hello")
+}
+
+// ---- Math edge cases ----
+
+fn TestMathEdges() {
+    assert_eq(abs(-42), 42)
+    assert_eq(abs(0), 0)
+    assert_eq(min(3, 7), 3)
+    assert_eq(max(3, 7), 7)
+}
+
+// ---- Hex roundtrip ----
+
+fn TestHexRoundtrip() {
+    let original = "Hello, World!"
+    let encoded = hex_encode(original)
+    let decoded = hex_decode(encoded)
+    assert_eq_str(decoded, original)
+}
+
+// ---- Builder accumulation (no leak) ----
+
+fn TestBuilderNoLeak() {
+    var i = 0
+    while i < 50 {
+        let b = str_builder()
+        var j = 0
+        while j < 100 {
+            builder_write(b, "x")
+            j = j + 1
+        }
+        let s = builder_string(b)
+        assert_eq(str_len(s), 100)
+        i = i + 1
+    }
+}
+
+// ---- Recursive string passing ----
+
+fn recurse_str(s: string, depth: int) -> string {
+    if depth <= 0 { return s }
+    return recurse_str(s + "", depth - 1)
+}
+
+fn TestRecursiveStringPassing() {
+    let s = "deep" + ""
+    let r = recurse_str(s, 50)
+    assert_eq_str(r, "deep")
+    assert_eq_str(s, "deep")
+}
+
+// ---- Multiple struct instances sharing field values ----
+
+fn TestStructFieldSharing() {
+    let name = "shared" + "_name"
+    let a = Config { host: name, port: 1, tags: ["x"] }
+    let b = Config { host: name, port: 2, tags: ["y"] }
+    assert_eq_str(a.host, "shared_name")
+    assert_eq_str(b.host, "shared_name")
+    assert_eq_str(name, "shared_name")
+}
+
+// ---- Append realloc stress (forces multiple reallocations) ----
+
+fn TestAppendReallocStress() {
+    var xs = make([]int, 0, 1)
+    var i = 0
+    while i < 1000 {
+        xs = append(xs, i)
+        i = i + 1
+    }
+    assert_eq(len(xs), 1000)
+    assert_eq(xs[0], 0)
+    assert_eq(xs[999], 999)
+}
+
+// ---- String slice boundary: exact length ----
+
+fn TestSliceBoundary() {
+    let s = "abcdef"
+    assert_eq_str(str_slice(s, 0, 6), "abcdef")
+    assert_eq_str(str_slice(s, 0, 0), "")
+    assert_eq_str(str_slice(s, 6, 6), "")
+    assert_eq_str(str_slice(s, 3, 3), "")
+    assert_eq_str(str_slice(s, 2, 4), "cd")
+}
+

@@ -1,0 +1,34 @@
+// std/regexp/syntax — literal / meta helpers (Go regexp/syntax).
+// Not a full parse tree. quote ≡ regexp.QuoteMeta.
+
+fn quote(s: string) -> string { return regex_quote_meta(s) }
+
+fn parse_ok(pat: string) -> int { return regex_valid(pat) }
+
+fn is_meta_byte(b: int) -> bool {
+    if b == 46 { return true }   // .
+    if b == 42 { return true }   // *
+    if b == 43 { return true }   // +
+    if b == 63 { return true }   // ?
+    if b == 40 { return true }   // (
+    if b == 41 { return true }   // )
+    if b == 91 { return true }   // [
+    if b == 93 { return true }   // ]
+    if b == 123 { return true }  // {
+    if b == 125 { return true }  // }
+    if b == 124 { return true }  // |
+    if b == 94 { return true }   // ^
+    if b == 36 { return true }   // $
+    if b == 92 { return true }   // \
+    return false
+}
+
+fn is_literal(pat: string) -> bool {
+    let n = str_len(pat)
+    let mut i = 0
+    while i < n {
+        if is_meta_byte(str_byte_at(pat, i)) { return false }
+        i = i + 1
+    }
+    return true
+}

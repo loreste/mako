@@ -1,0 +1,5 @@
+// std/crypto/md5 — MD5 hex digest (C, same core as SIP Digest).
+// Collision-broken: use only for checksums / legacy interop, not signatures.
+
+fn sum(data: string) -> string { return md5_hex(data) }
+fn hex(data: string) -> string { return md5_hex(data) }

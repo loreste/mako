@@ -1,6 +1,27 @@
+// std/maps — map helpers. Go equivalent: maps.
+// Specialized on map[string]int (the monomorph Go uses most in this tree).
+
 fn keys(m: map[string]int) -> []string { return maps_keys(m) }
 fn values(m: map[string]int) -> []int { return maps_values(m) }
 fn clear(m: map[string]int) { maps_clear(m) }
 fn clone(m: map[string]int) -> map[string]int { return maps_clone(m) }
 fn equal(a: map[string]int, b: map[string]int) -> int { return maps_equal(a, b) }
 fn copy(dst: map[string]int, src: map[string]int) { maps_copy(dst, src) }
+
+fn equal_ok(a: map[string]int, b: map[string]int) -> bool {
+    return maps_equal(a, b) == 1
+}
+
+fn has_key(m: map[string]int, k: string) -> bool {
+    return has(m, k)
+}
+
+fn remove(mut m: map[string]int, k: string) {
+    delete(m, k)
+}
+
+fn insert(dst: map[string]int, src: map[string]int) {
+    maps_copy(dst, src)
+}
+
+fn len_of(m: map[string]int) -> int { return len(m) }

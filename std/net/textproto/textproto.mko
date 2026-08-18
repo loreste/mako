@@ -1,0 +1,39 @@
+// std/net/textproto — MIME-style headers (Go net/textproto).
+
+fn canonical_mime(s: string) -> string {
+    let mut out = ""
+    let mut up = true
+    let mut i = 0
+    while i < str_len(s) {
+        let b = str_byte_at(s, i)
+        let ch = str_slice(s, i, i + 1)
+        if up {
+            out = out + str_to_upper(ch)
+        } else {
+            out = out + str_to_lower(ch)
+        }
+        up = b == 45
+        i = i + 1
+    }
+    return out
+}
+
+fn mime_header_get(raw: string, name: string) -> string {
+    let want = str_to_lower(name)
+    let lines = str_split(raw, "\n")
+    let mut i = 0
+    while i < len(lines) {
+        let line = str_trim(lines[i], "\r")
+        let c = str_index(line, ":")
+        if c > 0 {
+            let key = str_to_lower(str_trim_space(str_slice(line, 0, c)))
+            if key == want {
+                return str_trim_space(str_slice(line, c + 1, str_len(line)))
+            }
+        }
+        i = i + 1
+    }
+    return ""
+}
+
+fn trim_bytes(s: string) -> string { return str_trim_space(s) }

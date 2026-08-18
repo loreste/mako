@@ -1,0 +1,67 @@
+// std/hash/crc32 — IEEE CRC-32 (Go hash/crc32).
+// Polynomial 0xEDB88320. Checksum of "123456789" is 0xCBF43926.
+
+fn ieee() -> int { return 3988292384 }
+
+fn checksum_ieee(data: string) -> int {
+    let mut crc = uint64(4294967295)
+    let poly = uint64(3988292384)
+    let n = str_len(data)
+    let mut i = 0
+    while i < n {
+        crc = crc ^ uint64(str_byte_at(data, i))
+        let mut b = 0
+        while b < 8 {
+            if (crc & uint64(1)) == uint64(1) {
+                crc = (crc >> uint64(1)) ^ poly
+            } else {
+                crc = crc >> uint64(1)
+            }
+            b = b + 1
+        }
+        i = i + 1
+    }
+    return int(crc ^ uint64(4294967295))
+}
+
+fn checksum_ieee_bytes(data: []byte) -> int {
+    let mut crc = uint64(4294967295)
+    let poly = uint64(3988292384)
+    let mut i = 0
+    while i < len(data) {
+        crc = crc ^ uint64(int(data[i]))
+        let mut b = 0
+        while b < 8 {
+            if (crc & uint64(1)) == uint64(1) {
+                crc = (crc >> uint64(1)) ^ poly
+            } else {
+                crc = crc >> uint64(1)
+            }
+            b = b + 1
+        }
+        i = i + 1
+    }
+    return int(crc ^ uint64(4294967295))
+}
+
+fn update_ieee(crc: int, data: string) -> int {
+    // Go Update: resume from a previous checksum.
+    let mut c = uint64(crc) ^ uint64(4294967295)
+    let poly = uint64(3988292384)
+    let n = str_len(data)
+    let mut i = 0
+    while i < n {
+        c = c ^ uint64(str_byte_at(data, i))
+        let mut b = 0
+        while b < 8 {
+            if (c & uint64(1)) == uint64(1) {
+                c = (c >> uint64(1)) ^ poly
+            } else {
+                c = c >> uint64(1)
+            }
+            b = b + 1
+        }
+        i = i + 1
+    }
+    return int(c ^ uint64(4294967295))
+}

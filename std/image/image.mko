@@ -1,0 +1,94 @@
+// std/image — Point / Rectangle (Go image). Half-open [min, max).
+
+struct Point {
+    x: int
+    y: int
+}
+
+struct Rectangle {
+    min_x: int
+    min_y: int
+    max_x: int
+    max_y: int
+}
+
+fn pt(x: int, y: int) -> Point { return Point { x: x, y: y } }
+
+fn rect(x0: int, y0: int, x1: int, y1: int) -> Rectangle {
+    let mut min_x = x0
+    let mut min_y = y0
+    let mut max_x = x1
+    let mut max_y = y1
+    if min_x > max_x {
+        let t = min_x
+        min_x = max_x
+        max_x = t
+    }
+    if min_y > max_y {
+        let t = min_y
+        min_y = max_y
+        max_y = t
+    }
+    return Rectangle { min_x: min_x, min_y: min_y, max_x: max_x, max_y: max_y }
+}
+
+fn add(p: Point, q: Point) -> Point { return Point { x: p.x + q.x, y: p.y + q.y } }
+fn sub(p: Point, q: Point) -> Point { return Point { x: p.x - q.x, y: p.y - q.y } }
+fn eq_pt(p: Point, q: Point) -> bool { return p.x == q.x && p.y == q.y }
+
+fn dx(r: Rectangle) -> int { return r.max_x - r.min_x }
+fn dy(r: Rectangle) -> int { return r.max_y - r.min_y }
+
+fn empty(r: Rectangle) -> bool {
+    return r.min_x >= r.max_x || r.min_y >= r.max_y
+}
+
+fn zp() -> Point { return Point { x: 0, y: 0 } }
+fn zr() -> Rectangle { return Rectangle { min_x: 0, min_y: 0, max_x: 0, max_y: 0 } }
+
+fn in_rect(p: Point, r: Rectangle) -> bool {
+    if empty(r) { return false }
+    return p.x >= r.min_x && p.x < r.max_x && p.y >= r.min_y && p.y < r.max_y
+}
+
+fn intersect(a: Rectangle, b: Rectangle) -> Rectangle {
+    let min_x = a.min_x
+    let min_y = a.min_y
+    let max_x = a.max_x
+    let max_y = a.max_y
+    let mut x0 = min_x
+    if b.min_x > x0 { x0 = b.min_x }
+    let mut y0 = min_y
+    if b.min_y > y0 { y0 = b.min_y }
+    let mut x1 = max_x
+    if b.max_x < x1 { x1 = b.max_x }
+    let mut y1 = max_y
+    if b.max_y < y1 { y1 = b.max_y }
+    if x0 >= x1 || y0 >= y1 {
+        return zr()
+    }
+    return Rectangle { min_x: x0, min_y: y0, max_x: x1, max_y: y1 }
+}
+
+fn union(a: Rectangle, b: Rectangle) -> Rectangle {
+    if empty(a) { return b }
+    if empty(b) { return a }
+    let mut x0 = a.min_x
+    if b.min_x < x0 { x0 = b.min_x }
+    let mut y0 = a.min_y
+    if b.min_y < y0 { y0 = b.min_y }
+    let mut x1 = a.max_x
+    if b.max_x > x1 { x1 = b.max_x }
+    let mut y1 = a.max_y
+    if b.max_y > y1 { y1 = b.max_y }
+    return Rectangle { min_x: x0, min_y: y0, max_x: x1, max_y: y1 }
+}
+
+fn inset(r: Rectangle, n: int) -> Rectangle {
+    return Rectangle {
+        min_x: r.min_x + n,
+        min_y: r.min_y + n,
+        max_x: r.max_x - n,
+        max_y: r.max_y - n,
+    }
+}

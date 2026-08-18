@@ -1,0 +1,169 @@
+// std/math/bits — bit operations on 64-bit words.
+// Go equivalent: math/bits. Operates on int as a 64-bit two's-complement
+// word; unsigned views use uint64.
+
+fn ones_count64(x: int) -> int {
+    let mut u = uint64(x)
+    let mut n = 0
+    while u != uint64(0) {
+        u = u & (u - uint64(1))
+        n = n + 1
+    }
+    return n
+}
+
+fn ones_count32(x: int) -> int {
+    return ones_count64(x & 4294967295)
+}
+
+fn ones_count16(x: int) -> int {
+    return ones_count64(x & 65535)
+}
+
+fn ones_count8(x: int) -> int {
+    return ones_count64(x & 255)
+}
+
+fn leading_zeros64(x: int) -> int {
+    if x == 0 { return 64 }
+    let mut u = uint64(x)
+    let mut n = 0
+    if (u >> uint64(32)) == uint64(0) {
+        n = n + 32
+        u = u << uint64(32)
+    }
+    if (u >> uint64(48)) == uint64(0) {
+        n = n + 16
+        u = u << uint64(16)
+    }
+    if (u >> uint64(56)) == uint64(0) {
+        n = n + 8
+        u = u << uint64(8)
+    }
+    if (u >> uint64(60)) == uint64(0) {
+        n = n + 4
+        u = u << uint64(4)
+    }
+    if (u >> uint64(62)) == uint64(0) {
+        n = n + 2
+        u = u << uint64(2)
+    }
+    if (u >> uint64(63)) == uint64(0) {
+        n = n + 1
+    }
+    return n
+}
+
+fn leading_zeros32(x: int) -> int {
+    return leading_zeros64(x & 4294967295) - 32
+}
+
+fn trailing_zeros64(x: int) -> int {
+    if x == 0 { return 64 }
+    let mut u = uint64(x)
+    let mut n = 0
+    while (u & uint64(1)) == uint64(0) {
+        u = u >> uint64(1)
+        n = n + 1
+    }
+    return n
+}
+
+fn trailing_zeros32(x: int) -> int {
+    if (x & 4294967295) == 0 { return 32 }
+    return trailing_zeros64(x)
+}
+
+fn len64(x: int) -> int {
+    return 64 - leading_zeros64(x)
+}
+
+fn len32(x: int) -> int {
+    return 32 - leading_zeros32(x)
+}
+
+fn rotate_left64(x: int, k: int) -> int {
+    let s = k & 63
+    if s == 0 { return x }
+    let u = uint64(x)
+    let r = (u << uint64(s)) | (u >> uint64(64 - s))
+    return int(r)
+}
+
+fn rotate_right64(x: int, k: int) -> int {
+    return rotate_left64(x, 64 - (k & 63))
+}
+
+fn reverse_bytes64(x: int) -> int {
+    let u = uint64(x)
+    let b0 = (u >> uint64(0)) & uint64(255)
+    let b1 = (u >> uint64(8)) & uint64(255)
+    let b2 = (u >> uint64(16)) & uint64(255)
+    let b3 = (u >> uint64(24)) & uint64(255)
+    let b4 = (u >> uint64(32)) & uint64(255)
+    let b5 = (u >> uint64(40)) & uint64(255)
+    let b6 = (u >> uint64(48)) & uint64(255)
+    let b7 = (u >> uint64(56)) & uint64(255)
+    let r = (b0 << uint64(56)) | (b1 << uint64(48)) | (b2 << uint64(40)) | (b3 << uint64(32)) | (b4 << uint64(24)) | (b5 << uint64(16)) | (b6 << uint64(8)) | b7
+    return int(r)
+}
+
+fn reverse_bytes32(x: int) -> int {
+    let u = uint64(x & 4294967295)
+    let b0 = (u >> uint64(0)) & uint64(255)
+    let b1 = (u >> uint64(8)) & uint64(255)
+    let b2 = (u >> uint64(16)) & uint64(255)
+    let b3 = (u >> uint64(24)) & uint64(255)
+    let r = (b0 << uint64(24)) | (b1 << uint64(16)) | (b2 << uint64(8)) | b3
+    return int(r)
+}
+
+fn reverse64(x: int) -> int {
+    let mut u = uint64(x)
+    u = ((u >> uint64(1)) & uint64(0x5555555555555555)) | ((u & uint64(0x5555555555555555)) << uint64(1))
+    u = ((u >> uint64(2)) & uint64(0x3333333333333333)) | ((u & uint64(0x3333333333333333)) << uint64(2))
+    u = ((u >> uint64(4)) & uint64(0x0f0f0f0f0f0f0f0f)) | ((u & uint64(0x0f0f0f0f0f0f0f0f)) << uint64(4))
+    return reverse_bytes64(int(u))
+}
+
+fn add64(x: int, y: int, carry: int) -> (int, int) {
+    // Unsigned add. Comparison is signed, so map to unsigned order
+    // with the sign bit flipped before `<`.
+    let bias = 1 << 63
+    let s1 = x + y
+    let mut c = 0
+    if (s1 ^ bias) < (x ^ bias) { c = 1 }
+    let cin = carry & 1
+    let sum = s1 + cin
+    if cin == 1 {
+        if (sum ^ bias) < (s1 ^ bias) { c = 1 }
+    }
+    return (sum, c)
+}
+
+fn sub64(x: int, y: int, borrow: int) -> (int, int) {
+    let ux = uint64(x)
+    let uy = uint64(y)
+    let ub = uint64(borrow & 1)
+    let mut b = 0
+    if ux < uy + ub { b = 1 }
+    let diff = ux - uy - ub
+    return (int(diff), b)
+}
+
+fn mul64(x: int, y: int) -> (int, int) {
+    // Split into 32-bit halves.
+    let mask = uint64(4294967295)
+    let x0 = uint64(x) & mask
+    let x1 = uint64(x) >> uint64(32)
+    let y0 = uint64(y) & mask
+    let y1 = uint64(y) >> uint64(32)
+    let p00 = x0 * y0
+    let p01 = x0 * y1
+    let p10 = x1 * y0
+    let p11 = x1 * y1
+    let mid = (p00 >> uint64(32)) + (p01 & mask) + (p10 & mask)
+    let lo = (p00 & mask) | ((mid & mask) << uint64(32))
+    let hi = p11 + (p01 >> uint64(32)) + (p10 >> uint64(32)) + (mid >> uint64(32))
+    return (int(lo), int(hi))
+}

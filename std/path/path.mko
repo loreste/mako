@@ -1,7 +1,10 @@
-// std/path — path manipulation.
-// Modeled after Go's path and path/filepath packages.
+// std/path — slash-separated path names (Go path, not filepath).
+// `match` is a keyword; glob matching is `matches`.
 
 fn join_path(a: string, b: string) -> string { return path_join(a, b) }
+fn join3(a: string, b: string, c: string) -> string {
+    return path_join(path_join(a, b), c)
+}
 fn clean(p: string) -> string { return path_clean(p) }
 fn base(p: string) -> string { return path_base(p) }
 fn dir(p: string) -> string { return path_dir(p) }
@@ -9,3 +12,50 @@ fn ext(p: string) -> string { return path_ext(p) }
 fn is_abs(p: string) -> bool { return path_is_abs(p) }
 fn file_size(p: string) -> int { return path_file_size(p) }
 fn size(p: string) -> int { return path_size(p) }
+
+fn split(p: string) -> (string, string) {
+    return (path_dir(p), path_base(p))
+}
+
+// matches is the equivalent of Go path.Match. `*` = any run except `/`,
+// `?` = one byte except `/`. Character classes are not supported in this
+// layer (use regexp for that).
+fn matches(pattern: string, name: string) -> bool {
+    return glob_match(pattern, name, 47)
+}
+
+fn glob_match(pattern: string, name: string, sep: int) -> bool {
+    return glob_at(pattern, 0, name, 0, sep)
+}
+
+fn glob_at(pattern: string, pi: int, name: string, ni: int, sep: int) -> bool {
+    let plen = str_len(pattern)
+    let nlen = str_len(name)
+    if pi >= plen { return ni >= nlen }
+    let pc = str_byte_at(pattern, pi)
+    if pc == 42 {
+        // '*'
+        let mut k = ni
+        while k <= nlen {
+            if glob_at(pattern, pi + 1, name, k, sep) { return true }
+            if k < nlen {
+                if str_byte_at(name, k) == sep { return false }
+            }
+            k = k + 1
+        }
+        return false
+    }
+    if pc == 63 {
+        if ni >= nlen { return false }
+        if str_byte_at(name, ni) == sep { return false }
+        return glob_at(pattern, pi + 1, name, ni + 1, sep)
+    }
+    if ni >= nlen { return false }
+    if pc == 92 && pi + 1 < plen {
+        // backslash escape
+        if str_byte_at(name, ni) != str_byte_at(pattern, pi + 1) { return false }
+        return glob_at(pattern, pi + 2, name, ni + 1, sep)
+    }
+    if pc != str_byte_at(name, ni) { return false }
+    return glob_at(pattern, pi + 1, name, ni + 1, sep)
+}

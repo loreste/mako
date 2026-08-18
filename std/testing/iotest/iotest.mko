@@ -1,0 +1,20 @@
+// std/testing/iotest — adversarial readers (Go testing/iotest).
+
+fn one_byte(s: string, off: int) -> string {
+    if off < 0 || off >= str_len(s) { return "" }
+    return str_slice(s, off, off + 1)
+}
+
+fn half(s: string) -> string {
+    return str_slice(s, 0, str_len(s) / 2)
+}
+
+fn timeout_err() -> string { return "timeout" }
+
+fn err_reader_err() -> string { return "iotest: err reader" }
+
+fn data_err(s: string, n: int) -> (string, string) {
+    if n <= 0 { return ("", "iotest: empty") }
+    if n >= str_len(s) { return (s, "") }
+    return (str_slice(s, 0, n), "")
+}

@@ -1,0 +1,6 @@
+// std/compress/lzw — GIF-style 9–12 bit LZW over bytes.
+// C hot path; bounded dictionary (4096). Memory-safe (no raw pointers in Mako).
+
+fn compress(s: string) -> string { return lzw_compress(s) }
+fn decompress(s: string) -> string { return lzw_decompress(s) }
+fn available() -> int { return 1 }

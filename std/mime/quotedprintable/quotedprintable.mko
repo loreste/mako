@@ -1,0 +1,76 @@
+// std/mime/quotedprintable — RFC 2045 quoted-printable.
+// Go equivalent: mime/quotedprintable.
+
+fn encode(s: string) -> string {
+    let mut out = ""
+    let mut col = 0
+    let n = str_len(s)
+    let mut i = 0
+    while i < n {
+        let b = str_byte_at(s, i)
+        let mut enc = false
+        if b < 32 || b > 126 || b == 61 {
+            enc = true
+        }
+        if b == 9 || b == 32 {
+            enc = false
+        }
+        if enc {
+            if col + 3 > 75 {
+                out = out + "=\n"
+                col = 0
+            }
+            out = out + "=" + hex2(b)
+            col = col + 3
+        } else {
+            if col + 1 > 75 {
+                out = out + "=\n"
+                col = 0
+            }
+            out = out + str_slice(s, i, i + 1)
+            col = col + 1
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn decode(s: string) -> (string, string) {
+    let mut out = ""
+    let n = str_len(s)
+    let mut i = 0
+    while i < n {
+        let b = str_byte_at(s, i)
+        if b == 61 {
+            if i + 1 < n && (str_byte_at(s, i + 1) == 10) {
+                i = i + 2
+                continue
+            }
+            if i + 1 < n && str_byte_at(s, i + 1) == 13 {
+                if i + 2 < n && str_byte_at(s, i + 2) == 10 {
+                    i = i + 3
+                } else {
+                    i = i + 2
+                }
+                continue
+            }
+            if i + 2 >= n { return ("", "quotedprintable: truncated") }
+            match parse_int_hex(str_slice(s, i + 1, i + 3)) {
+                Ok(v) => {
+                    if v < 0 || v > 255 { return ("", "quotedprintable: hex") }
+                    out = out + utf8_encode_rune(v)
+                    i = i + 3
+                }
+                Err(_) => { return ("", "quotedprintable: hex") }
+            }
+        } else {
+            out = out + str_slice(s, i, i + 1)
+            i = i + 1
+        }
+    }
+    return (out, "")
+}
+
+fn hex2(b: int) -> string {
+    return str_to_upper(format_int_hex_pad(b, 2))
+}

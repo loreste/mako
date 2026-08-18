@@ -1,0 +1,6 @@
+// std/compress/bzip2 — bzip2 when libbz2 is linked (MAKO_BZ2).
+// available() is 0 on builds without the library.
+
+fn compress(s: string) -> string { return bzip2_compress(s) }
+fn decompress(s: string) -> string { return bzip2_decompress(s) }
+fn available() -> int { return bzip2_available() }

@@ -1,0 +1,19 @@
+// std/hash/maphash — 64-bit string hash (Go hash/maphash).
+// FNV-1a 64; seedable via xor of a caller seed.
+
+fn hash(s: string) -> uint64 {
+    let mut h = (uint64(0xcbf29ce4) << uint64(32)) | uint64(0x84222325)
+    let p = uint64(1099511628211)
+    let n = str_len(s)
+    let mut i = 0
+    while i < n {
+        h = h ^ uint64(str_byte_at(s, i))
+        h = h * p
+        i = i + 1
+    }
+    return h
+}
+
+fn hash_seeded(seed: uint64, s: string) -> uint64 {
+    return hash(s) ^ seed
+}

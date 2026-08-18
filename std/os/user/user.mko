@@ -1,0 +1,32 @@
+// std/os/user — current process user.
+// Go equivalent: os/user.Current. No libc passwd lookup; HOME/USER + uid.
+
+struct User {
+    uid: string
+    gid: string
+    username: string
+    home: string
+}
+
+fn current() -> User {
+    let name = env_get("USER")
+    let mut uname = name
+    if str_len(uname) == 0 { uname = env_get("USERNAME") }
+    if str_len(uname) == 0 { uname = env_get("LOGNAME") }
+    let home = env_get("HOME")
+    let mut homedir = home
+    if str_len(homedir) == 0 { homedir = env_get("USERPROFILE") }
+    return User {
+        uid: format_int(syscall_getuid()),
+        gid: format_int(syscall_getgid()),
+        username: uname,
+        home: homedir,
+    }
+}
+
+fn current_uid() -> int { return syscall_getuid() }
+fn current_gid() -> int { return syscall_getgid() }
+fn current_home() -> string {
+    let u = current()
+    return u.home
+}

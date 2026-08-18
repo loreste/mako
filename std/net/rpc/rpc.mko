@@ -1,0 +1,50 @@
+// std/net/rpc — JSON-RPC 2.0 request/response framing (Go net/rpc equivalent).
+// Transport is the caller's (HTTP/TCP). Memory-safe string codec.
+
+fn json_escape(s: string) -> string {
+    let mut out = ""
+    let mut i = 0
+    while i < str_len(s) {
+        let b = str_byte_at(s, i)
+        if b == 34 {
+            out = out + "\\\""
+        } else if b == 92 {
+            out = out + "\\\\"
+        } else if b == 10 {
+            out = out + "\\n"
+        } else if b == 13 {
+            out = out + "\\r"
+        } else {
+            out = out + str_slice(s, i, i + 1)
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn request(id: int, method: string, params: string) -> string {
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + format_int(id) + ",\"method\":\"" + json_escape(method) + "\",\"params\":" + params_or_null(params) + "}"
+}
+
+fn response_ok(id: int, result: string) -> string {
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + format_int(id) + ",\"result\":" + params_or_null(result) + "}"
+}
+
+fn response_err(id: int, code: int, msg: string) -> string {
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + format_int(id) + ",\"error\":{\"code\":" + format_int(code) + ",\"message\":\"" + json_escape(msg) + "\"}}"
+}
+
+fn method_of(body: string) -> string {
+    return json_get_string(body, "method")
+}
+
+fn id_of(body: string) -> int { return json_get_int(body, "id") }
+
+fn is_request(body: string) -> bool {
+    return str_len(method_of(body)) > 0
+}
+
+fn params_or_null(p: string) -> string {
+    if str_len(p) == 0 { return "null" }
+    return p
+}

@@ -1,0 +1,76 @@
+// std/hash/fnv — FNV-1 / FNV-1a (Go hash/fnv).
+// 32-bit offset 2166136261, prime 16777619.
+// 64-bit offset 14695981039346656037, prime 1099511628211.
+
+fn offset32() -> int { return 2166136261 }
+fn prime32() -> int { return 16777619 }
+
+fn sum32a(data: string) -> int {
+    let mut h = uint64(2166136261)
+    let p = uint64(16777619)
+    let n = str_len(data)
+    let mut i = 0
+    while i < n {
+        h = h ^ uint64(str_byte_at(data, i))
+        h = h * p
+        i = i + 1
+    }
+    return int(h & uint64(4294967295))
+}
+
+fn sum32(data: string) -> int {
+    let mut h = uint64(2166136261)
+    let p = uint64(16777619)
+    let n = str_len(data)
+    let mut i = 0
+    while i < n {
+        h = h * p
+        h = h ^ uint64(str_byte_at(data, i))
+        i = i + 1
+    }
+    return int(h & uint64(4294967295))
+}
+
+fn offset64() -> uint64 {
+    return (uint64(0xcbf29ce4) << uint64(32)) | uint64(0x84222325)
+}
+
+fn prime64() -> uint64 { return uint64(1099511628211) }
+
+fn sum64a(data: string) -> uint64 {
+    let mut h = offset64()
+    let p = prime64()
+    let n = str_len(data)
+    let mut i = 0
+    while i < n {
+        h = h ^ uint64(str_byte_at(data, i))
+        h = h * p
+        i = i + 1
+    }
+    return h
+}
+
+fn sum64(data: string) -> uint64 {
+    let mut h = offset64()
+    let p = prime64()
+    let n = str_len(data)
+    let mut i = 0
+    while i < n {
+        h = h * p
+        h = h ^ uint64(str_byte_at(data, i))
+        i = i + 1
+    }
+    return h
+}
+
+fn sum32a_bytes(data: []byte) -> int {
+    let mut h = uint64(2166136261)
+    let p = uint64(16777619)
+    let mut i = 0
+    while i < len(data) {
+        h = h ^ uint64(int(data[i]))
+        h = h * p
+        i = i + 1
+    }
+    return int(h & uint64(4294967295))
+}

@@ -1,0 +1,21 @@
+// std/testing/slogtest — slog record checks (Go log/slog/slogtest).
+
+fn valid_level(level: string) -> bool {
+    if level == "debug" { return true }
+    if level == "info" { return true }
+    if level == "warn" { return true }
+    if level == "error" { return true }
+    return false
+}
+
+fn valid_attr(key: string, val: string) -> bool {
+    if str_len(key) == 0 { return false }
+    let _ = val
+    return true
+}
+
+fn check_record(level: string, msg: string) -> (int, string) {
+    if !valid_level(level) { return (0, "invalid level") }
+    if str_len(msg) == 0 { return (0, "empty message") }
+    return (1, "")
+}

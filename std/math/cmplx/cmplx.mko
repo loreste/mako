@@ -1,0 +1,96 @@
+// std/math/cmplx — complex numbers as (re, im) pairs.
+// Go equivalent: complex128 + math/cmplx. No language `complex` type;
+// the pair is the Mako equivalent.
+
+struct Complex {
+    re: float
+    im: float
+}
+
+fn rect(re: float, im: float) -> Complex {
+    return Complex { re: re, im: im }
+}
+
+fn real_part(z: Complex) -> float { return z.re }
+fn imag_part(z: Complex) -> float { return z.im }
+
+fn abs(z: Complex) -> float { return math_hypot(z.re, z.im) }
+
+fn phase(z: Complex) -> float { return math_atan2(z.im, z.re) }
+
+fn polar(r: float, theta: float) -> Complex {
+    return Complex { re: r * math_cos(theta), im: r * math_sin(theta) }
+}
+
+fn conj(z: Complex) -> Complex {
+    return Complex { re: z.re, im: 0.0 - z.im }
+}
+
+fn add(a: Complex, b: Complex) -> Complex {
+    return Complex { re: a.re + b.re, im: a.im + b.im }
+}
+
+fn sub(a: Complex, b: Complex) -> Complex {
+    return Complex { re: a.re - b.re, im: a.im - b.im }
+}
+
+fn mul(a: Complex, b: Complex) -> Complex {
+    return Complex {
+        re: a.re * b.re - a.im * b.im,
+        im: a.re * b.im + a.im * b.re,
+    }
+}
+
+fn div(a: Complex, b: Complex) -> Complex {
+    let d = b.re * b.re + b.im * b.im
+    if d == 0.0 {
+        return Complex { re: math_inf(), im: math_inf() }
+    }
+    return Complex {
+        re: (a.re * b.re + a.im * b.im) / d,
+        im: (a.im * b.re - a.re * b.im) / d,
+    }
+}
+
+fn exp(z: Complex) -> Complex {
+    let e = math_exp(z.re)
+    return Complex { re: e * math_cos(z.im), im: e * math_sin(z.im) }
+}
+
+fn log(z: Complex) -> Complex {
+    return Complex { re: math_log(abs(z)), im: phase(z) }
+}
+
+fn sqrt(z: Complex) -> Complex {
+    let r = abs(z)
+    if r == 0.0 { return Complex { re: 0.0, im: 0.0 } }
+    return polar(math_sqrt(r), phase(z) / 2.0)
+}
+
+fn pow(z: Complex, w: Complex) -> Complex {
+    if z.re == 0.0 && z.im == 0.0 {
+        return Complex { re: 0.0, im: 0.0 }
+    }
+    return exp(mul(w, log(z)))
+}
+
+fn sin(z: Complex) -> Complex {
+    // sin(x+iy) = sin x cosh y + i cos x sinh y
+    let x = z.re
+    let y = z.im
+    let ey = math_exp(y)
+    let emy = math_exp(0.0 - y)
+    let cosh = (ey + emy) / 2.0
+    let sinh = (ey - emy) / 2.0
+    return Complex { re: math_sin(x) * cosh, im: math_cos(x) * sinh }
+}
+
+fn cos(z: Complex) -> Complex {
+    let x = z.re
+    let y = z.im
+    let ey = math_exp(y)
+    let emy = math_exp(0.0 - y)
+    let cosh = (ey + emy) / 2.0
+    let sinh = (ey - emy) / 2.0
+    return Complex { re: math_cos(x) * cosh, im: 0.0 - math_sin(x) * sinh }
+}

@@ -11,4 +11,27 @@ fn int_range(lo: int, hi: int) -> int {
     return lo + rand_intn(hi - lo)
 }
 
-// ponytail: shuffle needs mutable slice; defer to future stdlib
+fn shuffle(mut a: []int) -> []int {
+    let n = len(a)
+    if n < 2 { return a }
+    let mut i = n - 1
+    while i > 0 {
+        let j = rand_intn(i + 1)
+        let t = a[i]
+        a[i] = a[j]
+        a[j] = t
+        i = i - 1
+    }
+    return a
+}
+
+fn perm(n: int) -> []int {
+    if n <= 0 { return make([]int, 0) }
+    let mut a = make([]int, 0, n)
+    let mut i = 0
+    while i < n {
+        a = append(a, i)
+        i = i + 1
+    }
+    return shuffle(a)
+}

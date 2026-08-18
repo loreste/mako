@@ -1,0 +1,120 @@
+// std/text/scanner — tokenise a string into idents, numbers, strings, ops.
+// Go equivalent: text/scanner (subset). Tokens are (kind, text, offset).
+
+fn ident() -> int { return 1 }
+fn int_tok() -> int { return 2 }
+fn float_tok() -> int { return 3 }
+fn string_tok() -> int { return 4 }
+fn char_tok() -> int { return 5 }
+fn comment_tok() -> int { return 6 }
+fn raw_tok() -> int { return 7 }
+fn eof_tok() -> int { return 0 }
+
+struct Token {
+    kind: int
+    text: string
+    off: int
+}
+
+fn scan(s: string) -> []Token {
+    let mut out: []Token = []
+    let n = str_len(s)
+    let mut i = 0
+    while i < n {
+        let b = str_byte_at(s, i)
+        if b == 32 || b == 9 || b == 10 || b == 13 {
+            i = i + 1
+            continue
+        }
+        if b == 47 && i + 1 < n {
+            let n1 = str_byte_at(s, i + 1)
+            if n1 == 47 {
+                let start = i
+                i = i + 2
+                while i < n && str_byte_at(s, i) != 10 { i = i + 1 }
+                out = append(out, Token { kind: 6, text: str_slice(s, start, i), off: start })
+                continue
+            }
+            if n1 == 42 {
+                let start = i
+                i = i + 2
+                while i + 1 < n {
+                    if str_byte_at(s, i) == 42 && str_byte_at(s, i + 1) == 47 {
+                        i = i + 2
+                        break
+                    }
+                    i = i + 1
+                }
+                out = append(out, Token { kind: 6, text: str_slice(s, start, i), off: start })
+                continue
+            }
+        }
+        if is_ident_start(b) {
+            let start = i
+            i = i + 1
+            while i < n && is_ident_cont(str_byte_at(s, i)) { i = i + 1 }
+            out = append(out, Token { kind: 1, text: str_slice(s, start, i), off: start })
+            continue
+        }
+        if b >= 48 && b <= 57 {
+            let start = i
+            let mut kind = 2
+            i = i + 1
+            while i < n && str_byte_at(s, i) >= 48 && str_byte_at(s, i) <= 57 { i = i + 1 }
+            if i < n && str_byte_at(s, i) == 46 {
+                kind = 3
+                i = i + 1
+                while i < n && str_byte_at(s, i) >= 48 && str_byte_at(s, i) <= 57 { i = i + 1 }
+            }
+            out = append(out, Token { kind: kind, text: str_slice(s, start, i), off: start })
+            continue
+        }
+        if b == 34 {
+            let start = i
+            i = i + 1
+            while i < n {
+                let c = str_byte_at(s, i)
+                if c == 92 && i + 1 < n {
+                    i = i + 2
+                    continue
+                }
+                if c == 34 {
+                    i = i + 1
+                    break
+                }
+                i = i + 1
+            }
+            out = append(out, Token { kind: 4, text: str_slice(s, start, i), off: start })
+            continue
+        }
+        if b == 39 {
+            let start = i
+            i = i + 1
+            while i < n {
+                let c = str_byte_at(s, i)
+                if c == 92 && i + 1 < n {
+                    i = i + 2
+                    continue
+                }
+                if c == 39 {
+                    i = i + 1
+                    break
+                }
+                i = i + 1
+            }
+            out = append(out, Token { kind: 5, text: str_slice(s, start, i), off: start })
+            continue
+        }
+        out = append(out, Token { kind: 7, text: str_slice(s, i, i + 1), off: i })
+        i = i + 1
+    }
+    return out
+}
+
+fn is_ident_start(b: int) -> bool {
+    return (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95
+}
+
+fn is_ident_cont(b: int) -> bool {
+    return is_ident_start(b) || (b >= 48 && b <= 57)
+}

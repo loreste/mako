@@ -19,13 +19,50 @@ fn strings_reverse(a: []string) -> []string {
 }
 
 fn is_sorted_ints(a: []int) -> bool {
-    for i in len(a) - 1 {
-        if a[i] > a[i + 1] {
-            return false
-        }
+    if len(a) < 2 { return true }
+    let mut i = 1
+    while i < len(a) {
+        if a[i] < a[i - 1] { return false }
+        i = i + 1
     }
     return true
 }
 
-// ponytail: no is_sorted_strings — Mako lacks string ordering (</>)
-// Add when str_compare(a, b) -> int is available as a builtin.
+fn is_sorted_strings(a: []string) -> bool {
+    if len(a) < 2 { return true }
+    let mut i = 1
+    while i < len(a) {
+        if str_compare(a[i - 1], a[i]) > 0 { return false }
+        i = i + 1
+    }
+    return true
+}
+
+// search_ints is Go sort.SearchInts: first index >= v on a sorted slice.
+fn search_ints(a: []int, v: int) -> int {
+    let mut lo = 0
+    let mut hi = len(a)
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2
+        if a[mid] < v {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
+    }
+    return lo
+}
+
+fn search_strings(a: []string, v: string) -> int {
+    let mut lo = 0
+    let mut hi = len(a)
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2
+        if str_compare(a[mid], v) < 0 {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
+    }
+    return lo
+}

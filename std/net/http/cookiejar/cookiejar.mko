@@ -1,0 +1,72 @@
+// std/net/http/cookiejar — in-memory cookie jar (Go net/http/cookiejar).
+// Host → name=value pairs. No publicsuffix table (exact host + parent).
+
+struct Jar {
+    hosts: []string
+    cookies: []string
+}
+
+fn new_jar() -> Jar {
+    return Jar { hosts: make([]string, 0), cookies: make([]string, 0) }
+}
+
+fn set_cookie(mut j: Jar, host: string, cookie: string) -> Jar {
+    let name = cookie_name(cookie)
+    let mut i = 0
+    while i < len(j.hosts) {
+        if j.hosts[i] == host {
+            if cookie_name(j.cookies[i]) == name {
+                j.cookies[i] = cookie
+                return j
+            }
+        }
+        i = i + 1
+    }
+    j.hosts = append(j.hosts, host)
+    j.cookies = append(j.cookies, cookie)
+    return j
+}
+
+fn cookies_for(j: Jar, host: string) -> []string {
+    let mut out: []string = []
+    let mut i = 0
+    while i < len(j.hosts) {
+        if host_match(j.hosts[i], host) {
+            out = append(out, j.cookies[i])
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn cookie_header(j: Jar, host: string) -> string {
+    let cs = cookies_for(j, host)
+    let mut out = ""
+    let mut i = 0
+    while i < len(cs) {
+        if i > 0 { out = out + "; " }
+        out = out + cookie_pair(cs[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn cookie_name(c: string) -> string {
+    let i = str_index(c, "=")
+    if i < 0 { return str_trim_space(c) }
+    return str_trim_space(str_slice(c, 0, i))
+}
+
+fn cookie_pair(c: string) -> string {
+    let i = str_index(c, ";")
+    if i < 0 { return str_trim_space(c) }
+    return str_trim_space(str_slice(c, 0, i))
+}
+
+fn host_match(stored: string, req: string) -> bool {
+    if stored == req { return true }
+    // Refuse single-label cookies (would match every "*.com").
+    if str_index(stored, ".") < 0 { return false }
+    if str_has_suffix(req, "." + stored) { return true }
+    return false
+}

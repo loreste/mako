@@ -1,4 +1,29 @@
-// std/net — seed (dial/listen live under net/http and runtime)
-fn available() -> bool {
-    return true
+// std/net — addresses, host/port, and name lookup.
+// Dial/listen live under net/http and the runtime. This pack is the
+// Go `net` address layer (SplitHostPort, ParseIP, LookupHost).
+
+fn host_lookup(name: string) -> string { return lookup_host(name) }
+fn lookup_count(name: string) -> int { return dns_lookup_count(name) }
+fn lookup_all(name: string) -> string { return dns_lookup_all(name) }
+fn lookup_ipv4(name: string) -> string { return dns_lookup_ipv4(name) }
+fn lookup_ipv6(name: string) -> string { return dns_lookup_ipv6(name) }
+
+fn ip_ok(s: string) -> int { return parse_ip_ok(s) }
+fn ip_family(s: string) -> int { return dns_ip_family(s) }
+fn is_loopback(s: string) -> int { return dns_is_loopback(s) }
+fn is_private(s: string) -> int { return dns_is_private(s) }
+fn normalize_host(s: string) -> string { return dns_normalize_host(s) }
+
+fn join_host_port(host: string, port: int) -> string {
+    return dns_join_host_port(host, port)
+}
+
+fn split_host(addr: string) -> string { return dns_split_host(addr) }
+fn split_port(addr: string) -> int { return dns_split_port(addr) }
+
+fn split_host_port(addr: string) -> (string, int, int) {
+    let h = dns_split_host(addr)
+    let p = dns_split_port(addr)
+    if str_len(addr) == 0 { return ("", 0, 0) }
+    return (h, p, 1)
 }

@@ -1,0 +1,37 @@
+// std/testing/quick — seeded property checks (Go testing/quick).
+// Uses math/rand, not crypto/rand. Predicates return 1/0 (native
+// cannot lower `fn(...) -> bool` callbacks).
+
+fn check_int(trials: int, pred: fn(int) -> int) -> int {
+    if trials <= 0 { return 1 }
+    let mut i = 0
+    while i < trials {
+        let x = rand_intn(1000000) - 500000
+        if pred(x) == 0 { return 0 }
+        i = i + 1
+    }
+    return 1
+}
+
+fn check_nat(trials: int, pred: fn(int) -> int) -> int {
+    if trials <= 0 { return 1 }
+    let mut i = 0
+    while i < trials {
+        let x = rand_intn(10000)
+        if pred(x) == 0 { return 0 }
+        i = i + 1
+    }
+    return 1
+}
+
+fn check_pair(trials: int, pred: fn(int, int) -> int) -> int {
+    if trials <= 0 { return 1 }
+    let mut i = 0
+    while i < trials {
+        let a = rand_intn(1000)
+        let b = rand_intn(1000)
+        if pred(a, b) == 0 { return 0 }
+        i = i + 1
+    }
+    return 1
+}

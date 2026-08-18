@@ -1,4 +1,7 @@
-// std/strings — Go-compatible string operations.
+// std/strings — owned-string operations.
+// Go equivalent: strings. Mako surface is snake_case; `join` is a keyword
+// so concatenation of parts is `concat`. Index mistakes never panic:
+// searches return -1, slices clamp to empty.
 
 // ---- Search ----
 
@@ -10,12 +13,68 @@ fn last_index(hay: string, needle: string) -> int { return str_last_index(hay, n
 fn count(s: string, sub: string) -> int { return str_count(s, sub) }
 
 fn index_byte(s: string, b: int) -> int {
-    var i = 0
-    while i < str_len(s) {
+    if b < 0 || b > 255 { return -1 }
+    let n = str_len(s)
+    let mut i = 0
+    while i < n {
         if str_byte_at(s, i) == b { return i }
         i = i + 1
     }
     return -1
+}
+
+fn last_index_byte(s: string, b: int) -> int {
+    if b < 0 || b > 255 { return -1 }
+    let mut i = str_len(s) - 1
+    while i >= 0 {
+        if str_byte_at(s, i) == b { return i }
+        i = i - 1
+    }
+    return -1
+}
+
+fn index_rune(s: string, r: int) -> int {
+    for i, c in range s {
+        if c == r { return i }
+    }
+    return -1
+}
+
+fn last_index_rune(s: string, r: int) -> int {
+    let mut found = -1
+    for i, c in range s {
+        if c == r { found = i }
+    }
+    return found
+}
+
+fn contains_rune(s: string, r: int) -> bool {
+    return index_rune(s, r) >= 0
+}
+
+fn index_any(s: string, chars: string) -> int {
+    if str_len(chars) == 0 { return -1 }
+    for i, r in range s {
+        for _, c in range chars {
+            if r == c { return i }
+        }
+    }
+    return -1
+}
+
+fn last_index_any(s: string, chars: string) -> int {
+    if str_len(chars) == 0 { return -1 }
+    let mut found = -1
+    for i, r in range s {
+        for _, c in range chars {
+            if r == c { found = i }
+        }
+    }
+    return found
+}
+
+fn contains_any(s: string, chars: string) -> bool {
+    return index_any(s, chars) >= 0
 }
 
 fn equal_fold(a: string, b: string) -> bool {
@@ -26,26 +85,67 @@ fn equal_fold(a: string, b: string) -> bool {
 
 fn to_lower(s: string) -> string { return str_to_lower(s) }
 fn to_upper(s: string) -> string { return str_to_upper(s) }
-fn repeat(s: string, n: int) -> string { return str_repeat(s, n) }
+fn repeat(s: string, n: int) -> string {
+    if n <= 0 { return "" }
+    return str_repeat(s, n)
+}
 fn replace(s: string, old: string, newv: string) -> string { return str_replace(s, old, newv) }
 fn replace_all(s: string, old: string, newv: string) -> string { return str_replace(s, old, newv) }
-fn slice(s: string, start: int, end: int) -> string { return str_slice(s, start, end) }
+fn slice(s: string, start: int, end: int) -> string {
+    let n = str_len(s)
+    let mut a = start
+    let mut b = end
+    if a < 0 { a = 0 }
+    if b > n { b = n }
+    if a > b { return "" }
+    return str_slice(s, a, b)
+}
+
+fn clone(s: string) -> string { return "" + s }
+
+fn replace_n(s: string, old: string, newv: string, n: int) -> string {
+    if str_len(old) == 0 { return s }
+    if n == 0 { return s }
+    if n < 0 { return str_replace(s, old, newv) }
+    let mut out = ""
+    let mut rest = s
+    let mut left = n
+    while left > 0 {
+        let i = str_index(rest, old)
+        if i < 0 {
+            return out + rest
+        }
+        out = out + str_slice(rest, 0, i) + newv
+        rest = str_slice(rest, i + str_len(old), str_len(rest))
+        left = left - 1
+    }
+    return out + rest
+}
 
 fn title(s: string) -> string {
     if str_len(s) == 0 { return "" }
-    var result = str_to_upper(str_slice(s, 0, 1))
-    var i = 1
-    while i < str_len(s) {
-        let prev = str_byte_at(s, i - 1)
-        let ch = str_slice(s, i, i + 1)
-        if prev == 32 || prev == 9 || prev == 10 {
-            result = result + str_to_upper(ch)
+    let b = str_builder()
+    let mut cap_next = true
+    for _, r in range s {
+        if r == 32 || r == 9 || r == 10 || r == 13 {
+            builder_write(b, utf8_encode_rune(r))
+            cap_next = true
+        } else if cap_next {
+            builder_write(b, utf8_encode_rune(unicode_to_upper(r)))
+            cap_next = false
         } else {
-            result = result + ch
+            builder_write(b, utf8_encode_rune(r))
         }
-        i = i + 1
     }
-    return result
+    return builder_string(b)
+}
+
+fn map_runes(s: string, f: fn(int) -> int) -> string {
+    let b = str_builder()
+    for _, r in range s {
+        builder_write(b, utf8_encode_rune(f(r)))
+    }
+    return builder_string(b)
 }
 
 // ---- Trim ----
@@ -69,6 +169,20 @@ fn trim_suffix(s: string, suffix: string) -> string {
     return s
 }
 
+fn cut_prefix(s: string, prefix: string) -> (string, bool) {
+    if str_has_prefix(s, prefix) {
+        return (str_slice(s, str_len(prefix), str_len(s)), true)
+    }
+    return (s, false)
+}
+
+fn cut_suffix(s: string, suffix: string) -> (string, bool) {
+    if str_has_suffix(s, suffix) {
+        return (str_slice(s, 0, str_len(s) - str_len(suffix)), true)
+    }
+    return (s, false)
+}
+
 // ---- Split / Join ----
 
 fn split(s: string, sep: string) -> []string { return str_split(s, sep) }
@@ -77,10 +191,125 @@ fn concat(parts: []string, sep: string) -> string { return str_join(parts, sep) 
 fn join_parts(parts: []string, sep: string) -> string { return str_join(parts, sep) }
 fn cut(s: string, sep: string) -> []string { return str_cut(s, sep) }
 
+fn cut_ok(s: string, sep: string) -> (string, string, bool) {
+    let i = str_index(s, sep)
+    if i < 0 {
+        return (s, "", false)
+    }
+    return (str_slice(s, 0, i), str_slice(s, i + str_len(sep), str_len(s)), true)
+}
+
+fn split_n(s: string, sep: string, n: int) -> []string {
+    if n == 1 { return [s] }
+    if str_len(sep) == 0 { return split_runes_n(s, n) }
+    let mut out: []string = []
+    let mut rest = s
+    let mut left = n
+    while 1 == 1 {
+        if left == 1 {
+            out = append(out, rest)
+            return out
+        }
+        let i = str_index(rest, sep)
+        if i < 0 {
+            out = append(out, rest)
+            return out
+        }
+        out = append(out, str_slice(rest, 0, i))
+        rest = str_slice(rest, i + str_len(sep), str_len(rest))
+        if left > 0 { left = left - 1 }
+    }
+    return out
+}
+
+fn split_after(s: string, sep: string) -> []string {
+    return split_after_n(s, sep, -1)
+}
+
+fn split_after_n(s: string, sep: string, n: int) -> []string {
+    if n == 1 { return [s] }
+    if str_len(sep) == 0 { return split_runes_n(s, n) }
+    let mut out: []string = []
+    let mut rest = s
+    let mut left = n
+    let sepn = str_len(sep)
+    while 1 == 1 {
+        if left == 1 {
+            out = append(out, rest)
+            return out
+        }
+        let i = str_index(rest, sep)
+        if i < 0 {
+            if str_len(rest) > 0 || len(out) == 0 {
+                out = append(out, rest)
+            }
+            return out
+        }
+        out = append(out, str_slice(rest, 0, i + sepn))
+        rest = str_slice(rest, i + sepn, str_len(rest))
+        if left > 0 { left = left - 1 }
+    }
+    return out
+}
+
+fn split_runes_n(s: string, n: int) -> []string {
+    let mut out: []string = []
+    let mut i = 0
+    let slen = str_len(s)
+    let mut left = n
+    while i < slen {
+        if left == 1 {
+            out = append(out, str_slice(s, i, slen))
+            return out
+        }
+        let sz = utf8_decode_size(s, i)
+        let mut step = sz
+        if step <= 0 { step = 1 }
+        if i + step > slen { step = slen - i }
+        out = append(out, str_slice(s, i, i + step))
+        i = i + step
+        if left > 0 { left = left - 1 }
+    }
+    if len(out) == 0 { return [""] }
+    return out
+}
+
+fn fields_fn(s: string, is_sep: fn(int) -> bool) -> []string {
+    let mut out: []string = []
+    let mut field = ""
+    let mut in_field = false
+    for _, r in range s {
+        if is_sep(r) {
+            if in_field {
+                out = append(out, field)
+                field = ""
+                in_field = false
+            }
+        } else {
+            field = field + utf8_encode_rune(r)
+            in_field = true
+        }
+    }
+    if in_field {
+        out = append(out, field)
+    }
+    return out
+}
+
 // ---- Comparison ----
 
 fn compare(a: string, b: string) -> int { return str_compare(a, b) }
 
-// ---- Builder ----
+// ---- Builder / reader ----
 
 fn builder() -> StrBuilder { return str_builder() }
+
+fn new_reader(s: string) -> string { return s }
+
+fn reader_len(s: string) -> int { return str_len(s) }
+
+fn reader_read(s: string, off: int, n: int) -> string {
+    if off < 0 || n <= 0 { return "" }
+    let end = off + n
+    return slice(s, off, end)
+}

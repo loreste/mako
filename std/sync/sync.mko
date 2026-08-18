@@ -23,9 +23,25 @@ fn done(wg: WaitGroup) { wait_group_done(wg) }
 fn wait(wg: WaitGroup) { wait_group_wait(wg) }
 
 // ---- Atomic ----
+// Wrappers cannot share the builtin name (that would recurse).
 
-fn atomic_new(val: int) -> int { return atomic_new(val) }
-fn atomic_load(a: int) -> int { return atomic_load(a) }
-fn atomic_store(a: int, val: int) { atomic_store(a, val) }
-fn atomic_add(a: int, delta: int) -> int { return atomic_add(a, delta) }
-fn atomic_cas(a: int, old: int, newv: int) -> int { return atomic_cas(a, old, newv) }
+fn new_atomic(val: int) -> AtomicInt { return atomic_new(val) }
+fn load(a: AtomicInt) -> int { return atomic_load(a) }
+fn store(a: AtomicInt, val: int) { atomic_store(a, val) }
+fn add_atomic(a: AtomicInt, delta: int) -> int { return atomic_add(a, delta) }
+fn cas(a: AtomicInt, old: int, newv: int) -> int { return atomic_cas(a, old, newv) }
+
+// once is Go sync.Once: a handle that lets a function run at most once.
+fn once() -> AtomicInt { return atomic_new(0) }
+
+fn do_once(h: AtomicInt, f: fn() -> int) -> int {
+    if atomic_cas(h, 0, 1) == 1 {
+        return f()
+    }
+    return 0
+}
+
+fn once_done(h: AtomicInt) -> int {
+    if atomic_load(h) != 0 { return 1 }
+    return 0
+}

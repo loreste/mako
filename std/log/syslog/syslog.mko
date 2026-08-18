@@ -1,0 +1,18 @@
+// std/log/syslog — RFC 5424-ish line format (Go log/syslog).
+// Transport is the caller's (UDP/unix). No libc syslog(3).
+
+fn emerg() -> int { return 0 }
+fn alert() -> int { return 1 }
+fn crit() -> int { return 2 }
+fn error() -> int { return 3 }
+fn warning() -> int { return 4 }
+fn notice() -> int { return 5 }
+fn inform() -> int { return 6 }
+fn debug_sev() -> int { return 7 }
+
+fn facility_user() -> int { return 8 }
+
+fn format(facility: int, severity: int, tag: string, msg: string) -> string {
+    let pri = facility + severity
+    return "<" + format_int(pri) + ">" + tag + ": " + msg
+}

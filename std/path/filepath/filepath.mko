@@ -1,4 +1,149 @@
+// std/path/filepath — OS paths. Go equivalent: path/filepath.
+
 fn walk(root: string) -> []string { return filepath_walk(root) }
 fn walk_n(root: string, max_depth: int) -> []string { return filepath_walk_n(root, max_depth) }
 fn clean(p: string) -> string { return path_clean(p) }
 fn join_path(a: string, b: string) -> string { return path_join(a, b) }
+fn base(p: string) -> string { return path_base(p) }
+fn dir(p: string) -> string { return path_dir(p) }
+fn ext(p: string) -> string { return path_ext(p) }
+fn is_abs(p: string) -> bool { return path_is_abs(p) }
+
+fn split(p: string) -> (string, string) {
+    return (path_dir(p), path_base(p))
+}
+
+fn to_slash(p: string) -> string {
+    return str_replace(p, "\\", "/")
+}
+
+fn from_slash(p: string) -> string {
+    return str_replace(p, "/", "\\")
+}
+
+fn volume_name(p: string) -> string {
+    // Windows "C:" / "C:\" / UNC. POSIX: empty.
+    if str_len(p) >= 2 {
+        let a = str_byte_at(p, 0)
+        let b = str_byte_at(p, 1)
+        if a >= 65 && a <= 90 || a >= 97 && a <= 122 {
+            if b == 58 {
+                if str_len(p) >= 3 {
+                    let c = str_byte_at(p, 2)
+                    if c == 47 || c == 92 { return str_slice(p, 0, 3) }
+                }
+                return str_slice(p, 0, 2)
+            }
+        }
+        if a == 92 && b == 92 {
+            return unc_volume(p)
+        }
+    }
+    return ""
+}
+
+fn unc_volume(p: string) -> string {
+    // \\host\share
+    let n = str_len(p)
+    let mut slashes = 0
+    let mut i = 0
+    while i < n {
+        let c = str_byte_at(p, i)
+        if c == 92 || c == 47 {
+            slashes = slashes + 1
+            if slashes == 4 { return str_slice(p, 0, i) }
+        }
+        i = i + 1
+    }
+    return p
+}
+
+fn abs(p: string) -> string {
+    if path_is_abs(p) { return path_clean(p) }
+    return path_clean(path_join(getcwd(), p))
+}
+
+fn rel(basep: string, target: string) -> string {
+    let b = path_clean(basep)
+    let t = path_clean(target)
+    if b == t { return "." }
+    let pref = b + "/"
+    if str_has_prefix(t, pref) {
+        return str_slice(t, str_len(pref), str_len(t))
+    }
+    // Walk up from base until a common prefix exists.
+    let mut up = ""
+    let mut cur = b
+    let mut guard = 0
+    while guard < 64 {
+        guard = guard + 1
+        if str_len(cur) == 0 || cur == "/" || cur == "." { break }
+        if up == "" {
+            up = ".."
+        } else {
+            up = up + "/.."
+        }
+        cur = path_dir(cur)
+        if cur == t { return up }
+        let p2 = cur + "/"
+        if str_has_prefix(t, p2) {
+            let rest = str_slice(t, str_len(p2), str_len(t))
+            if str_len(rest) == 0 { return up }
+            return up + "/" + rest
+        }
+    }
+    return t
+}
+
+fn split_list(p: string) -> []string {
+    // PATH-style: ':' on POSIX, also accept ';'.
+    if str_len(p) == 0 { return make([]string, 0) }
+    let mut out: []string = []
+    let mut cur = ""
+    let mut i = 0
+    while i < str_len(p) {
+        let c = str_byte_at(p, i)
+        if c == 58 || c == 59 {
+            out = append(out, cur)
+            cur = ""
+        } else {
+            cur = cur + str_slice(p, i, i + 1)
+        }
+        i = i + 1
+    }
+    out = append(out, cur)
+    return out
+}
+
+fn matches(pattern: string, name: string) -> bool {
+    // Path-separator aware: '/' or '\\'.
+    return glob_at(pattern, 0, name, 0)
+}
+
+fn glob_at(pattern: string, pi: int, name: string, ni: int) -> bool {
+    let plen = str_len(pattern)
+    let nlen = str_len(name)
+    if pi >= plen { return ni >= nlen }
+    let pc = str_byte_at(pattern, pi)
+    if pc == 42 {
+        let mut k = ni
+        while k <= nlen {
+            if glob_at(pattern, pi + 1, name, k) { return true }
+            if k < nlen {
+                let c = str_byte_at(name, k)
+                if c == 47 || c == 92 { return false }
+            }
+            k = k + 1
+        }
+        return false
+    }
+    if pc == 63 {
+        if ni >= nlen { return false }
+        let c = str_byte_at(name, ni)
+        if c == 47 || c == 92 { return false }
+        return glob_at(pattern, pi + 1, name, ni + 1)
+    }
+    if ni >= nlen { return false }
+    if pc != str_byte_at(name, ni) { return false }
+    return glob_at(pattern, pi + 1, name, ni + 1)
+}

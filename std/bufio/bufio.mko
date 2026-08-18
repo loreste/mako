@@ -7,3 +7,41 @@ fn writer(path: string) -> BufWriter { return buf_writer_new(path) }
 fn write(w: BufWriter, s: string) -> int { return buf_write(w, s) }
 fn flush(w: BufWriter) -> int { return buf_flush(w) }
 fn writer_close(w: BufWriter) -> int { return buf_writer_close(w) }
+
+// scan_lines is Go bufio.Scanner with ScanLines.
+fn scan_lines(s: string) -> []string {
+    let mut out: []string = []
+    let n = str_len(s)
+    let mut i = 0
+    let mut start = 0
+    while i < n {
+        let b = str_byte_at(s, i)
+        if b == 10 {
+            let mut end = i
+            if end > start && str_byte_at(s, end - 1) == 13 {
+                end = end - 1
+            }
+            out = append(out, str_slice(s, start, end))
+            i = i + 1
+            start = i
+            continue
+        }
+        i = i + 1
+    }
+    if start < n || n == 0 {
+        let mut end = n
+        if end > start && str_byte_at(s, end - 1) == 13 {
+            end = end - 1
+        }
+        out = append(out, str_slice(s, start, end))
+    }
+    return out
+}
+
+fn scan_words(s: string) -> []string { return str_fields(s) }
+
+fn peek_prefix(s: string, n: int) -> string {
+    if n <= 0 { return "" }
+    if n >= str_len(s) { return s }
+    return str_slice(s, 0, n)
+}

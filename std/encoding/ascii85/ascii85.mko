@@ -1,0 +1,102 @@
+// std/encoding/ascii85 — Adobe ASCII85 (Go encoding/ascii85).
+// Four zero bytes encode as 'z'. Other 4-byte groups become 5 chars in 33..117.
+
+fn encode(data: string) -> string {
+    let n = str_len(data)
+    let mut out = ""
+    let mut i = 0
+    while i < n {
+        let mut block = uint64(0)
+        let mut k = 0
+        while k < 4 {
+            block = block << uint64(8)
+            if i + k < n {
+                block = block + uint64(str_byte_at(data, i + k))
+            }
+            k = k + 1
+        }
+        let remain = n - i
+        if remain >= 4 && block == uint64(0) {
+            out = out + "z"
+            i = i + 4
+            continue
+        }
+        let mut digits = make([]int, 5)
+        let mut v = block
+        let mut d = 4
+        while d >= 0 {
+            digits[d] = int(v % uint64(85))
+            v = v / uint64(85)
+            d = d - 1
+        }
+        let mut count = 5
+        if remain < 4 { count = remain + 1 }
+        let mut c = 0
+        while c < count {
+            out = out + utf8_encode_rune(33 + digits[c])
+            c = c + 1
+        }
+        i = i + 4
+    }
+    return out
+}
+
+fn decode(s: string) -> (string, string) {
+    let n = str_len(s)
+    let mut out = ""
+    let mut acc = make([]int, 0, 5)
+    let mut i = 0
+    while i < n {
+        let b = str_byte_at(s, i)
+        if b == 32 || b == 10 || b == 13 || b == 9 {
+            i = i + 1
+            continue
+        }
+        if b == 122 {
+            if len(acc) != 0 { return ("", "ascii85: z inside group") }
+            out = out + nul4()
+            i = i + 1
+            continue
+        }
+        if b < 33 || b > 117 { return ("", "ascii85: bad char") }
+        acc = append(acc, b - 33)
+        if len(acc) == 5 {
+            out = out + flush_group(acc, 4)
+            acc = make([]int, 0, 5)
+        }
+        i = i + 1
+    }
+    if len(acc) > 0 {
+        let got = len(acc)
+        if got == 1 { return ("", "ascii85: leftover") }
+        while len(acc) < 5 {
+            acc = append(acc, 84)
+        }
+        out = out + flush_group(acc, got - 1)
+    }
+    return (out, "")
+}
+
+fn nul4() -> string {
+    return utf8_encode_rune(0) + utf8_encode_rune(0) + utf8_encode_rune(0) + utf8_encode_rune(0)
+}
+
+fn flush_group(digits: []int, nbytes: int) -> string {
+    if len(digits) != 5 { return "" }
+    let mut v = uint64(0)
+    let mut i = 0
+    while i < 5 {
+        v = v * uint64(85) + uint64(digits[i])
+        i = i + 1
+    }
+    let b0 = int((v >> uint64(24)) & uint64(255))
+    let b1 = int((v >> uint64(16)) & uint64(255))
+    let b2 = int((v >> uint64(8)) & uint64(255))
+    let b3 = int(v & uint64(255))
+    let mut out = ""
+    if nbytes >= 1 { out = out + utf8_encode_rune(b0) }
+    if nbytes >= 2 { out = out + utf8_encode_rune(b1) }
+    if nbytes >= 3 { out = out + utf8_encode_rune(b2) }
+    if nbytes >= 4 { out = out + utf8_encode_rune(b3) }
+    return out
+}

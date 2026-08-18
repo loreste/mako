@@ -1,5 +1,6 @@
-// std/bytes — byte buffer and byte-level operations.
-// Modeled after Go's bytes package.
+// std/bytes — byte-slice and buffer operations.
+// Go equivalent: bytes. Works on []byte; string helpers stay for
+// the existing Buffer surface. Indexes never panic.
 
 // ---- Buffer ----
 
@@ -9,14 +10,26 @@ fn string(b: BytesBuffer) -> string { return bytes_buffer_string(b) }
 fn buf_len(b: BytesBuffer) -> int { return bytes_buffer_len(b) }
 fn reset(b: BytesBuffer) { bytes_buffer_reset(b) }
 
-// ---- Byte slice operations ----
+// ---- Views ----
 
 fn to_hex(data: string) -> string { return bytes_to_hex(data) }
 fn as_str(data: []byte) -> string { return bytes_as_str(data) }
 fn view(s: string, start: int, end: int) -> []byte { return bytes_view(s, start, end) }
 fn is_view(data: []byte) -> bool { return bytes_is_view(data) == 1 }
 
-// ---- Search ----
+fn clone(data: []byte) -> []byte {
+    let mut out = make([]byte, 0, len(data))
+    let mut i = 0
+    while i < len(data) {
+        out = append(out, data[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn from_string(s: string) -> []byte { return bytes(s) }
+
+// ---- Search (string surface kept) ----
 
 fn contains(data: string, sub: string) -> bool { return str_contains(data, sub) }
 fn has_prefix(data: string, prefix: string) -> bool { return str_has_prefix(data, prefix) }
@@ -24,17 +37,182 @@ fn has_suffix(data: string, suffix: string) -> bool { return str_has_suffix(data
 fn index(data: string, sub: string) -> int { return str_index(data, sub) }
 fn count(data: string, sub: string) -> int { return str_count(data, sub) }
 
+// ---- Search on []byte ----
+
+fn index_byte(data: []byte, b: byte) -> int {
+    let mut i = 0
+    while i < len(data) {
+        if data[i] == b { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn last_index_byte(data: []byte, b: byte) -> int {
+    let mut i = len(data) - 1
+    while i >= 0 {
+        if data[i] == b { return i }
+        i = i - 1
+    }
+    return -1
+}
+
+fn index_bytes(data: []byte, sub: []byte) -> int {
+    let n = len(sub)
+    if n == 0 { return 0 }
+    if n > len(data) { return -1 }
+    let last = len(data) - n
+    let mut i = 0
+    while i <= last {
+        let mut ok = true
+        let mut j = 0
+        while j < n {
+            if data[i + j] != sub[j] {
+                ok = false
+                break
+            }
+            j = j + 1
+        }
+        if ok { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+fn contains_bytes(data: []byte, sub: []byte) -> bool {
+    return index_bytes(data, sub) >= 0
+}
+
+fn has_prefix_bytes(data: []byte, prefix: []byte) -> bool {
+    if len(prefix) > len(data) { return false }
+    let mut i = 0
+    while i < len(prefix) {
+        if data[i] != prefix[i] { return false }
+        i = i + 1
+    }
+    return true
+}
+
+fn has_suffix_bytes(data: []byte, suffix: []byte) -> bool {
+    if len(suffix) > len(data) { return false }
+    let off = len(data) - len(suffix)
+    let mut i = 0
+    while i < len(suffix) {
+        if data[off + i] != suffix[i] { return false }
+        i = i + 1
+    }
+    return true
+}
+
+fn count_bytes(data: []byte, sub: []byte) -> int {
+    if len(sub) == 0 {
+        return len(data) + 1
+    }
+    let mut n = 0
+    let mut i = 0
+    while 1 == 1 {
+        let rest = slice(data, i, len(data))
+        let j = index_bytes(rest, sub)
+        if j < 0 { return n }
+        n = n + 1
+        i = i + j + len(sub)
+    }
+    return n
+}
+
 // ---- Transform ----
 
 fn to_lower(data: string) -> string { return str_to_lower(data) }
 fn to_upper(data: string) -> string { return str_to_upper(data) }
 fn trim_space(data: string) -> string { return str_trim_space(data) }
-fn repeat(data: string, n: int) -> string { return str_repeat(data, n) }
+fn repeat(data: string, n: int) -> string {
+    if n <= 0 { return "" }
+    return str_repeat(data, n)
+}
 fn replace(data: string, old: string, newv: string) -> string { return str_replace(data, old, newv) }
+
+fn slice(data: []byte, start: int, end: int) -> []byte {
+    let n = len(data)
+    let mut a = start
+    let mut b = end
+    if a < 0 { a = 0 }
+    if b > n { b = n }
+    if a > b { return make([]byte, 0) }
+    let mut out = make([]byte, 0, b - a)
+    let mut i = a
+    while i < b {
+        out = append(out, data[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn trim_prefix_bytes(data: []byte, prefix: []byte) -> []byte {
+    if has_prefix_bytes(data, prefix) {
+        return slice(data, len(prefix), len(data))
+    }
+    return clone(data)
+}
+
+fn trim_suffix_bytes(data: []byte, suffix: []byte) -> []byte {
+    if has_suffix_bytes(data, suffix) {
+        return slice(data, 0, len(data) - len(suffix))
+    }
+    return clone(data)
+}
+
+fn concat_all(parts: [][]byte, sep: []byte) -> []byte {
+    let mut out = make([]byte, 0)
+    let mut i = 0
+    while i < len(parts) {
+        if i > 0 {
+            let mut j = 0
+            while j < len(sep) {
+                out = append(out, sep[j])
+                j = j + 1
+            }
+        }
+        let p = parts[i]
+        let mut k = 0
+        while k < len(p) {
+            out = append(out, p[k])
+            k = k + 1
+        }
+        i = i + 1
+    }
+    return out
+}
 
 // ---- Compare ----
 
 fn equal(a: string, b: string) -> bool { return a == b }
+
+fn equal_bytes(a: []byte, b: []byte) -> bool {
+    if len(a) != len(b) { return false }
+    let mut i = 0
+    while i < len(a) {
+        if a[i] != b[i] { return false }
+        i = i + 1
+    }
+    return true
+}
+
+fn compare_bytes(a: []byte, b: []byte) -> int {
+    let mut i = 0
+    let n = len(a)
+    let m = len(b)
+    let mut lim = n
+    if m < lim { lim = m }
+    while i < lim {
+        if a[i] < b[i] { return -1 }
+        if a[i] > b[i] { return 1 }
+        i = i + 1
+    }
+    if n < m { return -1 }
+    if n > m { return 1 }
+    return 0
+}
+
 fn equal_fold(a: string, b: string) -> bool {
     return str_to_lower(a) == str_to_lower(b)
 }

@@ -1,6 +1,7 @@
 // Package context provides deadline propagation and cancellation.
 //
-// A Context carries a deadline (absolute ms timestamp) and a cancelled flag.
+// A Context carries a deadline (absolute ms timestamp), a cancelled flag,
+// and a string-pair value bag (`with_value` / `value`). Mako has no `any`.
 // Functions that accept a Context should check ctx.done() before expensive work.
 
 pack context
@@ -8,21 +9,22 @@ pack context
 export struct Context {
     deadline_ms: int
     cancelled: int
+    bag: string
 }
 
 // background returns a context with no deadline and not cancelled.
 export fn background() -> Context {
-    return Context { deadline_ms: 0, cancelled: 0 }
+    return Context { deadline_ms: 0, cancelled: 0, bag: "" }
 }
 
 // with_timeout returns a context that expires after ms milliseconds from now.
 export fn with_timeout(ms: int) -> Context {
-    return Context { deadline_ms: now_ms() + ms, cancelled: 0 }
+    return Context { deadline_ms: now_ms() + ms, cancelled: 0, bag: "" }
 }
 
 // with_deadline returns a context with an absolute deadline (ms since epoch).
 export fn with_deadline(deadline_ms: int) -> Context {
-    return Context { deadline_ms: deadline_ms, cancelled: 0 }
+    return Context { deadline_ms: deadline_ms, cancelled: 0, bag: "" }
 }
 
 on Context {
@@ -41,7 +43,49 @@ on Context {
 
     // cancelled returns a new context that is marked as cancelled.
     fn with_cancel(self) -> Context {
-        return Context { deadline_ms: self.deadline_ms, cancelled: 1 }
+        return Context { deadline_ms: self.deadline_ms, cancelled: 1, bag: self.bag }
+    }
+
+    // with_value is Go context.WithValue for string pairs (Mako has no `any`).
+    // Records are `key\\tval\\n`. Later writes of the same key shadow earlier ones.
+    fn with_value(self, key: string, val: string) -> Context {
+        return Context {
+            deadline_ms: self.deadline_ms,
+            cancelled: self.cancelled,
+            bag: self.bag + key + "\t" + val + "\n",
+        }
+    }
+
+    fn value(self, key: string) -> string {
+        let needle = key + "\t"
+        let bag = self.bag
+        let mut pos = str_len(bag)
+        while pos > 0 {
+            let mut i = pos - 1
+            if i >= 0 {
+                if str_byte_at(bag, i) == 10 { i = i - 1 }
+            }
+            let mut start = 0
+            while i >= 0 {
+                if str_byte_at(bag, i) == 10 {
+                    start = i + 1
+                    i = -1
+                } else {
+                    i = i - 1
+                }
+            }
+            let rec = str_slice(bag, start, pos)
+            if str_has_prefix(rec, needle) {
+                let rest = str_slice(rec, str_len(needle), str_len(rec))
+                if str_has_suffix(rest, "\n") {
+                    return str_slice(rest, 0, str_len(rest) - 1)
+                }
+                return rest
+            }
+            if start == 0 { return "" }
+            pos = start
+        }
+        return ""
     }
 
     // remaining returns milliseconds until deadline, or -1 if no deadline.

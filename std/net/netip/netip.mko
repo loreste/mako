@@ -1,0 +1,148 @@
+// std/net/netip — IPv4/IPv6 addresses and prefixes.
+// Go equivalent: net/netip. Addresses are owned strings plus parsed fields.
+
+struct Addr {
+    raw: string
+    v4: bool
+    a: int
+    b: int
+    c: int
+    d: int
+}
+
+struct Prefix {
+    addr: Addr
+    bits: int
+}
+
+fn parse_addr(s: string) -> (Addr, string) {
+    if is_ipv4(s) {
+        return parse_v4(s)
+    }
+    if str_contains(s, ":") {
+        if parse_ip_ok(s) == 1 {
+            return (Addr { raw: s, v4: false, a: 0, b: 0, c: 0, d: 0 }, "")
+        }
+        return (Addr { raw: "", v4: false, a: 0, b: 0, c: 0, d: 0 }, "invalid IPv6")
+    }
+    return (Addr { raw: "", v4: false, a: 0, b: 0, c: 0, d: 0 }, "invalid IP")
+}
+
+fn parse_v4(s: string) -> (Addr, string) {
+    let parts = str_split(s, ".")
+    let empty = Addr { raw: "", v4: true, a: 0, b: 0, c: 0, d: 0 }
+    if len(parts) != 4 { return (empty, "invalid IPv4") }
+    let a, ea = parse_octet(parts[0])
+    if str_len(ea) > 0 { return (empty, ea) }
+    let b, eb = parse_octet(parts[1])
+    if str_len(eb) > 0 { return (empty, eb) }
+    let c, ec = parse_octet(parts[2])
+    if str_len(ec) > 0 { return (empty, ec) }
+    let d, ed = parse_octet(parts[3])
+    if str_len(ed) > 0 { return (empty, ed) }
+    return (Addr { raw: s, v4: true, a: a, b: b, c: c, d: d }, "")
+}
+
+fn parse_octet(s: string) -> (int, string) {
+    if str_len(s) == 0 { return (0, "empty octet") }
+    match parse_int(s) {
+        Ok(v) => {
+            if v < 0 || v > 255 { return (0, "octet out of range") }
+            return (v, "")
+        }
+        Err(_) => { return (0, "invalid octet") }
+    }
+    return (0, "invalid octet")
+}
+
+fn is_ipv4(s: string) -> bool {
+    return str_contains(s, ".") && !str_contains(s, ":")
+}
+
+fn addr_from4(a: int, b: int, c: int, d: int) -> Addr {
+    let s = format_int(a) + "." + format_int(b) + "." + format_int(c) + "." + format_int(d)
+    return Addr { raw: s, v4: true, a: a, b: b, c: c, d: d }
+}
+
+fn is4(a: Addr) -> bool { return a.v4 }
+fn is6(a: Addr) -> bool { return !a.v4 }
+fn string_addr(a: Addr) -> string { return a.raw }
+
+fn is_unspecified(a: Addr) -> bool {
+    if a.v4 { return a.a == 0 && a.b == 0 && a.c == 0 && a.d == 0 }
+    return a.raw == "::" || a.raw == "0:0:0:0:0:0:0:0"
+}
+
+fn is_loopback_addr(a: Addr) -> bool {
+    if a.v4 { return a.a == 127 }
+    return dns_is_loopback(a.raw) == 1
+}
+
+fn is_private_addr(a: Addr) -> bool {
+    if a.v4 {
+        if a.a == 10 { return true }
+        if a.a == 172 && a.b >= 16 && a.b <= 31 { return true }
+        if a.a == 192 && a.b == 168 { return true }
+        return false
+    }
+    return dns_is_private(a.raw) == 1
+}
+
+fn is_link_local(a: Addr) -> bool {
+    if a.v4 { return a.a == 169 && a.b == 254 }
+    return str_has_prefix(str_to_lower(a.raw), "fe80:")
+}
+
+fn is_multicast(a: Addr) -> bool {
+    if a.v4 { return a.a >= 224 && a.a <= 239 }
+    let h = str_byte_at(str_to_lower(a.raw), 0)
+    return h == 102 // 'f' of ff00::/8
+}
+
+fn compare_addr(a: Addr, b: Addr) -> int {
+    if a.v4 && b.v4 {
+        if a.a != b.a { return cmpi(a.a, b.a) }
+        if a.b != b.b { return cmpi(a.b, b.b) }
+        if a.c != b.c { return cmpi(a.c, b.c) }
+        return cmpi(a.d, b.d)
+    }
+    return str_compare(a.raw, b.raw)
+}
+
+fn cmpi(a: int, b: int) -> int {
+    if a < b { return -1 }
+    if a > b { return 1 }
+    return 0
+}
+
+fn parse_prefix(s: string) -> (Prefix, string) {
+    let i = str_last_index(s, "/")
+    let empty = Prefix { addr: Addr { raw: "", v4: true, a: 0, b: 0, c: 0, d: 0 }, bits: 0 }
+    if i < 0 { return (empty, "missing prefix bits") }
+    let addr_s = str_slice(s, 0, i)
+    let bits_s = str_slice(s, i + 1, str_len(s))
+    let a, ea = parse_addr(addr_s)
+    if str_len(ea) > 0 { return (empty, ea) }
+    match parse_int(bits_s) {
+        Ok(bits) => {
+            let mut maxb = 128
+            if a.v4 { maxb = 32 }
+            if bits < 0 || bits > maxb { return (empty, "prefix bits out of range") }
+            return (Prefix { addr: a, bits: bits }, "")
+        }
+        Err(e) => { return (empty, e) }
+    }
+    return (empty, "invalid prefix")
+}
+
+fn prefix_contains(p: Prefix, a: Addr) -> bool {
+    if p.addr.v4 != a.v4 { return false }
+    if !p.addr.v4 { return false }
+    if p.bits <= 0 { return true }
+    if p.bits >= 32 { return compare_addr(p.addr, a) == 0 }
+    let host = (p.addr.a << 24) | (p.addr.b << 16) | (p.addr.c << 8) | p.addr.d
+    let other = (a.a << 24) | (a.b << 16) | (a.c << 8) | a.d
+    let shift = 32 - p.bits
+    let m = int(uint64(4294967295) << uint64(shift)) & 4294967295
+    return (host & m) == (other & m)
+}

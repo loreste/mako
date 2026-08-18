@@ -1,0 +1,11 @@
+// std/crypto/ecdsa — P-256 via jwt_sign_es256 / jwt_verify_es256 (OpenSSL).
+
+fn sign_p256(payload: string, key_pem: string) -> string {
+    return jwt_sign_es256(payload, key_pem)
+}
+
+fn verify_p256(token: string, pub_pem: string) -> int {
+    return jwt_verify_es256(token, pub_pem)
+}
+
+fn available() -> int { return 1 }

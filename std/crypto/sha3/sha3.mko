@@ -1,0 +1,5 @@
+// std/crypto/sha3 — SHA3-256 (FIPS 202 / Keccak). C hot path.
+
+fn sum256(data: string) -> string { return sha3_256_hex(data) }
+fn sum256_raw(data: string) -> string { return sha3_256_raw(data) }
+fn hex(data: string) -> string { return sha3_256_hex(data) }

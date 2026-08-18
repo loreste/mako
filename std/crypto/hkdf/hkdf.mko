@@ -1,0 +1,11 @@
+// std/crypto/hkdf — HKDF-SHA256 (Go crypto/hkdf, RFC 5869).
+// C hot path. Empty when out_len <= 0.
+
+fn sha256(ikm: string, salt: string, info: string, out_len: int) -> string {
+    if out_len <= 0 { return "" }
+    return hkdf_sha256(ikm, salt, info, out_len)
+}
+
+fn key(ikm: string, salt: string, info: string, out_len: int) -> string {
+    return sha256(ikm, salt, info, out_len)
+}

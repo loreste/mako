@@ -1,0 +1,12 @@
+// std/crypto/pbkdf2 — PBKDF2-HMAC-SHA256 (Go crypto/pbkdf2).
+// C hot path. Empty when iterations or dklen is not positive.
+
+fn key(password: string, salt: string, iterations: int, dklen: int) -> string {
+    if iterations <= 0 { return "" }
+    if dklen <= 0 { return "" }
+    return pbkdf2_sha256(password, salt, iterations, dklen)
+}
+
+fn sha256(password: string, salt: string, iterations: int, dklen: int) -> string {
+    return key(password, salt, iterations, dklen)
+}

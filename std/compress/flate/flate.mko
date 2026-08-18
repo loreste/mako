@@ -1,0 +1,6 @@
+// std/compress/flate — raw DEFLATE (RFC 1951).
+// C zlib when linked; available() is 0 otherwise.
+
+fn compress(s: string) -> string { return flate_compress(s) }
+fn decompress(s: string) -> string { return flate_decompress(s) }
+fn available() -> int { return flate_available() }

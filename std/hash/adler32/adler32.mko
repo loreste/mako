@@ -1,0 +1,27 @@
+// std/hash/adler32 — Adler-32 (Go hash/adler32).
+// Checksum of "123456789" is 0x091E01DE.
+
+fn checksum(data: string) -> int {
+    let mut a = 1
+    let mut b = 0
+    let n = str_len(data)
+    let mut i = 0
+    while i < n {
+        a = (a + str_byte_at(data, i)) % 65521
+        b = (b + a) % 65521
+        i = i + 1
+    }
+    return (b << 16) | a
+}
+
+fn checksum_bytes(data: []byte) -> int {
+    let mut a = 1
+    let mut b = 0
+    let mut i = 0
+    while i < len(data) {
+        a = (a + int(data[i])) % 65521
+        b = (b + a) % 65521
+        i = i + 1
+    }
+    return (b << 16) | a
+}

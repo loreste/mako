@@ -1,0 +1,49 @@
+// std/text/tabwriter — align columns on tab stops.
+// Go equivalent: text/tabwriter. Pads cells with spaces.
+
+fn format(s: string) -> string {
+    return format_pad_width(s, 1)
+}
+
+fn format_pad_width(s: string, minpad: int) -> string {
+    let mut padn = minpad
+    if padn < 1 { padn = 1 }
+    let lines = str_split(s, "\n")
+    let mut widths = make([]int, 0)
+    let mut i = 0
+    while i < len(lines) {
+        let cells = str_split(lines[i], "\t")
+        let mut c = 0
+        while c < len(cells) {
+            let w = str_len(cells[c])
+            if c >= len(widths) {
+                widths = append(widths, w)
+            } else if w > widths[c] {
+                widths[c] = w
+            }
+            c = c + 1
+        }
+        i = i + 1
+    }
+    let mut out = ""
+    i = 0
+    while i < len(lines) {
+        if i > 0 { out = out + "\n" }
+        let cells = str_split(lines[i], "\t")
+        let mut c = 0
+        while c < len(cells) {
+            out = out + cells[c]
+            if c + 1 < len(cells) {
+                let need = widths[c] + padn - str_len(cells[c])
+                let mut k = 0
+                while k < need {
+                    out = out + " "
+                    k = k + 1
+                }
+            }
+            c = c + 1
+        }
+        i = i + 1
+    }
+    return out
+}

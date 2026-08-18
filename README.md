@@ -102,8 +102,12 @@ Actors with mailboxes. No free `go` keyword — every spawned task has an owner.
 **Stdlib.** HTTP server and client. TLS (OpenSSL). WebSocket. JSON. SQLite and
 Postgres. SIP parsing and building. HEP (Homer) ingest. UDP/TCP/Unix sockets.
 File I/O. Regex. UUID. Base64. Binary buffers. Prometheus metrics. Crypto
-(SHA-256, HMAC, PBKDF2, AEAD). Coverage is uneven — [STDLIB.md](docs/STDLIB.md)
-records what has real tests and what only verifies its shape.
+(SHA-256, HMAC, PBKDF2, AEAD). Application packs have Go-equivalent surfaces
+(`strings`, `bytes`, `io`, `os/env`, `net/netip`, `math/bits`, `hash/crc32`,
+`crypto/rand`, `image`, … — Mako names, not a syntax clone). Coverage is
+still uneven — [STDLIB.md](docs/STDLIB.md) records what has real tests,
+what is a capability equivalent, and what is intentionally out (`unsafe`,
+`go/*`, `debug/*`, `weak`).
 
 **Backends.** Native object code is the default (Cranelift). The C backend
 remains available via `--backend c` and is used automatically for sanitizers,

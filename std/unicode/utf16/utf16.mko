@@ -1,0 +1,91 @@
+// std/unicode/utf16 — UTF-16 encode/decode.
+// Go equivalent: unicode/utf8's sibling unicode/utf16.
+// Code units are []int in 0..65535. Invalid lone surrogates become U+FFFD.
+
+fn rune_error() -> int { return 65533 }
+fn max_rune() -> int { return 1114111 }
+fn surr1() -> int { return 55296 }
+fn surr2() -> int { return 56320 }
+fn surr3() -> int { return 57344 }
+fn surr_self() -> int { return 65536 }
+
+fn is_surrogate(r: int) -> bool {
+    return r >= 55296 && r < 57344
+}
+
+fn decode_rune(r1: int, r2: int) -> int {
+    if r1 < 55296 || r1 >= 56320 { return rune_error() }
+    if r2 < 56320 || r2 >= 57344 { return rune_error() }
+    return (((r1 - 55296) << 10) | (r2 - 56320)) + 65536
+}
+
+fn encode_rune(r: int) -> (int, int, int) {
+    // returns (unit0, unit1, count)
+    if r < 0 || r > 1114111 || is_surrogate(r) {
+        return (65533, 0, 1)
+    }
+    if r < 65536 {
+        return (r, 0, 1)
+    }
+    let v = r - 65536
+    return (55296 + (v >> 10), 56320 + (v & 1023), 2)
+}
+
+fn encode(runes: []int) -> []int {
+    let mut out = make([]int, 0, len(runes))
+    let mut i = 0
+    while i < len(runes) {
+        let a, b, n = encode_rune(runes[i])
+        out = append(out, a)
+        if n == 2 { out = append(out, b) }
+        i = i + 1
+    }
+    return out
+}
+
+fn decode(units: []int) -> []int {
+    let mut out = make([]int, 0, len(units))
+    let mut i = 0
+    while i < len(units) {
+        let u = units[i]
+        if u >= 55296 && u < 56320 && i + 1 < len(units) {
+            let v = units[i + 1]
+            if v >= 56320 && v < 57344 {
+                out = append(out, decode_rune(u, v))
+                i = i + 2
+                continue
+            }
+        }
+        if is_surrogate(u) {
+            out = append(out, 65533)
+        } else {
+            out = append(out, u)
+        }
+        i = i + 1
+    }
+    return out
+}
+
+fn encode_string(s: string) -> []int {
+    let mut runes = make([]int, 0)
+    for _, r in range s {
+        runes = append(runes, r)
+    }
+    return encode(runes)
+}
+
+fn decode_string(units: []int) -> string {
+    let runes = decode(units)
+    let mut out = ""
+    let mut i = 0
+    while i < len(runes) {
+        out = out + utf8_encode_rune(runes[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn is_big_endian_bom(units: []int) -> bool {
+    if len(units) == 0 { return false }
+    return units[0] == 65279
+}

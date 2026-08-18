@@ -1,0 +1,18 @@
+// std/crypto/rsa — RSA surface.
+// Product policy: no homegrown RSA. Use TLS/OpenSSL for transport.
+// This pack is a probe + PKCS#1 digest-info helper (memory-safe, no key ops).
+
+fn verify_pkcs1_sha256(token: string, pub_pem: string) -> int {
+    return jwt_verify_rs256(token, pub_pem)
+}
+
+// Verify path is linked; signing is not provided here (no homegrown RSA).
+fn available() -> int { return 1 }
+
+fn can_sign() -> int { return 0 }
+
+fn pkcs1_digest_info_sha256(digest_hex: string) -> string {
+    // DER DigestInfo for SHA-256 (RFC 8017):
+    // 30 31 30 0d 06 09 60 86 48 01 65 03 04 02 01 05 00 04 20 || H
+    return "3031300d060960864801650304020105000420" + digest_hex
+}

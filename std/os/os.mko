@@ -1,12 +1,11 @@
 // std/os — operating system interaction
 //
 // File I/O, environment, process, directory operations.
-// Modeled after Go's os package and Rust's std::fs / std::env.
+// Go equivalent: os. Errors are strings / Result, never nil pointers.
 
 // ---- Working directory ----
 
 fn getwd() -> string { return getcwd() }
-fn chdir_to(p: string) -> int { return chdir(p) }
 
 // ---- Environment variables ----
 
@@ -16,6 +15,55 @@ fn unsetenv(k: string) -> int { return env_unset(k) }
 fn hasenv(k: string) -> bool { return env_has(k) == 1 }
 fn environ() -> []string { return env_keys() }
 
+fn lookup_env(k: string) -> (string, bool) {
+    if env_has(k) == 1 {
+        return (env_get(k), true)
+    }
+    return ("", false)
+}
+
+fn expand_env(s: string) -> string {
+    let mut out = ""
+    let n = str_len(s)
+    let mut i = 0
+    while i < n {
+        let c = str_byte_at(s, i)
+        if c == 36 && i + 1 < n {
+            // $VAR or ${VAR}
+            if str_byte_at(s, i + 1) == 123 {
+                let mut j = i + 2
+                while j < n && str_byte_at(s, j) != 125 {
+                    j = j + 1
+                }
+                if j < n {
+                    let name = str_slice(s, i + 2, j)
+                    out = out + env_get(name)
+                    i = j + 1
+                    continue
+                }
+            } else {
+                let mut j = i + 1
+                while j < n {
+                    let ch = str_byte_at(s, j)
+                    let letter = (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 95
+                    let digit = ch >= 48 && ch <= 57
+                    if !(letter || (digit && j > i + 1)) { break }
+                    j = j + 1
+                }
+                if j > i + 1 {
+                    let name = str_slice(s, i + 1, j)
+                    out = out + env_get(name)
+                    i = j
+                    continue
+                }
+            }
+        }
+        out = out + str_slice(s, i, i + 1)
+        i = i + 1
+    }
+    return out
+}
+
 // ---- Process ----
 
 fn exit_with(code: int) { exit(code) }
@@ -23,7 +71,38 @@ fn argv() -> []string { return args() }
 fn nargs() -> int { return argc() }
 fn arg(i: int) -> string { return arg_get(i) }
 fn pid() -> int { return syscall_getpid() }
+fn ppid() -> int { return syscall_getppid() }
 fn host() -> string { return syscall_hostname() }
+fn hostname() -> string { return syscall_hostname() }
+fn getuid() -> int { return syscall_getuid() }
+fn geteuid() -> int { return syscall_geteuid() }
+fn getgid() -> int { return syscall_getgid() }
+fn getegid() -> int { return syscall_getegid() }
+fn getpagesize() -> int { return syscall_pagesize() }
+
+fn user_home_dir() -> string {
+    let h = env_get("HOME")
+    if str_len(h) > 0 { return h }
+    let p = env_get("USERPROFILE")
+    if str_len(p) > 0 { return p }
+    return ""
+}
+
+fn user_cache_dir() -> string {
+    let c = env_get("XDG_CACHE_HOME")
+    if str_len(c) > 0 { return c }
+    let home = user_home_dir()
+    if str_len(home) == 0 { return "" }
+    return path_join(home, ".cache")
+}
+
+fn user_config_dir() -> string {
+    let c = env_get("XDG_CONFIG_HOME")
+    if str_len(c) > 0 { return c }
+    let home = user_home_dir()
+    if str_len(home) == 0 { return "" }
+    return path_join(home, ".config")
+}
 
 // ---- File operations (path-based) ----
 
@@ -33,6 +112,11 @@ fn exists(path: string) -> bool { return file_exists(path) }
 fn remove(path: string) -> int { return remove_file(path) }
 fn rename_file(from: string, to: string) -> int { return rename(from, to) }
 fn size(path: string) -> int { return path_file_size(path) }
+fn mkdir_all_path(path: string) -> int { return mkdir_all(path) }
+fn remove_all_path(path: string) -> int { return remove_all(path) }
+fn copy(from: string, to: string) -> int { return copy_file(from, to) }
+fn chmod_path(path: string, mode: int) -> int { return chmod(path, mode) }
+fn create(path: string) -> int { return write_file(path, "") }
 
 // ---- File descriptor operations ----
 
@@ -52,3 +136,24 @@ fn mkdir_path(path: string) -> int { return mkdir(path) }
 fn readdir(path: string) -> []string { return read_dir(path) }
 fn join_path(a: string, b: string) -> string { return path_join(a, b) }
 fn temp() -> string { return temp_dir() }
+fn tempdir() -> string { return temp_dir() }
+
+fn is_exist_err(err: string) -> bool {
+    return str_contains(err, "exist") || str_contains(err, "EEXIST")
+}
+
+fn is_not_exist_err(err: string) -> bool {
+    return str_contains(err, "not found") || str_contains(err, "no such") || str_contains(err, "ENOENT")
+}
+
+fn is_permission_err(err: string) -> bool {
+    return str_contains(err, "permission") || str_contains(err, "EACCES") || str_contains(err, "EPERM")
+}
+
+fn is_timeout_err(err: string) -> bool {
+    return str_contains(err, "timeout") || str_contains(err, "deadline") || str_contains(err, "ETIMEDOUT")
+}
+
+fn stdin_fd() -> int { return 0 }
+fn stdout_fd() -> int { return 1 }
+fn stderr_fd() -> int { return 2 }

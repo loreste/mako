@@ -1,0 +1,33 @@
+// std/expvar — published process variables (Go expvar).
+// In-process map[string]int; export as JSON object.
+
+fn set(mut m: map[string]int, name: string, v: int) -> map[string]int {
+    m[name] = v
+    return m
+}
+
+fn add(mut m: map[string]int, name: string, delta: int) -> map[string]int {
+    if has(m, name) {
+        m[name] = m[name] + delta
+    } else {
+        m[name] = delta
+    }
+    return m
+}
+
+fn get(m: map[string]int, name: string) -> int {
+    if has(m, name) { return m[name] }
+    return 0
+}
+
+fn json(m: map[string]int) -> string {
+    let ks = maps_keys(m)
+    let mut out = "{"
+    let mut i = 0
+    while i < len(ks) {
+        if i > 0 { out = out + "," }
+        out = out + "\"" + ks[i] + "\":" + format_int(m[ks[i]])
+        i = i + 1
+    }
+    return out + "}"
+}

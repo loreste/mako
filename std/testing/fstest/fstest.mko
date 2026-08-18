@@ -1,0 +1,46 @@
+// std/testing/fstest — in-memory file map (Go testing/fstest.MapFS).
+// write ignores empty names. Callers must keep the returned MapFS.
+
+struct MapFS {
+    names: []string
+    bodies: []string
+}
+
+fn new_fs() -> MapFS {
+    return MapFS { names: make([]string, 0), bodies: make([]string, 0) }
+}
+
+fn write(mut fs: MapFS, name: string, body: string) -> MapFS {
+    if str_len(name) == 0 { return fs }
+    let mut i = 0
+    while i < len(fs.names) {
+        if fs.names[i] == name {
+            fs.bodies[i] = body
+            return fs
+        }
+        i = i + 1
+    }
+    fs.names = append(fs.names, name)
+    fs.bodies = append(fs.bodies, body)
+    return fs
+}
+
+fn read(fs: MapFS, name: string) -> (string, string) {
+    let mut i = 0
+    while i < len(fs.names) {
+        if fs.names[i] == name { return (fs.bodies[i], "") }
+        i = i + 1
+    }
+    return ("", "file does not exist")
+}
+
+fn exists(fs: MapFS, name: string) -> bool {
+    let mut i = 0
+    while i < len(fs.names) {
+        if fs.names[i] == name { return true }
+        i = i + 1
+    }
+    return false
+}
+
+fn count(fs: MapFS) -> int { return len(fs.names) }

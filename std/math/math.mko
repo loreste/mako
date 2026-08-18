@@ -87,3 +87,46 @@ fn lcm(a: int, b: int) -> int {
     if a == 0 || b == 0 { return 0 }
     return iabs(a) / gcd(a, b) * iabs(b)
 }
+
+fn copysign(mag: float, sign: float) -> float {
+    let a = math_abs(mag)
+    if sign < 0.0 { return 0.0 - a }
+    return a
+}
+
+fn signbit(x: float) -> bool { return x < 0.0 }
+
+fn dim(x: float, y: float) -> float {
+    let d = x - y
+    if d > 0.0 { return d }
+    return 0.0
+}
+
+fn pow10(n: int) -> float { return math_pow(10.0, float(n)) }
+fn exp2(x: float) -> float { return math_pow(2.0, x) }
+fn expm1(x: float) -> float {
+    let y = math_exp(x)
+    return y - 1.0
+}
+fn log1p(x: float) -> float {
+    let one = 1.0
+    return math_log(one + x)
+}
+
+fn sincos_sin(x: float) -> float { return math_sin(x) }
+fn sincos_cos(x: float) -> float { return math_cos(x) }
+
+fn ieee_remainder(x: float, y: float) -> float {
+    if y == 0.0 { return math_nan() }
+    let q = math_round(x / y)
+    return x - y * q
+}
+
+fn nextafter(x: float, y: float) -> float {
+    if x == y { return y }
+    if math_is_nan(x) == 1 || math_is_nan(y) == 1 { return math_nan() }
+    let eps = math_pow(2.0, 0.0 - 52.0)
+    let tiny = math_pow(2.0, 0.0 - 1074.0)
+    if x < y { return x + math_abs(x) * eps + tiny }
+    return x - math_abs(x) * eps - tiny
+}

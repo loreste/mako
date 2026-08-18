@@ -1,8 +1,7 @@
 // Package io defines Reader and Writer types for byte-oriented I/O.
 //
-// StringReader reads from a string. ByteWriter collects bytes.
-// copy reads all from a StringReader into a ByteWriter.
-// read_all reads a StringReader into a string.
+// Go equivalent: io. EOF is the empty-error sentinel "EOF" (Go's io.EOF).
+// Copy/limit/multi helpers are memory-safe: they never index past a buffer.
 
 pack io
 
@@ -38,6 +37,19 @@ on StringReader {
     fn reset(mut self) {
         self.pos = 0
     }
+
+    fn seek(mut self, offset: int, whence: int) -> (int, string) {
+        let mut next = offset
+        if whence == 1 {
+            next = self.pos + offset
+        } else if whence == 2 {
+            next = len(self.data) + offset
+        }
+        if next < 0 { return (self.pos, "negative position") }
+        if next > len(self.data) { next = len(self.data) }
+        self.pos = next
+        return (self.pos, "")
+    }
 }
 
 // ByteWriter collects written bytes into a growable buffer.
@@ -72,6 +84,78 @@ on ByteWriter {
     }
 }
 
+// LimitReader stops after n bytes (Go io.LimitReader).
+export struct LimitReader {
+    data: string
+    pos: int
+    remain: int
+}
+
+export fn limit_reader(s: string, n: int) -> LimitReader {
+    let mut capn = n
+    if capn < 0 { capn = 0 }
+    return LimitReader { data: s, pos: 0, remain: capn }
+}
+
+on LimitReader {
+    fn read(mut self, mut buf: []byte) -> (int, string) {
+        if self.remain <= 0 || self.pos >= len(self.data) {
+            return (0, "EOF")
+        }
+        let remaining = len(self.data) - self.pos
+        let mut n = len(buf)
+        if n > remaining { n = remaining }
+        if n > self.remain { n = self.remain }
+        let mut i = 0
+        while i < n {
+            buf[i] = byte(int(self.data[self.pos + i]))
+            i = i + 1
+        }
+        self.pos = self.pos + n
+        self.remain = self.remain - n
+        return (n, "")
+    }
+}
+
+// SectionReader is a window into a string (Go io.SectionReader).
+export struct SectionReader {
+    data: string
+    base: int
+    pos: int
+    end: int
+}
+
+export fn section_reader(s: string, off: int, n: int) -> SectionReader {
+    let slen = len(s)
+    let mut start = off
+    if start < 0 { start = 0 }
+    if start > slen { start = slen }
+    let mut last = start + n
+    if n < 0 { last = start }
+    if last > slen { last = slen }
+    return SectionReader { data: s, base: start, pos: start, end: last }
+}
+
+on SectionReader {
+    fn read(mut self, mut buf: []byte) -> (int, string) {
+        if self.pos >= self.end {
+            return (0, "EOF")
+        }
+        let remaining = self.end - self.pos
+        let mut n = len(buf)
+        if n > remaining { n = remaining }
+        let mut i = 0
+        while i < n {
+            buf[i] = byte(int(self.data[self.pos + i]))
+            i = i + 1
+        }
+        self.pos = self.pos + n
+        return (n, "")
+    }
+
+    fn size(self) -> int { return self.end - self.base }
+}
+
 // read_all reads everything from a StringReader and returns it as a string.
 export fn read_all(s: string) -> string {
     return s
@@ -103,4 +187,51 @@ export fn drain(r: StringReader) -> (string, string) {
         }
     }
     return (string(out), "")
+}
+
+export fn eof() -> string { return "EOF" }
+
+export fn seek_start() -> int { return 0 }
+export fn seek_current() -> int { return 1 }
+export fn seek_end() -> int { return 2 }
+
+export fn copy_n(src: string, n: int) -> string {
+    if n <= 0 { return "" }
+    if n >= len(src) { return src }
+    return src[0:n]
+}
+
+export fn read_at_least(src: string, off: int, minn: int) -> (string, string) {
+    if off < 0 { return ("", "negative offset") }
+    if off >= len(src) { return ("", "EOF") }
+    let avail = len(src) - off
+    if avail < minn { return (src[off:], "unexpected EOF") }
+    return (src[off:off + minn], "")
+}
+
+export fn read_full(src: string, off: int, n: int) -> (string, string) {
+    return read_at_least(src, off, n)
+}
+
+export fn discard(n: int) -> int {
+    if n < 0 { return 0 }
+    return n
+}
+
+export fn write_string(mut w: ByteWriter, s: string) -> (int, string) {
+    return w.write(bytes(s))
+}
+
+export fn multi_string(parts: []string) -> string {
+    let mut out = ""
+    let mut i = 0
+    while i < len(parts) {
+        out = out + parts[i]
+        i = i + 1
+    }
+    return out
+}
+
+export fn tee(src: string) -> (string, string) {
+    return (src, src)
 }

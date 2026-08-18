@@ -1,0 +1,11 @@
+// std/hash/crc64 — Go hash/crc64 ECMA.
+// Returns the raw 64-bit pattern as int (high bit set is negative).
+// Do not wrap with uint64() — Mako rejects negative→uint64.
+
+fn checksum_ecma(data: string) -> int {
+    return crc64_ecma(data)
+}
+
+fn checksum_ecma_bits(data: string) -> int {
+    return crc64_ecma(data)
+}

@@ -1,0 +1,44 @@
+// std/encoding/pem — PEM encode/decode.
+// Go equivalent: encoding/pem. Decode uses the runtime PEM scanners;
+// encode wraps base64 at 64 columns.
+
+fn count_blocks(pem: string) -> int { return pem_count_blocks(pem) }
+fn has_block(pem: string, label: string) -> bool { return pem_has_block(pem, label) == 1 }
+fn extract_block(pem: string, label: string) -> string { return pem_extract_block(pem, label) }
+fn load_file(path: string) -> string { return pem_load_file(path) }
+
+fn encode(label: string, data: string) -> string {
+    let b64 = base64_encode(data)
+    let mut out = "-----BEGIN " + label + "-----\n"
+    let n = str_len(b64)
+    let mut i = 0
+    while i < n {
+        let mut end = i + 64
+        if end > n { end = n }
+        out = out + str_slice(b64, i, end) + "\n"
+        i = end
+    }
+    return out + "-----END " + label + "-----\n"
+}
+
+fn decode_bytes(pem: string, label: string) -> string {
+    let block = pem_extract_block(pem, label)
+    if str_len(block) == 0 { return "" }
+    // Strip header/footer and whitespace, then base64-decode.
+    let mut body = ""
+    let lines = str_split(block, "\n")
+    let mut i = 0
+    while i < len(lines) {
+        let line = str_trim_space(lines[i])
+        if str_has_prefix(line, "-----") {
+            i = i + 1
+            continue
+        }
+        if str_len(line) > 0 {
+            body = body + line
+        }
+        i = i + 1
+    }
+    if str_len(body) == 0 { return "" }
+    return base64_decode(body)
+}
