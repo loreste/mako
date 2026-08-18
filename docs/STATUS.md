@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-08-16** · product **mako0.5.5** (tip; last tag **v0.5.5**) ·
+Last inventory: **2026-08-18** · product **mako0.5.5** (tip; last tag **v0.5.5**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
@@ -22,7 +22,7 @@ focused concurrency suite under TSan · [The Mako Book](book/).
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
 | **Target pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
 | **Dual-form coverage (optional sugar)** | **~94%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
-| **Standard library** | **~98%** of target areas Done (Wave 9; not every symbol or integration) |
+| **Standard library** | Application packs have Go-equivalent surfaces (2026-08-18 wave). Not every Go toolchain/`unsafe` package — see [STDLIB.md](STDLIB.md) |
 | **Soundness (SAFE/RT core)** | Introduced in 0.2.4, actively hardened — [SOUNDNESS.md](SOUNDNESS.md); soaks and edge cases remain |
 
 ---
@@ -95,6 +95,24 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | `str_cut` / `str_count` | Done |
 | UTF-8-aware regexp `\p{...}` for common scripts/categories + simple lookahead | Done |
 | Tests | `goext_wave8_test.mko`, `goext_wave9_test.mko` |
+
+## Standard library — Go-equivalent wave (2026-08-18)
+
+Capability equivalents of the Go application stdlib. Mako names (`concat`,
+`matches`, `cut_ok`). No panic-on-OOB. Not `unsafe` / `go/*` / `debug/*`.
+
+| Area | Status | Tests |
+|------|--------|-------|
+| `strings` / `bytes` / `slices` / `strconv` / `path` / `filepath` | Done | `stdlib_parity_core_test` |
+| `cmp` / `math/bits` / `cmplx` / `big` / hashes / utf16 / ascii85 / pem / qp / tabwriter / scanner / suffixarray | Done | `stdlib_parity_packs_test` |
+| `io` Limit/Section/`copy_n` | Done | `stdlib_parity_io_test` |
+| `os/env` / `os/user` / `io/fs` | Done | `stdlib_parity_os_test` |
+| `net` host/port / `net/netip` | Done | `stdlib_parity_net_test` |
+| `time.parse_duration` / `sync.once` | Done | `stdlib_parity_time_sync_test` |
+| `stdlib-gate` | 144 package files type-check | `scripts/stdlib-gate.sh` |
+| compress flate/zlib/lzw/bzip2 · crypto md5/sha3/subtle/rsa/ecdsa · Rat · crc64 · cookiejar · httputil · expvar · unique · iter · color/draw · textproto · rpc · iotest · asn1 · syslog | Done | `stdlib_parity_gap_test` |
+| Adversarial vectors (MD5/SHA3/CRC-64/ECMA, Rat 2/4, ASN.1 128/−128, LZW binary, cookie host isolation, RPC escape) | Done | `stdlib_parity_adversarial_test` |
+| `crypto/rand` / `hkdf` / `pbkdf2` · `testing/{quick,fstest,slogtest}` · `image` Point/Rect · `regexp/syntax` · `httptrace` · `context.with_value` · `rand.shuffle`/`perm` · named time offsets | Done | `stdlib_parity_wave3_test` |
 
 ---
 

@@ -2,25 +2,28 @@
 
 Mako ships a standard library focused on backend development: strings, formatting,
 file I/O, networking, encoding, cryptography, synchronization, and database
-clients. This chapter tours the major packages with imports and usage examples.
+clients. Application packs also have **Go-equivalent** surfaces — same jobs,
+Mako names (`concat` not `Join`, `matches` not `Match`). Indexes never panic;
+parse failures are `Result` or `(value, err)`, never nil. Full index:
+[STDLIB.md](../STDLIB.md).
 
 You can call many helpers as bare builtins (`str_split`, `path_join`, ...) or
 import packages for namespaced access (`strings.split`, `path.clean`, ...).
 
 ```mko
-import "strings"
-import "path"
+pull "strings"
+pull "path"
 
 fn main() {
     let parts = strings.split("a,b,c", ",")
-    print(strings.join(parts, "/"))
+    print(strings.concat(parts, "/"))
     print(path.clean("/x/../y"))
 }
 ```
 
-Bare `import "strings"` resolves from the standard library directory (`std/`,
-overrideable via `MAKO_STD`). The import auto-aliases so `strings.split` works
-immediately.
+Bare `pull "strings"` (or `import "strings"`) resolves from the standard
+library directory (`std/`, overrideable via `MAKO_STD`). The import auto-aliases
+so `strings.split` works immediately.
 
 ---
 
@@ -69,7 +72,7 @@ import "strings"
 
 fn main() {
     let parts = strings.split("a:b:c", ":")
-    print(strings.join(parts, ", "))       // "a, b, c"
+    print(strings.concat(parts, ", "))     // "a, b, c"
     print(strings.trim("  hi  "))          // "hi"
     print(strings.to_upper("mako"))        // "MAKO"
     print(strings.to_lower("MAKO"))        // "mako"
@@ -84,6 +87,12 @@ fn main() {
 
     print_int(strings.index("hello", "ll"))  // 2
     print_int(strings.count("banana", "a"))  // 3
+
+    let head, tail, ok = strings.cut_ok("a=b", "=")
+    if ok {
+        print(head)   // a
+        print(tail)   // b
+    }
 }
 ```
 
@@ -131,14 +140,14 @@ fn main() {
 Buffered reading and writing for efficient I/O operations:
 
 ```mko
-import "bufio"
+pull "bufio"
 
 fn main() {
-    let content = read_file("data.txt")
-    let lines = str_split(content, "\n")
-    for line in lines {
+    let lines = bufio.scan_lines("a\nb\r\nc")
+    for _, line in range lines {
         print(line)
     }
+    print(bufio.peek_prefix("hello", 2))    // he
 }
 ```
 
@@ -187,15 +196,58 @@ fn main() {
 }
 ```
 
-The `filepath` package adds glob and walk:
+`path.matches` is the equivalent of Go `path.Match` (`join` / `match` are
+keywords). `*` does not cross `/`.
 
 ```mko
-import "filepath"
+pull "path"
+pull "path/filepath"
 
 fn main() {
-    // Walk directory tree
-    let count = filepath_walk_n("/tmp", 100)
-    print_int(count)
+    print_int(int(path.matches("*.mko", "main.mko")))
+    print(filepath.rel("/a/b", "/a/b/c"))     // c
+    print(filepath.to_slash("a\\b"))          // a/b
+    let names = filepath.walk("/tmp")
+    print_int(len(names))
+}
+```
+
+---
+
+## slices / cmp / sort
+
+Typed slice helpers. Out-of-range indexes clamp or no-op — they never panic.
+
+```mko
+pull "slices"
+pull "cmp"
+pull "sort"
+
+fn main() {
+    let i, found = slices.binary_search([1, 3, 5, 8], 5)
+    print_int(i)
+    let xs = slices.insert([1, 3], 1, 2)      // [1, 2, 3]
+    print_int(cmp.compare_int(1, 2))          // -1
+    print_int(sort.search_ints([1, 3, 5], 4)) // 1 (insertion point)
+}
+```
+
+---
+
+## strconv
+
+Parse/format plus Go-style quoting. `unquote` returns `(text, err)` so it
+works across packages on both backends.
+
+```mko
+pull "strconv"
+
+fn main() {
+    print(strconv.quote("a\nb"))
+    let s, err = strconv.unquote("\"hi\"")
+    if str_len(err) == 0 {
+        print(s)
+    }
 }
 ```
 
@@ -214,12 +266,20 @@ fn main() {
 
     let formatted = time_format(now_ms())
     print(formatted)                // human-readable timestamp
+
+    match time.parse_duration("1h30m") {
+        Ok(ms) => print_int(ms)     // 5400000 milliseconds
+        Err(e) => print(e)
+    }
 }
 ```
 
+`time.parse_duration` accepts Go duration syntax (`1h2m3s`, `-250ms`, `1.5s`).
+The result is milliseconds (this package's duration unit).
+
 ---
 
-## math
+## math / bits / cmplx / big
 
 Numeric operations and constants:
 
@@ -234,6 +294,141 @@ fn main() {
     print_float(pow(2.0, 10.0)) // 1024
 }
 ```
+
+```mko
+pull "math/bits"
+pull "math/cmplx"
+pull "math/big"
+
+fn main() {
+    print_int(bits.ones_count64(7))           // 3
+    print_int(bits.trailing_zeros64(8))       // 3
+    let z = cmplx.rect(3.0, 4.0)
+    print_float(cmplx.abs(z))                 // 5
+    let n, err = big.from_string("1000000000000")
+    print(big.to_string(big.add(n, big.from_int(1))))
+}
+```
+
+Complex numbers are a `Complex { re, im }` pair — there is no language
+`complex` type. `math/big.Int` is signed arbitrary precision (add/sub/mul/cmp).
+
+---
+
+## hash
+
+```mko
+pull "hash/crc32"
+pull "hash/adler32"
+pull "hash/fnv"
+
+fn main() {
+    print_int(crc32.checksum_ieee("123456789"))   // 0xCBF43926
+    print_int(adler32.checksum("123456789"))      // 0x091E01DE
+    print_int(fnv.sum32a(""))                     // 2166136261
+}
+```
+
+---
+
+## net / netip
+
+```mko
+pull "net"
+pull "net/netip"
+
+fn main() {
+    let host, port, ok = net.split_host_port("127.0.0.1:8080")
+    print(host)
+    print_int(port)
+
+    let addr, err = netip.parse_addr("192.168.1.10")
+    if str_len(err) == 0 && netip.is_private_addr(addr) {
+        print(netip.string_addr(addr))
+    }
+    let pref, pe = netip.parse_prefix("10.0.0.0/8")
+}
+```
+
+---
+
+## os/env / os/user / io / bufio
+
+```mko
+pull "os/env"
+pull "os/user"
+pull "io"
+pull "bufio"
+
+fn main() {
+    let _ = env.set("APP", "mako")
+    print(env.expand("hello $APP"))
+    let u = user.current()
+    print(u.home)
+
+    let lines = bufio.scan_lines("a\nb\nc")
+    print_int(len(lines))
+
+    let lim = io.limit_reader("abcdef", 3)
+    let mut buf = make([]byte, 8, 8)
+    let n, e = lim.read(buf)
+    print_int(n)                    // 3
+}
+```
+
+`os/env` is the native-safe environment pack. Importing the full `os` pack
+pulls path/fd wrappers that the native backend does not lower yet (`chdir`,
+`chmod`, …) — use builtins or `os/env` on the native default.
+
+`sync.once` / `do_once` is the equivalent of Go `sync.Once` (an `AtomicInt`
+handle; `do_once` takes `fn() -> int`).
+
+---
+
+## compress / crypto extras
+
+```mko
+pull "compress/lzw"
+pull "compress/zlib"
+pull "crypto/md5"
+pull "crypto/sha3"
+
+fn main() {
+    print(md5.sum(""))                    // d41d8cd98f00b204e9800998ecf8427e
+    print(sha3.sum256("abc"))             // 64 hex chars
+    if zlib.available() == 1 {
+        print(zlib.decompress(zlib.compress("hello")))
+    }
+    print(lzw.decompress(lzw.compress("mako")))
+}
+```
+
+`flate` is raw DEFLATE (needs zlib linked). `bzip2.available()` is 0 unless
+the build defines `MAKO_BZ2`. MD5 is for legacy checksums only.
+
+```mko
+pull "crypto/rand" as crand
+pull "crypto/hkdf"
+pull "context"
+pull "math/rand"
+pull "time"
+pull "image"
+
+fn main() {
+    let buf = crand.read(16)
+    print_int(len(buf))               // 16
+    let ctx = context.background().with_value("user", "ada")
+    print(ctx.value("user"))          // ada
+    rand.seed(1)
+    print_int(len(rand.perm(5)))      // 5
+    print_int(time.load_location("EST"))  // -18000
+    print_int(image.dx(image.rect(0, 0, 10, 8)))
+}
+```
+
+`time.load_location` is a fixed-offset table (UTC/EST/JST/…), not IANA
+tzdb. `testing/quick` predicates return `int` 1/0. `crypto/rand.prime_hint`
+is a length hint, not a prime generator.
 
 ---
 

@@ -242,6 +242,32 @@ mako test . -v
 # 3 passed, 0 failed
 ```
 
+## Std testing packs
+
+`testing/quick` runs seeded property checks. Predicates return `int` 1/0
+(native cannot lower `fn(...) -> bool` callbacks). `testing/fstest` is an
+in-memory file map — keep the value `write` returns. `testing/slogtest`
+checks level/message records.
+
+```mko
+pull "testing/quick"
+pull "testing/fstest"
+
+fn commutes(a: int, b: int) -> int {
+    if a + b == b + a { return 1 }
+    return 0
+}
+
+fn TestQuickAndMapFS() {
+    assert_eq(quick.check_pair(30, commutes), 1)
+    let mut fs = fstest.new_fs()
+    fs = fstest.write(fs, "a.txt", "hello")
+    let body, err = fstest.read(fs, "a.txt")
+    assert_eq_str(err, "")
+    assert_eq_str(body, "hello")
+}
+```
+
 ## Next steps
 
 - [Release builds](09-release-builds.md)

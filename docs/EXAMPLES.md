@@ -841,12 +841,13 @@ mako run main.mko
 For standard library imports, use bare names:
 
 ```mko
-import "strings"
-import "path"
+pull "strings"
+pull "path"
 
 fn main() {
     let parts = strings.split("a,b,c", ",")
-    let p = path.join("/usr", "local", "bin")
+    print(strings.concat(parts, "-"))
+    let p = path.join_path("/usr", "local")
     print(p)
 }
 ```

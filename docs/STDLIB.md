@@ -2,10 +2,10 @@
 
 Batteries for **web and backends**, with naming conventions adapted to Mako.
 
-**Product tip:** **0.4.0**. Core stdlib packages (`io`, `encoding/json`,
-`context`, `collections`, `net/http`, `database/sql`) are now written in
-idiomatic Mako with generics and `mut self`. Lower-level surface remains
-builtins over C runtime headers.
+**Product tip:** **0.5.x**. Application packs have Go-equivalent surfaces
+(2026-08-18 wave) — snake_case, no panic-on-OOB, `Result` / `(value, err)`
+instead of nil. Not a syntax clone and not every Go toolchain package.
+Lower-level hot path remains builtins over C runtime headers.
 
 Call builtins directly (`str_split`, `path_join`, …) **or** import std packages:
 
@@ -36,8 +36,9 @@ Queue: [ROADMAP.md](ROADMAP.md).
 Runtime: `runtime/mako_rt.h`, `runtime/mako_stdlib.h`, `runtime/mako_std.h`,
 `runtime/mako_http.h`, `runtime/mako_db.h`, `runtime/mako_security.h`.
 
-Tests: `examples/testing/stdlib_*`, plus area tests (`base64_test`, `regex_*`,
-`errors_test`, `path_join_test`, …). Demo: `examples/stdlib/demo.mko`.
+Tests: `examples/testing/stdlib_*`, `stdlib_parity_*_test.mko`, plus area
+tests (`base64_test`, `regex_*`, `errors_test`, `path_join_test`, …).
+Demo: `examples/stdlib/demo.mko`.
 The claims gate also runs `scripts/stdlib-gate.sh`, which type-checks every
 checked-in `std/**/*.mko` package file so a stale wrapper cannot remain hidden
 because no application imports it. This proves package-surface validity, not
@@ -45,28 +46,35 @@ symbol-for-symbol parity with Go or any optional platform integration.
 
 ---
 
-## Package index (synced 2026-07-17 · Wave 9 + codecs)
+## Package index (synced 2026-08-18 · Go-equivalent + wave 3)
+
+Mako names are snake_case and keyword-safe (`concat` not `join`, `matches`
+not `match`). Indexes never panic: searches return −1, slices clamp.
+Parse failures are `Result`, never nil pointers.
 
 | Package | Status | Role |
 |---------|--------|------|
-| `strings` / `bytes` | **Done** | split/join/trim/replace/builder + `bytes.Buffer` |
-| `strconv` / `fmt` / `print` | **Done** | parse/format; Sprintf/Print/Errorf multi-arg |
-| `io` / `fs` / `path` / `filepath` | **Done** | files + recursive walk |
-| `bufio` | **Done** | buffered reader/writer |
-| `os` / `env` / `args` / `os/exec` / `os/signal` | **Done** | env/args/exec; signal Unix |
+| `strings` / `bytes` | **Done** | search/cut/split_n/fields_fn + []byte index/compare/clone |
+| `strconv` / `fmt` / `print` | **Done** | parse/format + quote/unquote/is_print |
+| `io` / `io/fs` / `path` / `filepath` | **Done** | Limit/Section readers, walk, glob `matches`, rel/abs |
+| `bufio` | **Done** | buffered reader/writer + `scan_lines` |
+| `os` / `os/env` / `os/user` / `os/exec` / `os/signal` | **Done** | env expand/lookup, uid/home, exec, signal Unix |
 | `flag` | **Done** | CLI flags |
-| `net` / `http` / `net/url` / `net/mail` / `net/smtp` | **Done** | MIME builder + SMTP session / STARTTLS / AUTH |
-| `encoding/*` + `gob` / `binary` / `yaml` / `toml` / `cbor` / `msgpack` / `avro` / `protobuf` | **Done** | wire + config + binary codecs |
-| `compress/gzip` · `archive/tar` · `archive/zip` | **Done** | multi-file zip + deflate |
-| `mime` / `multipart` · `context` · `crypto` | **Done** | |
-| `math` / `rand` · `text/template` / `html/template` | **Done** | Go-style engine: if/range/with/define + HTML escape |
-| `html` · `utf8` · `unicode` · `sync` / `atomic` · `slices` / `maps` | **Done** | UCD seed + full utf8 encode/decode |
-| `errors` / `testing` / `httptest` / `regexp` / `log` / `slog` / `sql` | **Done** | RE2-ish + `\x` `(?:)` `\p{...}` scripts/categories + lookahead |
-| `image/png` / `gif` / `jpeg` | **Done** | LZW dict; DCT + Huffman block; JFIF shell + APP7 Mako payload |
+| `net` / `net/netip` / `http` / `cookiejar` / `httputil` / `httptrace` / `net/url` / `net/mail` / `net/smtp` | **Done** | host/port, IPv4/IPv6/prefix, HTTP, MIME/SMTP |
+| `encoding/*` + `ascii85` / `pem` / `gob` / `binary` / `yaml` / `toml` / `cbor` / `msgpack` / `avro` / `protobuf` | **Done** | wire + config + binary codecs |
+| `compress/gzip` · `flate` · `zlib` · `lzw` · `bzip2` · `archive/tar` · `archive/zip` | **Done** | C hot path; bzip2 optional |
+| `mime` / `multipart` / `quotedprintable` · `context` · `crypto` | **Done** | context values are string pairs (`with_value` / `value`) |
+| `math` / `math/bits` / `math/cmplx` / `math/big` / `rand` | **Done** | bits, complex pairs, big.Int add/mul, `shuffle`/`perm` |
+| `text/template` / `html/template` / `text/tabwriter` / `text/scanner` | **Done** | Go-style engine + tab align + token scan |
+| `html` · `utf8` · `utf16` · `unicode` · `sync` / `atomic` · `slices` / `maps` / `cmp` · `iter` · `unique` | **Done** | UCD + UTF-16 + compare + intern |
+| `errors` / `testing` / `httptest` / `quick` / `fstest` / `slogtest` / `regexp` / `regexp/syntax` / `log` / `slog` / `sql` | **Done** | RE2-ish + property checks + MapFS |
+| `hash` / `hash/crc32` / `hash/adler32` / `hash/fnv` | **Done** | IEEE CRC-32, Adler-32, FNV-1/1a |
+| `index/suffixarray` | **Done** | suffix index + lookup |
+| `image` / `image/color` / `draw` / `png` / `gif` / `jpeg` | **Done** | Point/Rect + LZW dict; DCT + Huffman; JFIF |
 | `reflect` | **Done** | POD value bag (N fields + nested POD flatten) + clone/equal; map fields rejected |
 | `plugin` | **Done** | product host (`std/plugin`): load/call/meta/reload/manifest + live dylib |
 | `syscall` | **Done** | portable OS primitives (`std/syscall`): pid/uid/host/pipe/dup/… |
-| `time` | **Done** | clocks + calendar + parse/format + duration (`std/time`) |
+| `time` | **Done** | clocks + calendar + parse/format + Go-style `parse_duration` |
 | `timer` | **Done** | general deadline min-heap (`timer_heap_*`) — protocol-agnostic |
 | `peer` | **Done** | general named peers + string-key routes (`peer_table_*`) |
 | `sctp` | **Done** | general SCTP transport (streams/PPID/HB/multihome where kernel allows) |
@@ -77,7 +85,114 @@ symbol-for-symbol parity with Go or any optional platform integration.
 | `messaging` | **Done seed** | In-process message queues `mq_*` ([MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md)) |
 | `embed` | **Done** | helper (not compile-time) |
 
-Runtime: `mako_rt.h` + `mako_goext.h` (Waves 1–9). Tests: `goext_wave{,3,4,5,6,7,8,9}_test.mko`.
+Runtime: `mako_rt.h` + `mako_goext.h` (Waves 1–9). Tests: `goext_wave{,3,4,5,6,7,8,9}_test.mko`,
+`stdlib_parity_*_test.mko`.
+
+### Go package → Mako equivalent (adversarial)
+
+This is capability parity, not a syntax clone. Preferred surface is
+`fn` / `let` / `on` / `pack` / `pull`.
+
+| Go | Mako pack | Notes |
+|----|-----------|--------|
+| `strings` / `bytes` | `strings` / `bytes` | `concat` ≡ `Join`; cut returns `(head, tail, ok)` |
+| `slices` / `maps` / `cmp` / `sort` | same names | typed monomorphs; OOB clamps |
+| `strconv` | `strconv` | `quote` / `unquote` / `is_print` |
+| `io` / `io/fs` | `io` / `io/fs` | `LimitReader` / `SectionReader` / `FileInfo` |
+| `path` / `path/filepath` | `path` / `path/filepath` | `matches` ≡ `Match` |
+| `os` / `os/user` | `os` / `os/env` / `os/user` | `lookup` / `expand` / `current` |
+| `net` / `net/netip` | `net` / `net/netip` | `split_host_port`, `parse_addr`, prefixes |
+| `math` / `bits` / `cmplx` / `big` | `math` / `math/bits` / `math/cmplx` / `math/big` | complex is a `Complex` pair |
+| `hash/crc32` / `adler32` / `fnv` / `crc64` | same | CRC-64 ECMA is a C builtin; result is `int` bits (do not `uint64()` a negative pattern) |
+| `encoding/ascii85` / `pem` | same | Adobe ASCII85 + PEM wrap |
+| `mime/quotedprintable` | same | RFC 2045 |
+| `unicode/utf16` | same | surrogate pairs, U+FFFD |
+| `text/tabwriter` / `scanner` | same | column pad + token scan |
+| `index/suffixarray` | same | naive build, lookup |
+| `time.ParseDuration` | `time.parse_duration` | result in milliseconds |
+| `sync.Once` | `sync.once` / `do_once` | CAS handle + `fn() -> int` |
+| `unsafe` / `weak` / `go/*` / `debug/*` | **won't** | memory-unsafe or Go toolchain |
+| `compress/{flate,zlib,bzip2,lzw}` | **Done** | C zlib/flate/LZW hot path; bzip2 when `MAKO_BZ2` |
+| `crypto/{rsa,ecdsa,md5,sha3}` | **Done** | MD5/SHA3-256 C; ES256/RS256 via existing JWT/OpenSSL |
+| `crypto/{rand,hkdf,pbkdf2}` | **Done** | CSPRNG / RFC 5869 / PBKDF2-HMAC-SHA256; no RSA keygen |
+| `context.WithValue` | `context.with_value` | string pairs only; later key shadows |
+| `time.LoadLocation` | `time.load_location` | fixed-offset table (EST/JST/…), not IANA tzdb |
+| `math/rand.Shuffle` / `Perm` | `rand.shuffle` / `perm` | Fisher–Yates; empty/`n<=0` → empty |
+| `image.Point` / `Rectangle` | `image` | half-open `[min, max)` |
+| `testing/quick` / `fstest` / `slogtest` | same | predicates return `int` 1/0 |
+| `regexp/syntax` | same | literal/meta + `quote`; not a parse tree |
+| `net/http/httptrace` | same | event log, does not hook the client |
+
+### New pack APIs (2026-08-18)
+
+```mko
+pull "strings"
+pull "strconv"
+pull "slices"
+pull "cmp"
+pull "math/bits"
+pull "math/cmplx"
+pull "math/big"
+pull "hash/crc32"
+pull "net/netip"
+pull "time"
+pull "sync"
+pull "os/env"
+
+fn main() {
+    let head, tail, ok = strings.cut_ok("a=b=c", "=")
+    let q = strconv.quote("a\nb")
+    let text, err = strconv.unquote(q)
+
+    let i, found = slices.binary_search([1, 3, 5], 3)
+    assert_eq(cmp.compare_int(1, 2), -1)
+
+    assert_eq(bits.ones_count64(7), 3)
+    let z = cmplx.rect(3.0, 4.0)
+    let n, e = big.from_string("1000000000000")
+
+    assert_eq(crc32.checksum_ieee("123456789"), 0xCBF43926)
+
+    let addr, ae = netip.parse_addr("10.1.2.3")
+    let pref, pe = netip.parse_prefix("10.0.0.0/8")
+
+    match time.parse_duration("1h30m") {
+        Ok(ms) => print_int(ms)   // 5400000
+        Err(_) => {}
+    }
+
+    let once = sync.once()
+    // do_once takes fn() -> int; first call runs it, later calls return 0
+
+    let _ = env.set("K", "v")
+    print(env.expand("x=$K"))     // x=v
+}
+```
+
+Wave 3 (CSPRNG, HKDF, context values, named offsets):
+
+```mko
+pull "crypto/rand" as crand
+pull "crypto/hkdf"
+pull "context"
+pull "math/rand"
+pull "time"
+
+fn main() {
+    print_int(len(crand.read(16)))
+    let ctx = context.background().with_value("user", "ada")
+    print(ctx.value("user"))
+    rand.seed(1)
+    print_int(len(rand.perm(5)))
+    print_int(time.load_location("EST"))   // -18000
+}
+```
+
+Tests: `examples/testing/stdlib_parity_core_test.mko`,
+`stdlib_parity_packs_test.mko`, `stdlib_parity_io_test.mko`,
+`stdlib_parity_os_test.mko`, `stdlib_parity_net_test.mko`,
+`stdlib_parity_time_sync_test.mko`, `stdlib_parity_gap_test.mko`,
+`stdlib_parity_adversarial_test.mko`, `stdlib_parity_wave3_test.mko`.
 
 ---
 
@@ -302,6 +417,29 @@ import "strings"
 | `as_bytes` / `bytes_as_str` / `bytes_view` / `bytes_is_view` | zero-copy views |
 | `buf_get` / `buf_put` | process-local reusable byte buffers |
 
+Package wrappers (`pull "strings"`) add the Go-equivalent surface. `join` is
+a keyword, so joining parts is `concat`. Indexes never panic.
+
+| Package fn | Go equivalent | Notes |
+|------------|---------------|--------|
+| `contains` / `has_prefix` / `has_suffix` | `Contains` / `HasPrefix` / `HasSuffix` | |
+| `index` / `last_index` / `count` | `Index` / `LastIndex` / `Count` | −1 if missing |
+| `index_byte` / `last_index_byte` | `IndexByte` / `LastIndexByte` | OOB byte → −1 |
+| `index_rune` / `contains_rune` | `IndexRune` / `ContainsRune` | |
+| `index_any` / `contains_any` | `IndexAny` / `ContainsAny` | |
+| `cut_ok` | `Cut` | `(head, tail, ok)` |
+| `cut_prefix` / `cut_suffix` | `CutPrefix` / `CutSuffix` | `(rest, ok)` |
+| `split_n` / `split_after` / `split_after_n` | `SplitN` / `SplitAfter*` | `n <= 0` splits all |
+| `fields_fn` | `FieldsFunc` | `fn(int) -> bool` rune predicate |
+| `replace_n` | `Replace` | `n < 0` means all |
+| `concat` / `join_parts` | `Join` | |
+| `clone` / `compare` / `equal_fold` | `Clone` / `Compare` / `EqualFold` | |
+| `trim_prefix` / `trim_suffix` | `TrimPrefix` / `TrimSuffix` | |
+
+`pull "bytes"` adds `[]byte` `index_bytes` / `contains_bytes` / `compare_bytes` /
+`clone` / `count_bytes` / `has_prefix_bytes` / `trim_prefix_bytes` on top of
+the existing `Buffer`.
+
 ### Usage examples
 
 ```mko
@@ -409,9 +547,16 @@ import "os"
 | `symlink` / `readlink` / `realpath` | links / resolve |
 | `file_exists` / `is_dir` / `read_dir` | FS |
 | `getcwd` / `chdir` | working directory |
-| `env_get` / `env_set` | environment |
+| `env_get` / `env_set` / `env_unset` / `env_has` / `env_keys` | environment |
 | `argc` / `args` / `arg_get` | process args |
 | `exit` | process exit |
+
+Package extras: `path.matches` (Go `path.Match`; `*` / `?`, no `/` across
+`*`). `path/filepath` adds `rel` / `abs` / `to_slash` / `from_slash` /
+`volume_name` / `split_list` / `matches`. `os/env` is the native-safe env
+pack (`get` / `set` / `lookup` / `expand` — `$VAR` and `${VAR}`). `os/user.current`
+returns uid/gid/username/home. `io` adds `limit_reader` / `section_reader` /
+`copy_n` / `read_full`. `io/fs` adds `stat` / `valid_path` / `walk`.
 
 Cross-platform: Win/Mac/Linux separators and dir APIs in `mako_stdlib.h` /
 `mako_platform.h`.
@@ -998,6 +1143,7 @@ import "time"
 | `time_format_local` / `date` / `clock` | format variants |
 | `time_add_ms` / `sub` / `after` / `before` / `trunc_*` | arithmetic |
 | `duration_*` / `duration_string` | duration in ms + pretty print |
+| `time.parse_duration` | Go duration syntax → milliseconds (`1h30m`, `-250ms`) |
 | `syscall_*` | portable OS: pid/uid/host/uname/pipe/dup/access/… |
 
 ### Low-latency pattern
@@ -1685,15 +1831,29 @@ Pull: `pull "uuid"` → `std/uuid/uuid.mko` re-exports. Prefer builtins on the h
 
 | Area | Mako today |
 |------|------------|
-| `strings` package import | Done — `import "strings"` → `std/strings/` (also path, fmt, sync, …) |
-| `bufio.Reader/Writer` | Done |
+| `strings` / `bytes` / `slices` / `maps` / `cmp` / `sort` | Done — Go-equivalent wave; OOB clamps, `concat` ≡ `Join` |
+| `bufio` scan + Reader/Writer | Done (`scan_lines` / `scan_words`) |
+| `strconv` quote/unquote | Done (`quote` / `unquote` → `(text, err)`) |
+| `io` / `io/fs` | Done — Limit/Section/`copy_n`/`FileInfo`/`valid_path` |
+| `path` / `filepath` glob | Done — `matches` ≡ `Match`; `rel`/`abs`/`volume_name` |
+| `os/env` / `os/user` | Done — `expand` / `lookup` / `current` |
+| `net` / `net/netip` | Done — host/port, IPv4/prefix; IPv6 via `parse_ip_ok` |
+| `math/bits` / `cmplx` / `big` | Done — 64-bit bits, `Complex` pair, `Int` add/mul/cmp |
+| `hash/crc32` / `adler32` / `fnv` | Done — IEEE / FNV-1a vectors in tests |
+| `encoding/ascii85` / `pem` / `quotedprintable` | Done |
+| `unicode/utf16` / `text/tabwriter` / `scanner` / `suffixarray` | Done |
+| `time.parse_duration` / `load_location` / `sync.once` | Done — duration in ms; named offsets are a fixed table, not tzdb |
+| `crypto/rand` / `hkdf` / `pbkdf2` / `context.with_value` / `image` Point/Rect | Done — CSPRNG + RFC 5869 vector; values are string pairs |
 | `net/http.Request` typed | Done (`HttpRequest`) |
 | `database/sql` one API | Done (`sql_*`; string params, last_insert/rows, multi-row cursor + bulk col; MySQL query still seed) |
 | Full `regexp` engine | RE2-ish (`\d\w\s`, `{n,m}`, `\b`, find_all/replace); not full RE2/PCRE |
-| `sync.WaitGroup` / RWMutex / atomic | Done |
+| `sync.WaitGroup` / RWMutex / atomic | Done (wrappers must not share builtin names) |
 | Generics collections | slices + maps + `List[T]` + set/heap/ring + take/drop/zip/map_add/filter/fold Done; full callback map/filter Later |
 | zip multi-file · png/gif/jpeg · reflect · httptest · gob/mail/smtp/slog/binary | Done (area-level; not every symbol) |
-| Full stdlib symbol parity | **Not claimed** (~98% major *areas*; not every symbol) |
+| `unsafe` / `weak` / `go/*` / `debug/*` | **Won't** — memory-unsafe or Go toolchain |
+| `compress/{flate,zlib,bzip2,lzw}` | **Done** — C zlib/flate/LZW; bzip2 optional (`MAKO_BZ2`) |
+| `crypto/{rsa,ecdsa,md5,sha3,rand,hkdf,pbkdf2}` | **Done** — MD5/SHA3-256 C; ES256/RS256 via JWT/OpenSSL; no RSA keygen |
+| Full stdlib symbol-for-symbol with Go | **Not claimed** — capability equivalents, Mako names |
 
 ---
 

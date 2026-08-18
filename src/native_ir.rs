@@ -25586,6 +25586,96 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
+            "flate_compress" if args.len() == 1 => Some((
+                "mako_native_flate_compress_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "flate_decompress" if args.len() == 1 => Some((
+                "mako_native_flate_decompress_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "flate_available" if args.len() == 0 => Some((
+                "mako_native_flate_available",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "zlib_compress" if args.len() == 1 => Some((
+                "mako_native_zlib_compress_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "zlib_decompress" if args.len() == 1 => Some((
+                "mako_native_zlib_decompress_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "zlib_available" if args.len() == 0 => Some((
+                "mako_native_zlib_available",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "bzip2_compress" if args.len() == 1 => Some((
+                "mako_native_bzip2_compress_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "bzip2_decompress" if args.len() == 1 => Some((
+                "mako_native_bzip2_decompress_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "bzip2_available" if args.len() == 0 => Some((
+                "mako_native_bzip2_available",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "lzw_compress" if args.len() == 1 => Some((
+                "mako_native_lzw_compress_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "lzw_decompress" if args.len() == 1 => Some((
+                "mako_native_lzw_decompress_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sha3_256_hex" if args.len() == 1 => Some((
+                "mako_native_sha3_256_hex_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sha3_256_raw" if args.len() == 1 => Some((
+                "mako_native_sha3_256_raw_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "md5_hex" if args.len() == 1 => Some((
+                "mako_native_md5_hex_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "crc64_ecma" if args.len() == 1 => Some((
+                "mako_native_crc64_ecma",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
             "rand_intn" if args.len() == 1 => Some((
                 "mako_native_rand_intn",
                 &[Type::I64],
@@ -30451,6 +30541,9 @@ impl<'a> FunctionLowerer<'a> {
                         | "yaml_get_bool"
                         | "yaml_has"
                         | "zip_deflate_available"
+                        | "flate_available"
+                        | "zlib_available"
+                        | "bzip2_available"
                         | "bytes_is_view"
                         | "http_route_match"
                         | "middleware_require_context"

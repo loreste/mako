@@ -2144,7 +2144,9 @@ Live Docker fixtures (ephemeral; tear down after):
 `scripts/ci-postgres.sh` → `examples/ci/pg_live.mko` (`pg_ok`/`pg_exec` on `:5433`).
 Default suite still uses mocks / down-server asserts (no Docker required).
 
-Time / path / file / env / args / log helpers (stdlib — full index: [STDLIB.md](STDLIB.md)):
+Time / path / file / env / args / log helpers (stdlib — full index: [STDLIB.md](STDLIB.md);
+Go-equivalent packs: `pull "strings"` / `os/env` / `net/netip` / `math/bits` /
+`crypto/rand` / `context` / `image` / …):
 
 ```mko
 // examples/stdlib/demo.mko · testing/stdlib_*_test.mko · path_join.mko · …
@@ -2628,7 +2630,8 @@ python3 -m http.server -d wasm-dist 8080
 
 **Already Done** (see STATUS): CFG NLL, HTTP/1.1 + HTTPS + H2 TLS beachhead,
 gRPC/H3-client pieces, WASI preview1, operators/imports/`mako version`,
-stdlib Waves 1–9 (~98% major areas).
+stdlib Waves 1–9 plus the 2026-08-18 Go-equivalent wave and wave-3 close
+(application packs; not every Go toolchain/`unsafe` package — [STDLIB.md](STDLIB.md)).
 
 Still **Target / Later** (VISION): colored `async`/`await`, complete Unicode property database / full PCRE
 (script seeds: Latin/Greek/Cyrillic/Arabic/Hebrew/Han/Hiragana/Katakana/Hangul/Thai/Devanagari/Tamil/Armenian/Ethiopic/Georgian/Cherokee/Bengali/Sinhala/Myanmar/Khmer/Tibetan/Syriac/Coptic/Runic/Thaana/Tagalog/Bopomofo/Braille/Ogham/Gothic/Canadian/Gujarati/Kannada/Malayalam/Telugu/Oriya/Lao/Balinese/Javanese/Sundanese/Buginese/Cham/Rejang/Lisu/Nko/Tifinagh/Samaritan/Mandaic/Saurashtra/Tai_Le/Kayah_Li/New_Tai_Lue/Ol_Chiki/Limbu/Lepcha/Batak/Tai_Tham/Syloti_Nagri/Vai/Yi/Glagolitic/Meetei_Mayek/Phags_Pa/Buhid/Hanunoo/Tagbanwa/Bamum/Mongolian/Tai_Viet/Inherited/Common + categories incl. Mn/Mc/Sm/Sk/Pc),

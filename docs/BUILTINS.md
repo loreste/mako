@@ -835,6 +835,16 @@ Tests: `examples/testing/dtls_test.mko` · interop: `scripts/dtls-smoke.sh`
 | `gzip_compress` | `gzip_compress(data: string) -> string` | Compress data with gzip |
 | `gzip_decompress` | `gzip_decompress(data: string) -> string` | Decompress gzip data |
 | `gzip_available` | `gzip_available() -> int` | Check if gzip is available |
+| `flate_compress` / `flate_decompress` | `(data) -> string` | Raw DEFLATE (RFC 1951); C zlib when linked |
+| `flate_available` | `() -> int` | 1 if raw DEFLATE is linked |
+| `zlib_compress` / `zlib_decompress` | `(data) -> string` | zlib wrapper (RFC 1950); same C path as `gzip_*` |
+| `zlib_available` | `() -> int` | 1 if zlib is linked |
+| `lzw_compress` / `lzw_decompress` | `(data) -> string` | GIF-style 9–12 bit LZW (C, bounded 4096) |
+| `bzip2_compress` / `bzip2_decompress` | `(data) -> string` | bzip2 when `MAKO_BZ2`; else empty |
+| `bzip2_available` | `() -> int` | 1 if libbz2 is linked |
+| `md5_hex` | `(data) -> string` | MD5 hex (legacy checksums only) |
+| `sha3_256_hex` / `sha3_256_raw` | `(data) -> string` | SHA3-256 (FIPS 202, C Keccak) |
+| `crc64_ecma` | `(data) -> int` | Go `hash/crc64` ECMA bits (init/xorout all-ones) |
 | `bin_encode_int` | `bin_encode_int(n: int) -> string` | Encode an integer in binary format |
 
 ### Binary Encoding (Little-Endian)

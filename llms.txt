@@ -20,7 +20,10 @@ Short facts:
 - `mut self` on methods: `fn push(mut self, v: int)` — mutations persist in caller
 - Multi-statement lambdas: `fn(x) { let a = x + 1; return a }` — full control flow
 - Stdlib in Mako: `pull "io"`, `pull "encoding/json"`, `pull "context"`,
-  `pull "net/http"`, `pull "database/sql"`, `pull "collections"`
+  `pull "net/http"`, `pull "database/sql"`, `pull "collections"`,
+  plus Go-equivalent packs (`strings`, `bytes`, `slices`, `os/env`,
+  `net/netip`, `math/bits`, `hash/crc32`, `crypto/rand`, `crypto/hkdf`,
+  `image`, `testing/quick`, …). `concat` ≡ Join; `matches` ≡ Match.
 - Tuples / multi-return: `let a, b = f()` (incl. struct elements)
 - Methods: `on Type { fn m(self) -> T { ... } }`
 - Modules: `pack name`, `pull "path"`, always qualify: `pkg.fn`, `eng.Table`,
@@ -56,7 +59,8 @@ Short facts:
 - Shutdown helpers, tracing, leak checks, crash reporting in the runtime
 - Release: `-O3 -flto`. WASM: `wasm32-wasip1`
 - Stdlib: HTTP (incl. HTTP/2), TLS, SQL, crypto, regex, UUID/ULID, channels,
-  SIP signaling, SMTP, templates, domain storage (BTree/LSM/WAL/Bloom), …
+  SIP signaling, SMTP, templates, domain storage (BTree/LSM/WAL/Bloom),
+  Go-equivalent application packs (see docs/STDLIB.md) — not unsafe/go/debug/*
 - Speed: wyhash maps, zero-copy string comparisons, compile-time constant folding,
   stack-based f-strings, condvar channel select, atomic HTTP conn tracking
 

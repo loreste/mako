@@ -396,11 +396,17 @@ Pull standard library units by name (no `./` prefix). Always qualify:
 
 ```mko
 pull "strings"
+pull "os/env"
 
 fn main() {
     print(strings.trim("  hello  "))
+    print(strings.concat(strings.split("a,b", ","), "-"))
+    print(env.expand("home=$HOME"))
 }
 ```
+
+Keyword-safe names: `concat` (not `join`), `matches` (not `match`).
+Index: [STDLIB.md](../STDLIB.md).
 
 ## Walkthrough: building a multi-file project
 

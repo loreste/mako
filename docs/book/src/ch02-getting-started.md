@@ -408,12 +408,19 @@ Pull std units by name (no `./` prefix) and always qualify:
 
 ```mko
 pull "strings"
+pull "path"
 pull "net/http"
 
 fn main() {
     print(strings.trim("  hello  "))
+    print(strings.concat(strings.split("a,b", ","), "-"))
+    print_int(int(path.matches("*.mko", "main.mko")))
 }
 ```
+
+`join` and `match` are keywords, so the equivalents are `concat` and
+`matches`. Full index: [STDLIB.md](../STDLIB.md) · book
+[ch07-stdlib](ch07-stdlib.md).
 
 ### When to use packages instead
 

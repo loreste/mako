@@ -27,7 +27,7 @@ you need below.
 
 | Doc | What's in it |
 |-----|-------------|
-| [Standard Library](STDLIB.md) | What's included, what's tested, what's shape-only |
+| [Standard Library](STDLIB.md) | What's included, Go-equivalent packs, what's tested, what's out of scope |
 | [Builtins](BUILTINS.md) | Built-in function signatures |
 
 ## Memory and safety

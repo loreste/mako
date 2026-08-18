@@ -895,7 +895,7 @@ Metrics/prom + span-lite JSON are in; **depth seeds landed** (2026-07-14).
 
 - Exotic `Result` / `Option` / `?` edges beyond current suite  
 - Full Unicode / PCRE / UCD depth (common `\p{…}` seeds landed)  
-- Symbol-level stdlib parity with every Go package name (not a goal line-for-line)  
+- Symbol-level stdlib parity with every Go package name (not a goal line-for-line; application equivalents landed 2026-08-18 — [STDLIB.md](STDLIB.md))  
 - JPEG viewer Huffman residual if still needed beyond baseline encode  
 
 ---
