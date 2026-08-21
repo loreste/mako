@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Documentation
+
+- Added the stdlib memory-safety gate: Mako parity means safe capability
+  coverage in Mako's own syntax, not cloning Go/Rust unsafe surfaces.
+
 ## 0.5.7 — 2026-08-18 (stdlib expansion, string ops, Go parity push)
 
 ### Compiler

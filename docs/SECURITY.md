@@ -1,6 +1,7 @@
 # Mako security
 
-**Status:** actively hardened, not formally proven. The ownership model
+**Status:** actively hardened toward the product goal of **100% memory-safe
+safe Mako**, not formally proven. The ownership model
 prevents many classes of memory bugs by construction, and the full test
 suite is exercised under ASan (with leak detection disabled) and UBSan with
 zero errors. ASan validates invalid accesses, use-after-free, double-free,
@@ -14,6 +15,12 @@ Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make memory corruption and common backend footguns hard to ship —
 by construction where possible, by hard errors where not.
 
+Mako is its own language with its own syntax. Safety decisions are Mako-shaped:
+stdlib parity with Go or Rust never requires exposing their unsafe memory
+surfaces. Safe APIs must uphold Mako ownership, bounds, cleanup, and
+concurrency rules; unsafe or unverifiable integration stays explicit and
+outside the safe claim.
+
 | Pillar | How it shows up |
 |--------|-----------------|
 | **Ownership** | `hold`/`share`/`arena` — deterministic free, no GC |
@@ -21,7 +28,9 @@ by construction where possible, by hard errors where not.
 | **Bounds** | Array/slice bounds checks in all builds (safe release mode) |
 | **Verification** | Full suite runs under ASan, UBSan, and TSan in CI |
 
-Soundness program: [SOUNDNESS.md](SOUNDNESS.md) · Memory model: [MEMORY_MODEL.md](MEMORY_MODEL.md).
+Soundness program: [SOUNDNESS.md](SOUNDNESS.md) · Memory model:
+[MEMORY_MODEL.md](MEMORY_MODEL.md) · Stdlib gate:
+[STDLIB_SAFETY.md](STDLIB_SAFETY.md).
 
 ## Principles
 

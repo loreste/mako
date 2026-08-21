@@ -1,11 +1,21 @@
 # Mako standard library
 
+Mako is its own language with its own syntax and ownership model. Standard
+library parity means safe capability coverage, not Go/Rust syntax cloning and
+not importing their unsafe surfaces.
+
 Batteries for **web and backends**, with naming conventions adapted to Mako.
 
 **Product tip:** **0.5.x**. Application packs have Go-equivalent surfaces
 (2026-08-18 wave) — snake_case, no panic-on-OOB, `Result` / `(value, err)`
 instead of nil. Not a syntax clone and not every Go toolchain package.
 Lower-level hot path remains builtins over C runtime headers.
+
+**Memory-safety bar:** safe stdlib APIs must be memory safe by construction.
+C/OS/crypto/compression-backed code is allowed only behind checked wrappers with
+documented ownership, cleanup, bounds, and handle lifecycle rules. Raw-memory
+or unverifiable behavior is excluded from safe parity or isolated behind an
+explicit unsafe boundary. See [STDLIB_SAFETY.md](STDLIB_SAFETY.md).
 
 Call builtins directly (`str_split`, `path_join`, …) **or** import std packages:
 
@@ -42,7 +52,9 @@ Demo: `examples/stdlib/demo.mko`.
 The claims gate also runs `scripts/stdlib-gate.sh`, which type-checks every
 checked-in `std/**/*.mko` package file so a stale wrapper cannot remain hidden
 because no application imports it. This proves package-surface validity, not
-symbol-for-symbol parity with Go or any optional platform integration.
+symbol-for-symbol parity with Go or any optional platform integration. A package
+is not complete for safe parity until it also satisfies
+[the stdlib memory-safety gate](STDLIB_SAFETY.md).
 
 ---
 
@@ -111,7 +123,8 @@ This is capability parity, not a syntax clone. Preferred surface is
 | `index/suffixarray` | same | naive build, lookup |
 | `time.ParseDuration` | `time.parse_duration` | result in milliseconds |
 | `sync.Once` | `sync.once` / `do_once` | CAS handle + `fn() -> int` |
-| `unsafe` / `weak` / `go/*` / `debug/*` | **won't** | memory-unsafe or Go toolchain |
+| `unsafe` / raw pointer APIs / unchecked memory primitives | **won't** | conflicts with safe Mako |
+| `weak` / `go/*` / `debug/*` | **won't / blocked** | Go toolchain or binary-parser surfaces; only bounded safe data parsers may be reconsidered |
 | `compress/{flate,zlib,bzip2,lzw}` | **Done** | C zlib/flate/LZW hot path; bzip2 when `MAKO_BZ2` |
 | `crypto/{rsa,ecdsa,md5,sha3}` | **Done** | MD5/SHA3-256 C; ES256/RS256 via existing JWT/OpenSSL |
 | `crypto/{rand,hkdf,pbkdf2}` | **Done** | CSPRNG / RFC 5869 / PBKDF2-HMAC-SHA256; no RSA keygen |
