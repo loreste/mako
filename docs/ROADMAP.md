@@ -1,11 +1,12 @@
 # Mako roadmap
 
-**Product version:** **0.5.5** (tip) · last tagged **v0.5.5** · Last sync: **2026-08-16**.  
-**Suite:** **406** Mako tests on `examples/testing` (C + native backends) + 140
-Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configured.
+**Product version:** **0.5.7** (tip) · last tagged **v0.5.7** · Last sync: **2026-08-19**.
+**Suite:** **418** `examples/testing` `*_test.mko` files · **2026-08-19:**
+native **413 passed, 5 failed** · C **416 passed, 2 failed** ·
+`cargo test --release` **146 passed, 0 failed** · CI ASan/UBSan/TSan as configured.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.5`** published; tip train **0.5.5**.
+**Release:** tag **`v0.5.7`** published; tip train **0.5.7**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -36,6 +37,8 @@ Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configu
 | **0.5.3** | Native backend completeness & struct memory safety | **Shipped** — struct clone/drop, chained assign, mut param safety |
 | **0.5.4** | Stdlib expansion, TLS server pool, self-contained macOS | **Shipped** — math, os, sort, collections, CMap, UDP reuseport, bundled LLD |
 | **0.5.5** | CI fixes, OpaqueHandle, backend regressions | **Shipped** — #34 #35 #36, CMap ASan fix, TLS mutex fix |
+| **0.5.6** | Native heap-argument ownership | **Shipped** |
+| **0.5.7** | Stdlib expansion (144 package files), str_slice, string compare | **Shipped** |
 | **0.5.x** | Further patches on 0.5 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
 
@@ -56,6 +59,8 @@ Rust unit tests, 0 failures on native or C gate · CI ASan/UBSan/TSan as configu
 0.5.3       native backend completeness & memory safety
 0.5.4       stdlib expansion, TLS server pool, self-contained macOS
 0.5.5       CI fixes, OpaqueHandle, backend regressions
+0.5.6       native heap-argument ownership
+0.5.7       stdlib expansion, str_slice, string compare
 0.5.x       patches
 1.0         stability freeze
 ```
@@ -83,7 +88,7 @@ stdlib, free `go` outside `crew`, or lifetime parameters.
 | Shared ownership-explicit IR | `src/native_ir.rs` |
 | Cranelift debug backend | `src/native_codegen.rs` |
 | Native bridge + embedded runtime archive | `runtime/native_bridge.c` |
-| Full testing corpus on native | **395/395** `mako test examples/testing --backend native` |
+| Full testing corpus on native | **395/395** on **2026-07-22** (that day's corpus). Current inventory is **418** files; see [STATUS.md](STATUS.md) |
 | Portable IO + concurrent select | seek/read_exact/append3 bridges; TLS select; recv closed vs timeout |
 | Language residual pack | mut-self `for` iterators; multi-stmt mut captures; const `s[i]` |
 | Product version string | `0.4.5` in `Cargo.toml` |
@@ -140,7 +145,7 @@ Phase 4 — Post-tag (Homebrew/winget follow-through; then 0.5 / 1.0 planning)
 
 ### Ship checklist
 
-- [x] Native language gate: full `examples/testing` green (**395/395**)  
+- [x] Native language gate: full `examples/testing` green (**395/395** on 2026-07-22; corpus has grown — see STATUS)
 - [x] Version `0.4.5` in tree  
 - [x] LLVM release path usable on primary host (Apple arm64) when llvm-backend + lld present  
 - [x] Bench numbers published (fib/parity ~1.01× Rust; slice ~1.12×; string_slice ~1.15× residual; binary ~1.01× after dead_strip)  
@@ -166,7 +171,7 @@ silently falling back to C.
 - [x] `defer`, labeled loops, match guards (shared IR + corpus)
 - [x] Native runtime interop via `runtime/native_bridge.c` (net/TLS/SQL/HTTP/SIP/…)
 - [x] `crew`, `kick`, `fan`, channels, and `select` (corpus green)
-- [x] Full `examples/testing` native correctness gate — **395/395** (2026-07-22)
+- [x] Full `examples/testing` native correctness gate — **395/395** (2026-07-22; corpus has grown — see STATUS)
 - [x] Mut-self iterators · multi-stmt mut captures · const string index
 - [ ] LLVM release path: broad workload runtime ≤ C and ≤ Rust (slice/map/I/O/CPU/RSS)
 - [ ] Cross-compilation, WASM, static, sanitizer, and overflow build modes (or hard-error)
@@ -771,7 +776,7 @@ Move beyond what the C backend can give.
 | Area | Status |
 |------|--------|
 | Go-like method sets | **Done** — `on T` / `T_m` implements I without `on T : I` · `iface_implicit_test` |
-| Dual-form checklist | **~94%** — remaining open item is intentional `*T`/`&x` (won't) |
+| Dual-form checklist | **52/52** in-scope Done — remaining item is intentional `*T`/`&x` (won't); see [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 
 ## Just closed (2026-07-15) — package-per-dir · rendezvous
 

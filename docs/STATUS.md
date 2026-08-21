@@ -1,12 +1,13 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-08-18** · product **mako0.5.5** (tip; last tag **v0.5.5**) ·
+Last inventory: **2026-08-19** · product **mako0.5.7** (tip; last tag **v0.5.7**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings · `s[i]`) · suite **406** `examples/testing`
-programs on **native** (0 failures) + Rust unit tests · full suite under ASan/UBSan;
-focused concurrency suite under TSan · [The Mako Book](book/).
+const-fn depth (match/while/for/strings · `s[i]`) · **418** `examples/testing`
+`*_test.mko` files · **2026-08-19:** native **413 passed, 5 failed** ·
+C **416 passed, 2 failed** · `cargo test --release` **146 passed, 0 failed** ·
+CI ASan/UBSan; focused concurrency under TSan · [The Mako Book](book/).
 
 **Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
@@ -16,12 +17,12 @@ focused concurrency suite under TSan · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.5.5** tip · last tag [**v0.5.5**](https://github.com/loreste/mako/releases/tag/v0.5.5) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.5.7** tip · last tag [**v0.5.7**](https://github.com/loreste/mako/releases/tag/v0.5.7) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
-| **Target pain coverage** | **~80%** strong rows — [PAIN_POINTS.md](PAIN_POINTS.md) |
-| **Dual-form coverage (optional sugar)** | **~94%** — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
+| **Target pain coverage** | **22/24** scoreboard rows Strong (1 Partial, 1 mixed) — [PAIN_POINTS.md](PAIN_POINTS.md) |
+| **Dual-form coverage (optional sugar)** | **52/52** in-scope items Done (1 intentional Won't: `*T`/`&x`) — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | Application packs have Go-equivalent surfaces (2026-08-18 wave). Not every Go toolchain/`unsafe` package — see [STDLIB.md](STDLIB.md) |
 | **Soundness (SAFE/RT core)** | Introduced in 0.2.4, actively hardened — [SOUNDNESS.md](SOUNDNESS.md); soaks and edge cases remain |
 
@@ -122,7 +123,7 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 |-------|--------|
 | Ownership free + no double-free (match Own, bind-scope, alias mut `__own`, move/clone) | PASS — ASan: `double_free_guard_test`, `match_own_free_test`, `own_branch_regress_test`, ownership suite |
 | `cargo build --release` | PASS |
-| `cargo test --release` | PASS — 140 unit tests |
+| `cargo test --release` | PASS — **146** unit tests (2026-08-19) |
 | `map[K]Option[T]` / `map[K]Result[T,E]` | PASS — `map_option_result_test` (11 tests) |
 | Security residuals (at-rest, limits, cancel, mTLS, SCRAM cbind) | PASS — `security_residuals_test` |
 | Security product polish (path size, PEM, CSR/self-signed, prom/trace, SCRAM-PLUS helpers) | PASS — `security_product_test` |
@@ -203,8 +204,9 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` | PASS — **395 passed**, 0 failed (C backend oracle) |
-| `mako test examples/testing --backend native` | PASS — **395 passed**, 0 failed (2026-07-22; shared-IR Cranelift + native bridge) |
+| `mako test examples/testing` (inventory) | **418** `*_test.mko` files (2026-08-19) |
+| `mako test examples/testing --backend c` | **416 passed, 2 failed** (2026-08-19). Failures: `domain_tracks_test`, `residual_seeds_test` (SIGABRT) |
+| `mako test examples/testing --backend native` | **413 passed, 5 failed** (2026-08-19). Failures: C's two plus `io_reader_writer_test`, `uuid_test` (SIGABRT); `issue36_builtins_test` (native IR unknown `jwt_sign_es256_header`) |
 | GC removal regression checks | PASS — removed builtin and legacy `[package] gc = true` both fail, including isolated cache paths |
 | Speed gate | PASS — normal ≤2.0× and strict ≤1.5× Rust gates; final measured ratios 0.21×–0.65× |
 | Leba downstream smoke | PASS — current compiler builds/checks Leba; compiled `doctor` reports 0 errors |

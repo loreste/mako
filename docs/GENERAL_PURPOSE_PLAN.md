@@ -2,8 +2,8 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.5.5**. Patch train: **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
-**0.5.2** runtime trust soaks, **0.5.5** native backend completeness & memory safety.
+**Product tip:** **0.5.7**. Patch train: **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
+**0.5.2** runtime trust soaks, **0.5.5** CI/OpaqueHandle, **0.5.7** stdlib expansion.
 See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 
 Mako's product contract is:

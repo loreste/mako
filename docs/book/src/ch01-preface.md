@@ -186,9 +186,9 @@ As of the current release:
 
 | Claim | Meaning |
 |-------|---------|
-| Version 0.3.0 | Current product; first public was 0.1.0 release, core language exercised by the current suite |
+| Version 0.5.7 | Current product (`Cargo.toml` / `mako version`); first public was 0.1.0 |
 | Stdlib coverage | Major backend areas covered (HTTP, TLS, JSON, SQL, etc.) |
-| Test suite | 338 test programs pass in the current suite |
+| Test suite | 418 `examples/testing` `*_test.mko` files (2026-08-19): native 413/5, C 416/2 |
 
 The language is usable for real work today. Generic structs/enums and interface
 bounds shipped in **0.2.0**; residual polish (mut-self iterators, multi-statement

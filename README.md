@@ -111,8 +111,9 @@ what is a capability equivalent, and what is intentionally out (`unsafe`,
 
 **Backends.** Native object code is the default (Cranelift). The C backend
 remains available via `--backend c` and is used automatically for sanitizers,
-cross-compilation, and emit-c. Both pass 395/395 tests and produce standalone
-binaries. LLVM release builds available with `--backend llvm --release`.
+cross-compilation, and emit-c. The `examples/testing` corpus is **418**
+`*_test.mko` files; measured **2026-08-19** native **413 passed, 5 failed**,
+C **416 passed, 2 failed**. Both backends produce standalone binaries. LLVM release builds available with `--backend llvm --release`.
 On macOS, the native backend ships with a bundled linker (LLD) — no clang or
 Xcode required. On Linux, `gcc` or `clang` is needed for linking.
 
@@ -213,7 +214,9 @@ mako test -r TestAdd -v                   # filter + verbose
 mako test --sanitize address examples/testing  # under ASan
 ```
 
-395 test files. The complete suite is exercised under ASan and UBSan in CI.
+418 `*_test.mko` files under `examples/testing` (inventory 2026-08-19).
+That day: native 413 passed / 5 failed; C 416 passed / 2 failed. The suite
+is exercised under ASan and UBSan in CI.
 A focused concurrency subset is exercised under TSan.
 
 ## Docs

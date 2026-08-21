@@ -17,7 +17,7 @@ needed — the compiler ships with a bundled linker. Memory safety uses `hold` /
 `crew` / `kick` / `join`, `fan` across cores, channels, actors — no free-fire
 leaks, no async coloring.
 
-Mako is currently at version **0.5.3**. This book teaches idiomatic Mako as it
+Mako is currently at version **0.5.7**. This book teaches idiomatic Mako as it
 ships today. Identity checklist: [IDENTITY.md](../../IDENTITY.md).
 
 | Area | Where |

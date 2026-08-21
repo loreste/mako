@@ -1,14 +1,14 @@
 # Mako release & cross-platform guide
 
-**Product version:** **0.5.5** (`Cargo.toml` / `mako version`);
-last published tag **v0.5.5**.  
-**Tree status:** native compiler language gate **395/395** on
-`mako test examples/testing --backend native` (2026-08-12).  
-**Versioning:** small patches preferred — [VERSIONING.md](VERSIONING.md).  
+**Product version:** **0.5.7** (`Cargo.toml` / `mako version`);
+last published tag **v0.5.7**.
+**Tree status:** `examples/testing` inventory **418** `*_test.mko` files
+(2026-08-19): native **413 passed, 5 failed**; C **416 passed, 2 failed**.
+**Versioning:** small patches preferred — [VERSIONING.md](VERSIONING.md).
 **Backends:** default **c**; recommend `MAKO_BACKEND=native` for debug and
-`--backend llvm --release` for optimizing builds (see [BUILD.md § Backend policy](BUILD.md)).  
-**Train:** **0.5.5** native backend completeness + struct memory safety + built-in coverage.  
-**Modes:** native/LLVM refuse sanitize/static/cross/wasm/emit-c — use `--backend c` (see [BUILD.md § Modes matrix](BUILD.md)).  
+`--backend llvm --release` for optimizing builds (see [BUILD.md § Backend policy](BUILD.md)).
+**Train:** **0.5.7** stdlib expansion + string ops + Go-parity packs.
+**Modes:** native/LLVM refuse sanitize/static/cross/wasm/emit-c — use `--backend c` (see [BUILD.md § Modes matrix](BUILD.md)).
 **Published release:** last tagged GitHub release may lag the tree — check
 [releases](https://github.com/loreste/mako/releases). Platform-specific workflow
 artifacts only; this guide does not promise a binary for every target triple.
