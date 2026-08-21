@@ -34,15 +34,37 @@ Soundness program: [SOUNDNESS.md](SOUNDNESS.md) · Memory model:
 
 ## Principles
 
-1. **Prevent, don't advise** — illegal states should not compile or should abort
+1. **Prevent, don't advise** -- illegal states should not compile or should abort
    with a clear diagnostic.
-2. **No GC** — all packages stay on ownership, shares, and arenas for
-   predictable latency. There is no collector mode that can weaken
-   hold/share/move rules.
-3. **Secure defaults in the stdlib** — parameterized DB APIs, header validation,
-   constant-time token compare, and explicit secret wiping.
-4. **Speed is the name of the game** — security features that cost cycles stay
+2. **No GC** -- packages stay on ownership, shares, and arenas for predictable
+   latency. There is no collector mode that can weaken hold/share/move rules.
+3. **Secure defaults in stdlib** -- parameterized DB APIs, header validation,
+   constant-time token compare, explicit secret wiping, verified TLS by default.
+4. **Speed is the name of the game** -- security features that cost cycles stay
    opt-in or debug-only; do not silently tax every release binary.
+
+## Footgun Prevention Policy
+
+Safe Mako should make the secure path the short path. APIs that commonly lead
+to memory corruption, credential leaks, injection, or silent downgrade must
+force an explicit choice: a loud name, an unsafe boundary, or a failing return.
+
+- **No hidden insecure fallback:** TLS, HTTPS, JWT, database, and parser helpers
+  fail closed instead of silently downgrading verification, bounds, or
+  algorithm checks.
+- **Dangerous names are explicit:** helpers such as `*_insecure` are for demos,
+  tests, and controlled local development only. They are not part of the safe
+  default path and must have a verified alternative next to them.
+- **Input injection is rejected at the boundary:** HTTP headers reject CR/LF/NUL,
+  SQL has parameterized APIs, URL/path helpers normalize before use, and parsers
+  bound lengths before touching buffers.
+- **Secrets are not ordinary strings once classified:** keys, bearer tokens,
+  password material, and session secrets should use `Secret` plus
+  `secret_eq_str`/`const_eq`; docs and examples must not teach `==` for token
+  checks.
+- **Unsafe stays narrow:** raw memory, unchecked indexes, FFI ownership transfer,
+  dynamic loading, and platform-specific handles are excluded from safe parity
+  unless wrapped by checked handles with deterministic cleanup.
 
 ### Concurrency Send seed (kick)
 

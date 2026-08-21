@@ -37,8 +37,13 @@ A stdlib package is not `Done` for safe parity until all applicable items pass:
   including malformed binary input and integer overflow in size calculations.
 - **Handle lifecycle:** native handles have idempotent close/drop behavior, stale
   handles are rejected, and close-while-in-use is synchronized.
-- **Concurrency:** shared state uses channels, `Mutex`, `RWMutex`, `CMap`, or
-  atomics; ordinary `let mut` state cannot be shared across tasks.
+- **Concurrency:** shared state uses channels, `Mutex`, `RWMutex`, `CMap`,
+  or atomics; ordinary `let mut` state cannot be shared across tasks.
+- **Footgun prevention:** unsafe or insecure behavior is not the default API.
+  If a helper disables verification, skips bounds, accepts raw SQL, loads
+  dynamic code, or transfers native ownership, the name must say so, docs
+  must point to the safe alternative, and the package must fail closed when
+  safe preconditions are missing.
 - **Backend parity:** safe behavior is the same on C, native, and LLVM backends,
   or the unsupported backend hard-errors.
 - **Verification:** package-specific tests include success cases, malformed

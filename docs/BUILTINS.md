@@ -1692,7 +1692,7 @@ Tests: `examples/testing/proxy_pool_test.mko`, `examples/testing/proxy_edge_test
 | `tls_serve` | `tls_serve(port: int, cert: string, key: string, handler: string) -> int` | Start a TLS server |
 | `tls_serve_once` | `tls_serve_once(port: int, cert: string, key: string, response: string) -> int` | Serve one TLS request |
 | `tls_serve_n` | `tls_serve_n(port: int, cert: string, key: string, response: string, n: int) -> int` | Serve n TLS requests |
-| `tls_get_insecure` | `tls_get_insecure(host: string, port: int, path: string) -> string` | TLS GET without certificate verification |
+| `tls_get_insecure` | `tls_get_insecure(host: string, port: int, path: string) -> string` | TLS GET without certificate verification; unsafe-boundary demo/local only |
 | `tls_get` | `tls_get(host: string, port: int, path: string, ca: string) -> string` | TLS GET with CA certificate |
 | `tls_post` | `tls_post(host: string, port: int, path: string, ca: string, body: string) -> string` | TLS POST with CA certificate |
 | `tls_handshake_ok` | `tls_handshake_ok(host: string, port: int, ca: string) -> string` | Test TLS handshake |
@@ -1734,13 +1734,16 @@ Use `tls_accept_start` + `tls_handshake_step` (or poll on `tls_conn_fd` with wan
 Mirror of the server API for **outbound** TLS (custom protocols, SIPS, mTLS apps).
 `tcp_connect` first, then `tls_connect(cli, fd, sni_host)`. Same `TlsConn` for
 read/write/close. Prefer `tls_client_new(ca_pem)` (VERIFY_PEER) over
-`tls_client_new_insecure` (demos only).
+`tls_client_new_insecure` (demos only). Insecure client helpers are an
+unsafe-boundary footgun: they skip certificate verification, must not appear in
+production examples, and should be blocked by application policy outside local
+development.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `tls_client_available` | `tls_client_available() -> int` | OpenSSL client backend present (1/0) |
 | `tls_client_new` | `tls_client_new(ca_pem: string) -> TlsClient` | Client ctx; verify peer against CA PEM |
-| `tls_client_new_insecure` | `tls_client_new_insecure() -> TlsClient` | Client ctx; **no** cert verify (dev only) |
+| `tls_client_new_insecure` | `tls_client_new_insecure() -> TlsClient` | Client ctx; **no** cert verify; unsafe-boundary demo/local only |
 | `tls_client_new_mtls` | `tls_client_new_mtls(ca, cert, key) -> TlsClient` | Client ctx; VERIFY_PEER + present client cert |
 | `tls_client_free` | `tls_client_free(cli: TlsClient) -> int` | Free client context |
 | `tls_connect` | `tls_connect(cli: TlsClient, fd: int, host: string) -> TlsConn` | Blocking handshake + SNI |
@@ -2215,7 +2218,7 @@ upgrade + frame code for `wss://` backends.
 |----------|-----------|-------------|
 | `wss_available` | `() -> int` | 1 if TLS client backend is linked |
 | `wss_client_connect` | `(cli: TlsClient, host, port, path, key) -> TlsConn` | TCP → TLS → WS upgrade |
-| `wss_client_connect_insecure` | `(host, port, path, key) -> TlsConn` | No peer verify (dev only) |
+| `wss_client_connect_insecure` | `(host, port, path, key) -> TlsConn` | No peer verify; unsafe-boundary demo/local only |
 | `wss_client_connect_ca` | `(host, port, path, key, ca_pem) -> TlsConn` | Verify peer with CA PEM |
 | `wss_upgrade` | `(conn: TlsConn, host, path, key) -> int` | WS upgrade on existing TLS |
 | `wss_client_send_text` / `binary` / `ping` | `(conn, data) -> int` | Masked client frames over TLS |

@@ -2234,7 +2234,7 @@ Supported: literals, `.`, `X*`/`X+`/`X?`, `|`, `[abc]`/`[a-z]`/`[^...]`,
 |--------------------------------|-----------------------------------|
 | `tls_serve_n(port, cert, key, body, max)` | HTTPS server (max N requests) |
 | `tls_get(url)` / `tls_post(url, body)` | HTTPS client (verifies peer) |
-| `tls_get_insecure(url)`       | HTTPS client (skips verify)       |
+| `tls_get_insecure(url)`       | HTTPS client that skips verification; unsafe-boundary demo/local only |
 | `tls_handshake_ok(host, port)` | Test TLS handshake               |
 
 #### WebSocket

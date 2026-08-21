@@ -8,6 +8,8 @@
   coverage in Mako's own syntax, not cloning Go/Rust unsafe surfaces.
 - Added a package-by-package stdlib safety matrix covering every checked-in
   `std/**/*.mko` file.
+- Documented the secure-default footgun prevention policy: insecure helpers
+  must be loud, opt-in, and paired with verified alternatives.
 
 ### Bug fixes
 
