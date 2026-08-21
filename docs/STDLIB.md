@@ -16,6 +16,8 @@ C/OS/crypto/compression-backed code is allowed only behind checked wrappers with
 documented ownership, cleanup, bounds, and handle lifecycle rules. Raw-memory
 or unverifiable behavior is excluded from safe parity or isolated behind an
 explicit unsafe boundary. See [STDLIB_SAFETY.md](STDLIB_SAFETY.md).
+Package-level classification is tracked in
+[STDLIB_SAFETY_MATRIX.md](STDLIB_SAFETY_MATRIX.md).
 
 Call builtins directly (`str_split`, `path_join`, …) **or** import std packages:
 

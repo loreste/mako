@@ -23,7 +23,7 @@ CI ASan/UBSan; focused concurrency under TSan · [The Mako Book](book/).
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
 | **Target pain coverage** | **22/24** scoreboard rows Strong (1 Partial, 1 mixed) — [PAIN_POINTS.md](PAIN_POINTS.md) |
 | **Dual-form coverage (optional sugar)** | **52/52** in-scope items Done (1 intentional Won't: `*T`/`&x`) — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
-| **Standard library** | Application packs have Go-equivalent surfaces (2026-08-18 wave), but safe parity requires the memory-safety gate in [STDLIB_SAFETY.md](STDLIB_SAFETY.md). Not every Go toolchain/`unsafe` package — see [STDLIB.md](STDLIB.md) |
+| **Standard library** | Application packs have Go-equivalent surfaces (2026-08-18 wave), but safe parity requires the memory-safety gate in [STDLIB_SAFETY.md](STDLIB_SAFETY.md) and package matrix in [STDLIB_SAFETY_MATRIX.md](STDLIB_SAFETY_MATRIX.md). Not every Go toolchain/`unsafe` package — see [STDLIB.md](STDLIB.md) |
 | **Soundness (SAFE/RT core)** | Introduced in 0.2.4, actively hardened — [SOUNDNESS.md](SOUNDNESS.md); soaks and edge cases remain |
 
 ---

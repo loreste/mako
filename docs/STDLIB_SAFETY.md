@@ -74,3 +74,6 @@ stdlib parity** until these are closed:
 
 The default product message should be: Mako is fast, Mako-shaped, and safe by
 construction; parity work expands capability only when it preserves that bar.
+
+Package-by-package status is tracked in
+[STDLIB_SAFETY_MATRIX.md](STDLIB_SAFETY_MATRIX.md).
