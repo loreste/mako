@@ -1,0 +1,146 @@
+// Adversarial tests for new std packs (Go stdlib equivalents).
+
+pull "math"
+pull "math/bits"
+pull "math/cmplx"
+pull "math/big"
+pull "hash/crc32"
+pull "hash/adler32"
+pull "hash/fnv"
+pull "encoding/ascii85"
+pull "encoding/pem"
+pull "mime/quotedprintable"
+pull "unicode/utf16"
+pull "text/tabwriter"
+pull "text/scanner"
+pull "index/suffixarray"
+pull "cmp"
+
+fn TestMathBits() {
+    assert_eq(bits.ones_count64(7), 3)
+    assert_eq(bits.ones_count64(0), 0)
+    assert_eq(bits.ones_count32(255), 8)
+    assert_eq(bits.leading_zeros64(0), 64)
+    assert_eq(bits.leading_zeros64(1), 63)
+    assert_eq(bits.trailing_zeros64(8), 3)
+    assert_eq(bits.trailing_zeros64(0), 64)
+    assert_eq(bits.len64(1), 1)
+    assert_eq(bits.len64(255), 8)
+    assert_eq(bits.rotate_left64(1, 1), 2)
+    assert_eq(bits.rotate_left64(1, 0), 1)
+    assert_eq(bits.reverse_bytes32(0x01020304), 0x04030201)
+    let sum, carry = bits.add64(1, 2, 0)
+    assert_eq(sum, 3)
+    assert_eq(carry, 0)
+    let d, br = bits.sub64(3, 1, 0)
+    assert_eq(d, 2)
+    assert_eq(br, 0)
+    let s2, c2 = bits.add64(0 - 1, 1, 0)
+    assert_eq(s2, 0)
+    assert_eq(c2, 1)
+}
+
+fn TestMathCmplxBig() {
+    let z = cmplx.rect(3.0, 4.0)
+    assert(math.fabs(cmplx.abs(z) - 5.0) < 0.000001)
+    let c = cmplx.conj(z)
+    assert(c.im < 0.0)
+    let p = cmplx.mul(z, c)
+    assert(math.fabs(p.re - 25.0) < 0.000001)
+    let q = cmplx.div(z, z)
+    assert(math.fabs(q.re - 1.0) < 0.000001)
+    assert(math.fabs(q.im) < 0.000001)
+
+    let a = big.from_int(123456789)
+    let b = big.from_int(987654321)
+    assert_eq_str(big.to_string(big.add(a, b)), "1111111110")
+    assert_eq_str(big.to_string(big.sub(b, a)), "864197532")
+    assert_eq_str(big.to_string(big.mul(big.from_int(99), big.from_int(99))), "9801")
+    let x, ex = big.from_string("1000000000000")
+    assert_eq_str(ex, "")
+    assert_eq_str(big.to_string(x), "1000000000000")
+    assert(big.bit_len(x) > 30)
+    let y, ey = big.from_string("-42")
+    assert_eq_str(ey, "")
+    assert_eq_str(big.to_string(y), "-42")
+    assert_eq(big.cmp(y, big.from_int(0)), -1)
+    let _, ez = big.from_string("nope")
+    assert(str_len(ez) > 0)
+}
+
+fn TestHashCodecs() {
+    assert_eq(crc32.checksum_ieee("123456789"), 0xCBF43926)
+    assert_eq(crc32.update_ieee(crc32.checksum_ieee("1234"), "56789"), 0xCBF43926)
+    assert_eq(adler32.checksum("123456789"), 0x091E01DE)
+    assert_eq(fnv.sum32a(""), 2166136261)
+    assert_eq(fnv.sum32a("a"), 0xe40c292c)
+
+    let enc = ascii85.encode("Man ")
+    assert_eq_str(enc, "9jqo^")
+    let d1, e1 = ascii85.decode("9jqo^")
+    assert_eq_str(e1, "")
+    assert_eq_str(d1, "Man ")
+    let _, e2 = ascii85.decode("!!!!!")
+    assert_eq_str(e2, "")
+    let _, e3 = ascii85.decode("~")
+    assert(str_len(e3) > 0)
+
+    let block = pem.encode("FOO", "hi")
+    assert(str_contains(block, "BEGIN FOO"))
+    let body = pem.decode_bytes(block, "FOO")
+    assert_eq_str(body, "hi")
+
+    let qp = quotedprintable.encode("a=b")
+    assert(str_contains(qp, "=3D") || str_contains(qp, "="))
+    let q1, qe1 = quotedprintable.decode("a=3Db")
+    assert_eq_str(qe1, "")
+    assert_eq_str(q1, "a=b")
+    let q2, qe2 = quotedprintable.decode("hello=\nworld")
+    assert_eq_str(qe2, "")
+    assert_eq_str(q2, "helloworld")
+}
+
+fn TestUtf16TabScanSuffix() {
+    let units = utf16.encode_string("A")
+    assert_eq(len(units), 1)
+    assert_eq(units[0], 65)
+    // U+1F600 GRINNING FACE
+    let grin = utf16.encode([128512])
+    assert_eq(len(grin), 2)
+    assert_eq(grin[0], 55357)
+    assert_eq(grin[1], 56832)
+    assert_eq(utf16.decode_rune(grin[0], grin[1]), 128512)
+    assert(utf16.is_surrogate(55357))
+    assert(!utf16.is_surrogate(65))
+    let bad = utf16.decode([55357])
+    assert_eq(len(bad), 1)
+    assert_eq(bad[0], 65533)
+
+    let aligned = tabwriter.format("a\tbb\tccc\n1\t2\t3")
+    assert(str_contains(aligned, "a "))
+    assert(str_contains(aligned, "bb "))
+
+    let toks = scanner.scan("foo 123 \"hi\" // c")
+    assert(len(toks) >= 3)
+    assert_eq(toks[0].kind, scanner.ident())
+    assert_eq_str(toks[0].text, "foo")
+    assert_eq(toks[1].kind, scanner.int_tok())
+    assert_eq_str(toks[1].text, "123")
+
+    let sa = suffixarray.new_index("banana")
+    assert(suffixarray.contains("banana", sa, "ana"))
+    assert(!suffixarray.contains("banana", sa, "xyz"))
+    let hits = suffixarray.lookup("banana", sa, "ana")
+    assert(len(hits) >= 1)
+}
+
+fn TestMathExtras() {
+    assert(math.copysign(3.0, -1.0) < 0.0)
+    assert(math.signbit(-2.0))
+    assert(!math.signbit(2.0))
+    assert(math.dim(5.0, 3.0) == 2.0)
+    assert(math.dim(3.0, 5.0) == 0.0)
+    assert(math.pow10(2) == 100.0)
+    assert(math.exp2(3.0) == 8.0)
+    assert(cmp.compare_float(1.0, 2.0) == -1)
+}

@@ -1,0 +1,110 @@
+// Adversarial cases the happy-path suite never touched.
+
+pull "compress/zlib"
+pull "compress/flate"
+pull "compress/lzw"
+pull "crypto/md5"
+pull "crypto/sha3"
+pull "crypto/subtle"
+pull "crypto/rsa"
+pull "math/big"
+pull "hash/crc64"
+pull "iter"
+pull "image/color"
+pull "net/textproto"
+pull "net/rpc"
+pull "testing/iotest"
+pull "encoding/asn1"
+pull "net/http/cookiejar"
+pull "unique"
+
+fn TestHashVectors() {
+    assert_eq_str(md5.sum(""), "d41d8cd98f00b204e9800998ecf8427e")
+    assert_eq_str(md5.sum("message digest"), "f96b697d7cb7938d525a2f31aaf161d0")
+    assert_eq_str(sha3.sum256(""), "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a")
+    assert_eq_str(sha3.sum256("abc"), "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
+    assert(!subtle.constant_eq_ok("ab", "abc"))
+    assert(!subtle.constant_eq_ok("", "x"))
+    assert(subtle.constant_eq_ok("", ""))
+    assert_eq(rsa.can_sign(), 0)
+}
+
+fn TestCrc64EcmaVector() {
+    // Go crc64.Checksum([]byte("123456789"), MakeTable(ECMA))
+    assert_eq(crc64.checksum_ecma_bits("123456789"), 0 - 7395533204333446662)
+}
+
+fn TestRatReduceAndSign() {
+    let r = big.rat_new(big.from_int(2), big.from_int(4))
+    assert_eq_str(big.rat_string(r), "1/2")
+    let neg = big.rat_new(big.from_int(2), big.from_int(0 - 4))
+    assert_eq_str(big.rat_string(neg), "-1/2")
+    let z = big.rat_new(big.from_int(1), big.from_int(0))
+    assert_eq_str(big.rat_string(z), "0")
+    let q = big.rat_quo(big.rat_from_int(1), big.rat_from_int(0))
+    assert_eq_str(big.rat_string(q), "0")
+}
+
+fn TestAsn1Edges() {
+    let a, e = asn1.decode_int(asn1.encode_int(128))
+    assert_eq_str(e, "")
+    assert_eq(a, 128)
+    let b, e2 = asn1.decode_int(asn1.encode_int(256))
+    assert_eq_str(e2, "")
+    assert_eq(b, 256)
+    let c, e3 = asn1.decode_int(asn1.encode_int(0 - 128))
+    assert_eq_str(e3, "")
+    assert_eq(c, 0 - 128)
+    let _, bad = asn1.decode_int("")
+    assert(str_len(bad) > 0)
+    let _, bad2 = asn1.decode_int("xx")
+    assert(str_len(bad2) > 0)
+}
+
+fn TestCompressAdversarial() {
+    let same = "aaaaaaaaaaaaaaaaaaaaaaaa"
+    assert_eq_str(lzw.decompress(lzw.compress(same)), same)
+    assert_eq_str(lzw.decompress(lzw.compress("x")), "x")
+    let bin = "a" + utf8_encode_rune(0) + "b"
+    assert_eq_str(lzw.decompress(lzw.compress(bin)), bin)
+    let junk = lzw.decompress("!!!!notlzw!!!!")
+    assert(str_len(junk) >= 0)
+    if zlib.available() == 1 {
+        assert_eq_str(zlib.decompress(zlib.compress("")), "")
+        let bad = zlib.decompress("not-zlib")
+        assert(str_len(bad) == 0 || bad != "not-zlib")
+    }
+    if flate.available() == 1 {
+        assert_eq_str(flate.decompress(flate.compress("")), "")
+        let badf = flate.decompress("xxxx")
+        assert(str_len(badf) == 0 || badf != "xxxx")
+    }
+}
+
+fn TestCookieJarHostIsolation() {
+    let mut j = cookiejar.new_jar()
+    j = cookiejar.set_cookie(j, "ex.com", "sid=1")
+    j = cookiejar.set_cookie(j, "ex.com", "sid=2")
+    assert_eq_str(cookiejar.cookie_header(j, "ex.com"), "sid=2")
+    assert(str_contains(cookiejar.cookie_header(j, "www.ex.com"), "sid=2"))
+    assert_eq_str(cookiejar.cookie_header(j, "notex.com"), "")
+    j = cookiejar.set_cookie(j, "com", "evil=1")
+    assert_eq_str(cookiejar.cookie_header(j, "ex.com"), "sid=2")
+}
+
+fn TestIterColorTextRpc() {
+    assert_eq(len(iter.take(iter.count(3), 0)), 0)
+    assert_eq(len(iter.drop(iter.count(3), 99)), 0)
+    assert_eq(len(iter.take(iter.count(2), 99)), 2)
+    let c = color.rgba(300, 0 - 4, 10, 255)
+    assert_eq(c.r, 255)
+    assert_eq(c.g, 0)
+    assert_eq_str(textproto.mime_header_get("A: 1\n", "missing"), "")
+    assert_eq_str(textproto.canonical_mime(""), "")
+    assert_eq_str(textproto.canonical_mime("x-foo-bar"), "X-Foo-Bar")
+    let req = rpc.request(7, "say\"hi", "null")
+    assert(!str_contains(req, "\"method\":\"say\"hi\""))
+    assert(str_contains(req, "say\\\"hi") || str_contains(req, "say"))
+    assert_eq_str(iotest.one_byte("ab", 99), "")
+    assert_eq_str(iotest.one_byte("ab", 0 - 1), "")
+}

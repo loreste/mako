@@ -1,0 +1,200 @@
+// Adversarial coverage for crypto/rand, hkdf, pbkdf2, testing/quick, fstest,
+// slogtest, context value chains, math/rand shuffle, time named offsets,
+// image Point/Rect, regexp/syntax, httptrace.
+
+pull "crypto/rand" as crand
+pull "crypto/hkdf"
+pull "crypto/pbkdf2"
+pull "testing/quick"
+pull "testing/fstest"
+pull "testing/slogtest"
+pull "context"
+pull "math/rand"
+pull "time"
+pull "crypto/subtle"
+pull "image"
+pull "regexp/syntax" as rsyntax
+pull "net/http/httptrace"
+
+fn always_true(x: int) -> int { return 1 }
+
+fn always_false(x: int) -> int { return 0 }
+
+fn add_commutes(a: int, b: int) -> int {
+    if a + b == b + a { return 1 }
+    return 0
+}
+
+fn TestCryptoRand() {
+    assert_eq_str(crand.read(0), "")
+    assert_eq_str(crand.read(0 - 3), "")
+    let a = crand.read(16)
+    let b = crand.read(16)
+    assert_eq(len(a), 16)
+    assert_eq(len(b), 16)
+    assert_eq(crand.int_n(0), 0)
+    assert_eq(crand.int_n(0 - 1), 0)
+    let n = crand.int_n(10)
+    assert(n >= 0 && n < 10)
+    assert_eq(crand.prime_hint(0 - 8), 0)
+    assert_eq(crand.prime_hint(2048), 2048)
+}
+
+fn TestHkdfPbkdf2() {
+    assert_eq_str(hkdf.sha256("ikm", "salt", "info", 0), "")
+    assert_eq_str(hkdf.sha256("ikm", "salt", "info", 0 - 1), "")
+    let ikm = hex_decode("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b")
+    let salt = hex_decode("000102030405060708090a0b0c")
+    let info = hex_decode("f0f1f2f3f4f5f6f7f8f9")
+    let okm = hkdf.sha256(ikm, salt, info, 42)
+    assert_eq(len(okm), 42)
+    assert_eq_str(
+        hex_encode(okm),
+        "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865")
+    assert_eq_str(pbkdf2.key("password", "salt", 0, 32), "")
+    assert_eq_str(pbkdf2.key("password", "salt", 1, 0), "")
+    let k1 = pbkdf2.key("password", "salt", 1, 32)
+    let k2 = pbkdf2.key("password", "salt", 1, 32)
+    let k3 = pbkdf2.key("password", "other", 1, 32)
+    assert_eq(len(k1), 32)
+    assert(subtle.constant_eq_ok(k1, k2))
+    assert(!subtle.constant_eq_ok(k1, k3))
+}
+
+fn TestQuickAndFstest() {
+    rand.seed(1)
+    assert_eq(quick.check_int(20, always_true), 1)
+    assert_eq(quick.check_int(8, always_false), 0)
+    assert_eq(quick.check_nat(0, always_true), 1)
+    assert_eq(quick.check_pair(30, add_commutes), 1)
+    let mut fs = fstest.new_fs()
+    fs = fstest.write(fs, "", "ghost")
+    assert_eq(fstest.count(fs), 0)
+    assert(!fstest.exists(fs, ""))
+    fs = fstest.write(fs, "a.txt", "hello")
+    fs = fstest.write(fs, "a.txt", "world")
+    assert_eq(fstest.count(fs), 1)
+    let body, err = fstest.read(fs, "a.txt")
+    assert_eq_str(err, "")
+    assert_eq_str(body, "world")
+    let _, missing = fstest.read(fs, "nope")
+    assert(str_len(missing) > 0)
+    assert(!fstest.exists(fs, "nope"))
+    assert(fstest.exists(fs, "a.txt"))
+    assert(slogtest.valid_level("info"))
+    assert(!slogtest.valid_level("fatal"))
+    assert(!slogtest.valid_attr("", "x"))
+    let ok, why = slogtest.check_record("info", "")
+    assert_eq(ok, 0)
+    assert(str_len(why) > 0)
+    let ok2, why2 = slogtest.check_record("info", "hello")
+    assert_eq(ok2, 1)
+    assert_eq_str(why2, "")
+}
+
+fn TestContextValueAndCancel() {
+    let bg = context.background()
+    assert_eq_str(bg.value("k"), "")
+    let ctx = bg.with_value("user", "ada").with_value("role", "root")
+    assert_eq_str(ctx.value("user"), "ada")
+    assert_eq_str(ctx.value("role"), "root")
+    assert_eq_str(ctx.value("other"), "")
+    let shadowed = ctx.with_value("user", "grace")
+    assert_eq_str(shadowed.value("user"), "grace")
+    assert_eq_str(shadowed.value("role"), "root")
+    let c2 = ctx.with_cancel()
+    assert_eq(c2.done(), 1)
+    assert_eq_str(c2.value("user"), "ada")
+    assert_eq_str(c2.value("role"), "root")
+}
+
+fn TestRandShufflePerm() {
+    rand.seed(42)
+    let p = rand.perm(5)
+    assert_eq(len(p), 5)
+    let mut seen = 0
+    let mut seen0 = 0
+    let mut seen1 = 0
+    let mut seen2 = 0
+    let mut seen3 = 0
+    let mut seen4 = 0
+    let mut i = 0
+    while i < 5 {
+        let v = p[i]
+        assert(v >= 0 && v < 5)
+        if v == 0 { seen0 = 1 }
+        if v == 1 { seen1 = 1 }
+        if v == 2 { seen2 = 1 }
+        if v == 3 { seen3 = 1 }
+        if v == 4 { seen4 = 1 }
+        seen = seen + v
+        i = i + 1
+    }
+    assert_eq(seen, 10)
+    assert_eq(seen0 + seen1 + seen2 + seen3 + seen4, 5)
+    assert_eq(len(rand.perm(0)), 0)
+    assert_eq(len(rand.perm(0 - 2)), 0)
+    let s = rand.shuffle([1])
+    assert_eq(s[0], 1)
+    let empty = rand.shuffle(make([]int, 0))
+    assert_eq(len(empty), 0)
+}
+
+fn TestTimeNamedOffset() {
+    assert_eq(time.load_location("UTC"), 0)
+    assert_eq(time.load_location("GMT"), 0)
+    assert_eq(time.load_location("Z"), 0)
+    assert_eq(time.load_location("EST"), 0 - 18000)
+    assert_eq(time.load_location("JST"), 32400)
+    assert_eq(time.load_location(""), time.unknown_offset())
+    assert_eq(time.load_location("Not/AZone"), time.unknown_offset())
+    assert(time.location_known("UTC"))
+    assert(!time.location_known("Not/AZone"))
+    assert_eq(time.in_named(1000, "UTC"), 1000)
+    assert_eq(time.in_named(1000, "EST"), 1000 - 18000000)
+}
+
+fn TestImageRect() {
+    let r = image.rect(0, 0, 10, 8)
+    assert_eq(image.dx(r), 10)
+    assert_eq(image.dy(r), 8)
+    assert(!image.empty(r))
+    assert(image.in_rect(image.pt(0, 0), r))
+    assert(image.in_rect(image.pt(9, 7), r))
+    assert(!image.in_rect(image.pt(10, 0), r))
+    assert(!image.in_rect(image.pt(0, 8), r))
+    assert(image.empty(image.zr()))
+    let swapped = image.rect(4, 4, 0, 0)
+    assert_eq(image.dx(swapped), 4)
+    assert(image.in_rect(image.pt(0, 0), swapped))
+    assert(!image.in_rect(image.pt(4, 4), swapped))
+    let miss = image.intersect(image.rect(0, 0, 2, 2), image.rect(5, 5, 7, 7))
+    assert(image.empty(miss))
+    let hit = image.intersect(image.rect(0, 0, 4, 4), image.rect(2, 2, 6, 6))
+    assert_eq(image.dx(hit), 2)
+    assert_eq(image.dy(hit), 2)
+    let p = image.add(image.pt(1, 2), image.pt(3, 4))
+    assert(image.eq_pt(p, image.pt(4, 6)))
+}
+
+fn TestRegexpSyntaxAndTrace() {
+    assert(rsyntax.is_literal("abc"))
+    assert(!rsyntax.is_literal("a.b"))
+    assert(!rsyntax.is_literal("a*"))
+    assert(str_contains(rsyntax.quote("a.b"), "\\."))
+    assert_eq(rsyntax.parse_ok("a+"), 1)
+    let mut t = httptrace.new_trace()
+    assert_eq(httptrace.count(t), 0)
+    assert_eq_str(httptrace.last(t), "")
+    t = httptrace.dns_start(t, "ex.com")
+    t = httptrace.dns_done(t, "")
+    t = httptrace.got_conn(t)
+    t = httptrace.wrote_headers(t)
+    t = httptrace.got_first_response_byte(t)
+    assert_eq(httptrace.count(t), 5)
+    assert(httptrace.has(t, "dns_start"))
+    assert(httptrace.has(t, "got_conn"))
+    assert_eq_str(httptrace.last(t), "got_first_response_byte")
+    t = httptrace.dns_done(t, "timeout")
+    assert(httptrace.has(t, "dns_done"))
+}
