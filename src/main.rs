@@ -96,9 +96,7 @@ fn resolve_backend(cli: BackendCli, env_keys: &[&str]) -> BackendCli {
             "llvm" => return BackendCli::Llvm,
             "c" => return BackendCli::C,
             other if !other.is_empty() => {
-                eprintln!(
-                    "mako: warning: {key}={other:?} ignored (use c, native, or llvm)"
-                );
+                eprintln!("mako: warning: {key}={other:?} ignored (use c, native, or llvm)");
             }
             _ => {}
         }
@@ -192,9 +190,7 @@ fn validate_direct_backend_modes(
         return Err(());
     }
     if matches!(backend, BackendCli::Llvm) && !matches!(level, OptLevel::Release) {
-        emit_plain_error(
-            "--backend llvm requires --release (debug builds: use --backend native)",
-        );
+        emit_plain_error("--backend llvm requires --release (debug builds: use --backend native)");
         return Err(());
     }
     #[cfg(not(feature = "llvm-backend"))]
@@ -424,6 +420,9 @@ enum Commands {
         /// Flag dual/compat spellings (`func`, `:=`, `import`, …) as style — Mako flair preferred
         #[arg(long, default_value_t = false)]
         identity: bool,
+        /// Flag insecure helper calls (`*_insecure`, skipped TLS verification)
+        #[arg(long, default_value_t = false)]
+        security: bool,
         /// Include shadowed variable warnings
         #[arg(long, default_value_t = false)]
         shadow: bool,
@@ -1248,10 +1247,7 @@ fn command_on_path(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn resolve_native_sources(
-    sources: Vec<PathBuf>,
-    target: Option<&str>,
-) -> Result<Vec<PathBuf>, ()> {
+fn resolve_native_sources(sources: Vec<PathBuf>, target: Option<&str>) -> Result<Vec<PathBuf>, ()> {
     if sources.is_empty() {
         return Ok(Vec::new());
     }
@@ -1454,11 +1450,11 @@ fn run(cli: Cli) -> Result<(), ()> {
                         &path,
                         package.as_deref(),
                         run_filter.as_deref(),
-                coverage,
-                sanitize.as_deref(),
-                backend,
-                native_sources.clone(),
-                iteration,
+                        coverage,
+                        sanitize.as_deref(),
+                        backend,
+                        native_sources.clone(),
+                        iteration,
                     );
                     let run_ok = run_reports.iter().all(tooling::TestRunReport::ok);
                     reports.extend(run_reports);
@@ -1479,12 +1475,12 @@ fn run(cli: Cli) -> Result<(), ()> {
                     &path,
                     package.as_deref(),
                     run_filter.as_deref(),
-                verbose,
-                coverage,
-                sanitize.as_deref(),
-                backend,
-                native_sources.clone(),
-            );
+                    verbose,
+                    coverage,
+                    sanitize.as_deref(),
+                    backend,
+                    native_sources.clone(),
+                );
                 if last_ok.is_err() {
                     break;
                 }
@@ -1495,13 +1491,14 @@ fn run(cli: Cli) -> Result<(), ()> {
             path,
             package,
             identity,
+            security,
             shadow,
         } => {
             if shadow {
                 std::env::set_var("MAKO_LINT_SHADOW", "1");
             }
             cmd_tool_paths(&path, package.as_deref(), |member| {
-                tooling::run_lint(member, identity)
+                tooling::run_lint(member, identity, security)
             })
         }
         Commands::Bench {
@@ -2060,11 +2057,11 @@ fn cmd_dev(
             eprintln!("mako dev: change detected — rebuild");
             let _ = cmd_run(
                 path,
-            package,
-            release,
-            BackendCli::C,
-            Vec::new(),
-            false,
+                package,
+                release,
+                BackendCli::C,
+                Vec::new(),
+                false,
                 true,
                 None,
                 overflow,
@@ -2113,11 +2110,11 @@ fn cmd_check(
         &BuildOpts {
             target: None,
             sanitize: None,
-                static_link: false,
-                overflow: OverflowMode::Wrap,
-                bounds_always: false,
-                native_sources: Vec::new(),
-            },
+            static_link: false,
+            overflow: OverflowMode::Wrap,
+            bounds_always: false,
+            native_sources: Vec::new(),
+        },
     );
     for t in &targets {
         if multi {
@@ -2191,9 +2188,7 @@ fn cmd_build(
         }
         // Strip debug symbols when --strip is passed.
         if std::env::var_os("MAKO_STRIP").is_some() && out_bin.exists() {
-            let status = std::process::Command::new("strip")
-                .arg(&out_bin)
-                .status();
+            let status = std::process::Command::new("strip").arg(&out_bin).status();
             match status {
                 Ok(s) if s.success() => {}
                 _ => eprintln!("warning: strip failed (binary still usable)"),
@@ -2441,14 +2436,14 @@ fn cmd_test(
                     verbose,
                     coverage,
                     &|f, program, names| {
-                    run_test_package(
-                        f,
-                        program,
-                        names,
-                        san.as_deref(),
-                        backend,
-                        &native_sources,
-                    )
+                        run_test_package(
+                            f,
+                            program,
+                            names,
+                            san.as_deref(),
+                            backend,
+                            &native_sources,
+                        )
                     },
                     &|f| run_file_quiet(f),
                 )?;
@@ -2526,11 +2521,13 @@ fn cmd_test_json(
         };
         match validate_direct_backend_modes(backend, level, &opts, false) {
             Ok(b) => b,
-            Err(()) => return vec![tooling::TestRunReport::error(
-                iteration,
-                path,
-                "invalid backend or sanitizer combination",
-            )],
+            Err(()) => {
+                return vec![tooling::TestRunReport::error(
+                    iteration,
+                    path,
+                    "invalid backend or sanitizer combination",
+                )]
+            }
         }
     } else {
         backend
@@ -2593,14 +2590,7 @@ fn cmd_test_json(
                 coverage,
                 iteration,
                 &|file, program, names| {
-                    run_test_package_json(
-                        file,
-                        program,
-                        names,
-                        sanitize,
-                        backend,
-                        &native_sources,
-                    )
+                    run_test_package_json(file, program, names, sanitize, backend, &native_sources)
                 },
                 &run_file_json,
             )
@@ -2681,11 +2671,11 @@ fn compile_legacy_test(file: &Path) -> Result<PathBuf, ()> {
         &BuildOpts {
             target: None,
             sanitize: None,
-                static_link: false,
-                overflow: OverflowMode::Wrap,
-                bounds_always: false,
-                native_sources: Vec::new(),
-            },
+            static_link: false,
+            overflow: OverflowMode::Wrap,
+            bounds_always: false,
+            native_sources: Vec::new(),
+        },
     )?;
     Ok(out_bin)
 }
@@ -2699,14 +2689,7 @@ fn run_test_package(
     backend: BackendCli,
     native_sources: &[PathBuf],
 ) -> Result<(), ()> {
-    let out_bin = compile_test_package(
-        file,
-        program,
-        test_fns,
-        sanitize,
-        backend,
-        native_sources,
-    )?;
+    let out_bin = compile_test_package(file, program, test_fns, sanitize, backend, native_sources)?;
     let timeout = test_timeout();
     let mut cmd = Command::new(&out_bin);
     cmd.env("MAKO_GFX_HEADLESS", "1");
@@ -2730,26 +2713,20 @@ fn run_test_package_json(
     backend: BackendCli,
     native_sources: &[PathBuf],
 ) -> tooling::TestExecution {
-    let out_bin = match compile_test_package(
-        file,
-        program,
-        test_fns,
-        sanitize,
-        backend,
-        native_sources,
-    ) {
-        Ok(path) => path,
-        Err(()) => {
-            return tooling::TestExecution::failed(
-                tooling::TestFailure::new(
-                    tooling::TestFailureKind::Compile,
-                    format!("could not compile test package {}", file.display()),
-                ),
-                "",
-                "",
-            );
-        }
-    };
+    let out_bin =
+        match compile_test_package(file, program, test_fns, sanitize, backend, native_sources) {
+            Ok(path) => path,
+            Err(()) => {
+                return tooling::TestExecution::failed(
+                    tooling::TestFailure::new(
+                        tooling::TestFailureKind::Compile,
+                        format!("could not compile test package {}", file.display()),
+                    ),
+                    "",
+                    "",
+                );
+            }
+        };
     let mut cmd = Command::new(&out_bin);
     cmd.env("MAKO_GFX_HEADLESS", "1")
         .stdout(Stdio::piped())
@@ -2811,9 +2788,9 @@ fn compile_test_package(
                     sanitize: sanitize.map(|s| s.to_string()),
                     static_link: false,
                     overflow: OverflowMode::Wrap,
-                bounds_always: false,
-                native_sources: native_sources.to_vec(),
-            },
+                    bounds_always: false,
+                    native_sources: native_sources.to_vec(),
+                },
             )?;
         }
         BackendCli::Native | BackendCli::Llvm => {
@@ -2843,9 +2820,9 @@ fn compile_test_package(
                     sanitize: sanitize.map(|s| s.to_string()),
                     static_link: false,
                     overflow: OverflowMode::Wrap,
-                bounds_always: false,
-                native_sources: native_sources.to_vec(),
-            },
+                    bounds_always: false,
+                    native_sources: native_sources.to_vec(),
+                },
                 test_fns,
             );
             match prev_shared {
@@ -4105,8 +4082,7 @@ fn build_incremental(
         backend
     };
     if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
-        let backend_ms =
-            build_native_object(&program, out_bin, file, level, backend, opts, &[])?;
+        let backend_ms = build_native_object(&program, out_bin, file, level, backend, opts, &[])?;
         return Ok((frontend_ms, backend_ms));
     }
 
@@ -4132,8 +4108,12 @@ fn build_incremental(
         incr.flags_fp.push(';');
     }
 
-    let units =
-        incremental::plan_object_units(&program, &incr, &runtime_dir, Some(&file.display().to_string()));
+    let units = incremental::plan_object_units(
+        &program,
+        &incr,
+        &runtime_dir,
+        Some(&file.display().to_string()),
+    );
     if emit_c {
         if let Some(u) = units.first() {
             let _ = fs::write(file.with_extension("c"), &u.c_src);
@@ -4235,8 +4215,7 @@ fn push_allocator_link_args(args: &mut Vec<String>, os: cc::OsKind) {
     if name.is_empty() || name.eq_ignore_ascii_case("system") {
         return;
     }
-    if name.ends_with(".a") || name.ends_with(".lib") || name.contains('/') || name.contains('\\')
-    {
+    if name.ends_with(".a") || name.ends_with(".lib") || name.contains('/') || name.contains('\\') {
         // Static archive path — put first so it can override malloc symbols.
         args.insert(0, name.to_string());
         return;
@@ -4477,8 +4456,8 @@ fn build_native_object(
                     None
                 }
             };
-            let force_shared_ir = std::env::var_os("MAKO_NATIVE_SHARED_IR_ONLY").is_some()
-                || !test_fns.is_empty();
+            let force_shared_ir =
+                std::env::var_os("MAKO_NATIVE_SHARED_IR_ONLY").is_some() || !test_fns.is_empty();
             if native_ir_object.is_none() && force_shared_ir {
                 emit_plain_error(&format!(
                     "--backend native shared IR lowering failed: {}",
@@ -4620,7 +4599,10 @@ fn build_native_object(
             arguments.push(std::ffi::OsString::from("OpenCL"));
         }
         if let Some(q) = find_quiche() {
-            arguments.push(std::ffi::OsString::from(format!("-L{}", q.lib_dir.display())));
+            arguments.push(std::ffi::OsString::from(format!(
+                "-L{}",
+                q.lib_dir.display()
+            )));
             arguments.push(std::ffi::OsString::from("-rpath"));
             arguments.push(std::ffi::OsString::from(q.lib_dir.display().to_string()));
             if q.prefer_static {
@@ -5525,6 +5507,33 @@ mod check_json_cli_tests {
                 vec![PathBuf::from("bridge.c"), PathBuf::from("capture.c")]
             ),
             _ => panic!("expected test command"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod lint_cli_tests {
+    use super::{Cli, Commands};
+    use clap::Parser;
+    use std::path::PathBuf;
+
+    #[test]
+    fn lint_security_flag_is_parsed() {
+        let cli = Cli::try_parse_from(["mako", "lint", "--security", "app/main.mko"]).unwrap();
+        match cli.command {
+            Commands::Lint {
+                path,
+                identity,
+                security,
+                shadow,
+                ..
+            } => {
+                assert_eq!(path, PathBuf::from("app/main.mko"));
+                assert!(!identity);
+                assert!(security);
+                assert!(!shadow);
+            }
+            _ => panic!("expected lint command"),
         }
     }
 }

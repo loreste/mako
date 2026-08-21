@@ -908,9 +908,11 @@ pub fn compile_ir_with_overflow(
     let print_int = declare_print_i64(&mut module)?;
     let print_bool = declare_print_bool(&mut module)?;
     let string_clone = declare_string_ptr_fn(&mut module, "mako_native_string_clone_ptr", 1, true)?;
-    let string_concat = declare_string_ptr_fn(&mut module, "mako_native_string_concat_ptr", 2, true)?;
+    let string_concat =
+        declare_string_ptr_fn(&mut module, "mako_native_string_concat_ptr", 2, true)?;
     let string_equal = declare_bool_return_fn(&mut module, "mako_native_string_equal_ptr", 2)?;
-    let string_compare = declare_string_ptr_fn(&mut module, "mako_native_str_compare_ptr", 2, true)?;
+    let string_compare =
+        declare_string_ptr_fn(&mut module, "mako_native_str_compare_ptr", 2, true)?;
     let string_print = declare_void_ptr_fn(&mut module, "mako_native_string_print_ptr", 1)?;
     let string_drop = declare_void_ptr_fn(&mut module, "mako_native_string_drop_ptr", 1)?;
     let int_to_string =
@@ -922,22 +924,30 @@ pub fn compile_ir_with_overflow(
     let mul_trap = declare_string_ptr_fn(&mut module, "mako_native_mul_i64_trap", 2, true)?;
     let trap_arith = overflow == crate::overflow::OverflowMode::Trap;
     let slice_make = declare_string_ptr_fn(&mut module, "mako_native_int_slice_make_ptr", 2, true)?;
-    let slice_literal = declare_string_ptr_fn(&mut module, "mako_native_int_slice_literal_ptr", 2, true)?;
+    let slice_literal =
+        declare_string_ptr_fn(&mut module, "mako_native_int_slice_literal_ptr", 2, true)?;
     let slice_len = declare_string_ptr_fn(&mut module, "mako_native_int_slice_len_ptr", 1, true)?;
     let slice_get = declare_string_ptr_fn(&mut module, "mako_native_int_slice_get_ptr", 2, true)?;
     let slice_set = declare_void_ptr_fn(&mut module, "mako_native_int_slice_set_ptr", 3)?;
-    let slice_append = declare_string_ptr_fn(&mut module, "mako_native_int_slice_append_ptr", 2, true)?;
-    let slice_slice = declare_string_ptr_fn(&mut module, "mako_native_int_slice_slice_ptr", 4, true)?;
-    let slice_clone = declare_string_ptr_fn(&mut module, "mako_native_int_slice_clone_ptr", 1, true)?;
+    let slice_append =
+        declare_string_ptr_fn(&mut module, "mako_native_int_slice_append_ptr", 2, true)?;
+    let slice_slice =
+        declare_string_ptr_fn(&mut module, "mako_native_int_slice_slice_ptr", 4, true)?;
+    let slice_clone =
+        declare_string_ptr_fn(&mut module, "mako_native_int_slice_clone_ptr", 1, true)?;
     let slice_drop = declare_void_ptr_fn(&mut module, "mako_native_int_slice_drop_ptr", 1)?;
     let ss_make = declare_string_ptr_fn(&mut module, "mako_native_string_slice_make_ptr", 2, true)?;
-    let ss_literal = declare_string_ptr_fn(&mut module, "mako_native_string_slice_literal_ptr", 2, true)?;
+    let ss_literal =
+        declare_string_ptr_fn(&mut module, "mako_native_string_slice_literal_ptr", 2, true)?;
     let ss_len = declare_string_ptr_fn(&mut module, "mako_native_string_slice_len_ptr", 1, true)?;
     let ss_get = declare_string_ptr_fn(&mut module, "mako_native_string_slice_get_ptr", 2, true)?;
     let ss_set = declare_void_ptr_fn(&mut module, "mako_native_string_slice_set_ptr", 3)?;
-    let ss_append = declare_string_ptr_fn(&mut module, "mako_native_string_slice_append_ptr", 2, true)?;
-    let ss_slice = declare_string_ptr_fn(&mut module, "mako_native_string_slice_slice_ptr", 4, true)?;
-    let ss_clone = declare_string_ptr_fn(&mut module, "mako_native_string_slice_clone_ptr", 1, true)?;
+    let ss_append =
+        declare_string_ptr_fn(&mut module, "mako_native_string_slice_append_ptr", 2, true)?;
+    let ss_slice =
+        declare_string_ptr_fn(&mut module, "mako_native_string_slice_slice_ptr", 4, true)?;
+    let ss_clone =
+        declare_string_ptr_fn(&mut module, "mako_native_string_slice_clone_ptr", 1, true)?;
     let ss_drop = declare_void_ptr_fn(&mut module, "mako_native_string_slice_drop_ptr", 1)?;
     let mut strlit_id: u32 = 0;
     let struct_make = declare_string_ptr_fn(&mut module, "mako_native_struct_make_ptr", 1, true)?;
@@ -1096,15 +1106,11 @@ pub fn compile_ir_with_overflow(
                             (BinOp::Div, IrType::F64) => fb.ins().fdiv(l, r),
                             (BinOp::Eq, IrType::F64) => fb.ins().fcmp(FloatCC::Equal, l, r),
                             (BinOp::Ne, IrType::F64) => fb.ins().fcmp(FloatCC::NotEqual, l, r),
-                            (BinOp::Lt, IrType::F64) => {
-                                fb.ins().fcmp(FloatCC::LessThan, l, r)
-                            }
+                            (BinOp::Lt, IrType::F64) => fb.ins().fcmp(FloatCC::LessThan, l, r),
                             (BinOp::Le, IrType::F64) => {
                                 fb.ins().fcmp(FloatCC::LessThanOrEqual, l, r)
                             }
-                            (BinOp::Gt, IrType::F64) => {
-                                fb.ins().fcmp(FloatCC::GreaterThan, l, r)
-                            }
+                            (BinOp::Gt, IrType::F64) => fb.ins().fcmp(FloatCC::GreaterThan, l, r),
                             (BinOp::Ge, IrType::F64) => {
                                 fb.ins().fcmp(FloatCC::GreaterThanOrEqual, l, r)
                             }
@@ -1276,7 +1282,9 @@ pub fn compile_ir_with_overflow(
                         let call = fb.ins().call_indirect(sig_ref, callee_v, &arguments);
                         if let Some(out) = out {
                             let result = *fb.inst_results(call).first().ok_or_else(|| {
-                                NativeError::new("native IR Cranelift: indirect call returned no value")
+                                NativeError::new(
+                                    "native IR Cranelift: indirect call returned no value",
+                                )
                             })?;
                             vals.insert(*out, result);
                         }
@@ -1346,13 +1354,30 @@ pub fn compile_ir_with_overflow(
                         let call = fb.ins().call(reference, &[vals[left], vals[right]]);
                         vals.insert(*out, fb.inst_results(call)[0]);
                     }
-                    IrInst::StringEqual { out, left, right, negated } => {
+                    IrInst::StringEqual {
+                        out,
+                        left,
+                        right,
+                        negated,
+                    } => {
                         let reference = module.declare_func_in_func(string_equal, &mut fb.func);
                         let call = fb.ins().call(reference, &[vals[left], vals[right]]);
                         let result = fb.inst_results(call)[0];
-                        vals.insert(*out, if *negated { fb.ins().bxor_imm(result, 1) } else { result });
+                        vals.insert(
+                            *out,
+                            if *negated {
+                                fb.ins().bxor_imm(result, 1)
+                            } else {
+                                result
+                            },
+                        );
                     }
-                    IrInst::StringCompare { out, left, right, op } => {
+                    IrInst::StringCompare {
+                        out,
+                        left,
+                        right,
+                        op,
+                    } => {
                         let reference = module.declare_func_in_func(string_compare, &mut fb.func);
                         let call = fb.ins().call(reference, &[vals[left], vals[right]]);
                         let cmp_val = fb.inst_results(call)[0];
@@ -1378,12 +1403,9 @@ pub fn compile_ir_with_overflow(
                     IrInst::StringLen { out, value } => {
                         // Pointer ABI: header is { data:ptr, len:i64 }; len at +8.
                         // Clear immortal/static high bit for the true byte length.
-                        let raw = fb.ins().load(
-                            types::I64,
-                            MemFlagsData::new(),
-                            vals[value],
-                            8,
-                        );
+                        let raw = fb
+                            .ins()
+                            .load(types::I64, MemFlagsData::new(), vals[value], 8);
                         let mask = fb.ins().iconst(types::I64, !(1i64 << 63));
                         let len = fb.ins().band(raw, mask);
                         vals.insert(*out, len);
@@ -1418,7 +1440,12 @@ pub fn compile_ir_with_overflow(
                         ));
                         let addr = fb.ins().stack_addr(types::I64, slot, 0);
                         for (i, element) in elements.iter().enumerate() {
-                            fb.ins().store(MemFlagsData::new(), vals[element], addr, (i * 8) as i32);
+                            fb.ins().store(
+                                MemFlagsData::new(),
+                                vals[element],
+                                addr,
+                                (i * 8) as i32,
+                            );
                         }
                         let count = fb.ins().iconst(types::I64, elements.len() as i64);
                         let reference = module.declare_func_in_func(slice_literal, &mut fb.func);
@@ -1435,19 +1462,34 @@ pub fn compile_ir_with_overflow(
                         let call = fb.ins().call(reference, &[vals[slice], vals[index]]);
                         vals.insert(*out, fb.inst_results(call)[0]);
                     }
-                    IrInst::SliceStore { slice, index, value } => {
+                    IrInst::SliceStore {
+                        slice,
+                        index,
+                        value,
+                    } => {
                         let reference = module.declare_func_in_func(slice_set, &mut fb.func);
-                        fb.ins().call(reference, &[vals[slice], vals[index], vals[value]]);
+                        fb.ins()
+                            .call(reference, &[vals[slice], vals[index], vals[value]]);
                     }
                     IrInst::SliceAppend { out, slice, value } => {
                         let reference = module.declare_func_in_func(slice_append, &mut fb.func);
                         let call = fb.ins().call(reference, &[vals[slice], vals[value]]);
                         vals.insert(*out, fb.inst_results(call)[0]);
                     }
-                    IrInst::SliceSlice { out, slice, low, high, max } => {
-                        let max = max.map(|v| vals[&v]).unwrap_or_else(|| fb.ins().iconst(types::I64, -1));
+                    IrInst::SliceSlice {
+                        out,
+                        slice,
+                        low,
+                        high,
+                        max,
+                    } => {
+                        let max = max
+                            .map(|v| vals[&v])
+                            .unwrap_or_else(|| fb.ins().iconst(types::I64, -1));
                         let reference = module.declare_func_in_func(slice_slice, &mut fb.func);
-                        let call = fb.ins().call(reference, &[vals[slice], vals[low], vals[high], max]);
+                        let call = fb
+                            .ins()
+                            .call(reference, &[vals[slice], vals[low], vals[high], max]);
                         vals.insert(*out, fb.inst_results(call)[0]);
                     }
                     IrInst::SliceClone { out, slice } => {
@@ -1466,9 +1508,16 @@ pub fn compile_ir_with_overflow(
                         vals.insert(*out, fb.inst_results(call)[0]);
                     }
                     IrInst::StrSliceLiteral { out, elements } => {
-                        let slot = fb.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, (elements.len().max(1) * 8) as u32, 3));
+                        let slot = fb.create_sized_stack_slot(StackSlotData::new(
+                            StackSlotKind::ExplicitSlot,
+                            (elements.len().max(1) * 8) as u32,
+                            3,
+                        ));
                         let addr = fb.ins().stack_addr(types::I64, slot, 0);
-                        for (i, e) in elements.iter().enumerate() { fb.ins().store(MemFlagsData::new(), vals[e], addr, (i * 8) as i32); }
+                        for (i, e) in elements.iter().enumerate() {
+                            fb.ins()
+                                .store(MemFlagsData::new(), vals[e], addr, (i * 8) as i32);
+                        }
                         let count = fb.ins().iconst(types::I64, elements.len() as i64);
                         let fref = module.declare_func_in_func(ss_literal, &mut fb.func);
                         let call = fb.ins().call(fref, &[addr, count]);
@@ -1484,19 +1533,34 @@ pub fn compile_ir_with_overflow(
                         let call = fb.ins().call(fref, &[vals[slice], vals[index]]);
                         vals.insert(*out, fb.inst_results(call)[0]);
                     }
-                    IrInst::StrSliceStore { slice, index, value } => {
+                    IrInst::StrSliceStore {
+                        slice,
+                        index,
+                        value,
+                    } => {
                         let fref = module.declare_func_in_func(ss_set, &mut fb.func);
-                        fb.ins().call(fref, &[vals[slice], vals[index], vals[value]]);
+                        fb.ins()
+                            .call(fref, &[vals[slice], vals[index], vals[value]]);
                     }
                     IrInst::StrSliceAppend { out, slice, value } => {
                         let fref = module.declare_func_in_func(ss_append, &mut fb.func);
                         let call = fb.ins().call(fref, &[vals[slice], vals[value]]);
                         vals.insert(*out, fb.inst_results(call)[0]);
                     }
-                    IrInst::StrSliceSlice { out, slice, low, high, max } => {
-                        let max = max.map(|v| vals[&v]).unwrap_or_else(|| fb.ins().iconst(types::I64, -1));
+                    IrInst::StrSliceSlice {
+                        out,
+                        slice,
+                        low,
+                        high,
+                        max,
+                    } => {
+                        let max = max
+                            .map(|v| vals[&v])
+                            .unwrap_or_else(|| fb.ins().iconst(types::I64, -1));
                         let fref = module.declare_func_in_func(ss_slice, &mut fb.func);
-                        let call = fb.ins().call(fref, &[vals[slice], vals[low], vals[high], max]);
+                        let call = fb
+                            .ins()
+                            .call(fref, &[vals[slice], vals[low], vals[high], max]);
                         vals.insert(*out, fb.inst_results(call)[0]);
                     }
                     IrInst::StrSliceClone { out, slice } => {
@@ -1508,7 +1572,11 @@ pub fn compile_ir_with_overflow(
                         let fref = module.declare_func_in_func(ss_drop, &mut fb.func);
                         fb.ins().call(fref, &[vals[value]]);
                     }
-                    IrInst::StructMake { out, struct_id, fields } => {
+                    IrInst::StructMake {
+                        out,
+                        struct_id,
+                        fields,
+                    } => {
                         let nbytes = (ir.structs[*struct_id as usize].fields.len() * 8) as i64;
                         let size = fb.ins().iconst(types::I64, nbytes);
                         let reference = module.declare_func_in_func(struct_make, &mut fb.func);
@@ -1520,7 +1588,13 @@ pub fn compile_ir_with_overflow(
                         }
                         vals.insert(*out, ptr);
                     }
-                    IrInst::StructField { out, base, index, ty, .. } => {
+                    IrInst::StructField {
+                        out,
+                        base,
+                        index,
+                        ty,
+                        ..
+                    } => {
                         let v = fb.ins().load(
                             ir_clif_type(*ty)?,
                             MemFlagsData::new(),
@@ -1529,7 +1603,9 @@ pub fn compile_ir_with_overflow(
                         );
                         vals.insert(*out, v);
                     }
-                    IrInst::StructFieldStore { base, index, value, .. } => {
+                    IrInst::StructFieldStore {
+                        base, index, value, ..
+                    } => {
                         fb.ins().store(
                             MemFlagsData::new(),
                             vals[value],
@@ -1537,12 +1613,23 @@ pub fn compile_ir_with_overflow(
                             (*index as i32) * 8,
                         );
                     }
-                    IrInst::StructClone { out, base, struct_id } => {
+                    IrInst::StructClone {
+                        out,
+                        base,
+                        struct_id,
+                    } => {
                         if f.name.starts_with("__mako.") {
                             // Inside helper functions: inline the clone (no recursion risk).
                             let cloned = emit_struct_clone(
-                                &mut fb, &mut module, ir, *struct_id, vals[base],
-                                string_clone, slice_clone, ss_clone, struct_make,
+                                &mut fb,
+                                &mut module,
+                                ir,
+                                *struct_id,
+                                vals[base],
+                                string_clone,
+                                slice_clone,
+                                ss_clone,
+                                struct_make,
                             )?;
                             vals.insert(*out, cloned);
                         } else {
@@ -1559,7 +1646,13 @@ pub fn compile_ir_with_overflow(
                             vals.insert(*out, fb.inst_results(call)[0]);
                         }
                     }
-                    IrInst::EnumMake { out, enum_id, tag, slot_base, payload } => {
+                    IrInst::EnumMake {
+                        out,
+                        enum_id,
+                        tag,
+                        slot_base,
+                        payload,
+                    } => {
                         // struct_make calloc's a zeroed block; store the tag and
                         // the variant's payload, leaving other slots null/zero.
                         let nbytes = (ir.structs[*enum_id as usize].fields.len() * 8) as i64;
@@ -1580,8 +1673,15 @@ pub fn compile_ir_with_overflow(
                         if f.name.starts_with("__mako.") {
                             // Inside helper functions: inline the drop.
                             emit_struct_drop(
-                                &mut fb, &mut module, ir, *struct_id, vals[value],
-                                string_drop, slice_drop, ss_drop, struct_drop,
+                                &mut fb,
+                                &mut module,
+                                ir,
+                                *struct_id,
+                                vals[value],
+                                string_drop,
+                                slice_drop,
+                                ss_drop,
+                                struct_drop,
                             )?;
                         } else {
                             // In user functions: call the helper to avoid block explosion.
@@ -1795,11 +1895,7 @@ fn emit_struct_clone(
                 sig.params.push(AbiParam::new(types::I64));
                 sig.returns.push(AbiParam::new(types::I64));
                 let id = module
-                    .declare_function(
-                        "mako_native_share_clone_ptr",
-                        Linkage::Import,
-                        &sig,
-                    )
+                    .declare_function("mako_native_share_clone_ptr", Linkage::Import, &sig)
                     .map_err(|e| NativeError::new(e.to_string()))?;
                 let f = module.declare_func_in_func(id, &mut fb.func);
                 let call = fb.ins().call(f, &[loaded]);
@@ -1817,11 +1913,7 @@ fn emit_struct_clone(
                 let call = fb.ins().call(f, &[loaded]);
                 fb.inst_results(call)[0]
             }
-            IrType::MapII
-            | IrType::MapSI
-            | IrType::MapSS
-            | IrType::MapIF
-            | IrType::MapFI => {
+            IrType::MapII | IrType::MapSI | IrType::MapSS | IrType::MapIF | IrType::MapFI => {
                 let name = match fty {
                     IrType::MapII => "mako_native_map_ii_clone_ptr",
                     IrType::MapSI => "mako_native_map_si_clone_ptr",
@@ -1859,7 +1951,8 @@ fn emit_struct_clone(
                 let nfp_v = fb.ins().iconst(types::I64, nfp);
                 let nsp_v = fb.ins().iconst(types::I64, nsp);
                 let call = call_runtime_fn(
-                    fb, module,
+                    fb,
+                    module,
                     "mako_native_struct_slice_clone_ptr",
                     &[loaded, nf_v, sm_v, nm_v, nfp_v, nsp_v],
                     true,
@@ -1875,7 +1968,8 @@ fn emit_struct_clone(
                 let vk_v = fb.ins().iconst(types::I64, vkind);
                 let zero = fb.ins().iconst(types::I64, 0);
                 let call = call_runtime_fn(
-                    fb, module,
+                    fb,
+                    module,
                     "mako_native_ptr_slice_clone_typed",
                     &[loaded, vk_v, zero, zero, zero, zero, zero],
                     true,
@@ -1883,30 +1977,18 @@ fn emit_struct_clone(
                 fb.inst_results(call)[0]
             }
             IrType::PtrSlice(_) => {
-                let call = call_runtime_fn(
-                    fb, module,
-                    "mako_native_ptr_slice_clone",
-                    &[loaded],
-                    true,
-                )?;
+                let call =
+                    call_runtime_fn(fb, module, "mako_native_ptr_slice_clone", &[loaded], true)?;
                 fb.inst_results(call)[0]
             }
             IrType::MapIPtr(_) => {
-                let call = call_runtime_fn(
-                    fb, module,
-                    "mako_native_map_ii_clone_ptr",
-                    &[loaded],
-                    true,
-                )?;
+                let call =
+                    call_runtime_fn(fb, module, "mako_native_map_ii_clone_ptr", &[loaded], true)?;
                 fb.inst_results(call)[0]
             }
             IrType::MapSPtr(_) => {
-                let call = call_runtime_fn(
-                    fb, module,
-                    "mako_native_map_si_clone_ptr",
-                    &[loaded],
-                    true,
-                )?;
+                let call =
+                    call_runtime_fn(fb, module, "mako_native_map_si_clone_ptr", &[loaded], true)?;
                 fb.inst_results(call)[0]
             }
             IrType::FloatSlice | IrType::ByteSlice | IrType::BoolSlice => {
@@ -1928,8 +2010,7 @@ fn emit_struct_clone(
             }
             _ => loaded,
         };
-        fb.ins()
-            .store(MemFlagsData::new(), stored, new_ptr, offset);
+        fb.ins().store(MemFlagsData::new(), stored, new_ptr, offset);
     }
     fb.ins().jump(merge_block, &[BlockArg::from(new_ptr)]);
     fb.seal_block(clone_block);
@@ -1978,11 +2059,7 @@ fn emit_struct_drop(
                 let mut sig = module.make_signature();
                 sig.params.push(AbiParam::new(types::I64));
                 let id = module
-                    .declare_function(
-                        "mako_native_share_drop_ptr",
-                        Linkage::Import,
-                        &sig,
-                    )
+                    .declare_function("mako_native_share_drop_ptr", Linkage::Import, &sig)
                     .map_err(|e| NativeError::new(e.to_string()))?;
                 let f = module.declare_func_in_func(id, &mut fb.func);
                 fb.ins().call(f, &[loaded]);
@@ -1997,11 +2074,7 @@ fn emit_struct_drop(
                 let f = module.declare_func_in_func(id, &mut fb.func);
                 fb.ins().call(f, &[loaded]);
             }
-            IrType::MapII
-            | IrType::MapSI
-            | IrType::MapSS
-            | IrType::MapIF
-            | IrType::MapFI => {
+            IrType::MapII | IrType::MapSI | IrType::MapSS | IrType::MapIF | IrType::MapFI => {
                 let name = match fty {
                     IrType::MapII => "mako_native_map_ii_drop_ptr",
                     IrType::MapSI => "mako_native_map_si_drop_ptr",
@@ -2039,7 +2112,8 @@ fn emit_struct_drop(
                 let nfp_v = fb.ins().iconst(types::I64, nfp);
                 let nsp_v = fb.ins().iconst(types::I64, nsp);
                 call_runtime_fn(
-                    fb, module,
+                    fb,
+                    module,
                     "mako_native_struct_slice_drop_ptr",
                     &[loaded, nf_v, sm_v, nm_v, nfp_v, nsp_v],
                     false,
@@ -2054,47 +2128,37 @@ fn emit_struct_drop(
                 let vk_v = fb.ins().iconst(types::I64, vkind);
                 let zero = fb.ins().iconst(types::I64, 0);
                 call_runtime_fn(
-                    fb, module,
+                    fb,
+                    module,
                     "mako_native_ptr_slice_drop_typed",
                     &[loaded, vk_v, zero, zero, zero, zero, zero],
                     false,
                 )?;
             }
-            IrType::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::Struct(_) | native_ir::MapValKind::NestedStruct(_)) => {
+            IrType::PtrSlice(vk)
+                if matches!(
+                    vk,
+                    native_ir::MapValKind::Struct(_) | native_ir::MapValKind::NestedStruct(_)
+                ) =>
+            {
                 call_runtime_fn(
-                    fb, module,
+                    fb,
+                    module,
                     "mako_native_ptr_slice_drop_free_elems",
                     &[loaded],
                     false,
                 )?;
             }
             IrType::PtrSlice(_) => {
-                call_runtime_fn(
-                    fb, module,
-                    "mako_native_ptr_slice_drop",
-                    &[loaded],
-                    false,
-                )?;
+                call_runtime_fn(fb, module, "mako_native_ptr_slice_drop", &[loaded], false)?;
             }
             IrType::MapIPtr(_) => {
-                call_runtime_fn(
-                    fb, module,
-                    "mako_native_map_ii_drop_ptr",
-                    &[loaded],
-                    false,
-                )?;
+                call_runtime_fn(fb, module, "mako_native_map_ii_drop_ptr", &[loaded], false)?;
             }
             IrType::MapSPtr(_) => {
-                call_runtime_fn(
-                    fb, module,
-                    "mako_native_map_si_drop_ptr",
-                    &[loaded],
-                    false,
-                )?;
+                call_runtime_fn(fb, module, "mako_native_map_si_drop_ptr", &[loaded], false)?;
             }
-            IrType::FloatSlice
-            | IrType::ByteSlice
-            | IrType::BoolSlice => {
+            IrType::FloatSlice | IrType::ByteSlice | IrType::BoolSlice => {
                 let name = match fty {
                     IrType::FloatSlice => "mako_native_float_slice_drop_ptr",
                     IrType::ByteSlice => "mako_native_byte_slice_drop_ptr",
@@ -2131,7 +2195,11 @@ fn declare_string_ptr_fn(
     for _ in 0..argc {
         sig.params.push(AbiParam::new(types::I64));
     }
-    sig.returns.push(AbiParam::new(if returns_ptr { types::I64 } else { types::I32 }));
+    sig.returns.push(AbiParam::new(if returns_ptr {
+        types::I64
+    } else {
+        types::I32
+    }));
     module
         .declare_function(name, Linkage::Import, &sig)
         .map_err(|e| NativeError::new(format!("native string runtime declaration failed: {e}")))
@@ -2148,22 +2216,37 @@ fn declare_print_i64(module: &mut ObjectModule) -> Result<FuncId, NativeError> {
 fn declare_print_bool(module: &mut ObjectModule) -> Result<FuncId, NativeError> {
     let mut sig = module.make_signature();
     sig.params.push(AbiParam::new(types::I8));
-    module.declare_function("mako_native_print_bool", Linkage::Import, &sig)
+    module
+        .declare_function("mako_native_print_bool", Linkage::Import, &sig)
         .map_err(|e| NativeError::new(format!("native bool runtime declaration failed: {e}")))
 }
 
-fn declare_bool_return_fn(module: &mut ObjectModule, name: &str, argc: usize) -> Result<FuncId, NativeError> {
+fn declare_bool_return_fn(
+    module: &mut ObjectModule,
+    name: &str,
+    argc: usize,
+) -> Result<FuncId, NativeError> {
     let mut sig = module.make_signature();
-    for _ in 0..argc { sig.params.push(AbiParam::new(types::I64)); }
+    for _ in 0..argc {
+        sig.params.push(AbiParam::new(types::I64));
+    }
     sig.returns.push(AbiParam::new(types::I8));
-    module.declare_function(name, Linkage::Import, &sig)
+    module
+        .declare_function(name, Linkage::Import, &sig)
         .map_err(|e| NativeError::new(format!("native bool runtime declaration failed: {e}")))
 }
 
-fn declare_void_ptr_fn(module: &mut ObjectModule, name: &str, argc: usize) -> Result<FuncId, NativeError> {
+fn declare_void_ptr_fn(
+    module: &mut ObjectModule,
+    name: &str,
+    argc: usize,
+) -> Result<FuncId, NativeError> {
     let mut sig = module.make_signature();
-    for _ in 0..argc { sig.params.push(AbiParam::new(types::I64)); }
-    module.declare_function(name, Linkage::Import, &sig)
+    for _ in 0..argc {
+        sig.params.push(AbiParam::new(types::I64));
+    }
+    module
+        .declare_function(name, Linkage::Import, &sig)
         .map_err(|e| NativeError::new(format!("native runtime declaration failed: {e}")))
 }
 
@@ -5354,7 +5437,11 @@ fn emit_reflect_schema_regs(
     for layout in &ir.structs {
         // Skip anonymous tuples / Result/Option packs (numeric or empty names).
         if layout.name.is_empty()
-            || layout.name.chars().next().is_some_and(|c| c.is_ascii_digit())
+            || layout
+                .name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
             || layout.name.starts_with("__")
             || layout.name.contains("Result")
             || layout.name.contains("Option")
@@ -5398,13 +5485,7 @@ fn ir_type_schema_name(ty: &IrType, ir: &native_ir::Module) -> String {
         IrType::Struct(id) => ir
             .structs
             .get(*id as usize)
-            .map(|s| {
-                s.name
-                    .rsplit("__")
-                    .next()
-                    .unwrap_or(&s.name)
-                    .to_string()
-            })
+            .map(|s| s.name.rsplit("__").next().unwrap_or(&s.name).to_string())
             .unwrap_or_else(|| "struct".into()),
         IrType::StructSlice(id) => {
             let inner = ir
@@ -5701,7 +5782,14 @@ mod tests {
     #[test]
     fn emits_host_object_for_minimal_main() {
         let program = Program {
-            items: vec![function("main", None, Block { stmts: vec![], source_lines: Box::default() })],
+            items: vec![function(
+                "main",
+                None,
+                Block {
+                    stmts: vec![],
+                    source_lines: Box::default(),
+                },
+            )],
         };
         let object = compile_object(&program, false).unwrap();
         assert!(object.len() > 64);

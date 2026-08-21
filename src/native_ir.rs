@@ -282,9 +282,9 @@ impl MapValKind {
                 | MapValKind::NestedMapII
                 | MapValKind::MapSPtrNestedMapII
                 | MapValKind::MapIPtrNestedMapII => MapValKind::MapIPtrNestedMapII,
-                MapValKind::MapSS
-                | MapValKind::NestedMapSS
-                | MapValKind::MapSPtrNestedMapSS => MapValKind::MapIPtrOther,
+                MapValKind::MapSS | MapValKind::NestedMapSS | MapValKind::MapSPtrNestedMapSS => {
+                    MapValKind::MapIPtrOther
+                }
                 MapValKind::MapIF | MapValKind::NestedMapIF => MapValKind::MapIPtrNestedMapII,
                 MapValKind::MapFI | MapValKind::NestedMapFI => MapValKind::MapIPtrNestedMapII,
                 _ => MapValKind::MapIPtrOther,
@@ -317,9 +317,9 @@ impl MapValKind {
                 | MapValKind::NestedMapII
                 | MapValKind::MapSPtrNestedMapII
                 | MapValKind::MapIPtrNestedMapII => MapValKind::MapSPtrNestedMapII,
-                MapValKind::MapSS
-                | MapValKind::NestedMapSS
-                | MapValKind::MapSPtrNestedMapSS => MapValKind::MapSPtrNestedMapSS,
+                MapValKind::MapSS | MapValKind::NestedMapSS | MapValKind::MapSPtrNestedMapSS => {
+                    MapValKind::MapSPtrNestedMapSS
+                }
                 _ => MapValKind::MapSPtrOther,
             },
             Type::PtrSlice(inner) => match inner {
@@ -380,9 +380,7 @@ impl MapValKind {
             MapValKind::NestedChanI => Type::PtrSlice(MapValKind::ChanI),
             MapValKind::NestedChanS => Type::PtrSlice(MapValKind::ChanS),
             MapValKind::NestedChanF => Type::PtrSlice(MapValKind::ChanF),
-            MapValKind::NestedChanPStruct(id) => {
-                Type::PtrSlice(MapValKind::ChanPStruct(id))
-            }
+            MapValKind::NestedChanPStruct(id) => Type::PtrSlice(MapValKind::ChanPStruct(id)),
             MapValKind::NestedChanPOther => Type::PtrSlice(MapValKind::ChanPOther),
             MapValKind::NestedNestedChanI => Type::PtrSlice(MapValKind::NestedChanI),
             MapValKind::NestedNestedChanS => Type::PtrSlice(MapValKind::NestedChanS),
@@ -390,9 +388,7 @@ impl MapValKind {
             MapValKind::NestedNestedChanPStruct(id) => {
                 Type::PtrSlice(MapValKind::NestedChanPStruct(id))
             }
-            MapValKind::NestedNestedChanPOther => {
-                Type::PtrSlice(MapValKind::NestedChanPOther)
-            }
+            MapValKind::NestedNestedChanPOther => Type::PtrSlice(MapValKind::NestedChanPOther),
             MapValKind::MapII => Type::MapII,
             MapValKind::MapSI => Type::MapSI,
             MapValKind::MapSS => Type::MapSS,
@@ -422,12 +418,8 @@ impl MapValKind {
             MapValKind::MapIPtrMapSPtrIntSlice => Type::MapSPtr(MapValKind::IntSlice),
             MapValKind::MapIPtrMapIPtrIntSlice => Type::MapIPtr(MapValKind::IntSlice),
             MapValKind::MapIPtrMapIPtrStrSlice => Type::MapIPtr(MapValKind::StrSlice),
-            MapValKind::MapSPtrMapIPtrNestedIntSlice => {
-                Type::MapIPtr(MapValKind::NestedIntSlice)
-            }
-            MapValKind::MapIPtrMapIPtrNestedIntSlice => {
-                Type::MapIPtr(MapValKind::NestedIntSlice)
-            }
+            MapValKind::MapSPtrMapIPtrNestedIntSlice => Type::MapIPtr(MapValKind::NestedIntSlice),
+            MapValKind::MapIPtrMapIPtrNestedIntSlice => Type::MapIPtr(MapValKind::NestedIntSlice),
             // NestedMap* on PtrSlice means []map[…] element kind.
             MapValKind::NestedMapII => Type::PtrSlice(MapValKind::MapII),
             MapValKind::NestedMapSI => Type::PtrSlice(MapValKind::MapSI),
@@ -760,15 +752,48 @@ pub enum Inst {
     DropSlice {
         value: Value,
     },
-    StrSliceLiteral { out: Value, elements: Vec<Value> },
-    StrSliceMake { out: Value, len: Value, cap: Option<Value> },
-    StrSliceLen { out: Value, slice: Value },
-    StrSliceIndex { out: Value, slice: Value, index: Value },
-    StrSliceStore { slice: Value, index: Value, value: Value },
-    StrSliceAppend { out: Value, slice: Value, value: Value },
-    StrSliceSlice { out: Value, slice: Value, low: Value, high: Value, max: Option<Value> },
-    StrSliceClone { out: Value, slice: Value },
-    DropStrSlice { value: Value },
+    StrSliceLiteral {
+        out: Value,
+        elements: Vec<Value>,
+    },
+    StrSliceMake {
+        out: Value,
+        len: Value,
+        cap: Option<Value>,
+    },
+    StrSliceLen {
+        out: Value,
+        slice: Value,
+    },
+    StrSliceIndex {
+        out: Value,
+        slice: Value,
+        index: Value,
+    },
+    StrSliceStore {
+        slice: Value,
+        index: Value,
+        value: Value,
+    },
+    StrSliceAppend {
+        out: Value,
+        slice: Value,
+        value: Value,
+    },
+    StrSliceSlice {
+        out: Value,
+        slice: Value,
+        low: Value,
+        high: Value,
+        max: Option<Value>,
+    },
+    StrSliceClone {
+        out: Value,
+        slice: Value,
+    },
+    DropStrSlice {
+        value: Value,
+    },
     /// Allocate a fresh owned struct block and store each scalar field into its
     /// slot (`fields[i]` → slot `i`).
     StructMake {
@@ -977,7 +1002,12 @@ impl StructRegistry {
             .fields
             .iter()
             .position(|(n, _)| n == name)
-            .map(|index| (index as u32, self.layouts.borrow()[id as usize].fields[index].1))
+            .map(|index| {
+                (
+                    index as u32,
+                    self.layouts.borrow()[id as usize].fields[index].1,
+                )
+            })
     }
 
     /// Find or create the anonymous struct layout for a tuple shape.
@@ -1236,14 +1266,10 @@ fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
         TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "int" || name == "int64") => {
             Ok(Type::IntSlice)
         }
-        TypeExpr::Array(inner)
-            if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "float" || name == "float64") =>
-        {
+        TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "float" || name == "float64") => {
             Ok(Type::FloatSlice)
         }
-        TypeExpr::Array(inner)
-            if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "byte" || name == "uint8") =>
-        {
+        TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "byte" || name == "uint8") => {
             Ok(Type::ByteSlice)
         }
         TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "bool") => {
@@ -1260,7 +1286,9 @@ fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
             Ok(Type::ChanI)
         }
         TypeExpr::Generic(name, args)
-            if name == "chan" && args.len() == 1 && matches!(&args[0], TypeExpr::Named(n) if n == "string") =>
+            if name == "chan"
+                && args.len() == 1
+                && matches!(&args[0], TypeExpr::Named(n) if n == "string") =>
         {
             Ok(Type::ChanS)
         }
@@ -1345,28 +1373,23 @@ fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
         TypeExpr::Named(name) if name == "Uuid" || name == "uuid" => Ok(Type::Str),
         // TitleCase unknown names (runtime handles) → opaque pointer.
         TypeExpr::Named(name)
-            if name
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_uppercase())
+            if name.chars().next().is_some_and(|c| c.is_uppercase())
                 && !matches!(name.as_str(), "ShareInt") =>
         {
             Ok(Type::Opaque)
         }
         // List[T] aliases []T for the common int/string specializations.
-        TypeExpr::Generic(name, args) if name == "List" && args.len() == 1 => {
-            match args[0] {
-                TypeExpr::Named(ref n) if n == "int" || n == "int64" => Ok(Type::IntSlice),
-                TypeExpr::Named(ref n) if n == "string" => Ok(Type::StrSlice),
-                TypeExpr::Named(ref n) if n == "float" || n == "float64" => Ok(Type::FloatSlice),
-                TypeExpr::Named(ref n) if n == "byte" || n == "uint8" => Ok(Type::ByteSlice),
-                TypeExpr::Named(ref n) if n == "bool" => Ok(Type::BoolSlice),
-                _ => Err(IrError::new(format!(
-                    "native IR: List[{}] is not supported yet",
-                    args[0]
-                ))),
-            }
-        }
+        TypeExpr::Generic(name, args) if name == "List" && args.len() == 1 => match args[0] {
+            TypeExpr::Named(ref n) if n == "int" || n == "int64" => Ok(Type::IntSlice),
+            TypeExpr::Named(ref n) if n == "string" => Ok(Type::StrSlice),
+            TypeExpr::Named(ref n) if n == "float" || n == "float64" => Ok(Type::FloatSlice),
+            TypeExpr::Named(ref n) if n == "byte" || n == "uint8" => Ok(Type::ByteSlice),
+            TypeExpr::Named(ref n) if n == "bool" => Ok(Type::BoolSlice),
+            _ => Err(IrError::new(format!(
+                "native IR: List[{}] is not supported yet",
+                args[0]
+            ))),
+        },
         // Angle-bracket form List<int> arrives as Generic too.
         _ => Err(IrError::new(format!(
             "native IR: type `{ty}` is not in the scalar increment"
@@ -1497,14 +1520,12 @@ fn resolve_type(ty: &TypeExpr, structs: &StructRegistry) -> Result<Type, IrError
                 Ok(Type::MapSS)
             }
             (TypeExpr::Named(kn), TypeExpr::Named(vn))
-                if (kn == "int" || kn == "int64")
-                    && (vn == "float" || vn == "float64") =>
+                if (kn == "int" || kn == "int64") && (vn == "float" || vn == "float64") =>
             {
                 Ok(Type::MapIF)
             }
             (TypeExpr::Named(kn), TypeExpr::Named(vn))
-                if (kn == "float" || kn == "float64")
-                    && (vn == "int" || vn == "int64") =>
+                if (kn == "float" || kn == "float64") && (vn == "int" || vn == "int64") =>
             {
                 Ok(Type::MapFI)
             }
@@ -1525,7 +1546,11 @@ fn resolve_type(ty: &TypeExpr, structs: &StructRegistry) -> Result<Type, IrError
             // map[Struct]int|string|float — content-keyed struct keys.
             (TypeExpr::Named(kn), TypeExpr::Named(vn))
                 if structs.by_name.contains_key(kn)
-                    && (vn == "int" || vn == "int64" || vn == "string" || vn == "float" || vn == "float64") =>
+                    && (vn == "int"
+                        || vn == "int64"
+                        || vn == "string"
+                        || vn == "float"
+                        || vn == "float64") =>
             {
                 let kid = structs.by_name[kn];
                 let kind = if vn == "string" {
@@ -1686,7 +1711,8 @@ fn build_structs(program: &Program) -> Result<StructRegistry, IrError> {
             }
             Item::Interface(iface) => {
                 interfaces.insert(iface.name.clone());
-                let methods: Vec<String> = iface.methods.iter().map(|(n, _, _)| n.clone()).collect();
+                let methods: Vec<String> =
+                    iface.methods.iter().map(|(n, _, _)| n.clone()).collect();
                 interface_methods.insert(iface.name.clone(), methods);
             }
             _ => {}
@@ -1772,8 +1798,18 @@ fn build_structs(program: &Program) -> Result<StructRegistry, IrError> {
                     if registry.variants.borrow().contains_key(&variant.name)
                         && !matches!(
                             variant.name.as_str(),
-                            "Ok" | "Err" | "Some" | "None" | "Val" | "Nothing" | "Just"
-                                | "Left" | "Right" | "Empty" | "Full" | "Absent" | "Present"
+                            "Ok" | "Err"
+                                | "Some"
+                                | "None"
+                                | "Val"
+                                | "Nothing"
+                                | "Just"
+                                | "Left"
+                                | "Right"
+                                | "Empty"
+                                | "Full"
+                                | "Absent"
+                                | "Present"
                         )
                     {
                         return Err(IrError::new(format!(
@@ -1896,12 +1932,10 @@ fn type_expr_for_tag(tag: &str) -> TypeExpr {
             Box::new(TypeExpr::Named("int".into())),
         ),
         // []Pt mono tags end with "slice" after a TitleCase name.
-        other if other.ends_with("slice")
-            && other.len() > 5
-            && other
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_uppercase()) =>
+        other
+            if other.ends_with("slice")
+                && other.len() > 5
+                && other.chars().next().is_some_and(|c| c.is_uppercase()) =>
         {
             let base = &other[..other.len() - 5];
             TypeExpr::Array(Box::new(TypeExpr::Named(base.into())))
@@ -2020,10 +2054,7 @@ fn subst_expr(expr: &Expr, map: &HashMap<String, TypeExpr>) -> Expr {
         Expr::Array(xs) => Expr::Array(xs.iter().map(|e| subst_expr(e, map)).collect()),
         Expr::Tuple(xs) => Expr::Tuple(xs.iter().map(|e| subst_expr(e, map)).collect()),
         Expr::Block(b) => Expr::Block(subst_block(b, map)),
-        Expr::Match {
-            scrutinee,
-            arms,
-        } => Expr::Match {
+        Expr::Match { scrutinee, arms } => Expr::Match {
             scrutinee: Box::new(subst_expr(scrutinee, map)),
             arms: arms
                 .iter()
@@ -2121,9 +2152,7 @@ fn monomorphize_generics(
     let struct_names: Vec<String> = structs
         .by_name
         .keys()
-        .filter(|s| {
-            s.chars().next().is_some_and(|c| c.is_uppercase()) && !s.contains('.')
-        })
+        .filter(|s| s.chars().next().is_some_and(|c| c.is_uppercase()) && !s.contains('.'))
         .cloned()
         .collect();
     // Free-function names already in the program (includes desugared `Type_method`
@@ -2186,13 +2215,22 @@ fn monomorphize_generics(
                         let bounded = !tmpl.type_bounds.is_empty();
                         // Primary tags: skip scalar tags for bounded generics
                         // (Ident → "int" would create a broken method body).
-                        if !(bounded && tags.iter().all(|t| {
-                            matches!(
-                                t.as_str(),
-                                "int" | "string" | "float" | "bool" | "map"
-                                    | "intslice" | "strslice" | "point" | "pointslice"
-                            )
-                        })) {
+                        if !(bounded
+                            && tags.iter().all(|t| {
+                                matches!(
+                                    t.as_str(),
+                                    "int"
+                                        | "string"
+                                        | "float"
+                                        | "bool"
+                                        | "map"
+                                        | "intslice"
+                                        | "strslice"
+                                        | "point"
+                                        | "pointslice"
+                                )
+                            }))
+                        {
                             let mono = format!("{name}__{}", tags.join("__"));
                             needed.entry(mono).or_insert(tags.clone());
                         }
@@ -2205,13 +2243,18 @@ fn monomorphize_generics(
                             // fail method dispatch inside the body.
                             if !bounded {
                                 for extra in [
-                                    "int", "string", "float", "bool", "intslice",
-                                    "strslice", "map", "point", "pointslice",
+                                    "int",
+                                    "string",
+                                    "float",
+                                    "bool",
+                                    "intslice",
+                                    "strslice",
+                                    "map",
+                                    "point",
+                                    "pointslice",
                                 ] {
                                     let m = format!("{name}__{extra}");
-                                    needed
-                                        .entry(m)
-                                        .or_insert_with(|| vec![extra.to_string()]);
+                                    needed.entry(m).or_insert_with(|| vec![extra.to_string()]);
                                 }
                             }
                             // Required methods for this bound (union across bounds).
@@ -2219,11 +2262,7 @@ fn monomorphize_generics(
                                 .type_bounds
                                 .values()
                                 .flat_map(|iface| {
-                                    iface_methods
-                                        .get(iface)
-                                        .into_iter()
-                                        .flatten()
-                                        .cloned()
+                                    iface_methods.get(iface).into_iter().flatten().cloned()
                                 })
                                 .collect();
                             // User structs (Dog, Point, …) as type-arg monomorphs.
@@ -2234,64 +2273,171 @@ fn monomorphize_generics(
                                     continue;
                                 }
                                 if bounded {
-                                    let ok = required_methods.iter().all(|m| {
-                                        free_fn_names.contains(&format!("{sname}_{m}"))
-                                    });
+                                    let ok = required_methods
+                                        .iter()
+                                        .all(|m| free_fn_names.contains(&format!("{sname}_{m}")));
                                     if !ok {
                                         continue;
                                     }
                                 }
                                 let m = format!("{name}__{sname}");
-                                needed
-                                    .entry(m)
-                                    .or_insert_with(|| vec![sname.clone()]);
+                                needed.entry(m).or_insert_with(|| vec![sname.clone()]);
                             }
                         }
                     }
                 }
                 for a in args {
-                    walk_expr(a, templates, needed, struct_names, free_fn_names, iface_methods);
+                    walk_expr(
+                        a,
+                        templates,
+                        needed,
+                        struct_names,
+                        free_fn_names,
+                        iface_methods,
+                    );
                 }
-                walk_expr(callee, templates, needed, struct_names, free_fn_names, iface_methods);
+                walk_expr(
+                    callee,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
+                );
             }
             Expr::Method { receiver, args, .. } => {
-                walk_expr(receiver, templates, needed, struct_names, free_fn_names, iface_methods);
+                walk_expr(
+                    receiver,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
+                );
                 for a in args {
-                    walk_expr(a, templates, needed, struct_names, free_fn_names, iface_methods);
+                    walk_expr(
+                        a,
+                        templates,
+                        needed,
+                        struct_names,
+                        free_fn_names,
+                        iface_methods,
+                    );
                 }
             }
             Expr::Binary { left, right, .. } => {
-                walk_expr(left, templates, needed, struct_names, free_fn_names, iface_methods);
-                walk_expr(right, templates, needed, struct_names, free_fn_names, iface_methods);
+                walk_expr(
+                    left,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
+                );
+                walk_expr(
+                    right,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
+                );
             }
             Expr::Unary { expr, .. }
             | Expr::Field { base: expr, .. }
             | Expr::Try(expr)
             | Expr::Join(expr)
-            | Expr::Kick { expr, .. } => walk_expr(expr, templates, needed, struct_names, free_fn_names, iface_methods),
+            | Expr::Kick { expr, .. } => walk_expr(
+                expr,
+                templates,
+                needed,
+                struct_names,
+                free_fn_names,
+                iface_methods,
+            ),
             Expr::Index { base, index } => {
-                walk_expr(base, templates, needed, struct_names, free_fn_names, iface_methods);
-                walk_expr(index, templates, needed, struct_names, free_fn_names, iface_methods);
+                walk_expr(
+                    base,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
+                );
+                walk_expr(
+                    index,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
+                );
             }
             Expr::Array(xs) | Expr::Tuple(xs) => {
                 for x in xs {
-                    walk_expr(x, templates, needed, struct_names, free_fn_names, iface_methods);
+                    walk_expr(
+                        x,
+                        templates,
+                        needed,
+                        struct_names,
+                        free_fn_names,
+                        iface_methods,
+                    );
                 }
             }
-            Expr::Block(b) => walk_block(b, templates, needed, struct_names, free_fn_names, iface_methods),
+            Expr::Block(b) => walk_block(
+                b,
+                templates,
+                needed,
+                struct_names,
+                free_fn_names,
+                iface_methods,
+            ),
             Expr::Match { scrutinee, arms } => {
-                walk_expr(scrutinee, templates, needed, struct_names, free_fn_names, iface_methods);
+                walk_expr(
+                    scrutinee,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
+                );
                 for arm in arms {
-                    walk_expr(&arm.body, templates, needed, struct_names, free_fn_names, iface_methods);
+                    walk_expr(
+                        &arm.body,
+                        templates,
+                        needed,
+                        struct_names,
+                        free_fn_names,
+                        iface_methods,
+                    );
                 }
             }
-            Expr::Lambda { body, .. } => walk_expr(body, templates, needed, struct_names, free_fn_names, iface_methods),
-            Expr::Fan {
-                collection,
-                mapper,
-            } => {
-                walk_expr(collection, templates, needed, struct_names, free_fn_names, iface_methods);
-                walk_expr(mapper, templates, needed, struct_names, free_fn_names, iface_methods);
+            Expr::Lambda { body, .. } => walk_expr(
+                body,
+                templates,
+                needed,
+                struct_names,
+                free_fn_names,
+                iface_methods,
+            ),
+            Expr::Fan { collection, mapper } => {
+                walk_expr(
+                    collection,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
+                );
+                walk_expr(
+                    mapper,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
+                );
             }
             _ => {}
         }
@@ -2307,26 +2453,71 @@ fn monomorphize_generics(
         for s in &b.stmts {
             match s {
                 Stmt::Let { init, .. } => walk_expr(
-                    init, templates, needed, struct_names, free_fn_names, iface_methods,
+                    init,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
                 ),
-                Stmt::Expr(e) | Stmt::Return(Some(e)) => {
-                    walk_expr(e, templates, needed, struct_names, free_fn_names, iface_methods)
-                }
+                Stmt::Expr(e) | Stmt::Return(Some(e)) => walk_expr(
+                    e,
+                    templates,
+                    needed,
+                    struct_names,
+                    free_fn_names,
+                    iface_methods,
+                ),
                 Stmt::If {
                     cond,
                     then_block,
                     else_block,
                     ..
                 } => {
-                    walk_expr(cond, templates, needed, struct_names, free_fn_names, iface_methods);
-                    walk_block(then_block, templates, needed, struct_names, free_fn_names, iface_methods);
+                    walk_expr(
+                        cond,
+                        templates,
+                        needed,
+                        struct_names,
+                        free_fn_names,
+                        iface_methods,
+                    );
+                    walk_block(
+                        then_block,
+                        templates,
+                        needed,
+                        struct_names,
+                        free_fn_names,
+                        iface_methods,
+                    );
                     if let Some(eb) = else_block {
-                        walk_block(eb, templates, needed, struct_names, free_fn_names, iface_methods);
+                        walk_block(
+                            eb,
+                            templates,
+                            needed,
+                            struct_names,
+                            free_fn_names,
+                            iface_methods,
+                        );
                     }
                 }
                 Stmt::While { cond, body, .. } => {
-                    walk_expr(cond, templates, needed, struct_names, free_fn_names, iface_methods);
-                    walk_block(body, templates, needed, struct_names, free_fn_names, iface_methods);
+                    walk_expr(
+                        cond,
+                        templates,
+                        needed,
+                        struct_names,
+                        free_fn_names,
+                        iface_methods,
+                    );
+                    walk_block(
+                        body,
+                        templates,
+                        needed,
+                        struct_names,
+                        free_fn_names,
+                        iface_methods,
+                    );
                 }
                 _ => {}
             }
@@ -2336,7 +2527,12 @@ fn monomorphize_generics(
         if let Item::Fn(f) = item {
             if f.type_params.is_empty() {
                 walk_block(
-                    &f.body, templates, &mut needed, &struct_names, &free_fn_names, iface_methods,
+                    &f.body,
+                    templates,
+                    &mut needed,
+                    &struct_names,
+                    &free_fn_names,
+                    iface_methods,
                 );
             }
         }
@@ -2487,7 +2683,10 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
             type_params: Vec::new(),
             params: Vec::new(),
             ret: Some(TypeExpr::Named("int".into())),
-            body: AstBlock { stmts, source_lines: Box::default() },
+            body: AstBlock {
+                stmts,
+                source_lines: Box::default(),
+            },
             exported: false,
             is_const: false,
             stability: crate::ast::ApiStability::Unspecified,
@@ -2814,7 +3013,11 @@ impl<'a> FunctionLowerer<'a> {
                 // local or cloned a borrow.  All other heap params
                 // (structs, maps, handles) remain borrows — the caller
                 // passes an owned copy and drops it post-call.
-                let owns = ty.is_consumable_header() && !param.mutable;
+                // Call lowering transfers an owned consumable header, or clones
+                // a borrowed one, and does not drop it after the call. Mutable
+                // parameters still own that header; mutability controls writes,
+                // not lifetime.
+                let owns = ty.is_consumable_header();
                 heap_owned.insert(param.name.clone(), owns);
             }
         }
@@ -2844,21 +3047,13 @@ impl<'a> FunctionLowerer<'a> {
         })
     }
 
-    fn with_lambda_collector(
-        mut self,
-        stubs: &'a mut Vec<FnDef>,
-        id: &'a mut u32,
-    ) -> Self {
+    fn with_lambda_collector(mut self, stubs: &'a mut Vec<FnDef>, id: &'a mut u32) -> Self {
         self.lambda_stubs = Some(stubs);
         self.lambda_id = Some(id);
         self
     }
 
-    fn with_kick_collector(
-        mut self,
-        stubs: &'a mut Vec<Function>,
-        id: &'a mut u32,
-    ) -> Self {
+    fn with_kick_collector(mut self, stubs: &'a mut Vec<Function>, id: &'a mut u32) -> Self {
         self.kick_stubs = Some(stubs);
         self.kick_id = Some(id);
         self
@@ -2995,9 +3190,7 @@ impl<'a> FunctionLowerer<'a> {
                 .iter()
                 .rev()
                 .find(|frame| frame.label.as_deref() == Some(lab))
-                .ok_or_else(|| {
-                    IrError::new(format!("native IR: unknown loop label `{lab}`"))
-                }),
+                .ok_or_else(|| IrError::new(format!("native IR: unknown loop label `{lab}`"))),
         }
     }
 
@@ -3015,11 +3208,7 @@ impl<'a> FunctionLowerer<'a> {
             }
             if let Some((ptr, ty)) = self.locals.get(&name).copied() {
                 let v = self.value();
-                self.emit(Inst::Load {
-                    out: v,
-                    ptr,
-                    ty,
-                });
+                self.emit(Inst::Load { out: v, ptr, ty });
                 self.emit_drop(v, ty);
             }
         }
@@ -3089,28 +3278,27 @@ impl<'a> FunctionLowerer<'a> {
                     .as_ref()
                     .map(|t| resolve_type(t, self.structs))
                     .transpose()?;
-                let (mut value, inferred, mut owned) =
-                    if annotated == Some(Type::ByteSlice) {
-                        if let Expr::Array(items) = init {
-                            self.lower_byte_array_literal(items)?
-                        } else {
-                            self.lower_expr(init)?
-                        }
-                    } else if let (Some(ann), Expr::Array(items)) = (annotated, init) {
-                        // Empty `[]` / typed literals: use the annotation when
-                        // elements cannot be inferred (`let xs: []int = []`).
-                        self.lower_array_literal_with_type(items, ann)?
-                    } else if let Some(Type::Struct(eid)) = annotated {
-                        // Typed Option/Result/enum lets: `let o: Option[map[K]V] = None`
-                        // and `let s: Option[T] = Some(x)` must pick the annotated monomorph.
-                        if self.structs.is_enum(eid) {
-                            self.lower_expr_for_expected(init, Type::Struct(eid))?
-                        } else {
-                            self.lower_expr(init)?
-                        }
+                let (mut value, inferred, mut owned) = if annotated == Some(Type::ByteSlice) {
+                    if let Expr::Array(items) = init {
+                        self.lower_byte_array_literal(items)?
                     } else {
                         self.lower_expr(init)?
-                    };
+                    }
+                } else if let (Some(ann), Expr::Array(items)) = (annotated, init) {
+                    // Empty `[]` / typed literals: use the annotation when
+                    // elements cannot be inferred (`let xs: []int = []`).
+                    self.lower_array_literal_with_type(items, ann)?
+                } else if let Some(Type::Struct(eid)) = annotated {
+                    // Typed Option/Result/enum lets: `let o: Option[map[K]V] = None`
+                    // and `let s: Option[T] = Some(x)` must pick the annotated monomorph.
+                    if self.structs.is_enum(eid) {
+                        self.lower_expr_for_expected(init, Type::Struct(eid))?
+                    } else {
+                        self.lower_expr(init)?
+                    }
+                } else {
+                    self.lower_expr(init)?
+                };
                 match inferred {
                     // Map headers are pointer handles: keep borrows so nested
                     // mutation through retrieved maps is shared (Go-like).
@@ -3155,10 +3343,7 @@ impl<'a> FunctionLowerer<'a> {
                         // expressions (e.g. field load of a slice for a new
                         // binding that should own a copy). Slice expressions
                         // stay unowned views.
-                        let is_slice_expr = matches!(
-                            init,
-                            Expr::Slice { .. } | Expr::Array(_)
-                        );
+                        let is_slice_expr = matches!(init, Expr::Slice { .. } | Expr::Array(_));
                         if !owned && !is_slice_expr {
                             value = self.emit_clone(value, inferred);
                             owned = true;
@@ -3219,9 +3404,7 @@ impl<'a> FunctionLowerer<'a> {
                         (value, false)
                     } else if ty == Type::ShareInt && inferred == Type::I64 {
                         (value, false)
-                    } else if ty == Type::IntSlice
-                        && matches!(inferred, Type::IntSlice)
-                    {
+                    } else if ty == Type::IntSlice && matches!(inferred, Type::IntSlice) {
                         (value, owned)
                     } else {
                         return Err(IrError::new("native IR: initializer type mismatch"));
@@ -3259,9 +3442,7 @@ impl<'a> FunctionLowerer<'a> {
                 // Go-style `let v, ok = m[k]`
                 let (mapv, mty, mo) = self.lower_expr(base)?;
                 if mo {
-                    return Err(IrError::new(
-                        "native IR: comma-ok map base must be a local",
-                    ));
+                    return Err(IrError::new("native IR: comma-ok map base must be a local"));
                 }
                 let (key, kty, ko) = self.lower_expr(index)?;
                 // Content-keyed struct maps must use map_struct_key_* — map_ii_*
@@ -3282,45 +3463,24 @@ impl<'a> FunctionLowerer<'a> {
                     Type::MapSS => Type::Str,
                     Type::MapIF => Type::F64,
                     Type::MapIPtr(vk) | Type::MapSPtr(vk) => vk.to_type(),
-                    _ => {
-                        return Err(IrError::new(
-                            "native IR: comma-ok lookup requires a map",
-                        ))
-                    }
+                    _ => return Err(IrError::new("native IR: comma-ok lookup requires a map")),
                 };
                 let (has_fn, get_fn) = match mty {
-                    Type::MapII => (
-                        "mako_native_map_ii_has_ptr",
-                        "mako_native_map_ii_get_ptr",
-                    ),
-                    Type::MapSI => (
-                        "mako_native_map_si_has_ptr",
-                        "mako_native_map_si_get_ptr",
-                    ),
-                    Type::MapSS => (
-                        "mako_native_map_ss_has_ptr",
-                        "mako_native_map_ss_get_ptr",
-                    ),
-                    Type::MapIF => (
-                        "mako_native_map_if_has_ptr",
-                        "mako_native_map_if_get_ptr",
-                    ),
-                    Type::MapFI => (
-                        "mako_native_map_fi_has_ptr",
-                        "mako_native_map_fi_get_ptr",
-                    ),
+                    Type::MapII => ("mako_native_map_ii_has_ptr", "mako_native_map_ii_get_ptr"),
+                    Type::MapSI => ("mako_native_map_si_has_ptr", "mako_native_map_si_get_ptr"),
+                    Type::MapSS => ("mako_native_map_ss_has_ptr", "mako_native_map_ss_get_ptr"),
+                    Type::MapIF => ("mako_native_map_if_has_ptr", "mako_native_map_if_get_ptr"),
+                    Type::MapFI => ("mako_native_map_fi_has_ptr", "mako_native_map_fi_get_ptr"),
                     Type::MapIPtr(_) if struct_key_sid.is_some() => (
                         "mako_native_map_struct_key_has_ptr",
                         "mako_native_map_struct_key_get_ptr",
                     ),
-                    Type::MapIPtr(_) => (
-                        "mako_native_map_ii_has_ptr",
-                        "mako_native_map_ii_get_ptr",
-                    ),
-                    Type::MapSPtr(_) => (
-                        "mako_native_map_si_has_ptr",
-                        "mako_native_map_si_get_ptr",
-                    ),
+                    Type::MapIPtr(_) => {
+                        ("mako_native_map_ii_has_ptr", "mako_native_map_ii_get_ptr")
+                    }
+                    Type::MapSPtr(_) => {
+                        ("mako_native_map_si_has_ptr", "mako_native_map_si_get_ptr")
+                    }
                     _ => unreachable!(),
                 };
                 // Normalize int-key maps (enum → tag, bool/float casts).
@@ -3537,7 +3697,10 @@ impl<'a> FunctionLowerer<'a> {
                         field_value
                     };
                     let slot = self.value();
-                    self.emit(Inst::Alloca { out: slot, ty: field_ty });
+                    self.emit(Inst::Alloca {
+                        out: slot,
+                        ty: field_ty,
+                    });
                     self.emit(Inst::Store {
                         ptr: slot,
                         value: bound,
@@ -3597,10 +3760,7 @@ impl<'a> FunctionLowerer<'a> {
                         ret: None,
                     });
                     // Keep stack local in sync for non-cell readers of the same slot.
-                    self.emit(Inst::Store {
-                        ptr: slot,
-                        value,
-                    });
+                    self.emit(Inst::Store { ptr: slot, value });
                     return Ok(());
                 }
                 match actual {
@@ -3726,9 +3886,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::FloatSlice => {
                         if it != Type::I64 || io || vt != Type::F64 || vo {
-                            return Err(IrError::new(
-                                "native IR: []float index assignment types",
-                            ));
+                            return Err(IrError::new("native IR: []float index assignment types"));
                         }
                         self.emit(Inst::Call {
                             out: None,
@@ -3739,9 +3897,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::ByteSlice => {
                         if it != Type::I64 || io || vt != Type::I64 || vo {
-                            return Err(IrError::new(
-                                "native IR: []byte index assignment types",
-                            ));
+                            return Err(IrError::new("native IR: []byte index assignment types"));
                         }
                         self.emit(Inst::Call {
                             out: None,
@@ -3752,9 +3908,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::BoolSlice => {
                         if it != Type::I64 || io || (vt != Type::I1 && vt != Type::I64) || vo {
-                            return Err(IrError::new(
-                                "native IR: []bool index assignment types",
-                            ));
+                            return Err(IrError::new("native IR: []bool index assignment types"));
                         }
                         let bval = if vt == Type::I1 {
                             let c = self.value();
@@ -3777,9 +3931,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::StructSlice(sid) => {
                         if it != Type::I64 || io || vt != Type::Struct(sid) {
-                            return Err(IrError::new(
-                                "native IR: []struct index assignment types",
-                            ));
+                            return Err(IrError::new("native IR: []struct index assignment types"));
                         }
                         let owned_elem = if vo {
                             val
@@ -3817,9 +3969,7 @@ impl<'a> FunctionLowerer<'a> {
                     Type::MapII => {
                         // Also used for map[int]bool (bool stored as 0/1 i64).
                         if it != Type::I64 || io || vo {
-                            return Err(IrError::new(
-                                "native IR: map[int]int assignment types",
-                            ));
+                            return Err(IrError::new("native IR: map[int]int assignment types"));
                         }
                         let mut v = val;
                         if vt == Type::I1 {
@@ -3832,9 +3982,7 @@ impl<'a> FunctionLowerer<'a> {
                             });
                             v = c;
                         } else if vt != Type::I64 {
-                            return Err(IrError::new(
-                                "native IR: map[int]int assignment types",
-                            ));
+                            return Err(IrError::new("native IR: map[int]int assignment types"));
                         }
                         self.emit(Inst::Call {
                             out: None,
@@ -3966,8 +4114,7 @@ impl<'a> FunctionLowerer<'a> {
                                 ));
                             }
                             let (nf, sm, nm, nfp, nsp) = self.struct_key_meta(sid);
-                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) =
-                                self.struct_map_value_meta(vk);
+                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                             self.emit(Inst::Call {
                                 out: None,
                                 function: "mako_native_map_struct_key_set_ptr".into(),
@@ -4011,9 +4158,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::MapIF => {
                         if it != Type::I64 || io || vt != Type::F64 || vo {
-                            return Err(IrError::new(
-                                "native IR: map[int]float assignment types",
-                            ));
+                            return Err(IrError::new("native IR: map[int]float assignment types"));
                         }
                         self.emit(Inst::Call {
                             out: None,
@@ -4024,9 +4169,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::MapFI => {
                         if it != Type::F64 || io || vt != Type::I64 || vo {
-                            return Err(IrError::new(
-                                "native IR: map[float]int assignment types",
-                            ));
+                            return Err(IrError::new("native IR: map[float]int assignment types"));
                         }
                         self.emit(Inst::Call {
                             out: None,
@@ -4037,9 +4180,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::StrSlice => {
                         if it != Type::I64 || io || vt != Type::Str {
-                            return Err(IrError::new(
-                                "native IR: []string index assignment types",
-                            ));
+                            return Err(IrError::new("native IR: []string index assignment types"));
                         }
                         // StrSliceStore clones the value; drop owned temps after.
                         self.emit(Inst::StrSliceStore {
@@ -4236,11 +4377,7 @@ impl<'a> FunctionLowerer<'a> {
                                 if owned && !saved_owned.contains_key(&name) {
                                     if let Some((ptr, ty)) = self.locals.get(&name).copied() {
                                         let v = self.value();
-                                        self.emit(Inst::Load {
-                                            out: v,
-                                            ptr,
-                                            ty,
-                                        });
+                                        self.emit(Inst::Load { out: v, ptr, ty });
                                         self.emit_drop(v, ty);
                                     }
                                 }
@@ -4264,11 +4401,7 @@ impl<'a> FunctionLowerer<'a> {
                                 if owned && !saved_owned.contains_key(&name) {
                                     if let Some((ptr, ty)) = self.locals.get(&name).copied() {
                                         let v = self.value();
-                                        self.emit(Inst::Load {
-                                            out: v,
-                                            ptr,
-                                            ty,
-                                        });
+                                        self.emit(Inst::Load { out: v, ptr, ty });
                                         self.emit_drop(v, ty);
                                     }
                                 }
@@ -4374,11 +4507,7 @@ impl<'a> FunctionLowerer<'a> {
                     if owned && !saved_owned.contains_key(&name) {
                         if let Some((ptr, ty)) = self.locals.get(&name).copied() {
                             let v = self.value();
-                            self.emit(Inst::Load {
-                                out: v,
-                                ptr,
-                                ty,
-                            });
+                            self.emit(Inst::Load { out: v, ptr, ty });
                             self.emit_drop(v, ty);
                         }
                     }
@@ -4565,13 +4694,8 @@ impl<'a> FunctionLowerer<'a> {
             let (slot, ty) = self.locals.get(ch_name).copied().ok_or_else(|| {
                 IrError::new(format!("native IR: select unknown channel `{ch_name}`"))
             })?;
-            if !matches!(
-                ty,
-                Type::ChanI | Type::ChanS | Type::ChanF | Type::ChanP(_)
-            ) {
-                return Err(IrError::new(
-                    "native IR: select arm must be a channel",
-                ));
+            if !matches!(ty, Type::ChanI | Type::ChanS | Type::ChanF | Type::ChanP(_)) {
+                return Err(IrError::new("native IR: select arm must be a channel"));
             }
             let v = self.value();
             self.emit(Inst::Load {
@@ -4704,10 +4828,7 @@ impl<'a> FunctionLowerer<'a> {
         };
         let n = self.value();
         match sty {
-            Type::IntSlice => self.emit(Inst::SliceLen {
-                out: n,
-                slice: src,
-            }),
+            Type::IntSlice => self.emit(Inst::SliceLen { out: n, slice: src }),
             Type::FloatSlice => self.emit(Inst::Call {
                 out: Some(n),
                 function: "mako_native_float_slice_len_ptr".into(),
@@ -5014,11 +5135,7 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     /// Collect free locals referenced by a lambda body (excluding params).
-    fn collect_lambda_free_locals(
-        &self,
-        body: &Expr,
-        params: &[String],
-    ) -> Vec<(String, Type)> {
+    fn collect_lambda_free_locals(&self, body: &Expr, params: &[String]) -> Vec<(String, Type)> {
         fn walk(e: &Expr, out: &mut Vec<String>) {
             match e {
                 Expr::Ident(n) => out.push(n.clone()),
@@ -5095,10 +5212,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                 }
                 Expr::Kick { expr, .. } => walk(expr, out),
-                Expr::Fan {
-                    collection,
-                    mapper,
-                } => {
+                Expr::Fan { collection, mapper } => {
                     walk(collection, out);
                     walk(mapper, out);
                 }
@@ -5285,9 +5399,8 @@ impl<'a> FunctionLowerer<'a> {
             } else if Self::param_used_as_int(body, p) {
                 TypeExpr::Named("int".into())
             } else {
-                let strish = body_s.contains("len")
-                    || body_s.contains("str_")
-                    || body_s.contains("String");
+                let strish =
+                    body_s.contains("len") || body_s.contains("str_") || body_s.contains("String");
                 if strish && params.len() == 1 && captures.is_empty() {
                     TypeExpr::Named("string".into())
                 } else if strish && params.len() >= 2 && i + 1 == params.len() {
@@ -5329,10 +5442,7 @@ impl<'a> FunctionLowerer<'a> {
                         ty: Some(TypeExpr::Named("int".into())),
                         init: Expr::Call {
                             callee: Box::new(Expr::Ident("__mako_env_get".into())),
-                            args: vec![
-                                Expr::Ident("__env".into()),
-                                Expr::Int(i as i64),
-                            ],
+                            args: vec![Expr::Ident("__env".into()), Expr::Int(i as i64)],
                         },
                     });
                     // Mutable local mirrors the cell; rewritten assigns go through store.
@@ -5354,10 +5464,7 @@ impl<'a> FunctionLowerer<'a> {
                         ty: Some(ty_ann),
                         init: Expr::Call {
                             callee: Box::new(Expr::Ident("__mako_env_get".into())),
-                            args: vec![
-                                Expr::Ident("__env".into()),
-                                Expr::Int(i as i64),
-                            ],
+                            args: vec![Expr::Ident("__env".into()), Expr::Int(i as i64)],
                         },
                     });
                 }
@@ -5389,7 +5496,10 @@ impl<'a> FunctionLowerer<'a> {
             }
             body_stmts.push(s);
         }
-        let body_block = AstBlock { stmts: body_stmts, source_lines: Box::default() };
+        let body_block = AstBlock {
+            stmts: body_stmts,
+            source_lines: Box::default(),
+        };
         stubs.push(FnDef {
             type_bounds: HashMap::new(),
             name: name.clone(),
@@ -5553,10 +5663,7 @@ impl<'a> FunctionLowerer<'a> {
         let (fname, mut call_args) = match lowered.len() {
             0 => ("mako_native_fn_call0", vec![fp]),
             1 => ("mako_native_fn_call1", vec![fp, lowered[0]]),
-            2 => (
-                "mako_native_fn_call2",
-                vec![fp, lowered[0], lowered[1]],
-            ),
+            2 => ("mako_native_fn_call2", vec![fp, lowered[0], lowered[1]]),
             3 => (
                 "mako_native_fn_call3",
                 vec![fp, lowered[0], lowered[1], lowered[2]],
@@ -5567,19 +5674,29 @@ impl<'a> FunctionLowerer<'a> {
             ),
             5 => (
                 "mako_native_fn_call5",
-                vec![fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4]],
+                vec![
+                    fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4],
+                ],
             ),
             6 => (
                 "mako_native_fn_call6",
-                vec![fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4], lowered[5]],
+                vec![
+                    fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4], lowered[5],
+                ],
             ),
             7 => (
                 "mako_native_fn_call7",
-                vec![fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4], lowered[5], lowered[6]],
+                vec![
+                    fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4], lowered[5],
+                    lowered[6],
+                ],
             ),
             8 => (
                 "mako_native_fn_call8",
-                vec![fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4], lowered[5], lowered[6], lowered[7]],
+                vec![
+                    fp, lowered[0], lowered[1], lowered[2], lowered[3], lowered[4], lowered[5],
+                    lowered[6], lowered[7],
+                ],
             ),
             _ => {
                 return Err(IrError::new(
@@ -5601,11 +5718,7 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     /// `crew.kick(f(args…))` — spawn a trampoline on the nursery.
-    fn lower_kick(
-        &mut self,
-        crew: &str,
-        expr: &Expr,
-    ) -> Result<(Value, Type, bool), IrError> {
+    fn lower_kick(&mut self, crew: &str, expr: &Expr) -> Result<(Value, Type, bool), IrError> {
         let Expr::Call { callee, args } = expr else {
             // Non-call kick: sequential evaluate (int only).
             let (v, ty, owned) = self.lower_expr(expr)?;
@@ -5626,11 +5739,10 @@ impl<'a> FunctionLowerer<'a> {
         let Expr::Ident(fname) = callee.as_ref() else {
             return Err(IrError::new("native IR: kick requires a direct call"));
         };
-        let (params, ret) = self
-            .signatures
-            .get(fname)
-            .cloned()
-            .ok_or_else(|| IrError::new(format!("native IR: kick unknown function `{fname}`")))?;
+        let (params, ret) =
+            self.signatures.get(fname).cloned().ok_or_else(|| {
+                IrError::new(format!("native IR: kick unknown function `{fname}`"))
+            })?;
         // Allow int, bool, float (bits), void→0, and pointer-sized returns (as i64).
         let ret_ok = matches!(
             ret,
@@ -5697,9 +5809,10 @@ impl<'a> FunctionLowerer<'a> {
             // Process-scoped detach: null nursery → mako_detach_spawn path.
             self.const_int(0, Type::I64)
         } else {
-            let (slot, ty) = self.locals.get(crew).copied().ok_or_else(|| {
-                IrError::new(format!("native IR: kick unknown crew `{crew}`"))
-            })?;
+            let (slot, ty) =
+                self.locals.get(crew).copied().ok_or_else(|| {
+                    IrError::new(format!("native IR: kick unknown crew `{crew}`"))
+                })?;
             if ty != Type::Nursery {
                 return Err(IrError::new("native IR: kick receiver must be a crew"));
             }
@@ -5741,7 +5854,8 @@ impl<'a> FunctionLowerer<'a> {
             let (mut v, ty, owned) = self.lower_expr(arg)?;
             let param = params[i];
             let kick_ty_ok = ty == param
-                || (param == Type::I64 && matches!(ty, Type::I1 | Type::Opaque | Type::OwnedOpaque(_)))
+                || (param == Type::I64
+                    && matches!(ty, Type::I1 | Type::Opaque | Type::OwnedOpaque(_)))
                 || (ty == Type::I64 && matches!(param, Type::Opaque | Type::OwnedOpaque(_)))
                 || (param == Type::Opaque && matches!(ty, Type::OwnedOpaque(_)))
                 || (ty == Type::Opaque && matches!(param, Type::OwnedOpaque(_)));
@@ -5795,10 +5909,7 @@ impl<'a> FunctionLowerer<'a> {
                 // structs that the trampoline clones).
                 if !matches!(arg, Expr::Ident(_)) {
                     let slot = self.value();
-                    self.emit(Inst::Alloca {
-                        out: slot,
-                        ty,
-                    });
+                    self.emit(Inst::Alloca { out: slot, ty });
                     self.emit(Inst::Store {
                         ptr: slot,
                         value: v,
@@ -5875,9 +5986,7 @@ impl<'a> FunctionLowerer<'a> {
         };
         let pack_param = Value(function.next_value);
         function.next_value += 1;
-        function
-            .params
-            .push(("pack".into(), pack_param, Type::I64));
+        function.params.push(("pack".into(), pack_param, Type::I64));
 
         let mut next = || {
             let v = Value(function.next_value);
@@ -6034,11 +6143,7 @@ impl<'a> FunctionLowerer<'a> {
             if owned && !saved_owned.contains_key(&name) {
                 if let Some((ptr, ty)) = self.locals.get(&name).copied() {
                     let v = self.value();
-                    self.emit(Inst::Load {
-                        out: v,
-                        ptr,
-                        ty,
-                    });
+                    self.emit(Inst::Load { out: v, ptr, ty });
                     self.emit_drop(v, ty);
                 }
             }
@@ -6194,9 +6299,8 @@ impl<'a> FunctionLowerer<'a> {
                 "native IR: `{next_fn}` has no receiver"
             )));
         }
-        let ret_ty = ret.ok_or_else(|| {
-            IrError::new(format!("native IR: `{next_fn}` must return Option[T]"))
-        })?;
+        let ret_ty = ret
+            .ok_or_else(|| IrError::new(format!("native IR: `{next_fn}` must return Option[T]")))?;
         let Type::Struct(opt_id) = ret_ty else {
             return Err(IrError::new(format!(
                 "native IR: `{next_fn}` must return Option[T]"
@@ -6352,14 +6456,7 @@ impl<'a> FunctionLowerer<'a> {
             let next_fn = format!("{type_name}_next");
             if self.signatures.contains_key(&next_fn) {
                 return self.lower_for_protocol(
-                    label,
-                    binders,
-                    body,
-                    iter_val,
-                    iter_ty,
-                    iter_owned,
-                    &type_name,
-                    &next_fn,
+                    label, binders, body, iter_val, iter_ty, iter_owned, &type_name, &next_fn,
                 );
             }
             return Err(IrError::new(format!(
@@ -6617,10 +6714,7 @@ impl<'a> FunctionLowerer<'a> {
                 ty: Type::I64,
             });
             let one = self.const_int(1, Type::I64);
-            self.emit(Inst::Store {
-                ptr: s,
-                value: one,
-            });
+            self.emit(Inst::Store { ptr: s, value: one });
             Some(s)
         } else {
             None
@@ -6686,15 +6780,9 @@ impl<'a> FunctionLowerer<'a> {
             }
             let key_slot = if let Some(kty) = key_ty {
                 let ks = self.value();
-                self.emit(Inst::Alloca {
-                    out: ks,
-                    ty: kty,
-                });
+                self.emit(Inst::Alloca { out: ks, ty: kty });
                 let null = self.value();
-                self.emit(Inst::NullHeap {
-                    out: null,
-                    ty: kty,
-                });
+                self.emit(Inst::NullHeap { out: null, ty: kty });
                 self.emit(Inst::Store {
                     ptr: ks,
                     value: null,
@@ -6923,27 +7011,27 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     // Common store path for non-struct/ptr-slice elements
                     if !matches!(slice_ty, Type::StructSlice(_) | Type::PtrSlice(_)) {
-                    self.emit(Inst::Store {
-                        ptr: vslot,
-                        value: elem,
-                    });
-                    if vname != "_" {
-                        self.locals.insert(vname.clone(), (vslot, elem_ty));
-                        if elem_ty.is_heap() {
-                            self.heap_owned.insert(vname.clone(), true);
-                        }
-                    } else if elem_ty.is_heap() {
-                        self.emit_drop(elem, elem_ty);
-                        let null = self.value();
-                        self.emit(Inst::NullHeap {
-                            out: null,
-                            ty: elem_ty,
-                        });
                         self.emit(Inst::Store {
                             ptr: vslot,
-                            value: null,
+                            value: elem,
                         });
-                    }
+                        if vname != "_" {
+                            self.locals.insert(vname.clone(), (vslot, elem_ty));
+                            if elem_ty.is_heap() {
+                                self.heap_owned.insert(vname.clone(), true);
+                            }
+                        } else if elem_ty.is_heap() {
+                            self.emit_drop(elem, elem_ty);
+                            let null = self.value();
+                            self.emit(Inst::NullHeap {
+                                out: null,
+                                ty: elem_ty,
+                            });
+                            self.emit(Inst::Store {
+                                ptr: vslot,
+                                value: null,
+                            });
+                        }
                     } // end non-struct-slice common path
                     let _ = val_only;
                 }
@@ -7027,10 +7115,9 @@ impl<'a> FunctionLowerer<'a> {
                     });
                     // Struct-key maps store a heap pointer as the i64 key — retype.
                     let key_ty = match &for_kind {
-                        ForIter::MapIPtr(vk) => vk
-                            .struct_key_id()
-                            .map(Type::Struct)
-                            .unwrap_or(Type::I64),
+                        ForIter::MapIPtr(vk) => {
+                            vk.struct_key_id().map(Type::Struct).unwrap_or(Type::I64)
+                        }
                         _ => Type::I64,
                     };
                     let kslot = self.value();
@@ -7399,9 +7486,7 @@ impl<'a> FunctionLowerer<'a> {
                         if let Some(id) = self.structs.struct_id(name) {
                             Type::StructSlice(id)
                         } else {
-                            return Err(IrError::new(
-                                "native IR: unsupported array element type",
-                            ));
+                            return Err(IrError::new("native IR: unsupported array element type"));
                         }
                     }
                     // Nested slice literal: `[[1,2],[3]]` → [][]int
@@ -7436,8 +7521,16 @@ impl<'a> FunctionLowerer<'a> {
                             Type::FloatSlice => Type::PtrSlice(MapValKind::FloatSlice),
                             Type::ByteSlice => Type::PtrSlice(MapValKind::ByteSlice),
                             Type::BoolSlice => Type::PtrSlice(MapValKind::BoolSlice),
-                            Type::PtrSlice(vk) => Type::PtrSlice(MapValKind::from_type(Type::PtrSlice(vk))),
-                            other if other.is_heap() || matches!(other, Type::ChanI | Type::ChanS | Type::ChanF | Type::ChanP(_)) => {
+                            Type::PtrSlice(vk) => {
+                                Type::PtrSlice(MapValKind::from_type(Type::PtrSlice(vk)))
+                            }
+                            other
+                                if other.is_heap()
+                                    || matches!(
+                                        other,
+                                        Type::ChanI | Type::ChanS | Type::ChanF | Type::ChanP(_)
+                                    ) =>
+                            {
                                 Type::PtrSlice(MapValKind::from_type(other))
                             }
                             _ => {
@@ -7655,7 +7748,11 @@ impl<'a> FunctionLowerer<'a> {
                         }
                         Ok((out, Type::I64, false))
                     }
-                    Type::IntSlice | Type::FloatSlice | Type::ByteSlice | Type::BoolSlice | Type::StrSlice => {
+                    Type::IntSlice
+                    | Type::FloatSlice
+                    | Type::ByteSlice
+                    | Type::BoolSlice
+                    | Type::StrSlice => {
                         if ity != Type::I64 || iowned {
                             return Err(IrError::new("native IR: slice index must be int"));
                         }
@@ -7826,9 +7923,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::MapSI => {
                         if ity != Type::Str {
-                            return Err(IrError::new(
-                                "native IR: map[string] key must be string",
-                            ));
+                            return Err(IrError::new("native IR: map[string] key must be string"));
                         }
                         self.emit(Inst::Call {
                             out: Some(out),
@@ -7846,9 +7941,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::MapSPtr(vk) => {
                         if ity != Type::Str {
-                            return Err(IrError::new(
-                                "native IR: map[string] key must be string",
-                            ));
+                            return Err(IrError::new("native IR: map[string] key must be string"));
                         }
                         self.emit(Inst::Call {
                             out: Some(out),
@@ -7907,9 +8000,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::MapIF => {
                         if ity != Type::I64 || iowned {
-                            return Err(IrError::new(
-                                "native IR: map[int]float key must be int",
-                            ));
+                            return Err(IrError::new("native IR: map[int]float key must be int"));
                         }
                         self.emit(Inst::Call {
                             out: Some(out),
@@ -7924,9 +8015,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Type::MapFI => {
                         if ity != Type::F64 || iowned {
-                            return Err(IrError::new(
-                                "native IR: map[float]int key must be float",
-                            ));
+                            return Err(IrError::new("native IR: map[float]int key must be float"));
                         }
                         self.emit(Inst::Call {
                             out: Some(out),
@@ -8223,9 +8312,9 @@ impl<'a> FunctionLowerer<'a> {
                         || made_ty == Type::ChanF
                         || matches!(made_ty, Type::ChanP(_))
                     {
-                        let len = len
-                            .as_deref()
-                            .ok_or_else(|| IrError::new("native IR: make(chan) requires capacity"))?;
+                        let len = len.as_deref().ok_or_else(|| {
+                            IrError::new("native IR: make(chan) requires capacity")
+                        })?;
                         let (lv, lt, lo) = self.lower_expr(len)?;
                         if lt != Type::I64 || lo {
                             return Err(IrError::new("native IR: make(chan) capacity must int"));
@@ -8269,9 +8358,7 @@ impl<'a> FunctionLowerer<'a> {
                 // make(queue[string], n) → mq_new + mq_declare("_", n); handle is I64.
                 if let TypeExpr::Generic(name, gargs) = ty {
                     if name == "queue" && gargs.len() == 1 {
-                        let cap_expr = len
-                            .as_deref()
-                            .or(cap.as_deref());
+                        let cap_expr = len.as_deref().or(cap.as_deref());
                         let cv = if let Some(ce) = cap_expr {
                             let (v, t, o) = self.lower_expr(ce)?;
                             if t != Type::I64 || o {
@@ -8486,9 +8573,7 @@ impl<'a> FunctionLowerer<'a> {
                             ret: Some(Type::I64),
                         }),
                         _ => {
-                            return Err(IrError::new(
-                                "native IR: cap expects a slice type",
-                            ));
+                            return Err(IrError::new("native IR: cap expects a slice type"));
                         }
                     }
                     if o {
@@ -8509,7 +8594,9 @@ impl<'a> FunctionLowerer<'a> {
                         Type::MapIPtr(vk)
                             if matches!(kt, Type::Struct(_)) && vk.struct_key_id().is_some() =>
                         {
-                            let Type::Struct(sid) = kt else { unreachable!() };
+                            let Type::Struct(sid) = kt else {
+                                unreachable!()
+                            };
                             let (nf, sm, nm, nfp, nsp) = self.struct_key_meta(sid);
                             self.emit(Inst::Call {
                                 out: Some(raw),
@@ -8521,10 +8608,11 @@ impl<'a> FunctionLowerer<'a> {
                                 self.emit_drop(k, Type::Struct(sid));
                             }
                         }
-                        Type::MapIPtr(_) | Type::MapII
-                            if matches!(kt, Type::Struct(sid) if !self.structs.is_enum(sid)) =>
+                        Type::MapIPtr(_) | Type::MapII if matches!(kt, Type::Struct(sid) if !self.structs.is_enum(sid)) =>
                         {
-                            let Type::Struct(sid) = kt else { unreachable!() };
+                            let Type::Struct(sid) = kt else {
+                                unreachable!()
+                            };
                             let (nf, sm, nm, nfp, nsp) = self.struct_key_meta(sid);
                             self.emit(Inst::Call {
                                 out: Some(raw),
@@ -8616,10 +8704,11 @@ impl<'a> FunctionLowerer<'a> {
                         Type::MapIPtr(vk)
                             if matches!(kt, Type::Struct(_)) && vk.struct_key_id().is_some() =>
                         {
-                            let Type::Struct(sid) = kt else { unreachable!() };
+                            let Type::Struct(sid) = kt else {
+                                unreachable!()
+                            };
                             let (nf, sm, nm, nfp, nsp) = self.struct_key_meta(sid);
-                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) =
-                                self.struct_map_value_meta(vk);
+                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                             self.emit(Inst::Call {
                                 out: None,
                                 function: "mako_native_map_struct_key_delete_ptr".into(),
@@ -8632,10 +8721,11 @@ impl<'a> FunctionLowerer<'a> {
                                 self.emit_drop(k, Type::Struct(sid));
                             }
                         }
-                        Type::MapIPtr(_) | Type::MapII
-                            if matches!(kt, Type::Struct(sid) if !self.structs.is_enum(sid)) =>
+                        Type::MapIPtr(_) | Type::MapII if matches!(kt, Type::Struct(sid) if !self.structs.is_enum(sid)) =>
                         {
-                            let Type::Struct(sid) = kt else { unreachable!() };
+                            let Type::Struct(sid) = kt else {
+                                unreachable!()
+                            };
                             let (nf, sm, nm, nfp, nsp) = self.struct_key_meta(sid);
                             let zero = self.const_int(0, Type::I64);
                             self.emit(Inst::Call {
@@ -8763,17 +8853,24 @@ impl<'a> FunctionLowerer<'a> {
                 // mask for the smaller signed widths when needed later).
                 if matches!(
                     function.as_str(),
-                    "int" | "int64" | "int32" | "int16" | "int8" | "uint64" | "uint32"
-                        | "uint16" | "uint8" | "byte" | "rune"
+                    "int"
+                        | "int64"
+                        | "int32"
+                        | "int16"
+                        | "int8"
+                        | "uint64"
+                        | "uint32"
+                        | "uint16"
+                        | "uint8"
+                        | "byte"
+                        | "rune"
                 ) && args.len() == 1
                 {
                     let (v, ty, owned) = self.lower_expr(&args[0])?;
                     match ty {
                         Type::I64 => {
                             if owned {
-                                return Err(IrError::new(
-                                    "native IR: integer cast of owned value",
-                                ));
+                                return Err(IrError::new("native IR: integer cast of owned value"));
                             }
                             // Truncate narrow destinations so print/arith match
                             // the C backend's intN_t narrowing.
@@ -9591,9 +9688,7 @@ impl<'a> FunctionLowerer<'a> {
                     let (v, vt, vo) = self.lower_expr(&args[0])?;
                     let (p, pt, po) = self.lower_expr(&args[1])?;
                     if vt != Type::F64 || pt != Type::I64 || vo || po {
-                        return Err(IrError::new(
-                            "native IR: format_float expects (float, int)",
-                        ));
+                        return Err(IrError::new("native IR: format_float expects (float, int)"));
                     }
                     let out = self.value();
                     self.emit(Inst::Call {
@@ -9910,11 +10005,7 @@ impl<'a> FunctionLowerer<'a> {
                         (Type::StrSlice, Type::Str, _) => {}
                         (Type::StructSlice(sid), Type::Struct(eid), _) if sid == eid => {}
                         (Type::PtrSlice(_), _, _) if ptr_elem_ok => {}
-                        _ => {
-                            return Err(IrError::new(
-                                "native IR: append element type mismatch",
-                            ))
-                        }
+                        _ => return Err(IrError::new("native IR: append element type mismatch")),
                     }
                     // `append` consumes its input header. A borrowed parameter
                     // or alias must first be cloned; otherwise append would free
@@ -10036,7 +10127,12 @@ impl<'a> FunctionLowerer<'a> {
                     });
                     return Ok((self.const_int(0, Type::I64), Type::I64, false));
                 }
-                if function == "print_int" || function == "print_int64" || function == "print_int32" || function == "print_int8" || function == "print_uint64" {
+                if function == "print_int"
+                    || function == "print_int64"
+                    || function == "print_int32"
+                    || function == "print_int8"
+                    || function == "print_uint64"
+                {
                     if args.len() != 1 {
                         return Err(IrError::new("native IR: print_int arity"));
                     }
@@ -10179,8 +10275,7 @@ impl<'a> FunctionLowerer<'a> {
                             _ => None,
                         };
                         if let Some(ret_ty) = ret_ty {
-                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) =
-                                self.struct_map_value_meta(vk);
+                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                             self.emit(Inst::Call {
                                 out: Some(out),
                                 function: "mako_native_maps_values_struct_key".into(),
@@ -10207,20 +10302,14 @@ impl<'a> FunctionLowerer<'a> {
                         }
                         Type::MapIPtr(MapValKind::StructKeyStr(_)) => {
                             // Values are string pointers stored as i64 → treat as []string via ptr slice.
-                            (
-                                "mako_native_maps_values_ii_as_ptr_slice",
-                                Type::StrSlice,
-                            )
+                            ("mako_native_maps_values_ii_as_ptr_slice", Type::StrSlice)
                         }
                         Type::MapIPtr(MapValKind::StructKeyStrSlice(_)) => (
                             "mako_native_maps_values_ii_as_ptr_slice",
                             Type::PtrSlice(MapValKind::StrSlice),
                         ),
                         Type::MapIPtr(MapValKind::StructKeyFloat(_)) => {
-                            (
-                                "mako_native_maps_values_ii_as_float_ptr",
-                                Type::FloatSlice,
-                            )
+                            ("mako_native_maps_values_ii_as_float_ptr", Type::FloatSlice)
                         }
                         Type::MapIPtr(MapValKind::StructKeyFloatSlice(_)) => (
                             "mako_native_maps_values_ii_as_ptr_slice",
@@ -10236,31 +10325,24 @@ impl<'a> FunctionLowerer<'a> {
                         ),
                         Type::MapSI => ("mako_native_maps_values_si_as_i64_ptr", Type::IntSlice),
                         // map[string]bool / scalar 0-1 values stored in SI table.
-                        Type::MapSPtr(MapValKind::Other) => (
-                            "mako_native_maps_values_si_as_i64_ptr",
-                            Type::IntSlice,
-                        ),
+                        Type::MapSPtr(MapValKind::Other) => {
+                            ("mako_native_maps_values_si_as_i64_ptr", Type::IntSlice)
+                        }
                         // map[int]bool / scalar 0-1 values stored in II table.
-                        Type::MapIPtr(MapValKind::Other) => (
-                            "mako_native_maps_values_ii_ptr",
-                            Type::IntSlice,
-                        ),
-                        Type::MapSPtr(MapValKind::Float) => (
-                            "mako_native_maps_values_si_as_float_ptr",
-                            Type::FloatSlice,
-                        ),
-                        Type::MapIPtr(MapValKind::Float) => (
-                            "mako_native_maps_values_ii_as_float_ptr",
-                            Type::FloatSlice,
-                        ),
+                        Type::MapIPtr(MapValKind::Other) => {
+                            ("mako_native_maps_values_ii_ptr", Type::IntSlice)
+                        }
+                        Type::MapSPtr(MapValKind::Float) => {
+                            ("mako_native_maps_values_si_as_float_ptr", Type::FloatSlice)
+                        }
+                        Type::MapIPtr(MapValKind::Float) => {
+                            ("mako_native_maps_values_ii_as_float_ptr", Type::FloatSlice)
+                        }
                         Type::MapIPtr(vk) => (
                             "mako_native_maps_values_ii_as_ptr_slice",
                             Type::PtrSlice(vk),
                         ),
-                        Type::MapSPtr(vk) => (
-                            "mako_native_maps_values_si_ptr",
-                            Type::PtrSlice(vk),
-                        ),
+                        Type::MapSPtr(vk) => ("mako_native_maps_values_si_ptr", Type::PtrSlice(vk)),
                         Type::MapSS => ("mako_native_maps_values_ss_ptr", Type::StrSlice),
                         Type::MapIF => ("mako_native_maps_values_if_ptr", Type::FloatSlice),
                         Type::MapFI => ("mako_native_maps_values_fi_ptr", Type::IntSlice),
@@ -10288,8 +10370,7 @@ impl<'a> FunctionLowerer<'a> {
                     if let Type::MapIPtr(vk) = mt {
                         if let Some(sid) = vk.struct_key_id() {
                             let (nf, sm, nm, nfp, nsp) = self.struct_key_meta(sid);
-                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) =
-                                self.struct_map_value_meta(vk);
+                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                             self.emit(Inst::Call {
                                 out: Some(out),
                                 function: "mako_native_map_struct_key_clone_ptr".into(),
@@ -10342,8 +10423,8 @@ impl<'a> FunctionLowerer<'a> {
                                 out: Some(out),
                                 function: "mako_native_maps_equal_struct_key".into(),
                                 args: vec![
-                                    a, b, nf, sm, nm, nfp, nsp, val_kind, val_nf, val_sm,
-                                    val_nm, val_nfp, val_nsp,
+                                    a, b, nf, sm, nm, nfp, nsp, val_kind, val_nf, val_sm, val_nm,
+                                    val_nfp, val_nsp,
                                 ],
                                 ret: Some(Type::I64),
                             });
@@ -10431,8 +10512,7 @@ impl<'a> FunctionLowerer<'a> {
                     if let Type::MapIPtr(vk) = mt {
                         if let Some(sid) = vk.struct_key_id() {
                             let (nf, sm, nm, nfp, nsp) = self.struct_key_meta(sid);
-                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) =
-                                self.struct_map_value_meta(vk);
+                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                             self.emit(Inst::Call {
                                 out: None,
                                 function: "mako_native_maps_clear_struct_key".into(),
@@ -10477,8 +10557,7 @@ impl<'a> FunctionLowerer<'a> {
                     if let Type::MapIPtr(vk) = dt {
                         if let Some(sid) = vk.struct_key_id() {
                             let (nf, sm, nm, nfp, nsp) = self.struct_key_meta(sid);
-                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) =
-                                self.struct_map_value_meta(vk);
+                            let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                             self.emit(Inst::Call {
                                 out: None,
                                 function: "mako_native_maps_copy_struct_key".into(),
@@ -10590,10 +10669,7 @@ impl<'a> FunctionLowerer<'a> {
                         c.push(format!("{function}__{}__{}", tags[0], tags[1]));
                     }
                     if tags.len() >= 3 {
-                        c.push(format!(
-                            "{function}__{}__{}__{}",
-                            tags[0], tags[1], tags[2]
-                        ));
+                        c.push(format!("{function}__{}__{}__{}", tags[0], tags[1], tags[2]));
                     }
                     // Also consider every registered monomorph of this base.
                     let prefix = format!("{function}__");
@@ -10651,17 +10727,14 @@ impl<'a> FunctionLowerer<'a> {
                                 .map(|(p, r)| (n.clone(), p, r))
                         })
                     })
-                    .ok_or_else(|| {
-                        IrError::new(format!("native IR: unknown call `{function}`"))
-                    })?;
+                    .ok_or_else(|| IrError::new(format!("native IR: unknown call `{function}`")))?;
                 if params.len() != args.len() {
                     return Err(IrError::new("native IR: call arity mismatch"));
                 }
                 let mut lowered = Vec::with_capacity(args.len());
                 let mut temporary_owned = Vec::new();
-                for (arg_expr, ((value0, actual0, mut owned), expected)) in args
-                    .iter()
-                    .zip(lowered_raw.into_iter().zip(params))
+                for (arg_expr, ((value0, actual0, mut owned), expected)) in
+                    args.iter().zip(lowered_raw.into_iter().zip(params))
                 {
                     let mut value = value0;
                     let mut actual = actual0;
@@ -10708,8 +10781,7 @@ impl<'a> FunctionLowerer<'a> {
                             || (expected == Type::I64 && actual == Type::Opaque)
                             || (matches!(expected, Type::OwnedOpaque(_)) && actual == Type::I64)
                             || (expected == Type::I64 && matches!(actual, Type::OwnedOpaque(_)))
-                            || (expected == Type::Opaque
-                                && matches!(actual, Type::OwnedOpaque(_)))
+                            || (expected == Type::Opaque && matches!(actual, Type::OwnedOpaque(_)))
                             || (matches!(expected, Type::OwnedOpaque(_)) && actual == Type::Opaque)
                         {
                             // Domain handles (EvLoop, GameUDP, TlsConn, …) are
@@ -10823,9 +10895,10 @@ impl<'a> FunctionLowerer<'a> {
                 update,
             } => {
                 let structs = self.structs;
-                let id = *structs.by_name.get(name).ok_or_else(|| {
-                    IrError::new(format!("native IR: unknown struct `{name}`"))
-                })?;
+                let id = *structs
+                    .by_name
+                    .get(name)
+                    .ok_or_else(|| IrError::new(format!("native IR: unknown struct `{name}`")))?;
                 let nfields = structs.field_count(id);
                 let mut slots: Vec<Option<Value>> = vec![None; nfields];
                 for (fname, fexpr) in fields {
@@ -10837,7 +10910,9 @@ impl<'a> FunctionLowerer<'a> {
                         return Err(IrError::new("native IR: struct field type mismatch"));
                     }
                     if slots[index as usize].is_some() {
-                        return Err(IrError::new(format!("native IR: duplicate field `{fname}`")));
+                        return Err(IrError::new(format!(
+                            "native IR: duplicate field `{fname}`"
+                        )));
                     }
                     // Shared handles: move ownership out of a bare local so the
                     // struct is the sole freer (clone is identity for these).
@@ -10908,7 +10983,9 @@ impl<'a> FunctionLowerer<'a> {
                         Some(v) => field_values.push(v),
                         None => {
                             let fname = structs.field_name(id, i);
-                            return Err(IrError::new(format!("native IR: missing field `{fname}`")));
+                            return Err(IrError::new(format!(
+                                "native IR: missing field `{fname}`"
+                            )));
                         }
                     }
                 }
@@ -10922,9 +10999,10 @@ impl<'a> FunctionLowerer<'a> {
             }
             Expr::StructLitPos { name, values } => {
                 let structs = self.structs;
-                let id = *structs.by_name.get(name).ok_or_else(|| {
-                    IrError::new(format!("native IR: unknown struct `{name}`"))
-                })?;
+                let id = *structs
+                    .by_name
+                    .get(name)
+                    .ok_or_else(|| IrError::new(format!("native IR: unknown struct `{name}`")))?;
                 let field_types: Vec<Type> = structs.field_types(id);
                 // Go-style: full positional `Point{1, 2}` or zero-value `Point{}`.
                 if !values.is_empty() && values.len() != field_types.len() {
@@ -10936,10 +11014,7 @@ impl<'a> FunctionLowerer<'a> {
                     for field_ty in &field_types {
                         let z = if field_ty.is_heap() || matches!(field_ty, Type::Struct(_)) {
                             let out = self.value();
-                            self.emit(Inst::NullHeap {
-                                out,
-                                ty: *field_ty,
-                            });
+                            self.emit(Inst::NullHeap { out, ty: *field_ty });
                             out
                         } else if *field_ty == Type::F64 {
                             let out = self.value();
@@ -11034,11 +11109,7 @@ impl<'a> FunctionLowerer<'a> {
                     return Err(IrError::new("native IR: join expects a task"));
                 }
                 let joined_ty = match inner.as_ref() {
-                    Expr::Ident(name) => self
-                        .job_ret_tys
-                        .get(name)
-                        .copied()
-                        .unwrap_or(Type::I64),
+                    Expr::Ident(name) => self.job_ret_tys.get(name).copied().unwrap_or(Type::I64),
                     _ => Type::I64,
                 };
                 let out = self.value();
@@ -11051,10 +11122,9 @@ impl<'a> FunctionLowerer<'a> {
                 // Note Result Err into enclosing nursery for wait()/err_count.
                 if let Type::Struct(eid) = joined_ty {
                     if self.structs.is_enum(eid) {
-                        if let (Expr::Ident(jname), Some(err_info)) = (
-                            inner.as_ref(),
-                            self.structs.variant_in_enum("Err", eid),
-                        ) {
+                        if let (Expr::Ident(jname), Some(err_info)) =
+                            (inner.as_ref(), self.structs.variant_in_enum("Err", eid))
+                        {
                             if let Some(crew) = self.job_crews.get(jname).cloned() {
                                 if let Some((nslot, Type::Nursery)) =
                                     self.locals.get(&crew).copied()
@@ -11130,7 +11200,9 @@ impl<'a> FunctionLowerer<'a> {
     ) -> Result<(Value, Type, bool), IrError> {
         let (condition, cty, cowned) = self.lower_expr(cond)?;
         if cowned {
-            return Err(IrError::new("native IR: owned string if-expression condition"));
+            return Err(IrError::new(
+                "native IR: owned string if-expression condition",
+            ));
         }
         let condition = match cty {
             Type::I1 => condition,
@@ -11148,7 +11220,9 @@ impl<'a> FunctionLowerer<'a> {
                 cmp
             }
             _ => {
-                return Err(IrError::new("native IR: if-expression condition must be bool"));
+                return Err(IrError::new(
+                    "native IR: if-expression condition must be bool",
+                ));
             }
         };
         let result_slot = self.value();
@@ -11247,11 +11321,7 @@ impl<'a> FunctionLowerer<'a> {
         if pty != Type::Str {
             return Err(IrError::new("native IR: wrap_err prefix expects string"));
         }
-        let prefix_owned = if po {
-            p
-        } else {
-            self.emit_clone(p, Type::Str)
-        };
+        let prefix_owned = if po { p } else { self.emit_clone(p, Type::Str) };
 
         let tag = self.value();
         self.emit(Inst::StructField {
@@ -11287,7 +11357,9 @@ impl<'a> FunctionLowerer<'a> {
 
         // Ok: keep r, drop prefix.
         self.current = ok_block;
-        self.emit(Inst::DropString { value: prefix_owned });
+        self.emit(Inst::DropString {
+            value: prefix_owned,
+        });
         self.emit(Inst::Store {
             ptr: result_slot,
             value: r,
@@ -11325,7 +11397,9 @@ impl<'a> FunctionLowerer<'a> {
             left: prefix_owned,
             right: sep,
         });
-        self.emit(Inst::DropString { value: prefix_owned });
+        self.emit(Inst::DropString {
+            value: prefix_owned,
+        });
         // sep is a literal (non-owned) — no drop.
         let msg = self.value();
         self.emit(Inst::StringConcat {
@@ -11334,7 +11408,9 @@ impl<'a> FunctionLowerer<'a> {
             right: old_err_owned,
         });
         self.emit(Inst::DropString { value: mid });
-        self.emit(Inst::DropString { value: old_err_owned });
+        self.emit(Inst::DropString {
+            value: old_err_owned,
+        });
         // Build Err(msg).
         let info = self
             .structs
@@ -11382,7 +11458,9 @@ impl<'a> FunctionLowerer<'a> {
         }
         let (mut b, bty, bo) = self.lower_expr(right)?;
         if bty != aty {
-            return Err(IrError::new("native IR: error_join Result types must match"));
+            return Err(IrError::new(
+                "native IR: error_join Result types must match",
+            ));
         }
         if !bo {
             b = self.emit_clone(b, bty);
@@ -11685,20 +11763,12 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     /// `errorf(fmt, arg)` — Err with `%s` substitution (or `fmt: arg`).
-    fn lower_errorf(
-        &mut self,
-        fmt: &Expr,
-        arg: &Expr,
-    ) -> Result<(Value, Type, bool), IrError> {
+    fn lower_errorf(&mut self, fmt: &Expr, arg: &Expr) -> Result<(Value, Type, bool), IrError> {
         self.lower_tagged_err_msg(fmt, arg, "errorf")
     }
 
     /// `error_tag(tag, msg)` → `Err("tag: msg")` (enum-like string tags).
-    fn lower_error_tag(
-        &mut self,
-        tag: &Expr,
-        msg: &Expr,
-    ) -> Result<(Value, Type, bool), IrError> {
+    fn lower_error_tag(&mut self, tag: &Expr, msg: &Expr) -> Result<(Value, Type, bool), IrError> {
         self.lower_tagged_err_msg(tag, msg, "error_tag")
     }
 
@@ -11715,16 +11785,8 @@ impl<'a> FunctionLowerer<'a> {
             return Err(IrError::new(format!("native IR: {who} expects strings")));
         }
         // Seed: always `left + ": " + right` (matches mako_error_tag / simple errorf).
-        let f_owned = if fo {
-            f
-        } else {
-            self.emit_clone(f, Type::Str)
-        };
-        let a_owned = if ao {
-            a
-        } else {
-            self.emit_clone(a, Type::Str)
-        };
+        let f_owned = if fo { f } else { self.emit_clone(f, Type::Str) };
+        let a_owned = if ao { a } else { self.emit_clone(a, Type::Str) };
         let sep = self.value();
         self.emit(Inst::StringLiteral {
             out: sep,
@@ -11809,7 +11871,10 @@ impl<'a> FunctionLowerer<'a> {
 
         self.current = ok_block;
         let f = self.const_int(0, Type::I1);
-        self.emit(Inst::Store { ptr: slot, value: f });
+        self.emit(Inst::Store {
+            ptr: slot,
+            value: f,
+        });
         if no {
             self.emit(Inst::DropString { value: n });
         }
@@ -11904,10 +11969,7 @@ impl<'a> FunctionLowerer<'a> {
         let ok_block = self.new_block();
         let merge = self.new_block();
         let slot = self.value();
-        self.emit(Inst::Alloca {
-            out: slot,
-            ty: rty,
-        });
+        self.emit(Inst::Alloca { out: slot, ty: rty });
         self.terminate(Terminator::Branch {
             condition: is_err,
             then_block: err_block,
@@ -11916,11 +11978,7 @@ impl<'a> FunctionLowerer<'a> {
 
         // Ok: clone / move result through.
         self.current = ok_block;
-        let ok_val = if owned {
-            r
-        } else {
-            self.emit_clone(r, rty)
-        };
+        let ok_val = if owned { r } else { self.emit_clone(r, rty) };
         self.emit(Inst::Store {
             ptr: slot,
             value: ok_val,
@@ -12132,7 +12190,10 @@ impl<'a> FunctionLowerer<'a> {
         })?;
         self.current = ok_block;
         let f = self.const_int(0, Type::I1);
-        self.emit(Inst::Store { ptr: slot, value: f });
+        self.emit(Inst::Store {
+            ptr: slot,
+            value: f,
+        });
         if to {
             self.emit(Inst::DropString { value: t });
         }
@@ -12170,7 +12231,10 @@ impl<'a> FunctionLowerer<'a> {
             from: Type::I64,
             to: Type::I1,
         });
-        self.emit(Inst::Store { ptr: slot, value: b });
+        self.emit(Inst::Store {
+            ptr: slot,
+            value: b,
+        });
         if to {
             self.emit(Inst::DropString { value: t });
         }
@@ -12860,10 +12924,7 @@ impl<'a> FunctionLowerer<'a> {
         Ok((self.const_int(0, Type::I64), Type::I64, false))
     }
 
-    fn drop_arm_locals(
-        &mut self,
-        keep: &HashMap<String, (Value, Type)>,
-    ) -> Result<(), IrError> {
+    fn drop_arm_locals(&mut self, keep: &HashMap<String, (Value, Type)>) -> Result<(), IrError> {
         let owned: Vec<_> = self
             .heap_owned
             .iter()
@@ -12875,11 +12936,7 @@ impl<'a> FunctionLowerer<'a> {
             }
             if let Some((ptr, ty)) = self.locals.get(&name).copied() {
                 let v = self.value();
-                self.emit(Inst::Load {
-                    out: v,
-                    ptr,
-                    ty,
-                });
+                self.emit(Inst::Load { out: v, ptr, ty });
                 self.emit_drop(v, ty);
                 self.heap_owned.insert(name, false);
             }
@@ -12964,8 +13021,14 @@ impl<'a> FunctionLowerer<'a> {
                         true
                     }
                     Type::Struct(_) => false,
-                    Type::StructSlice(_) | Type::PtrSlice(_) | Type::MapII | Type::MapSI
-                    | Type::MapSS | Type::MapIF | Type::MapFI | Type::MapIPtr(_)
+                    Type::StructSlice(_)
+                    | Type::PtrSlice(_)
+                    | Type::MapII
+                    | Type::MapSI
+                    | Type::MapSS
+                    | Type::MapIF
+                    | Type::MapFI
+                    | Type::MapIPtr(_)
                     | Type::MapSPtr(_) => {
                         // len(map)/len(slice) style via runtime helpers later; for
                         // now maps use free `len()` call, not method form.
@@ -13025,11 +13088,7 @@ impl<'a> FunctionLowerer<'a> {
         // Task.join() — retype joined i64 bits as the kicked function return type.
         if rty == Type::Task && method == "join" && args.is_empty() {
             let joined_ty = match receiver {
-                Expr::Ident(name) => self
-                    .job_ret_tys
-                    .get(name)
-                    .copied()
-                    .unwrap_or(Type::I64),
+                Expr::Ident(name) => self.job_ret_tys.get(name).copied().unwrap_or(Type::I64),
                 _ => Type::I64,
             };
             let out = self.value();
@@ -13042,14 +13101,11 @@ impl<'a> FunctionLowerer<'a> {
             // Result-returning jobs: record Err into enclosing nursery (err_count).
             if let Type::Struct(eid) = joined_ty {
                 if self.structs.is_enum(eid) {
-                    if let (Expr::Ident(jname), Some(err_info)) = (
-                        receiver,
-                        self.structs.variant_in_enum("Err", eid),
-                    ) {
+                    if let (Expr::Ident(jname), Some(err_info)) =
+                        (receiver, self.structs.variant_in_enum("Err", eid))
+                    {
                         if let Some(crew) = self.job_crews.get(jname).cloned() {
-                            if let Some((nslot, Type::Nursery)) =
-                                self.locals.get(&crew).copied()
-                            {
+                            if let Some((nslot, Type::Nursery)) = self.locals.get(&crew).copied() {
                                 let n = self.value();
                                 self.emit(Inst::Load {
                                     out: n,
@@ -13112,14 +13168,12 @@ impl<'a> FunctionLowerer<'a> {
         if rty == Type::Task && method == "join_deadline" && args.len() == 1 {
             let (dl, dty, do_) = self.lower_expr(&args[0])?;
             if dty != Type::I64 || do_ {
-                return Err(IrError::new("native IR: join_deadline expects deadline int"));
+                return Err(IrError::new(
+                    "native IR: join_deadline expects deadline int",
+                ));
             }
             let joined_ty = match receiver {
-                Expr::Ident(name) => self
-                    .job_ret_tys
-                    .get(name)
-                    .copied()
-                    .unwrap_or(Type::I64),
+                Expr::Ident(name) => self.job_ret_tys.get(name).copied().unwrap_or(Type::I64),
                 _ => Type::I64,
             };
             // If already Result[*,string], return that type; else wrap I64 in Result.
@@ -13577,7 +13631,9 @@ impl<'a> FunctionLowerer<'a> {
                             });
                             v = w;
                         } else if !vt.is_ptr_sized() || vt == Type::F64 {
-                            return Err(IrError::new("native IR: chan[T].send payload unsupported"));
+                            return Err(IrError::new(
+                                "native IR: chan[T].send payload unsupported",
+                            ));
                         } else {
                             // Move owned heap into the channel (caller must not drop).
                             if vo {
@@ -13591,7 +13647,9 @@ impl<'a> FunctionLowerer<'a> {
                     } else {
                         // String channel: pass owned string pointer as i64 payload.
                         if vt != Type::Str {
-                            return Err(IrError::new("native IR: chan[string].send expects string"));
+                            return Err(IrError::new(
+                                "native IR: chan[string].send expects string",
+                            ));
                         }
                         if !vo {
                             v = self.emit_clone(v, Type::Str);
@@ -13973,7 +14031,9 @@ impl<'a> FunctionLowerer<'a> {
                         }
                     } else if matches!(rty, Type::ChanP(_)) {
                         if !vt.is_ptr_sized() || vt == Type::F64 {
-                            return Err(IrError::new("native IR: send_timeout payload unsupported"));
+                            return Err(IrError::new(
+                                "native IR: send_timeout payload unsupported",
+                            ));
                         }
                         if !vo && vt.is_heap() {
                             v = self.emit_clone(v, vt);
@@ -14273,9 +14333,7 @@ impl<'a> FunctionLowerer<'a> {
             if let Some((fn_name, (params, ret))) = self
                 .signatures
                 .iter()
-                .find(|(name, (params, _))| {
-                    name.ends_with(&suffix) && params.len() == args.len()
-                })
+                .find(|(name, (params, _))| name.ends_with(&suffix) && params.len() == args.len())
                 .map(|(n, sig)| (n.clone(), sig.clone()))
             {
                 if rowned {
@@ -14590,8 +14648,7 @@ impl<'a> FunctionLowerer<'a> {
         }
         let mut values = Vec::with_capacity(items.len());
         for item in items {
-            let (mut v, ty, owned) =
-                self.lower_expr_for_expected(item, expected_elem)?;
+            let (mut v, ty, owned) = self.lower_expr_for_expected(item, expected_elem)?;
             // Allow bool↔int and pointer-sized identity aliases (e.g. ChanI vs
             // ChanP(Other) in []chan[T] seeds, Opaque handles as I64 slots).
             let compatible = ty == expected_elem
@@ -14777,10 +14834,7 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn lower_byte_array_literal(
-        &mut self,
-        items: &[Expr],
-    ) -> Result<(Value, Type, bool), IrError> {
+    fn lower_byte_array_literal(&mut self, items: &[Expr]) -> Result<(Value, Type, bool), IrError> {
         let mut values = Vec::with_capacity(items.len());
         for item in items {
             let (v, ty, owned) = self.lower_expr(item)?;
@@ -14819,9 +14873,7 @@ impl<'a> FunctionLowerer<'a> {
     ) -> Result<(Value, Type, bool), IrError> {
         let (r, rty, owned) = self.lower_expr(result)?;
         let Type::Struct(id) = rty else {
-            return Err(IrError::new(
-                "native IR: result_unwrap_or expects Result",
-            ));
+            return Err(IrError::new("native IR: result_unwrap_or expects Result"));
         };
         let (d, dty, do_) = self.lower_expr(default)?;
         if dty != Type::I64 || do_ {
@@ -15091,7 +15143,11 @@ impl<'a> FunctionLowerer<'a> {
         for (i, arm) in arms.iter().enumerate() {
             let is_last = i == arms.len() - 1;
             let arm_block = self.new_block();
-            let next_block = if is_last { None } else { Some(self.new_block()) };
+            let next_block = if is_last {
+                None
+            } else {
+                Some(self.new_block())
+            };
             self.current = test_block;
             match &arm.pattern {
                 Pattern::Wildcard | Pattern::Ident(_) => {
@@ -15262,10 +15318,7 @@ impl<'a> FunctionLowerer<'a> {
                         fv
                     };
                     let slot = self.value();
-                    self.emit(Inst::Alloca {
-                        out: slot,
-                        ty: fty,
-                    });
+                    self.emit(Inst::Alloca { out: slot, ty: fty });
                     self.emit(Inst::Store {
                         ptr: slot,
                         value: bound,
@@ -15330,10 +15383,7 @@ impl<'a> FunctionLowerer<'a> {
                         fv
                     };
                     let slot = self.value();
-                    self.emit(Inst::Alloca {
-                        out: slot,
-                        ty: fty,
-                    });
+                    self.emit(Inst::Alloca { out: slot, ty: fty });
                     self.emit(Inst::Store {
                         ptr: slot,
                         value: bound,
@@ -15345,9 +15395,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             _ => {
-                return Err(IrError::new(
-                    "native IR: unsupported tuple match pattern",
-                ));
+                return Err(IrError::new("native IR: unsupported tuple match pattern"));
             }
         }
         let result = self.lower_expr(&arm.body)?;
@@ -15421,9 +15469,8 @@ impl<'a> FunctionLowerer<'a> {
                         }
                     });
                 }
-                let cond = any.ok_or_else(|| {
-                    IrError::new("native IR: scalar match arm has no literals")
-                })?;
+                let cond =
+                    any.ok_or_else(|| IrError::new("native IR: scalar match arm has no literals"))?;
                 self.terminate(Terminator::Branch {
                     condition: cond,
                     then_block: arm_block,
@@ -15437,7 +15484,10 @@ impl<'a> FunctionLowerer<'a> {
             if let Some(name) = bind_name {
                 // Whole-scrutinee identifier binding (`x => x + 1`).
                 let local = self.value();
-                self.emit(Inst::Alloca { out: local, ty: sty });
+                self.emit(Inst::Alloca {
+                    out: local,
+                    ty: sty,
+                });
                 self.emit(Inst::Store {
                     ptr: local,
                     value: scrutinee,
@@ -15563,9 +15613,7 @@ impl<'a> FunctionLowerer<'a> {
                 for part in parts {
                     let (vs, catch, bind) = self.resolve_scalar_pattern(part, sty)?;
                     if catch || bind.is_some() {
-                        return Err(IrError::new(
-                            "native IR: or-pattern must be literal-only",
-                        ));
+                        return Err(IrError::new("native IR: or-pattern must be literal-only"));
                     }
                     values.extend(vs);
                 }
@@ -15625,7 +15673,11 @@ impl<'a> FunctionLowerer<'a> {
 
             self.current = test_block;
             let arm_block = self.new_block();
-            let next_block = if is_last { None } else { Some(self.new_block()) };
+            let next_block = if is_last {
+                None
+            } else {
+                Some(self.new_block())
+            };
             if is_last || catch_all {
                 self.terminate(Terminator::Jump(arm_block))?;
             } else {
@@ -15724,8 +15776,7 @@ impl<'a> FunctionLowerer<'a> {
                     ptr: local,
                     value: sptr,
                 });
-                self.locals
-                    .insert(name, (local, Type::Struct(enum_id)));
+                self.locals.insert(name, (local, Type::Struct(enum_id)));
             }
             for (name, path) in &bindings {
                 // Walk the field path from the scrutinee.
@@ -15997,9 +16048,12 @@ impl<'a> FunctionLowerer<'a> {
                         "native IR: nested variant `{name}` on non-enum payload"
                     )));
                 }
-                let info = self.structs.variant_in_enum(name, inner_id).ok_or_else(|| {
-                    IrError::new(format!("native IR: unknown nested variant `{name}`"))
-                })?;
+                let info = self
+                    .structs
+                    .variant_in_enum(name, inner_id)
+                    .ok_or_else(|| {
+                        IrError::new(format!("native IR: unknown nested variant `{name}`"))
+                    })?;
                 if bindings.len() != info.arity {
                     return Err(IrError::new(
                         "native IR: nested variant pattern arity mismatch",
@@ -16109,7 +16163,10 @@ impl<'a> FunctionLowerer<'a> {
             if self.heap_owned.get(name) == Some(&false) {
                 if let Some(&(slot, _ty)) = self.locals.get(name) {
                     let null = self.const_int(0, Type::I64);
-                    self.emit(Inst::Store { ptr: slot, value: null });
+                    self.emit(Inst::Store {
+                        ptr: slot,
+                        value: null,
+                    });
                 }
             }
         }
@@ -16146,30 +16203,42 @@ impl<'a> FunctionLowerer<'a> {
         // arg types: I64, F64, Str, ChanI, Arena, I1
         type Spec = (&'static str, &'static [Type], Option<Type>, bool);
         let spec: Option<Spec> = match function {
-            "tcp_listen" if args.len() == 1 => {
-                Some(("mako_native_tcp_listen", &[Type::I64], Some(Type::I64), false))
-            }
+            "tcp_listen" if args.len() == 1 => Some((
+                "mako_native_tcp_listen",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
             "tcp_connect" if args.len() == 2 => Some((
                 "mako_native_tcp_connect_ptr",
                 &[Type::Str, Type::I64],
                 Some(Type::I64),
                 false,
             )),
-            "tcp_accept" if args.len() == 1 => {
-                Some(("mako_native_tcp_accept", &[Type::I64], Some(Type::I64), false))
-            }
+            "tcp_accept" if args.len() == 1 => Some((
+                "mako_native_tcp_accept",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
             "tcp_accept_nb" if args.len() == 1 => Some((
                 "mako_native_tcp_accept_nb",
                 &[Type::I64],
                 Some(Type::I64),
                 false,
             )),
-            "tcp_close" if args.len() == 1 => {
-                Some(("mako_native_tcp_close", &[Type::I64], Some(Type::I64), false))
-            }
-            "http_bind" if args.len() == 1 => {
-                Some(("mako_native_http_bind", &[Type::I64], Some(Type::I64), false))
-            }
+            "tcp_close" if args.len() == 1 => Some((
+                "mako_native_tcp_close",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "http_bind" if args.len() == 1 => Some((
+                "mako_native_http_bind",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
             "http_accept" if args.len() == 1 => Some((
                 "mako_native_http_accept",
                 &[Type::I64],
@@ -16278,12 +16347,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "chan_select_value" if args.is_empty() => Some((
-                "mako_native_chan_select_value",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "chan_select_value" if args.is_empty() => {
+                Some(("mako_native_chan_select_value", &[], Some(Type::I64), false))
+            }
             "chan_select2" if args.len() == 3 => Some((
                 "mako_native_chan_select2",
                 &[Type::ChanI, Type::ChanI, Type::I64],
@@ -16296,9 +16362,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "http_echo" if args.len() == 1 => {
-                Some(("mako_native_http_echo", &[Type::I64], Some(Type::I64), false))
-            }
+            "http_echo" if args.len() == 1 => Some((
+                "mako_native_http_echo",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
             "http_serve" if args.len() == 2 => Some((
                 "mako_native_http_serve_ptr",
                 &[Type::I64, Type::Str],
@@ -16479,18 +16548,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "metric_inc" if args.len() == 1 => Some((
-                "mako_native_metric_inc",
-                &[Type::I64],
-                None,
-                false,
-            )),
-            "log_warn" if args.len() == 1 => Some((
-                "mako_native_log_warn_ptr",
-                &[Type::Str],
-                None,
-                false,
-            )),
+            "metric_inc" if args.len() == 1 => {
+                Some(("mako_native_metric_inc", &[Type::I64], None, false))
+            }
+            "log_warn" if args.len() == 1 => {
+                Some(("mako_native_log_warn_ptr", &[Type::Str], None, false))
+            }
             "json_i" if args.len() == 2 => Some((
                 "mako_native_json_i_ptr",
                 &[Type::Str, Type::I64],
@@ -16533,12 +16596,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "mail_msg_new" if args.is_empty() => Some((
-                "mako_native_mail_msg_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "mail_msg_new" if args.is_empty() => {
+                Some(("mako_native_mail_msg_new", &[], Some(Type::I64), false))
+            }
             "smtp_mock_serve_once" if args.is_empty() => Some((
                 "mako_native_smtp_mock_serve_once",
                 &[],
@@ -16559,7 +16619,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "tls_serve_h2_routes" if args.len() == 6 => Some((
                 "mako_native_tls_serve_h2_routes_ptr",
-                &[Type::I64, Type::Str, Type::Str, Type::Str, Type::Str, Type::I64],
+                &[
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -16599,18 +16666,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "llm_api_key" if args.is_empty() => Some((
-                "mako_native_llm_api_key",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "gpu_device_open" if args.is_empty() => Some((
-                "mako_native_gpu_device_open",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "llm_api_key" if args.is_empty() => {
+                Some(("mako_native_llm_api_key", &[], Some(Type::Str), true))
+            }
+            "gpu_device_open" if args.is_empty() => {
+                Some(("mako_native_gpu_device_open", &[], Some(Type::I64), false))
+            }
             "h3_server_new" if args.len() == 2 => Some((
                 "mako_native_h3_server_new_certs",
                 &[Type::Str, Type::Str],
@@ -16659,27 +16720,24 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "sip_branch" if args.is_empty() => Some((
-                "mako_native_sip_branch",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "str_builder" if args.is_empty() => Some((
-                "mako_native_str_builder",
-                &[],
-                Some(Type::Builder),
-                true,
-            )),
-            "tmpl_data_new" if args.is_empty() => Some((
-                "mako_native_tmpl_data_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "sip_branch" if args.is_empty() => {
+                Some(("mako_native_sip_branch", &[], Some(Type::Str), true))
+            }
+            "str_builder" if args.is_empty() => {
+                Some(("mako_native_str_builder", &[], Some(Type::Builder), true))
+            }
+            "tmpl_data_new" if args.is_empty() => {
+                Some(("mako_native_tmpl_data_new", &[], Some(Type::I64), false))
+            }
             "chan_select4" if args.len() == 5 => Some((
                 "mako_native_chan_select4",
-                &[Type::ChanI, Type::ChanI, Type::ChanI, Type::ChanI, Type::I64],
+                &[
+                    Type::ChanI,
+                    Type::ChanI,
+                    Type::ChanI,
+                    Type::ChanI,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -16775,12 +16833,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "log_error" if args.len() == 1 => Some((
-                "mako_native_log_error_ptr",
-                &[Type::Str],
-                None,
-                false,
-            )),
+            "log_error" if args.len() == 1 => {
+                Some(("mako_native_log_error_ptr", &[Type::Str], None, false))
+            }
             "redis_ping" if args.len() == 2 => Some((
                 "mako_native_redis_ping_ptr",
                 &[Type::Str, Type::I64],
@@ -16823,12 +16878,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "uuid_nil" if args.is_empty() => Some((
-                "mako_native_uuid_nil",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "uuid_nil" if args.is_empty() => {
+                Some(("mako_native_uuid_nil", &[], Some(Type::Str), true))
+            }
             "str_has_suffix" if args.len() == 2 => Some((
                 "mako_native_str_has_suffix_ptr",
                 &[Type::Str, Type::Str],
@@ -16895,12 +16947,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "actor_stop" if args.len() == 1 => Some((
-                "mako_native_actor_stop",
-                &[Type::ChanI],
-                None,
-                false,
-            )),
+            "actor_stop" if args.len() == 1 => {
+                Some(("mako_native_actor_stop", &[Type::ChanI], None, false))
+            }
             "http_body" if args.len() == 1 => Some((
                 "mako_native_http_body_ptr",
                 &[Type::I64],
@@ -16985,24 +17034,15 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "hist_sum" if args.len() == 1 => Some((
-                "mako_native_hist_sum",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
-            "hist_avg" if args.len() == 1 => Some((
-                "mako_native_hist_avg",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
-            "metrics_export" if args.is_empty() => Some((
-                "mako_native_metrics_export",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "hist_sum" if args.len() == 1 => {
+                Some(("mako_native_hist_sum", &[Type::I64], Some(Type::I64), false))
+            }
+            "hist_avg" if args.len() == 1 => {
+                Some(("mako_native_hist_avg", &[Type::I64], Some(Type::I64), false))
+            }
+            "metrics_export" if args.is_empty() => {
+                Some(("mako_native_metrics_export", &[], Some(Type::Str), true))
+            }
             "sha256" if args.len() == 1 => Some((
                 "mako_native_sha256_ptr",
                 &[Type::Str],
@@ -17143,7 +17183,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "smtp_send_msg" if args.len() == 6 => Some((
                 "mako_native_smtp_send_msg_ptr",
-                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::I64, Type::I64],
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -17167,7 +17214,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "tls_serve_h2_routes" if args.len() == 6 => Some((
                 "mako_native_tls_serve_h2_routes_ptr",
-                &[Type::I64, Type::Str, Type::Str, Type::Str, Type::Str, Type::I64],
+                &[
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -17207,18 +17261,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "evloop_new" if args.is_empty() => Some((
-                "mako_native_evloop_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "sip_tag" if args.is_empty() => Some((
-                "mako_native_sip_tag",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "evloop_new" if args.is_empty() => {
+                Some(("mako_native_evloop_new", &[], Some(Type::I64), false))
+            }
+            "sip_tag" if args.is_empty() => {
+                Some(("mako_native_sip_tag", &[], Some(Type::Str), true))
+            }
             "llm_content" if args.len() == 1 => Some((
                 "mako_native_llm_content_ptr",
                 &[Type::Str],
@@ -17261,12 +17309,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "mono_ns" if args.is_empty() => Some((
-                "mako_native_mono_ns",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "mono_ns" if args.is_empty() => {
+                Some(("mako_native_mono_ns", &[], Some(Type::I64), false))
+            }
             "nb_read" if args.len() == 1 => Some((
                 "mako_native_nb_read_ptr",
                 &[Type::I64],
@@ -17285,12 +17330,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "http2_conn_new" if args.is_empty() => Some((
-                "mako_native_http2_conn_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "http2_conn_new" if args.is_empty() => {
+                Some(("mako_native_http2_conn_new", &[], Some(Type::I64), false))
+            }
             "str_to_lower" if args.len() == 1 => Some((
                 "mako_native_str_to_lower_ptr",
                 &[Type::Str],
@@ -17327,30 +17369,21 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "llm_base_url" if args.is_empty() => Some((
-                "mako_native_llm_base_url",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "llm_default_model" if args.is_empty() => Some((
-                "mako_native_llm_default_model",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "llm_base_url" if args.is_empty() => {
+                Some(("mako_native_llm_base_url", &[], Some(Type::Str), true))
+            }
+            "llm_default_model" if args.is_empty() => {
+                Some(("mako_native_llm_default_model", &[], Some(Type::Str), true))
+            }
             "nb_accept" if args.len() == 1 => Some((
                 "mako_native_nb_accept",
                 &[Type::I64],
                 Some(Type::I64),
                 false,
             )),
-            "sip_cseq_new" if args.is_empty() => Some((
-                "mako_native_sip_cseq_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "sip_cseq_new" if args.is_empty() => {
+                Some(("mako_native_sip_cseq_new", &[], Some(Type::I64), false))
+            }
             "model_new" if args.len() == 1 => Some((
                 "mako_native_model_new",
                 &[Type::I64],
@@ -17441,39 +17474,171 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "http2_conn_use" if args.len() == 1 => Some(("mako_native_http2_conn_use", &[Type::I64], Some(Type::I64), false)),
-            "http2_conn_set_server" if args.len() == 1 => Some(("mako_native_http2_conn_set_server", &[Type::I64], Some(Type::I64), false)),
-            "http2_conn_pump" if args.len() == 1 => Some(("mako_native_http2_conn_pump_ptr", &[Type::Str], Some(Type::Str), true)),
-            "http2_conn_header_stream" if args.is_empty() => Some(("mako_native_http2_conn_header_stream", &[], Some(Type::I64), false)),
-            "http2_conn_header_block" if args.len() == 1 => Some(("mako_native_http2_conn_header_block", &[Type::I64], Some(Type::Str), true)),
-            "http2_conn_free" if args.len() == 1 => Some(("mako_native_http2_conn_free", &[Type::I64], Some(Type::I64), false)),
-            "hpack_decode_block" if args.len() == 1 => Some(("mako_native_hpack_decode_block_ptr", &[Type::Str], Some(Type::I64), false)),
-            "http2_response" if args.len() == 3 => Some(("mako_native_http2_response_ptr", &[Type::I64, Type::I64, Type::Str], Some(Type::Str), true)),
-            "tls_server_available" if args.is_empty() => Some(("mako_native_tls_server_available", &[], Some(Type::I64), false)),
-            "dtls_available" if args.is_empty() => Some(("mako_native_dtls_available", &[], Some(Type::I64), false)),
-            "dtls_ctx_new" if args.len() == 3 => Some(("mako_native_dtls_ctx_new_ptr", &[Type::Str, Type::Str, Type::I64], Some(Type::Opaque), false)),
-            "dtls_ctx_free" if args.len() == 1 => Some(("mako_native_dtls_ctx_free", &[Type::Opaque], Some(Type::I64), false)),
-            "dtls_connect" if args.len() == 4 => Some(("mako_native_dtls_connect_ptr", &[Type::Opaque, Type::I64, Type::Str, Type::I64], Some(Type::Opaque), false)),
-            "dtls_accept" if args.len() == 2 => Some(("mako_native_dtls_accept", &[Type::Opaque, Type::I64], Some(Type::Opaque), false)),
-            "dtls_send" if args.len() == 2 => Some(("mako_native_dtls_send_ptr", &[Type::Opaque, Type::Str], Some(Type::I64), false)),
-            "dtls_recv" if args.len() == 2 => Some(("mako_native_dtls_recv", &[Type::Opaque, Type::I64], Some(Type::Str), true)),
-            "dtls_close" if args.len() == 1 => Some(("mako_native_dtls_close", &[Type::Opaque], Some(Type::I64), false)),
-            "dtls_conn_fd" if args.len() == 1 => Some(("mako_native_dtls_conn_fd", &[Type::Opaque], Some(Type::I64), false)),
-            "dtls_peer_fingerprint" if args.len() == 1 => Some(("mako_native_dtls_peer_fingerprint", &[Type::Opaque], Some(Type::Str), true)),
-            "dtls_local_fingerprint" if args.len() == 1 => Some(("mako_native_dtls_local_fingerprint", &[Type::Opaque], Some(Type::Str), true)),
-            "dtls_export_srtp_keys" if args.len() == 1 => Some(("mako_native_dtls_export_srtp_keys", &[Type::Opaque], Some(Type::Str), true)),
-            "dtls_srtp_profile" if args.len() == 1 => Some(("mako_native_dtls_srtp_profile", &[Type::Opaque], Some(Type::Str), true)),
-            "tls_server_new" if args.len() == 2 => Some(("mako_native_tls_server_new_ptr", &[Type::Str, Type::Str], Some(Type::Opaque), false)),
+            "http2_conn_use" if args.len() == 1 => Some((
+                "mako_native_http2_conn_use",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "http2_conn_set_server" if args.len() == 1 => Some((
+                "mako_native_http2_conn_set_server",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "http2_conn_pump" if args.len() == 1 => Some((
+                "mako_native_http2_conn_pump_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "http2_conn_header_stream" if args.is_empty() => Some((
+                "mako_native_http2_conn_header_stream",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "http2_conn_header_block" if args.len() == 1 => Some((
+                "mako_native_http2_conn_header_block",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "http2_conn_free" if args.len() == 1 => Some((
+                "mako_native_http2_conn_free",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "hpack_decode_block" if args.len() == 1 => Some((
+                "mako_native_hpack_decode_block_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "http2_response" if args.len() == 3 => Some((
+                "mako_native_http2_response_ptr",
+                &[Type::I64, Type::I64, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_server_available" if args.is_empty() => Some((
+                "mako_native_tls_server_available",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "dtls_available" if args.is_empty() => {
+                Some(("mako_native_dtls_available", &[], Some(Type::I64), false))
+            }
+            "dtls_ctx_new" if args.len() == 3 => Some((
+                "mako_native_dtls_ctx_new_ptr",
+                &[Type::Str, Type::Str, Type::I64],
+                Some(Type::Opaque),
+                false,
+            )),
+            "dtls_ctx_free" if args.len() == 1 => Some((
+                "mako_native_dtls_ctx_free",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "dtls_connect" if args.len() == 4 => Some((
+                "mako_native_dtls_connect_ptr",
+                &[Type::Opaque, Type::I64, Type::Str, Type::I64],
+                Some(Type::Opaque),
+                false,
+            )),
+            "dtls_accept" if args.len() == 2 => Some((
+                "mako_native_dtls_accept",
+                &[Type::Opaque, Type::I64],
+                Some(Type::Opaque),
+                false,
+            )),
+            "dtls_send" if args.len() == 2 => Some((
+                "mako_native_dtls_send_ptr",
+                &[Type::Opaque, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "dtls_recv" if args.len() == 2 => Some((
+                "mako_native_dtls_recv",
+                &[Type::Opaque, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "dtls_close" if args.len() == 1 => Some((
+                "mako_native_dtls_close",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "dtls_conn_fd" if args.len() == 1 => Some((
+                "mako_native_dtls_conn_fd",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "dtls_peer_fingerprint" if args.len() == 1 => Some((
+                "mako_native_dtls_peer_fingerprint",
+                &[Type::Opaque],
+                Some(Type::Str),
+                true,
+            )),
+            "dtls_local_fingerprint" if args.len() == 1 => Some((
+                "mako_native_dtls_local_fingerprint",
+                &[Type::Opaque],
+                Some(Type::Str),
+                true,
+            )),
+            "dtls_export_srtp_keys" if args.len() == 1 => Some((
+                "mako_native_dtls_export_srtp_keys",
+                &[Type::Opaque],
+                Some(Type::Str),
+                true,
+            )),
+            "dtls_srtp_profile" if args.len() == 1 => Some((
+                "mako_native_dtls_srtp_profile",
+                &[Type::Opaque],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_server_new" if args.len() == 2 => Some((
+                "mako_native_tls_server_new_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Opaque),
+                false,
+            )),
             "tls_server_new_tls13" if args.len() == 2 => Some((
                 "mako_native_tls_server_new_tls13_ptr",
                 &[Type::Str, Type::Str],
                 Some(Type::Opaque),
                 false,
             )),
-            "tls_accept" if args.len() == 2 => Some(("mako_native_tls_accept", &[Type::I64, Type::I64], Some(Type::I64), false)),
-            "tls_read" if args.len() == 2 => Some(("mako_native_tls_read", &[Type::Opaque, Type::I64], Some(Type::Str), true)),
-            "tls_write" if args.len() == 2 => Some(("mako_native_tls_write_ptr", &[Type::Opaque, Type::Str], Some(Type::I64), false)),
-            "tls_conn_close" if args.len() == 1 => Some(("mako_native_tls_conn_close", &[Type::Opaque], Some(Type::I64), false)),
+            "tls_accept" if args.len() == 2 => Some((
+                "mako_native_tls_accept",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_read" if args.len() == 2 => Some((
+                "mako_native_tls_read",
+                &[Type::Opaque, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_write" if args.len() == 2 => Some((
+                "mako_native_tls_write_ptr",
+                &[Type::Opaque, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_conn_close" if args.len() == 1 => Some((
+                "mako_native_tls_conn_close",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
             "tls_conn_alpn" if args.len() == 1 => Some((
                 "mako_native_tls_conn_alpn_ptr",
                 &[Type::Opaque],
@@ -17482,7 +17647,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "https_request" if args.len() == 6 => Some((
                 "mako_native_https_request_ptr",
-                &[Type::Str, Type::Str, Type::Str, Type::Str, Type::Str, Type::I64],
+                &[
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                ],
                 Some(Type::Str),
                 true,
             )),
@@ -17492,78 +17664,429 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "h3_server_close" if args.len() == 1 => Some(("mako_native_h3_server_close", &[Type::I64], Some(Type::I64), false)),
-            "h3_server_poll" if args.len() == 2 => Some(("mako_native_h3_server_poll", &[Type::I64, Type::I64], Some(Type::I64), false)),
-            "h3_response" if args.len() == 5 => Some(("mako_native_h3_response_ptr", &[Type::I64, Type::I64, Type::I64, Type::Str, Type::Str], Some(Type::I64), false)),
-            "h3_stream_write" if args.len() == 3 => Some(("mako_native_h3_stream_write_ptr", &[Type::I64, Type::I64, Type::Str], Some(Type::I64), false)),
-            "llm_system_user" if args.len() == 3 => Some(("mako_native_llm_system_user_ptr", &[Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
-            "llm_chat_retry" if args.len() == 5 => Some(("mako_native_llm_chat_retry_ptr", &[Type::Str, Type::Str, Type::Str, Type::I64, Type::I64], Some(Type::Str), true)),
-            "elapsed_ns" if args.len() == 1 => Some(("mako_native_elapsed_ns", &[Type::I64], Some(Type::I64), false)),
-            "llm_is_error" if args.len() == 1 => Some(("mako_native_llm_is_error_ptr", &[Type::Str], Some(Type::I64), false)),
-            "llm_error_message" if args.len() == 1 => Some(("mako_native_llm_error_message_ptr", &[Type::Str], Some(Type::Str), true)),
-            "llm_last_status" if args.is_empty() => Some(("mako_native_llm_last_status", &[], Some(Type::I64), false)),
-            "llm_usage_prompt_tokens" if args.len() == 1 => Some(("mako_native_llm_usage_prompt_tokens_ptr", &[Type::Str], Some(Type::I64), false)),
-            "llm_usage_completion_tokens" if args.len() == 1 => Some(("mako_native_llm_usage_completion_tokens_ptr", &[Type::Str], Some(Type::I64), false)),
-            "smtp_new" if args.len() == 2 => Some(("mako_native_smtp_new_ptr", &[Type::Str, Type::I64], Some(Type::I64), false)),
-            "smtp_connect" if args.len() == 1 => Some(("mako_native_smtp_connect", &[Type::I64], Some(Type::I64), false)),
-            "smtp_ehlo" if args.len() == 2 => Some(("mako_native_smtp_ehlo_ptr", &[Type::I64, Type::Str], Some(Type::I64), false)),
-            "smtp_send_built" if args.len() == 2 => Some(("mako_native_smtp_send_built", &[Type::I64, Type::I64], Some(Type::I64), false)),
-            "smtp_quit" if args.len() == 1 => Some(("mako_native_smtp_quit", &[Type::I64], Some(Type::I64), false)),
-            "smtp_close" if args.len() == 1 => Some(("mako_native_smtp_close", &[Type::I64], Some(Type::I64), false)),
-            "smtp_mock_stop" if args.is_empty() => Some(("mako_native_smtp_mock_stop", &[], Some(Type::I64), false)),
-            "smtp_last_reply" if args.len() == 1 => Some(("mako_native_smtp_last_reply", &[Type::I64], Some(Type::Str), true)),
-            "smtp_mock_last_from" if args.is_empty() => Some(("mako_native_smtp_mock_last_from", &[], Some(Type::Str), true)),
-            "smtp_mock_last_rcpt" if args.is_empty() => Some(("mako_native_smtp_mock_last_rcpt", &[], Some(Type::Str), true)),
-            "smtp_mock_last_message" if args.is_empty() => Some(("mako_native_smtp_mock_last_message", &[], Some(Type::Str), true)),
-            "model_set_f32" if args.len() == 7 => Some(("mako_native_model_set_f32_ptr", &[Type::I64, Type::Str, Type::FloatSlice, Type::I64, Type::I64, Type::I64, Type::I64], Some(Type::I64), false)),
-            "model_linear_f32" if args.len() == 9 => Some(("mako_native_model_linear_f32", &[Type::I64, Type::I64, Type::I64, Type::Str, Type::Str, Type::I64, Type::I64, Type::I64, Type::I64], Some(Type::I64), false)),
-            "model_save" if args.len() == 2 => Some(("mako_native_model_save_ptr", &[Type::I64, Type::Str], Some(Type::I64), false)),
-            "model_free" if args.len() == 1 => Some(("mako_native_model_free", &[Type::I64], Some(Type::I64), false)),
-            "gpu_device_close" if args.len() == 1 => Some(("mako_native_gpu_device_close", &[Type::I64], Some(Type::I64), false)),
-            "gpu_buf_new" if args.len() == 2 => Some(("mako_native_gpu_buf_new", &[Type::I64, Type::I64], Some(Type::I64), false)),
-            "gpu_upload_f32" if args.len() == 2 => Some(("mako_native_gpu_upload_f32", &[Type::I64, Type::FloatSlice], Some(Type::I64), false)),
-            "gpu_download_f32" if args.len() == 1 => Some(("mako_native_gpu_download_f32", &[Type::I64], Some(Type::FloatSlice), true)),
-            "gpu_relu_f32" if args.len() == 2 => Some(("mako_native_gpu_relu_f32", &[Type::I64, Type::I64], Some(Type::I64), false)),
-            "evloop_del" if args.len() == 2 => Some(("mako_native_evloop_del", &[Type::I64, Type::I64], Some(Type::I64), false)),
-            "nb_write" if args.len() == 2 => Some(("mako_native_nb_write_ptr", &[Type::I64, Type::Str], Some(Type::I64), false)),
-            "nb_close" if args.len() == 1 => Some(("mako_native_nb_close", &[Type::I64], Some(Type::I64), false)),
-            "sip_via_value" if args.len() == 4 => Some(("mako_native_sip_via_value_ptr", &[Type::Str, Type::Str, Type::I64, Type::Str], Some(Type::Str), true)),
-            "sip_from_value" if args.len() == 3 => Some(("mako_native_sip_from_value_ptr", &[Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
-            "sip_to_value" if args.len() == 3 => Some(("mako_native_sip_to_value_ptr", &[Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
-            "sip_cseq_value" if args.len() == 2 => Some(("mako_native_sip_cseq_value_ptr", &[Type::I64, Type::Str], Some(Type::Str), true)),
-            "sip_contact_value" if args.len() == 1 => Some(("mako_native_sip_contact_value_ptr", &[Type::Str], Some(Type::Str), true)),
-            "sip_uri_build" if args.len() == 3 => Some(("mako_native_sip_uri_build_ptr", &[Type::Str, Type::Str, Type::I64], Some(Type::Str), true)),
-            "sip_request" if args.len() == 4 => Some(("mako_native_sip_request_ptr", &[Type::Str, Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
-            "sip_method" if args.len() == 1 => Some(("mako_native_sip_method_ptr", &[Type::Str], Some(Type::Str), true)),
-            "sip_request_uri" if args.len() == 1 => Some(("mako_native_sip_request_uri_ptr", &[Type::Str], Some(Type::Str), true)),
-            "sip_body" if args.len() == 1 => Some(("mako_native_sip_body_ptr", &[Type::Str], Some(Type::Str), true)),
-            "sip_reply" if args.len() == 5 => Some(("mako_native_sip_reply_ptr", &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
-            "sip_status_code" if args.len() == 1 => Some(("mako_native_sip_status_code_ptr", &[Type::Str], Some(Type::I64), false)),
-            "sdp_build_audio" if args.len() == 5 => Some(("mako_native_sdp_build_audio_ptr", &[Type::Str, Type::Str, Type::Str, Type::I64, Type::Str], Some(Type::Str), true)),
-            "sdp_media_port" if args.len() == 2 => Some(("mako_native_sdp_media_port_ptr", &[Type::Str, Type::I64], Some(Type::I64), false)),
-            "sdp_connection_addr" if args.len() == 1 => Some(("mako_native_sdp_connection_addr_ptr", &[Type::Str], Some(Type::Str), true)),
-            "rtp_pack" if args.len() == 6 => Some(("mako_native_rtp_pack_ptr", &[Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::Str], Some(Type::Str), true)),
-            "rtp_seq" if args.len() == 1 => Some(("mako_native_rtp_seq_ptr", &[Type::Str], Some(Type::I64), false)),
-            "rtp_ssrc" if args.len() == 1 => Some(("mako_native_rtp_ssrc_ptr", &[Type::Str], Some(Type::I64), false)),
-            "cmap_new" if args.is_empty() => Some(("mako_native_cmap_new", &[], Some(Type::Opaque), true)),
-            "cmap_set" if args.len() == 3 => Some(("mako_native_cmap_set_ptr", &[Type::Opaque, Type::Str, Type::Str], None, false)),
-            "cmap_get" if args.len() == 2 => Some(("mako_native_cmap_get_ptr", &[Type::Opaque, Type::Str], Some(Type::Str), true)),
-            "sql_open_sqlite" if args.len() == 1 => Some(("mako_native_sql_open_sqlite_ptr", &[Type::Str], Some(Type::Opaque), false)),
-            "sql_exec_plain" if args.len() == 2 => Some(("mako_native_sql_exec_plain_ptr", &[Type::Opaque, Type::Str], Some(Type::I64), false)),
-            "sql_exec_str4" if args.len() == 6 => Some(("mako_native_sql_exec_str4_ptr", &[Type::Opaque, Type::Str, Type::Str, Type::Str, Type::Str, Type::Str], Some(Type::I64), false)),
-            "sql_query_str" if args.len() == 3 => Some(("mako_native_sql_query_str_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::Str), true)),
-            "format_int" if args.len() == 1 => Some(("mako_native_int_to_string_ptr", &[Type::I64], Some(Type::Str), true)),
-            "int_to_string" if args.len() == 1 => Some(("mako_native_int_to_string_ptr", &[Type::I64], Some(Type::Str), true)),
-            "http_forward" if args.len() == 5 => Some(("mako_native_http_forward_ptr", &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
+            "h3_server_close" if args.len() == 1 => Some((
+                "mako_native_h3_server_close",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "h3_server_poll" if args.len() == 2 => Some((
+                "mako_native_h3_server_poll",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "h3_response" if args.len() == 5 => Some((
+                "mako_native_h3_response_ptr",
+                &[Type::I64, Type::I64, Type::I64, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "h3_stream_write" if args.len() == 3 => Some((
+                "mako_native_h3_stream_write_ptr",
+                &[Type::I64, Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "llm_system_user" if args.len() == 3 => Some((
+                "mako_native_llm_system_user_ptr",
+                &[Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "llm_chat_retry" if args.len() == 5 => Some((
+                "mako_native_llm_chat_retry_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "elapsed_ns" if args.len() == 1 => Some((
+                "mako_native_elapsed_ns",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "llm_is_error" if args.len() == 1 => Some((
+                "mako_native_llm_is_error_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "llm_error_message" if args.len() == 1 => Some((
+                "mako_native_llm_error_message_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "llm_last_status" if args.is_empty() => {
+                Some(("mako_native_llm_last_status", &[], Some(Type::I64), false))
+            }
+            "llm_usage_prompt_tokens" if args.len() == 1 => Some((
+                "mako_native_llm_usage_prompt_tokens_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "llm_usage_completion_tokens" if args.len() == 1 => Some((
+                "mako_native_llm_usage_completion_tokens_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "smtp_new" if args.len() == 2 => Some((
+                "mako_native_smtp_new_ptr",
+                &[Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "smtp_connect" if args.len() == 1 => Some((
+                "mako_native_smtp_connect",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "smtp_ehlo" if args.len() == 2 => Some((
+                "mako_native_smtp_ehlo_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "smtp_send_built" if args.len() == 2 => Some((
+                "mako_native_smtp_send_built",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "smtp_quit" if args.len() == 1 => Some((
+                "mako_native_smtp_quit",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "smtp_close" if args.len() == 1 => Some((
+                "mako_native_smtp_close",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "smtp_mock_stop" if args.is_empty() => {
+                Some(("mako_native_smtp_mock_stop", &[], Some(Type::I64), false))
+            }
+            "smtp_last_reply" if args.len() == 1 => Some((
+                "mako_native_smtp_last_reply",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "smtp_mock_last_from" if args.is_empty() => Some((
+                "mako_native_smtp_mock_last_from",
+                &[],
+                Some(Type::Str),
+                true,
+            )),
+            "smtp_mock_last_rcpt" if args.is_empty() => Some((
+                "mako_native_smtp_mock_last_rcpt",
+                &[],
+                Some(Type::Str),
+                true,
+            )),
+            "smtp_mock_last_message" if args.is_empty() => Some((
+                "mako_native_smtp_mock_last_message",
+                &[],
+                Some(Type::Str),
+                true,
+            )),
+            "model_set_f32" if args.len() == 7 => Some((
+                "mako_native_model_set_f32_ptr",
+                &[
+                    Type::I64,
+                    Type::Str,
+                    Type::FloatSlice,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
+                Some(Type::I64),
+                false,
+            )),
+            "model_linear_f32" if args.len() == 9 => Some((
+                "mako_native_model_linear_f32",
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
+                Some(Type::I64),
+                false,
+            )),
+            "model_save" if args.len() == 2 => Some((
+                "mako_native_model_save_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "model_free" if args.len() == 1 => Some((
+                "mako_native_model_free",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "gpu_device_close" if args.len() == 1 => Some((
+                "mako_native_gpu_device_close",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "gpu_buf_new" if args.len() == 2 => Some((
+                "mako_native_gpu_buf_new",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "gpu_upload_f32" if args.len() == 2 => Some((
+                "mako_native_gpu_upload_f32",
+                &[Type::I64, Type::FloatSlice],
+                Some(Type::I64),
+                false,
+            )),
+            "gpu_download_f32" if args.len() == 1 => Some((
+                "mako_native_gpu_download_f32",
+                &[Type::I64],
+                Some(Type::FloatSlice),
+                true,
+            )),
+            "gpu_relu_f32" if args.len() == 2 => Some((
+                "mako_native_gpu_relu_f32",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "evloop_del" if args.len() == 2 => Some((
+                "mako_native_evloop_del",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "nb_write" if args.len() == 2 => Some((
+                "mako_native_nb_write_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "nb_close" if args.len() == 1 => {
+                Some(("mako_native_nb_close", &[Type::I64], Some(Type::I64), false))
+            }
+            "sip_via_value" if args.len() == 4 => Some((
+                "mako_native_sip_via_value_ptr",
+                &[Type::Str, Type::Str, Type::I64, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_from_value" if args.len() == 3 => Some((
+                "mako_native_sip_from_value_ptr",
+                &[Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_to_value" if args.len() == 3 => Some((
+                "mako_native_sip_to_value_ptr",
+                &[Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_cseq_value" if args.len() == 2 => Some((
+                "mako_native_sip_cseq_value_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_contact_value" if args.len() == 1 => Some((
+                "mako_native_sip_contact_value_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_uri_build" if args.len() == 3 => Some((
+                "mako_native_sip_uri_build_ptr",
+                &[Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_request" if args.len() == 4 => Some((
+                "mako_native_sip_request_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_method" if args.len() == 1 => Some((
+                "mako_native_sip_method_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_request_uri" if args.len() == 1 => Some((
+                "mako_native_sip_request_uri_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_body" if args.len() == 1 => Some((
+                "mako_native_sip_body_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_reply" if args.len() == 5 => Some((
+                "mako_native_sip_reply_ptr",
+                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sip_status_code" if args.len() == 1 => Some((
+                "mako_native_sip_status_code_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "sdp_build_audio" if args.len() == 5 => Some((
+                "mako_native_sdp_build_audio_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::I64, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sdp_media_port" if args.len() == 2 => Some((
+                "mako_native_sdp_media_port_ptr",
+                &[Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "sdp_connection_addr" if args.len() == 1 => Some((
+                "mako_native_sdp_connection_addr_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "rtp_pack" if args.len() == 6 => Some((
+                "mako_native_rtp_pack_ptr",
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::Str,
+                ],
+                Some(Type::Str),
+                true,
+            )),
+            "rtp_seq" if args.len() == 1 => Some((
+                "mako_native_rtp_seq_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "rtp_ssrc" if args.len() == 1 => Some((
+                "mako_native_rtp_ssrc_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "cmap_new" if args.is_empty() => {
+                Some(("mako_native_cmap_new", &[], Some(Type::Opaque), true))
+            }
+            "cmap_set" if args.len() == 3 => Some((
+                "mako_native_cmap_set_ptr",
+                &[Type::Opaque, Type::Str, Type::Str],
+                None,
+                false,
+            )),
+            "cmap_get" if args.len() == 2 => Some((
+                "mako_native_cmap_get_ptr",
+                &[Type::Opaque, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "sql_open_sqlite" if args.len() == 1 => Some((
+                "mako_native_sql_open_sqlite_ptr",
+                &[Type::Str],
+                Some(Type::Opaque),
+                false,
+            )),
+            "sql_exec_plain" if args.len() == 2 => Some((
+                "mako_native_sql_exec_plain_ptr",
+                &[Type::Opaque, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "sql_exec_str4" if args.len() == 6 => Some((
+                "mako_native_sql_exec_str4_ptr",
+                &[
+                    Type::Opaque,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                ],
+                Some(Type::I64),
+                false,
+            )),
+            "sql_query_str" if args.len() == 3 => Some((
+                "mako_native_sql_query_str_ptr",
+                &[Type::Opaque, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "format_int" if args.len() == 1 => Some((
+                "mako_native_int_to_string_ptr",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "int_to_string" if args.len() == 1 => Some((
+                "mako_native_int_to_string_ptr",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "http_forward" if args.len() == 5 => Some((
+                "mako_native_http_forward_ptr",
+                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
             "http_forward_full" if args.len() == 7 => Some((
                 "mako_native_http_forward_full_ptr",
-                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str, Type::Str, Type::I64],
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
             "http_forward_fd" if args.len() == 7 => Some((
                 "mako_native_http_forward_fd_ptr",
-                &[Type::I64, Type::Str, Type::Str, Type::Str, Type::Str, Type::Str, Type::I64],
+                &[
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -17634,17 +18157,80 @@ impl<'a> FunctionLowerer<'a> {
                 true,
             )),
 
-            "h3_accept_stream" if args.len() == 1 => Some(("mako_native_h3_accept_stream", &[Type::I64], Some(Type::I64), false)),
-            "quiche_available" if args.is_empty() => Some(("mako_native_quiche_available", &[], Some(Type::I64), false)),
-            "quiche_version" if args.is_empty() => Some(("mako_native_quiche_version", &[], Some(Type::Str), true)),
-            "quiche_handshake" if args.len() == 4 => Some(("mako_native_quiche_handshake_ptr", &[Type::Str, Type::I64, Type::Str, Type::I64], Some(Type::Str), true)),
-            "quiche_h3_get" if args.len() == 5 => Some(("mako_native_quiche_h3_get_ptr", &[Type::Str, Type::I64, Type::Str, Type::Str, Type::I64], Some(Type::Str), true)),
-            "quiche_h3_post" if args.len() == 6 => Some(("mako_native_quiche_h3_post_ptr", &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str, Type::I64], Some(Type::Str), true)),
-            "quiche_h3_get_two" if args.len() == 6 => Some(("mako_native_quiche_h3_get_two_ptr", &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str, Type::I64], Some(Type::Str), true)),
-            "sql_close" if args.len() == 1 => Some(("mako_native_sql_close", &[Type::Opaque], Some(Type::I64), false)),
-            "h3_stream_method" if args.len() == 2 => Some(("mako_native_h3_stream_method", &[Type::I64, Type::I64], Some(Type::Str), true)),
-            "h3_stream_path" if args.len() == 2 => Some(("mako_native_h3_stream_path", &[Type::I64, Type::I64], Some(Type::Str), true)),
-            "h3_stream_body" if args.len() == 2 => Some(("mako_native_h3_stream_body", &[Type::I64, Type::I64], Some(Type::Str), true)),
+            "h3_accept_stream" if args.len() == 1 => Some((
+                "mako_native_h3_accept_stream",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "quiche_available" if args.is_empty() => {
+                Some(("mako_native_quiche_available", &[], Some(Type::I64), false))
+            }
+            "quiche_version" if args.is_empty() => {
+                Some(("mako_native_quiche_version", &[], Some(Type::Str), true))
+            }
+            "quiche_handshake" if args.len() == 4 => Some((
+                "mako_native_quiche_handshake_ptr",
+                &[Type::Str, Type::I64, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "quiche_h3_get" if args.len() == 5 => Some((
+                "mako_native_quiche_h3_get_ptr",
+                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "quiche_h3_post" if args.len() == 6 => Some((
+                "mako_native_quiche_h3_post_ptr",
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                ],
+                Some(Type::Str),
+                true,
+            )),
+            "quiche_h3_get_two" if args.len() == 6 => Some((
+                "mako_native_quiche_h3_get_two_ptr",
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                ],
+                Some(Type::Str),
+                true,
+            )),
+            "sql_close" if args.len() == 1 => Some((
+                "mako_native_sql_close",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "h3_stream_method" if args.len() == 2 => Some((
+                "mako_native_h3_stream_method",
+                &[Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "h3_stream_path" if args.len() == 2 => Some((
+                "mako_native_h3_stream_path",
+                &[Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "h3_stream_body" if args.len() == 2 => Some((
+                "mako_native_h3_stream_body",
+                &[Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
             // High-frequency testing/stdlib helpers (bridge in native_bridge.c).
             "env_get_or" if args.len() == 2 => Some((
                 "mako_native_env_get_or_ptr",
@@ -17658,12 +18244,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "sha1" if args.len() == 1 => Some((
-                "mako_native_sha1_ptr",
-                &[Type::Str],
-                Some(Type::Str),
-                true,
-            )),
+            "sha1" if args.len() == 1 => {
+                Some(("mako_native_sha1_ptr", &[Type::Str], Some(Type::Str), true))
+            }
             "would_overflow_add" if args.len() == 2 => Some((
                 "mako_native_would_overflow_add",
                 &[Type::I64, Type::I64],
@@ -17700,36 +18283,27 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "time_sleep_ms" if args.len() == 1 => Some((
-                "mako_native_time_sleep_ms",
-                &[Type::I64],
-                None,
-                false,
-            )),
+            "time_sleep_ms" if args.len() == 1 => {
+                Some(("mako_native_time_sleep_ms", &[Type::I64], None, false))
+            }
             "tcp_listen_addr" if args.len() == 2 => Some((
                 "mako_native_tcp_listen_addr_ptr",
                 &[Type::Str, Type::I64],
                 Some(Type::I64),
                 false,
             )),
-            "aead_available" if args.len() == 0 => Some((
-                "mako_native_aead_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "aead_available" if args.len() == 0 => {
+                Some(("mako_native_aead_available", &[], Some(Type::I64), false))
+            }
             "alloc_report_json" if args.len() == 0 => Some((
                 "mako_native_alloc_report_json_ptr",
                 &[],
                 Some(Type::Str),
                 true,
             )),
-            "alloc_track_reset" if args.len() == 0 => Some((
-                "mako_native_alloc_track_reset",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "alloc_track_reset" if args.len() == 0 => {
+                Some(("mako_native_alloc_track_reset", &[], Some(Type::I64), false))
+            }
             "append_file" if args.len() == 2 => Some((
                 "mako_native_append_file_ptr",
                 &[Type::Str, Type::Str],
@@ -17838,12 +18412,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "gpu_available" if args.len() == 0 => Some((
-                "mako_native_gpu_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "gpu_available" if args.len() == 0 => {
+                Some(("mako_native_gpu_available", &[], Some(Type::I64), false))
+            }
             "gpu_set_prefer_host" if args.len() == 1 => Some((
                 "mako_native_gpu_set_prefer_host",
                 &[Type::I64],
@@ -17904,12 +18475,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "http2_conn_reset" if args.len() == 0 => Some((
-                "mako_native_http2_conn_reset",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "http2_conn_reset" if args.len() == 0 => {
+                Some(("mako_native_http2_conn_reset", &[], Some(Type::I64), false))
+            }
             "http2_goaway_frame" if args.len() == 2 => Some((
                 "mako_native_http2_goaway_frame_ptr",
                 &[Type::I64, Type::I64],
@@ -17934,12 +18502,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "http_last_status" if args.len() == 0 => Some((
-                "mako_native_http_last_status",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "http_last_status" if args.len() == 0 => {
+                Some(("mako_native_http_last_status", &[], Some(Type::I64), false))
+            }
             "http_respond_json" if args.len() == 3 => Some((
                 "mako_native_http_respond_json_ptr",
                 &[Type::I64, Type::I64, Type::Str],
@@ -17952,12 +18517,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "https_last_status" if args.len() == 0 => Some((
-                "mako_native_https_last_status",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "https_last_status" if args.len() == 0 => {
+                Some(("mako_native_https_last_status", &[], Some(Type::I64), false))
+            }
             "io_backoff_ms" if args.len() == 3 => Some((
                 "mako_native_io_backoff_ms",
                 &[Type::I64, Type::I64, Type::I64],
@@ -18018,12 +18580,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "mono_res_ns" if args.len() == 0 => Some((
-                "mako_native_mono_res_ns",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "mono_res_ns" if args.len() == 0 => {
+                Some(("mako_native_mono_res_ns", &[], Some(Type::I64), false))
+            }
             "msgpack_encode_int" if args.len() == 1 => Some((
                 "mako_native_msgpack_encode_int_ptr",
                 &[Type::I64],
@@ -18072,12 +18631,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "plugin_max_slots" if args.len() == 0 => Some((
-                "mako_native_plugin_max_slots",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "plugin_max_slots" if args.len() == 0 => {
+                Some(("mako_native_plugin_max_slots", &[], Some(Type::I64), false))
+            }
             "profile_sample_clear" if args.len() == 0 => Some((
                 "mako_native_profile_sample_clear",
                 &[],
@@ -18120,24 +18676,15 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "reqctx_new" if args.len() == 0 => Some((
-                "mako_native_reqctx_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "ring_new" if args.len() == 1 => Some((
-                "mako_native_ring_new",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
-            "router_new" if args.len() == 0 => Some((
-                "mako_native_router_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "reqctx_new" if args.len() == 0 => {
+                Some(("mako_native_reqctx_new", &[], Some(Type::I64), false))
+            }
+            "ring_new" if args.len() == 1 => {
+                Some(("mako_native_ring_new", &[Type::I64], Some(Type::I64), false))
+            }
+            "router_new" if args.len() == 0 => {
+                Some(("mako_native_router_new", &[], Some(Type::I64), false))
+            }
             "runtime_stats_reset" if args.len() == 0 => Some((
                 "mako_native_runtime_stats_reset",
                 &[],
@@ -18204,12 +18751,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "syscall_available" if args.len() == 0 => Some((
-                "mako_native_syscall_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "syscall_available" if args.len() == 0 => {
+                Some(("mako_native_syscall_available", &[], Some(Type::I64), false))
+            }
             "t_run" if args.len() == 1 => Some((
                 "mako_native_t_run_ptr",
                 &[Type::Str],
@@ -18242,7 +18786,15 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "time_date" if args.len() == 7 => Some((
                 "mako_native_time_date",
-                &[Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64],
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -18276,48 +18828,33 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "trace_clear" if args.len() == 0 => Some((
-                "mako_native_trace_clear",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "trace_id" if args.len() == 0 => Some((
-                "mako_native_trace_id_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "udp_bind" if args.len() == 1 => Some((
-                "mako_native_udp_bind",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "trace_clear" if args.len() == 0 => {
+                Some(("mako_native_trace_clear", &[], Some(Type::I64), false))
+            }
+            "trace_id" if args.len() == 0 => {
+                Some(("mako_native_trace_id_ptr", &[], Some(Type::Str), true))
+            }
+            "udp_bind" if args.len() == 1 => {
+                Some(("mako_native_udp_bind", &[Type::I64], Some(Type::I64), false))
+            }
             "url_scheme" if args.len() == 1 => Some((
                 "mako_native_url_scheme_ptr",
                 &[Type::Str],
                 Some(Type::Str),
                 true,
             )),
-            "utf8_rune_error" if args.len() == 0 => Some((
-                "mako_native_utf8_rune_error",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "utf8_rune_error" if args.len() == 0 => {
+                Some(("mako_native_utf8_rune_error", &[], Some(Type::I64), false))
+            }
             "validate_required" if args.len() == 1 => Some((
                 "mako_native_validate_required_ptr",
                 &[Type::Str],
                 Some(Type::I64),
                 false,
             )),
-            "watch_available" if args.len() == 0 => Some((
-                "mako_native_watch_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "watch_available" if args.len() == 0 => {
+                Some(("mako_native_watch_available", &[], Some(Type::I64), false))
+            }
             "ws_accept_key" if args.len() == 1 => Some((
                 "mako_native_ws_accept_key_ptr",
                 &[Type::Str],
@@ -18426,12 +18963,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "gpu_backend" if args.len() == 0 => Some((
-                "mako_native_gpu_backend_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "gpu_backend" if args.len() == 0 => {
+                Some(("mako_native_gpu_backend_ptr", &[], Some(Type::Str), true))
+            }
             "gpu_gelu_f32" if args.len() == 2 => Some((
                 "mako_native_gpu_gelu_f32",
                 &[Type::I64, Type::I64],
@@ -18486,12 +19020,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "http2_window_conn" if args.len() == 0 => Some((
-                "mako_native_http2_window_conn",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "http2_window_conn" if args.len() == 0 => {
+                Some(("mako_native_http2_window_conn", &[], Some(Type::I64), false))
+            }
             "http_post" if args.len() == 2 => Some((
                 "mako_native_http_post_ptr",
                 &[Type::Str, Type::Str],
@@ -18624,12 +19155,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "leak_mark" if args.len() == 0 => Some((
-                "mako_native_leak_mark",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "leak_mark" if args.len() == 0 => {
+                Some(("mako_native_leak_mark", &[], Some(Type::I64), false))
+            }
             "llm_messages_append" if args.len() == 2 => Some((
                 "mako_native_llm_messages_append_ptr",
                 &[Type::Str, Type::Str],
@@ -18660,12 +19188,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "mono_overhead_ns" if args.len() == 0 => Some((
-                "mako_native_mono_overhead_ns",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "mono_overhead_ns" if args.len() == 0 => {
+                Some(("mako_native_mono_overhead_ns", &[], Some(Type::I64), false))
+            }
             "msgpack_decode_int" if args.len() == 1 => Some((
                 "mako_native_msgpack_decode_int_ptr",
                 &[Type::Str],
@@ -18774,12 +19299,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "ring_cap" if args.len() == 1 => Some((
-                "mako_native_ring_cap",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "ring_cap" if args.len() == 1 => {
+                Some(("mako_native_ring_cap", &[Type::I64], Some(Type::I64), false))
+            }
             "router_count" if args.len() == 1 => Some((
                 "mako_native_router_count",
                 &[Type::I64],
@@ -18792,12 +19314,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "sched_workers" if args.len() == 0 => Some((
-                "mako_native_sched_workers",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "sched_workers" if args.len() == 0 => {
+                Some(("mako_native_sched_workers", &[], Some(Type::I64), false))
+            }
             "sg_gather3" if args.len() == 3 => Some((
                 "mako_native_sg_gather3_ptr",
                 &[Type::Str, Type::Str, Type::Str],
@@ -18812,7 +19331,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "sip_digest_response" if args.len() == 6 => Some((
                 "mako_native_sip_digest_response_ptr",
-                &[Type::Str, Type::Str, Type::Str, Type::Str, Type::Str, Type::Str],
+                &[
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                ],
                 Some(Type::Str),
                 true,
             )),
@@ -18925,12 +19451,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "utf8_rune_self" if args.len() == 0 => Some((
-                "mako_native_utf8_rune_self",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "utf8_rune_self" if args.len() == 0 => {
+                Some(("mako_native_utf8_rune_self", &[], Some(Type::I64), false))
+            }
             "validate_min_len" if args.len() == 2 => Some((
                 "mako_native_validate_min_len_ptr",
                 &[Type::Str, Type::I64],
@@ -18961,12 +19484,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "slog_get_level" if args.len() == 0 => Some((
-                "mako_native_slog_get_level",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "slog_get_level" if args.len() == 0 => {
+                Some(("mako_native_slog_get_level", &[], Some(Type::I64), false))
+            }
             // High-frequency testing helpers (round 3).
             "path_ext" if args.len() == 1 => Some((
                 "mako_native_path_ext_ptr",
@@ -18980,12 +19500,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "wall_ms" if args.len() == 0 => Some((
-                "mako_native_wall_ms",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "wall_ms" if args.len() == 0 => {
+                Some(("mako_native_wall_ms", &[], Some(Type::I64), false))
+            }
             "fmt_sprint" if args.len() == 1 => Some((
                 "mako_native_fmt_sprint_ptr",
                 &[Type::Str],
@@ -19112,12 +19629,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "btree_new" if args.len() == 0 => Some((
-                "mako_native_btree_new",
-                &[],
-                Some(Type::Opaque),
-                true,
-            )),
+            "btree_new" if args.len() == 0 => {
+                Some(("mako_native_btree_new", &[], Some(Type::Opaque), true))
+            }
             "btree_put" if args.len() == 3 => Some((
                 "mako_native_btree_put",
                 &[Type::Opaque, Type::I64, Type::I64],
@@ -19160,12 +19674,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "pbtree_new" if args.len() == 0 => Some((
-                "mako_native_pbtree_new",
-                &[],
-                Some(Type::Opaque),
-                true,
-            )),
+            "pbtree_new" if args.len() == 0 => {
+                Some(("mako_native_pbtree_new", &[], Some(Type::Opaque), true))
+            }
             "pbtree_put" if args.len() == 3 => Some((
                 "mako_native_pbtree_put",
                 &[Type::Opaque, Type::I64, Type::I64],
@@ -19281,12 +19792,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "bloom_new" if args.len() == 0 => Some((
-                "mako_native_bloom_new",
-                &[],
-                Some(Type::Opaque),
-                true,
-            )),
+            "bloom_new" if args.len() == 0 => {
+                Some(("mako_native_bloom_new", &[], Some(Type::Opaque), true))
+            }
             "bloom_add" if args.len() == 2 => Some((
                 "mako_native_bloom_add",
                 &[Type::Opaque, Type::I64],
@@ -19361,30 +19869,18 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "range_len" if args.len() == 0 => Some((
-                "mako_native_range_len",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "range_cap" if args.len() == 0 => Some((
-                "mako_native_range_cap",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "range_next" if args.len() == 0 => Some((
-                "mako_native_range_next",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "range_rewind" if args.len() == 0 => Some((
-                "mako_native_range_rewind",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "range_len" if args.len() == 0 => {
+                Some(("mako_native_range_len", &[], Some(Type::I64), false))
+            }
+            "range_cap" if args.len() == 0 => {
+                Some(("mako_native_range_cap", &[], Some(Type::I64), false))
+            }
+            "range_next" if args.len() == 0 => {
+                Some(("mako_native_range_next", &[], Some(Type::I64), false))
+            }
+            "range_rewind" if args.len() == 0 => {
+                Some(("mako_native_range_rewind", &[], Some(Type::I64), false))
+            }
             "btree_put_str" if args.len() == 3 => Some((
                 "mako_native_btree_put_str_ptr",
                 &[Type::Opaque, Type::Str, Type::I64],
@@ -19523,12 +20019,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "mvcc_new" if args.len() == 0 => Some((
-                "mako_native_mvcc_new",
-                &[],
-                Some(Type::Opaque),
-                true,
-            )),
+            "mvcc_new" if args.len() == 0 => {
+                Some(("mako_native_mvcc_new", &[], Some(Type::Opaque), true))
+            }
             "mvcc_free" if args.len() == 1 => Some((
                 "mako_native_mvcc_free",
                 &[Type::Opaque],
@@ -19559,12 +20052,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "multimap_new" if args.len() == 0 => Some((
-                "mako_native_multimap_new",
-                &[],
-                Some(Type::Opaque),
-                true,
-            )),
+            "multimap_new" if args.len() == 0 => {
+                Some(("mako_native_multimap_new", &[], Some(Type::Opaque), true))
+            }
             "multimap_free" if args.len() == 1 => Some((
                 "mako_native_multimap_free",
                 &[Type::Opaque],
@@ -19835,12 +20325,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "argon2_available" if args.len() == 0 => Some((
-                "mako_native_argon2_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "argon2_available" if args.len() == 0 => {
+                Some(("mako_native_argon2_available", &[], Some(Type::I64), false))
+            }
             "fmt_printf3" if args.len() == 4 => Some((
                 "mako_native_fmt_printf3_ptr",
                 &[Type::Str, Type::Str, Type::Str, Type::Str],
@@ -19850,8 +20337,15 @@ impl<'a> FunctionLowerer<'a> {
             "sst_build4" if args.len() == 9 => Some((
                 "mako_native_sst_build4_ptr",
                 &[
-                    Type::Str, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64,
-                    Type::I64, Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
                 ],
                 Some(Type::Opaque),
                 true,
@@ -19859,9 +20353,23 @@ impl<'a> FunctionLowerer<'a> {
             "sst_build8" if args.len() == 17 => Some((
                 "mako_native_sst_build8_ptr",
                 &[
-                    Type::Str, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64,
-                    Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64,
-                    Type::I64, Type::I64, Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
                 ],
                 Some(Type::Opaque),
                 true,
@@ -19869,9 +20377,24 @@ impl<'a> FunctionLowerer<'a> {
             "sst_build_n" if args.len() == 18 => Some((
                 "mako_native_sst_build_n_ptr",
                 &[
-                    Type::Str, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64,
-                    Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64,
-                    Type::I64, Type::I64, Type::I64, Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
                 ],
                 Some(Type::Opaque),
                 true,
@@ -19879,42 +20402,33 @@ impl<'a> FunctionLowerer<'a> {
             "gemm2x2" if args.len() == 8 => Some((
                 "mako_native_gemm2x2",
                 &[
-                    Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
                     Type::I64,
                 ],
                 Some(Type::I64),
                 false,
             )),
-            "gemm_c01" if args.len() == 0 => Some((
-                "mako_native_gemm_c01",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "gemm_c10" if args.len() == 0 => Some((
-                "mako_native_gemm_c10",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "gemm_c11" if args.len() == 0 => Some((
-                "mako_native_gemm_c11",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "debug_file" if args.len() == 0 => Some((
-                "mako_native_debug_file_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "debug_line" if args.len() == 0 => Some((
-                "mako_native_debug_line",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "gemm_c01" if args.len() == 0 => {
+                Some(("mako_native_gemm_c01", &[], Some(Type::I64), false))
+            }
+            "gemm_c10" if args.len() == 0 => {
+                Some(("mako_native_gemm_c10", &[], Some(Type::I64), false))
+            }
+            "gemm_c11" if args.len() == 0 => {
+                Some(("mako_native_gemm_c11", &[], Some(Type::I64), false))
+            }
+            "debug_file" if args.len() == 0 => {
+                Some(("mako_native_debug_file_ptr", &[], Some(Type::Str), true))
+            }
+            "debug_line" if args.len() == 0 => {
+                Some(("mako_native_debug_line", &[], Some(Type::I64), false))
+            }
             "builder_write_slice" if args.len() == 4 => Some((
                 "mako_native_builder_write_slice_ptr",
                 &[Type::Builder, Type::Str, Type::I64, Type::I64],
@@ -20065,12 +20579,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "ulid_new" if args.is_empty() => Some((
-                "mako_native_ulid_new",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "ulid_new" if args.is_empty() => {
+                Some(("mako_native_ulid_new", &[], Some(Type::Str), true))
+            }
             "ulid_string" if args.len() == 1 => Some((
                 "mako_native_ulid_string_ptr",
                 &[Type::Str],
@@ -20083,30 +20594,18 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "uuid_ns_dns" if args.is_empty() => Some((
-                "mako_native_uuid_ns_dns",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "uuid_ns_url" if args.is_empty() => Some((
-                "mako_native_uuid_ns_url",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "uuid_ns_oid" if args.is_empty() => Some((
-                "mako_native_uuid_ns_oid",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "uuid_ns_x500" if args.is_empty() => Some((
-                "mako_native_uuid_ns_x500",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "uuid_ns_dns" if args.is_empty() => {
+                Some(("mako_native_uuid_ns_dns", &[], Some(Type::Str), true))
+            }
+            "uuid_ns_url" if args.is_empty() => {
+                Some(("mako_native_uuid_ns_url", &[], Some(Type::Str), true))
+            }
+            "uuid_ns_oid" if args.is_empty() => {
+                Some(("mako_native_uuid_ns_oid", &[], Some(Type::Str), true))
+            }
+            "uuid_ns_x500" if args.is_empty() => {
+                Some(("mako_native_uuid_ns_x500", &[], Some(Type::Str), true))
+            }
             "chan_str_try_send" if args.len() == 2 => Some((
                 "mako_native_chan_str_try_send",
                 &[Type::ChanS, Type::Str],
@@ -20185,12 +20684,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "utf8_max_rune" if args.len() == 0 => Some((
-                "mako_native_utf8_max_rune",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "utf8_max_rune" if args.len() == 0 => {
+                Some(("mako_native_utf8_max_rune", &[], Some(Type::I64), false))
+            }
             "url_path" if args.len() == 1 => Some((
                 "mako_native_url_path_ptr",
                 &[Type::Str],
@@ -20210,18 +20706,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "time_unix" if args.len() == 0 => Some((
-                "mako_native_time_unix",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "abs" if args.len() == 1 => Some((
-                "mako_native_abs",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "time_unix" if args.len() == 0 => {
+                Some(("mako_native_time_unix", &[], Some(Type::I64), false))
+            }
+            "abs" if args.len() == 1 => {
+                Some(("mako_native_abs", &[Type::I64], Some(Type::I64), false))
+            }
             "min" if args.len() == 2 => Some((
                 "mako_native_min",
                 &[Type::I64, Type::I64],
@@ -20252,12 +20742,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::F64),
                 false,
             )),
-            "getcwd" if args.len() == 0 => Some((
-                "mako_native_getcwd_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "getcwd" if args.len() == 0 => {
+                Some(("mako_native_getcwd_ptr", &[], Some(Type::Str), true))
+            }
             "is_dir" if args.len() == 1 => Some((
                 "mako_native_is_dir_ptr",
                 &[Type::Str],
@@ -20276,36 +20763,21 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "mono_us" if args.len() == 0 => Some((
-                "mako_native_mono_us",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "mono_ms" if args.len() == 0 => Some((
-                "mako_native_mono_ms",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "mono_res_ns" if args.len() == 0 => Some((
-                "mako_native_mono_res_ns",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "mono_overhead_ns" if args.len() == 0 => Some((
-                "mako_native_mono_overhead_ns",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "sleep_us" if args.len() == 1 => Some((
-                "mako_native_sleep_us",
-                &[Type::I64],
-                None,
-                false,
-            )),
+            "mono_us" if args.len() == 0 => {
+                Some(("mako_native_mono_us", &[], Some(Type::I64), false))
+            }
+            "mono_ms" if args.len() == 0 => {
+                Some(("mako_native_mono_ms", &[], Some(Type::I64), false))
+            }
+            "mono_res_ns" if args.len() == 0 => {
+                Some(("mako_native_mono_res_ns", &[], Some(Type::I64), false))
+            }
+            "mono_overhead_ns" if args.len() == 0 => {
+                Some(("mako_native_mono_overhead_ns", &[], Some(Type::I64), false))
+            }
+            "sleep_us" if args.len() == 1 => {
+                Some(("mako_native_sleep_us", &[Type::I64], None, false))
+            }
             "elapsed_us" if args.len() == 1 => Some((
                 "mako_native_elapsed_us",
                 &[Type::I64],
@@ -20348,12 +20820,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "sleep_until_ns" if args.len() == 1 => Some((
-                "mako_native_sleep_until_ns",
-                &[Type::I64],
-                None,
-                false,
-            )),
+            "sleep_until_ns" if args.len() == 1 => {
+                Some(("mako_native_sleep_until_ns", &[Type::I64], None, false))
+            }
             "format_int_hex" if args.len() == 1 => Some((
                 "mako_native_format_int_hex_ptr",
                 &[Type::I64],
@@ -20408,48 +20877,30 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "wall_us" if args.len() == 0 => Some((
-                "mako_native_wall_us",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "wall_ns" if args.len() == 0 => Some((
-                "mako_native_wall_ns",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "wall_us" if args.len() == 0 => {
+                Some(("mako_native_wall_us", &[], Some(Type::I64), false))
+            }
+            "wall_ns" if args.len() == 0 => {
+                Some(("mako_native_wall_ns", &[], Some(Type::I64), false))
+            }
             "time_format" if args.len() == 1 => Some((
                 "mako_native_time_format_ptr",
                 &[Type::I64],
                 Some(Type::Str),
                 true,
             )),
-            "mutex_new" if args.len() == 0 => Some((
-                "mako_native_mutex_new",
-                &[],
-                Some(Type::Opaque),
-                true,
-            )),
-            "mutex_lock" if args.len() == 1 => Some((
-                "mako_native_mutex_lock",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
-            "mutex_unlock" if args.len() == 1 => Some((
-                "mako_native_mutex_unlock",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
-            "spin_until_ns" if args.len() == 1 => Some((
-                "mako_native_spin_until_ns",
-                &[Type::I64],
-                None,
-                false,
-            )),
+            "mutex_new" if args.len() == 0 => {
+                Some(("mako_native_mutex_new", &[], Some(Type::Opaque), true))
+            }
+            "mutex_lock" if args.len() == 1 => {
+                Some(("mako_native_mutex_lock", &[Type::Opaque], None, false))
+            }
+            "mutex_unlock" if args.len() == 1 => {
+                Some(("mako_native_mutex_unlock", &[Type::Opaque], None, false))
+            }
+            "spin_until_ns" if args.len() == 1 => {
+                Some(("mako_native_spin_until_ns", &[Type::I64], None, false))
+            }
             "ints_contains" if args.len() == 2 => Some((
                 "mako_native_ints_contains_ptr",
                 &[Type::IntSlice, Type::I64],
@@ -20487,18 +20938,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "session_id_new" if args.len() == 0 => Some((
-                "mako_native_session_id_new_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "png_available" if args.len() == 0 => Some((
-                "mako_native_png_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "session_id_new" if args.len() == 0 => {
+                Some(("mako_native_session_id_new_ptr", &[], Some(Type::Str), true))
+            }
+            "png_available" if args.len() == 0 => {
+                Some(("mako_native_png_available", &[], Some(Type::I64), false))
+            }
             "binary_put_u32be" if args.len() == 1 => Some((
                 "mako_native_binary_put_u32be_ptr",
                 &[Type::I64],
@@ -20523,12 +20968,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "bcrypt_available" if args.len() == 0 => Some((
-                "mako_native_bcrypt_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "bcrypt_available" if args.len() == 0 => {
+                Some(("mako_native_bcrypt_available", &[], Some(Type::I64), false))
+            }
             "str_as_view" if args.len() == 1 => Some((
                 // Non-owning view: return the same header pointer, ret_owned=false.
                 "mako_native_str_as_view_ptr",
@@ -20555,42 +20997,24 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "csrf_token" if args.len() == 0 => Some((
-                "mako_native_csrf_token_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "rwmutex_new" if args.len() == 0 => Some((
-                "mako_native_rwmutex_new",
-                &[],
-                Some(Type::Opaque),
-                true,
-            )),
-            "rwmutex_rlock" if args.len() == 1 => Some((
-                "mako_native_rwmutex_rlock",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
-            "rwmutex_runlock" if args.len() == 1 => Some((
-                "mako_native_rwmutex_runlock",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
-            "rwmutex_lock" if args.len() == 1 => Some((
-                "mako_native_rwmutex_lock",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
-            "rwmutex_unlock" if args.len() == 1 => Some((
-                "mako_native_rwmutex_unlock",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
+            "csrf_token" if args.len() == 0 => {
+                Some(("mako_native_csrf_token_ptr", &[], Some(Type::Str), true))
+            }
+            "rwmutex_new" if args.len() == 0 => {
+                Some(("mako_native_rwmutex_new", &[], Some(Type::Opaque), true))
+            }
+            "rwmutex_rlock" if args.len() == 1 => {
+                Some(("mako_native_rwmutex_rlock", &[Type::Opaque], None, false))
+            }
+            "rwmutex_runlock" if args.len() == 1 => {
+                Some(("mako_native_rwmutex_runlock", &[Type::Opaque], None, false))
+            }
+            "rwmutex_lock" if args.len() == 1 => {
+                Some(("mako_native_rwmutex_lock", &[Type::Opaque], None, false))
+            }
+            "rwmutex_unlock" if args.len() == 1 => {
+                Some(("mako_native_rwmutex_unlock", &[Type::Opaque], None, false))
+            }
             "list_push_int" if args.len() == 2 => Some((
                 "mako_native_list_push_int_ptr",
                 &[Type::IntSlice, Type::I64],
@@ -20603,12 +21027,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::IntSlice),
                 true,
             )),
-            "list_popped_int" if args.len() == 0 => Some((
-                "mako_native_list_popped_int",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "list_popped_int" if args.len() == 0 => {
+                Some(("mako_native_list_popped_int", &[], Some(Type::I64), false))
+            }
             "list_get_int" if args.len() == 2 => Some((
                 "mako_native_list_get_int_ptr",
                 &[Type::IntSlice, Type::I64],
@@ -20723,12 +21144,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::IntSlice),
                 true,
             )),
-            "queue_popped_int" if args.len() == 0 => Some((
-                "mako_native_queue_popped_int",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "queue_popped_int" if args.len() == 0 => {
+                Some(("mako_native_queue_popped_int", &[], Some(Type::I64), false))
+            }
             "slices_reverse_strs" if args.len() == 1 => Some((
                 "mako_native_slices_reverse_strs_ptr",
                 &[Type::StrSlice],
@@ -20784,30 +21202,21 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "wait_group_new" if args.len() == 0 => Some((
-                "mako_native_wait_group_new",
-                &[],
-                Some(Type::Opaque),
-                false,
-            )),
+            "wait_group_new" if args.len() == 0 => {
+                Some(("mako_native_wait_group_new", &[], Some(Type::Opaque), false))
+            }
             "wait_group_add" if args.len() == 2 => Some((
                 "mako_native_wait_group_add",
                 &[Type::Opaque, Type::I64],
                 None,
                 false,
             )),
-            "wait_group_done" if args.len() == 1 => Some((
-                "mako_native_wait_group_done",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
-            "wait_group_wait" if args.len() == 1 => Some((
-                "mako_native_wait_group_wait",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
+            "wait_group_done" if args.len() == 1 => {
+                Some(("mako_native_wait_group_done", &[Type::Opaque], None, false))
+            }
+            "wait_group_wait" if args.len() == 1 => {
+                Some(("mako_native_wait_group_wait", &[Type::Opaque], None, false))
+            }
             "atomic_new" if args.len() == 1 => Some((
                 "mako_native_atomic_new",
                 &[Type::I64],
@@ -20844,12 +21253,9 @@ impl<'a> FunctionLowerer<'a> {
                 None,
                 false,
             )),
-            "syscall_getpid" if args.len() == 0 => Some((
-                "mako_native_syscall_getpid",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "syscall_getpid" if args.len() == 0 => {
+                Some(("mako_native_syscall_getpid", &[], Some(Type::I64), false))
+            }
             "path_size" if args.len() == 1 => Some((
                 "mako_native_path_size_ptr",
                 &[Type::Str],
@@ -20862,12 +21268,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "ring_len" if args.len() == 1 => Some((
-                "mako_native_ring_len",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "ring_len" if args.len() == 1 => {
+                Some(("mako_native_ring_len", &[Type::I64], Some(Type::I64), false))
+            }
             "signal_fired" if args.len() == 1 => Some((
                 "mako_native_signal_fired_ptr",
                 &[Type::Str],
@@ -20880,18 +21283,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "watch_new" if args.len() == 0 => Some((
-                "mako_native_watch_new",
-                &[],
-                Some(Type::Opaque),
-                false,
-            )),
-            "zip_create" if args.len() == 0 => Some((
-                "mako_native_zip_create",
-                &[],
-                Some(Type::Opaque),
-                false,
-            )),
+            "watch_new" if args.len() == 0 => {
+                Some(("mako_native_watch_new", &[], Some(Type::Opaque), false))
+            }
+            "zip_create" if args.len() == 0 => {
+                Some(("mako_native_zip_create", &[], Some(Type::Opaque), false))
+            }
             "buf_reader_from_string" if args.len() == 1 => Some((
                 "mako_native_buf_reader_from_string_ptr",
                 &[Type::Str],
@@ -21066,12 +21463,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "syscall_errno" if args.len() == 0 => Some((
-                "mako_native_syscall_errno",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "syscall_errno" if args.len() == 0 => {
+                Some(("mako_native_syscall_errno", &[], Some(Type::I64), false))
+            }
             "ws_accept" if args.len() == 1 => Some((
                 "mako_native_ws_accept",
                 &[Type::I64],
@@ -21084,12 +21478,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::StrSlice),
                 true,
             )),
-            "secret_drop" if args.len() == 1 => Some((
-                "mako_native_secret_drop",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
+            "secret_drop" if args.len() == 1 => {
+                Some(("mako_native_secret_drop", &[Type::Opaque], None, false))
+            }
             "reqctx_get" if args.len() == 2 => Some((
                 "mako_native_reqctx_get_value_ptr",
                 &[Type::I64, Type::Str],
@@ -21486,12 +21877,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "leak_scope_enter" if args.len() == 0 => Some((
-                "mako_native_leak_scope_enter",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "leak_scope_enter" if args.len() == 0 => {
+                Some(("mako_native_leak_scope_enter", &[], Some(Type::I64), false))
+            }
             "list_eq_int" if args.len() == 2 => Some((
                 "mako_native_list_eq_int",
                 &[Type::IntSlice, Type::IntSlice],
@@ -21600,12 +21988,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "ring_pop" if args.len() == 1 => Some((
-                "mako_native_ring_pop",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "ring_pop" if args.len() == 1 => {
+                Some(("mako_native_ring_pop", &[Type::I64], Some(Type::I64), false))
+            }
             "router_add" if args.len() == 4 => Some((
                 "mako_native_router_add_ptr",
                 &[Type::I64, Type::Str, Type::Str, Type::Str],
@@ -21642,12 +22027,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "syscall_getppid" if args.len() == 0 => Some((
-                "mako_native_syscall_getppid",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "syscall_getppid" if args.len() == 0 => {
+                Some(("mako_native_syscall_getppid", &[], Some(Type::I64), false))
+            }
             "tcp_connect_timeout" if args.len() == 3 => Some((
                 "mako_native_tcp_connect_timeout_ptr",
                 &[Type::Str, Type::I64, Type::I64],
@@ -21720,18 +22102,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "unix_socket_pair" if args.len() == 0 => Some((
-                "mako_native_unix_socket_pair",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "utf8_utf_max" if args.len() == 0 => Some((
-                "mako_native_utf8_utf_max",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "unix_socket_pair" if args.len() == 0 => {
+                Some(("mako_native_unix_socket_pair", &[], Some(Type::I64), false))
+            }
+            "utf8_utf_max" if args.len() == 0 => {
+                Some(("mako_native_utf8_utf_max", &[], Some(Type::I64), false))
+            }
             "validate_int_range" if args.len() == 3 => Some((
                 "mako_native_validate_int_range",
                 &[Type::I64, Type::I64, Type::I64],
@@ -21867,7 +22243,15 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "gpu_layernorm_f32" if args.len() == 7 => Some((
                 "mako_native_gpu_layernorm_f32",
-                &[Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::F64],
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::F64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -22003,12 +22387,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "leak_scope_exit" if args.len() == 0 => Some((
-                "mako_native_leak_scope_exit",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "leak_scope_exit" if args.len() == 0 => {
+                Some(("mako_native_leak_scope_exit", &[], Some(Type::I64), false))
+            }
             "list_fill_int" if args.len() == 2 => Some((
                 "mako_native_list_fill_int_ptr",
                 &[Type::I64, Type::I64],
@@ -22057,12 +22438,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "plugin_count" if args.len() == 0 => Some((
-                "mako_native_plugin_count",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "plugin_count" if args.len() == 0 => {
+                Some(("mako_native_plugin_count", &[], Some(Type::I64), false))
+            }
             "plugin_name" if args.len() == 1 => Some((
                 "mako_native_plugin_name_ptr",
                 &[Type::I64],
@@ -22123,24 +22501,18 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "slog_debug" if args.len() == 1 => Some((
-                "mako_native_slog_debug_ptr",
-                &[Type::Str],
-                None,
-                false,
-            )),
+            "slog_debug" if args.len() == 1 => {
+                Some(("mako_native_slog_debug_ptr", &[Type::Str], None, false))
+            }
             "str_byte_at" if args.len() == 2 => Some((
                 "mako_native_str_byte_at_ptr",
                 &[Type::Str, Type::I64],
                 Some(Type::I64),
                 false,
             )),
-            "syscall_getuid" if args.len() == 0 => Some((
-                "mako_native_syscall_getuid",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "syscall_getuid" if args.len() == 0 => {
+                Some(("mako_native_syscall_getuid", &[], Some(Type::I64), false))
+            }
             "tcp_pool_acquire" if args.len() == 1 => Some((
                 "mako_native_tcp_pool_acquire",
                 &[Type::I64],
@@ -22195,12 +22567,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "trace_span_id" if args.len() == 0 => Some((
-                "mako_native_trace_span_id_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "trace_span_id" if args.len() == 0 => {
+                Some(("mako_native_trace_span_id_ptr", &[], Some(Type::Str), true))
+            }
             "udp_recv" if args.len() == 2 => Some((
                 "mako_native_udp_recv_ptr",
                 &[Type::I64, Type::I64],
@@ -22292,12 +22661,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "ffi_abi_name" if args.len() == 0 => Some((
-                "mako_native_ffi_abi_name_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "ffi_abi_name" if args.len() == 0 => {
+                Some(("mako_native_ffi_abi_name_ptr", &[], Some(Type::Str), true))
+            }
             "fsm_can" if args.len() == 3 => Some((
                 "mako_native_fsm_can_ptr",
                 &[Type::Str, Type::Str, Type::Str],
@@ -22318,7 +22684,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "gpu_attention_f32" if args.len() == 6 => Some((
                 "mako_native_gpu_attention_f32",
-                &[Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64],
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -22430,18 +22803,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "leak_check" if args.len() == 0 => Some((
-                "mako_native_leak_check",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "leak_assert_scope" if args.len() == 0 => Some((
-                "mako_native_leak_assert_scope",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "leak_check" if args.len() == 0 => {
+                Some(("mako_native_leak_check", &[], Some(Type::I64), false))
+            }
+            "leak_assert_scope" if args.len() == 0 => {
+                Some(("mako_native_leak_assert_scope", &[], Some(Type::I64), false))
+            }
             "list_range_int" if args.len() == 2 => Some((
                 "mako_native_list_range_int_ptr",
                 &[Type::I64, Type::I64],
@@ -22550,18 +22917,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "slog_info" if args.len() == 1 => Some((
-                "mako_native_slog_info_ptr",
-                &[Type::Str],
-                None,
-                false,
-            )),
-            "syscall_geteuid" if args.len() == 0 => Some((
-                "mako_native_syscall_geteuid",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "slog_info" if args.len() == 1 => {
+                Some(("mako_native_slog_info_ptr", &[Type::Str], None, false))
+            }
+            "syscall_geteuid" if args.len() == 0 => {
+                Some(("mako_native_syscall_geteuid", &[], Some(Type::I64), false))
+            }
             "tcp_pool_release" if args.len() == 3 => Some((
                 "mako_native_tcp_pool_release",
                 &[Type::I64, Type::I64, Type::I64],
@@ -22580,12 +22941,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "time_day" if args.len() == 1 => Some((
-                "mako_native_time_day",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "time_day" if args.len() == 1 => {
+                Some(("mako_native_time_day", &[Type::I64], Some(Type::I64), false))
+            }
             "tls_record_version" if args.len() == 1 => Some((
                 "mako_native_tls_record_version_ptr",
                 &[Type::Str],
@@ -22598,12 +22956,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "trace_end" if args.len() == 0 => Some((
-                "mako_native_trace_end",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "trace_end" if args.len() == 0 => {
+                Some(("mako_native_trace_end", &[], Some(Type::I64), false))
+            }
             "udp_close" if args.len() == 1 => Some((
                 "mako_native_udp_close",
                 &[Type::I64],
@@ -22779,12 +23134,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "lfq_new" if args.len() == 1 => Some((
-                "mako_native_lfq_new",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "lfq_new" if args.len() == 1 => {
+                Some(("mako_native_lfq_new", &[Type::I64], Some(Type::I64), false))
+            }
             "list_binary_search_int" if args.len() == 2 => Some((
                 "mako_native_list_binary_search_int",
                 &[Type::IntSlice, Type::I64],
@@ -22845,12 +23197,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "plugin_last_error" if args.len() == 0 => Some((
-                "mako_native_plugin_last_error",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "plugin_last_error" if args.len() == 0 => {
+                Some(("mako_native_plugin_last_error", &[], Some(Type::I64), false))
+            }
             "png_decode_gray" if args.len() == 1 => Some((
                 "mako_native_png_decode_gray_ptr",
                 &[Type::Str],
@@ -22899,18 +23248,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "slog_warn" if args.len() == 1 => Some((
-                "mako_native_slog_warn_ptr",
-                &[Type::Str],
-                None,
-                false,
-            )),
-            "syscall_getgid" if args.len() == 0 => Some((
-                "mako_native_syscall_getgid",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "slog_warn" if args.len() == 1 => {
+                Some(("mako_native_slog_warn_ptr", &[Type::Str], None, false))
+            }
+            "syscall_getgid" if args.len() == 0 => {
+                Some(("mako_native_syscall_getgid", &[], Some(Type::I64), false))
+            }
             "tcp_pool_close" if args.len() == 1 => Some((
                 "mako_native_tcp_pool_close",
                 &[Type::I64],
@@ -22947,12 +23290,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "trace_current" if args.len() == 0 => Some((
-                "mako_native_trace_current_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "trace_current" if args.len() == 0 => {
+                Some(("mako_native_trace_current_ptr", &[], Some(Type::Str), true))
+            }
             "trace_export_otlp_pb_len" if args.len() == 0 => Some((
                 "mako_native_trace_export_otlp_pb_len",
                 &[],
@@ -23218,18 +23558,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "slog_error" if args.len() == 1 => Some((
-                "mako_native_slog_error_ptr",
-                &[Type::Str],
-                None,
-                false,
-            )),
-            "syscall_getegid" if args.len() == 0 => Some((
-                "mako_native_syscall_getegid",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "slog_error" if args.len() == 1 => {
+                Some(("mako_native_slog_error_ptr", &[Type::Str], None, false))
+            }
+            "syscall_getegid" if args.len() == 0 => {
+                Some(("mako_native_syscall_getegid", &[], Some(Type::I64), false))
+            }
             "tcp_linger" if args.len() == 3 => Some((
                 "mako_native_tcp_linger",
                 &[Type::I64, Type::I64, Type::I64],
@@ -23260,12 +23594,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "tok_new" if args.len() == 0 => Some((
-                "mako_native_tok_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "tok_new" if args.len() == 0 => {
+                Some(("mako_native_tok_new", &[], Some(Type::I64), false))
+            }
             "trace_export_otlp_pb" if args.len() == 0 => Some((
                 "mako_native_trace_export_otlp_pb_ptr",
                 &[],
@@ -23357,12 +23688,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "gzip_available" if args.len() == 0 => Some((
-                "mako_native_gzip_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "gzip_available" if args.len() == 0 => {
+                Some(("mako_native_gzip_available", &[], Some(Type::I64), false))
+            }
             "hpack_huffman_decode" if args.len() == 1 => Some((
                 "mako_native_hpack_huffman_decode_ptr",
                 &[Type::Str],
@@ -23399,12 +23727,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "lfq_len" if args.len() == 1 => Some((
-                "mako_native_lfq_len",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "lfq_len" if args.len() == 1 => {
+                Some(("mako_native_lfq_len", &[Type::I64], Some(Type::I64), false))
+            }
             "list_drop_int" if args.len() == 2 => Some((
                 "mako_native_list_drop_int_ptr",
                 &[Type::IntSlice, Type::I64],
@@ -23489,24 +23814,18 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::IntSlice),
                 true,
             )),
-            "signal_on_term" if args.len() == 0 => Some((
-                "mako_native_signal_on_term",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "signal_on_term" if args.len() == 0 => {
+                Some(("mako_native_signal_on_term", &[], Some(Type::I64), false))
+            }
             "sip_via_branch" if args.len() == 1 => Some((
                 "mako_native_sip_via_branch_ptr",
                 &[Type::Str],
                 Some(Type::Str),
                 true,
             )),
-            "slog_set_json" if args.len() == 1 => Some((
-                "mako_native_slog_set_json",
-                &[Type::I64],
-                None,
-                false,
-            )),
+            "slog_set_json" if args.len() == 1 => {
+                Some(("mako_native_slog_set_json", &[Type::I64], None, false))
+            }
             "slog_with" if args.len() == 4 => Some((
                 "mako_native_slog_with_ptr",
                 &[Type::Str, Type::Str, Type::Str, Type::Str],
@@ -23652,12 +23971,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "hpack_dyn_clear" if args.len() == 0 => Some((
-                "mako_native_hpack_dyn_clear",
-                &[],
-                None,
-                false,
-            )),
+            "hpack_dyn_clear" if args.len() == 0 => {
+                Some(("mako_native_hpack_dyn_clear", &[], None, false))
+            }
             "http_shutdown_deadline" if args.len() == 0 => Some((
                 "mako_native_http_shutdown_deadline",
                 &[],
@@ -23724,12 +24040,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "plugin_log_count" if args.len() == 0 => Some((
-                "mako_native_plugin_log_count",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "plugin_log_count" if args.len() == 0 => {
+                Some(("mako_native_plugin_log_count", &[], Some(Type::I64), false))
+            }
             "profile_sample_cpu_us" if args.len() == 0 => Some((
                 "mako_native_profile_sample_cpu_us",
                 &[],
@@ -23989,18 +24302,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "hot_site_enabled" if args.len() == 0 => Some((
-                "mako_native_hot_site_enabled",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "hot_site_clear" if args.len() == 0 => Some((
-                "mako_native_hot_site_clear",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "hot_site_enabled" if args.len() == 0 => {
+                Some(("mako_native_hot_site_enabled", &[], Some(Type::I64), false))
+            }
+            "hot_site_clear" if args.len() == 0 => {
+                Some(("mako_native_hot_site_clear", &[], Some(Type::I64), false))
+            }
             "hot_site_hit" if args.len() == 1 => Some((
                 "mako_native_hot_site_hit",
                 &[Type::I64],
@@ -24013,43 +24320,28 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "hot_site_total" if args.len() == 0 => Some((
-                "mako_native_hot_site_total",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "hot_site_top_id" if args.len() == 0 => Some((
-                "mako_native_hot_site_top_id",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "hot_site_total" if args.len() == 0 => {
+                Some(("mako_native_hot_site_total", &[], Some(Type::I64), false))
+            }
+            "hot_site_top_id" if args.len() == 0 => {
+                Some(("mako_native_hot_site_top_id", &[], Some(Type::I64), false))
+            }
             "hot_site_top_count" if args.len() == 0 => Some((
                 "mako_native_hot_site_top_count",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "hot_sites_json" if args.len() == 0 => Some((
-                "mako_native_hot_sites_json_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "hot_sites_json" if args.len() == 0 => {
+                Some(("mako_native_hot_sites_json_ptr", &[], Some(Type::Str), true))
+            }
             // Messaging queues + NATS / Redis list adapters
-            "mq_new" if args.len() == 0 => Some((
-                "mako_native_mq_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "mq_free" if args.len() == 1 => Some((
-                "mako_native_mq_free",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "mq_new" if args.len() == 0 => {
+                Some(("mako_native_mq_new", &[], Some(Type::I64), false))
+            }
+            "mq_free" if args.len() == 1 => {
+                Some(("mako_native_mq_free", &[Type::I64], Some(Type::I64), false))
+            }
             "mq_declare" if args.len() == 3 => Some((
                 "mako_native_mq_declare",
                 &[Type::I64, Type::Str, Type::I64],
@@ -24080,12 +24372,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "nats_new" if args.len() == 0 => Some((
-                "mako_native_nats_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "nats_new" if args.len() == 0 => {
+                Some(("mako_native_nats_new", &[], Some(Type::I64), false))
+            }
             "nats_free" if args.len() == 1 => Some((
                 "mako_native_nats_free",
                 &[Type::I64],
@@ -24140,12 +24429,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "redis_mq_new" if args.len() == 0 => Some((
-                "mako_native_redis_mq_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "redis_mq_new" if args.len() == 0 => {
+                Some(("mako_native_redis_mq_new", &[], Some(Type::I64), false))
+            }
             "redis_mq_free" if args.len() == 1 => Some((
                 "mako_native_redis_mq_free",
                 &[Type::I64],
@@ -24383,12 +24669,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "temp_dir" if args.len() == 0 => Some((
-                "mako_native_temp_dir_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "temp_dir" if args.len() == 0 => {
+                Some(("mako_native_temp_dir_ptr", &[], Some(Type::Str), true))
+            }
             "time_weekday" if args.len() == 1 => Some((
                 "mako_native_time_weekday",
                 &[Type::I64],
@@ -24528,12 +24811,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "gpu_metal_ok" if args.len() == 0 => Some((
-                "mako_native_gpu_metal_ok",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "gpu_metal_ok" if args.len() == 0 => {
+                Some(("mako_native_gpu_metal_ok", &[], Some(Type::I64), false))
+            }
             "gpu_mul_f32" if args.len() == 3 => Some((
                 "mako_native_gpu_mul_f32",
                 &[Type::I64, Type::I64, Type::I64],
@@ -24558,12 +24838,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "hpack_dyn_len" if args.len() == 0 => Some((
-                "mako_native_hpack_dyn_len",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "hpack_dyn_len" if args.len() == 0 => {
+                Some(("mako_native_hpack_dyn_len", &[], Some(Type::I64), false))
+            }
             "http2_conn_max_concurrent" if args.len() == 0 => Some((
                 "mako_native_http2_conn_max_concurrent",
                 &[],
@@ -24600,12 +24877,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "plugin_close_all" if args.len() == 0 => Some((
-                "mako_native_plugin_close_all",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "plugin_close_all" if args.len() == 0 => {
+                Some(("mako_native_plugin_close_all", &[], Some(Type::I64), false))
+            }
             "profile_snapshot_json" if args.len() == 0 => Some((
                 "mako_native_profile_snapshot_json_ptr",
                 &[],
@@ -24733,12 +25007,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "gpu_cuda_ok" if args.len() == 0 => Some((
-                "mako_native_gpu_cuda_ok",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "gpu_cuda_ok" if args.len() == 0 => {
+                Some(("mako_native_gpu_cuda_ok", &[], Some(Type::I64), false))
+            }
             "gpu_scale_f32" if args.len() == 3 => Some((
                 "mako_native_gpu_scale_f32",
                 &[Type::I64, Type::I64, Type::F64],
@@ -24775,12 +25046,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "hpack_dyn_name" if args.len() == 0 => Some((
-                "mako_native_hpack_dyn_name_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "hpack_dyn_name" if args.len() == 0 => {
+                Some(("mako_native_hpack_dyn_name_ptr", &[], Some(Type::Str), true))
+            }
             "http2_conn_goaway_last" if args.len() == 0 => Some((
                 "mako_native_http2_conn_goaway_last",
                 &[],
@@ -24817,12 +25085,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "process_rss_bytes" if args.len() == 0 => Some((
-                "mako_native_process_rss_bytes",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "process_rss_bytes" if args.len() == 0 => {
+                Some(("mako_native_process_rss_bytes", &[], Some(Type::I64), false))
+            }
             "quic_initial_hp_mask" if args.len() == 2 => Some((
                 "mako_native_quic_initial_hp_mask_ptr",
                 &[Type::Str, Type::Str],
@@ -24861,16 +25126,21 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "smtp_send_auth" if args.len() == 7 => Some((
                 "mako_native_smtp_send_auth_ptr",
-                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str, Type::Str, Type::Str],
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                ],
                 Some(Type::I64),
                 false,
             )),
-            "syscall_pagesize" if args.len() == 0 => Some((
-                "mako_native_syscall_pagesize",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "syscall_pagesize" if args.len() == 0 => {
+                Some(("mako_native_syscall_pagesize", &[], Some(Type::I64), false))
+            }
             "time_parse_rfc3339" if args.len() == 1 => Some((
                 "mako_native_time_parse_rfc3339_ptr",
                 &[Type::Str],
@@ -24932,12 +25202,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "gpu_vulkan_ok" if args.len() == 0 => Some((
-                "mako_native_gpu_vulkan_ok",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "gpu_vulkan_ok" if args.len() == 0 => {
+                Some(("mako_native_gpu_vulkan_ok", &[], Some(Type::I64), false))
+            }
             "graphql_request_vars" if args.len() == 2 => Some((
                 "mako_native_graphql_request_vars_ptr",
                 &[Type::Str, Type::Str],
@@ -24950,12 +25217,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "heap_popped_int" if args.len() == 0 => Some((
-                "mako_native_heap_popped_int",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "heap_popped_int" if args.len() == 0 => {
+                Some(("mako_native_heap_popped_int", &[], Some(Type::I64), false))
+            }
             "hpack_dyn_name_at" if args.len() == 1 => Some((
                 "mako_native_hpack_dyn_name_at_ptr",
                 &[Type::I64],
@@ -25052,12 +25316,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "syscall_ncpu" if args.len() == 0 => Some((
-                "mako_native_syscall_ncpu",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "syscall_ncpu" if args.len() == 0 => {
+                Some(("mako_native_syscall_ncpu", &[], Some(Type::I64), false))
+            }
             "time_parse_date" if args.len() == 1 => Some((
                 "mako_native_time_parse_date_ptr",
                 &[Type::Str],
@@ -25095,12 +25356,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "close_listeners" if args.len() == 0 => Some((
-                "mako_native_close_listeners",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "close_listeners" if args.len() == 0 => {
+                Some(("mako_native_close_listeners", &[], Some(Type::I64), false))
+            }
             "file_size" if args.len() == 1 => Some((
                 "mako_native_file_size",
                 &[Type::I64],
@@ -25121,7 +25379,16 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "grpc_http2_client_stream_flow" if args.len() == 8 => Some((
                 "mako_native_grpc_http2_client_stream_flow_ptr",
-                &[Type::I64, Type::Str, Type::I64, Type::Str, Type::I64, Type::Str, Type::I64, Type::I64],
+                &[
+                    Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::Str),
                 true,
             )),
@@ -25149,12 +25416,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "httptest_status" if args.len() == 0 => Some((
-                "mako_native_httptest_status",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "httptest_status" if args.len() == 0 => {
+                Some(("mako_native_httptest_status", &[], Some(Type::I64), false))
+            }
             "list_concat_str" if args.len() == 2 => Some((
                 "mako_native_list_concat_str_ptr",
                 &[Type::StrSlice, Type::StrSlice],
@@ -25227,12 +25491,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "stack_trace" if args.len() == 0 => Some((
-                "mako_native_stack_trace_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "stack_trace" if args.len() == 0 => {
+                Some(("mako_native_stack_trace_ptr", &[], Some(Type::Str), true))
+            }
             "syscall_getrlimit_nofile" if args.len() == 0 => Some((
                 "mako_native_syscall_getrlimit_nofile",
                 &[],
@@ -25247,7 +25508,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "tls_grpc_unary" if args.len() == 6 => Some((
                 "mako_native_tls_grpc_unary_ptr",
-                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::I64, Type::Str],
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                ],
                 Some(Type::Str),
                 true,
             )),
@@ -25257,12 +25525,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "tok_size" if args.len() == 1 => Some((
-                "mako_native_tok_size",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "tok_size" if args.len() == 1 => {
+                Some(("mako_native_tok_size", &[Type::I64], Some(Type::I64), false))
+            }
             "unicode_is_letter" if args.len() == 1 => Some((
                 "mako_native_unicode_is_letter",
                 &[Type::I64],
@@ -25282,12 +25547,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "gpu_opencl_ok" if args.len() == 0 => Some((
-                "mako_native_gpu_opencl_ok",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "gpu_opencl_ok" if args.len() == 0 => {
+                Some(("mako_native_gpu_opencl_ok", &[], Some(Type::I64), false))
+            }
             "http2_priority_frame" if args.len() == 4 => Some((
                 "mako_native_http2_priority_frame_ptr",
                 &[Type::I64, Type::I64, Type::I64, Type::I64],
@@ -25300,12 +25562,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "http2_stream_reset" if args.len() == 0 => Some((
-                "mako_native_http2_stream_reset",
-                &[],
-                None,
-                false,
-            )),
+            "http2_stream_reset" if args.len() == 0 => {
+                Some(("mako_native_http2_stream_reset", &[], None, false))
+            }
             "httptest_header" if args.len() == 1 => Some((
                 "mako_native_httptest_header_ptr",
                 &[Type::Str],
@@ -25372,12 +25631,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "syscall_pipe" if args.len() == 0 => Some((
-                "mako_native_syscall_pipe",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "syscall_pipe" if args.len() == 0 => {
+                Some(("mako_native_syscall_pipe", &[], Some(Type::I64), false))
+            }
             "time_format_clock" if args.len() == 1 => Some((
                 "mako_native_time_format_clock_ptr",
                 &[Type::I64],
@@ -25402,12 +25658,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "tok_free" if args.len() == 1 => Some((
-                "mako_native_tok_free",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "tok_free" if args.len() == 1 => {
+                Some(("mako_native_tok_free", &[Type::I64], Some(Type::I64), false))
+            }
             "unicode_is_digit" if args.len() == 1 => Some((
                 "mako_native_unicode_is_digit",
                 &[Type::I64],
@@ -25421,12 +25674,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "fsync" if args.len() == 1 => Some((
-                "mako_native_fsync",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "fsync" if args.len() == 1 => {
+                Some(("mako_native_fsync", &[Type::I64], Some(Type::I64), false))
+            }
             "list_map_mul_int" if args.len() == 2 => Some((
                 "mako_native_list_map_mul_int_ptr",
                 &[Type::IntSlice, Type::I64],
@@ -25519,13 +25769,28 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "gpu_matmul_f32" if args.len() == 6 => Some((
                 "mako_native_gpu_matmul_f32",
-                &[Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64],
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
             "gpu_mha_f32" if args.len() == 7 => Some((
                 "mako_native_gpu_mha_f32",
-                &[Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64],
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -25584,12 +25849,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "zip_close" if args.len() == 1 => Some((
-                "mako_native_zip_close",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
+            "zip_close" if args.len() == 1 => {
+                Some(("mako_native_zip_close", &[Type::Opaque], None, false))
+            }
             "zip_list" if args.len() == 1 => Some((
                 "mako_native_zip_list_ptr",
                 &[Type::Str],
@@ -25668,12 +25930,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "flate_available" if args.len() == 0 => Some((
-                "mako_native_flate_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "flate_available" if args.len() == 0 => {
+                Some(("mako_native_flate_available", &[], Some(Type::I64), false))
+            }
             "zlib_compress" if args.len() == 1 => Some((
                 "mako_native_zlib_compress_ptr",
                 &[Type::Str],
@@ -25686,12 +25945,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "zlib_available" if args.len() == 0 => Some((
-                "mako_native_zlib_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "zlib_available" if args.len() == 0 => {
+                Some(("mako_native_zlib_available", &[], Some(Type::I64), false))
+            }
             "bzip2_compress" if args.len() == 1 => Some((
                 "mako_native_bzip2_compress_ptr",
                 &[Type::Str],
@@ -25704,12 +25960,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "bzip2_available" if args.len() == 0 => Some((
-                "mako_native_bzip2_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "bzip2_available" if args.len() == 0 => {
+                Some(("mako_native_bzip2_available", &[], Some(Type::I64), false))
+            }
             "lzw_compress" if args.len() == 1 => Some((
                 "mako_native_lzw_compress_ptr",
                 &[Type::Str],
@@ -25752,12 +26005,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "rand_seed" if args.len() == 1 => Some((
-                "mako_native_rand_seed",
-                &[Type::I64],
-                None,
-                false,
-            )),
+            "rand_seed" if args.len() == 1 => {
+                Some(("mako_native_rand_seed", &[Type::I64], None, false))
+            }
             "bytes_buffer_len" if args.len() == 1 => Some((
                 "mako_native_bytes_buffer_len",
                 &[Type::Opaque],
@@ -26001,7 +26251,16 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "tls_grpc_stream" if args.len() == 8 => Some((
                 "mako_native_tls_grpc_stream_ptr",
-                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::I64, Type::Str, Type::I64, Type::Str],
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                ],
                 Some(Type::Str),
                 true,
             )),
@@ -26079,214 +26338,615 @@ impl<'a> FunctionLowerer<'a> {
                 false,
             )),
             // CMap composite-key helpers
-            "cmap_has2" if args.len() == 3 => Some(("mako_native_cmap_has2_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::I64), false)),
-            "cmap_get2" if args.len() == 3 => Some(("mako_native_cmap_get2_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::Str), true)),
-            "cmap_del2" if args.len() == 3 => Some(("mako_native_cmap_del2_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::I64), false)),
-            "cmap_has3i" if args.len() == 4 => Some(("mako_native_cmap_has3i_ptr", &[Type::Opaque, Type::Str, Type::Str, Type::I64], Some(Type::I64), false)),
-            "cmap_get3i" if args.len() == 4 => Some(("mako_native_cmap_get3i_ptr", &[Type::Opaque, Type::Str, Type::Str, Type::I64], Some(Type::Str), true)),
-            "cmap_del3i" if args.len() == 4 => Some(("mako_native_cmap_del3i_ptr", &[Type::Opaque, Type::Str, Type::Str, Type::I64], Some(Type::I64), false)),
-            "cmap_set_int" if args.len() == 3 => Some(("mako_native_cmap_set_int_ptr", &[Type::Opaque, Type::Str, Type::I64], None, false)),
-            "cmap_get_int" if args.len() == 3 => Some(("mako_native_cmap_get_int_ptr", &[Type::Opaque, Type::Str, Type::I64], Some(Type::I64), false)),
-            "jwt_sign_es256_header" if args.len() == 3 => Some(("mako_native_jwt_sign_es256_header_ptr", &[Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
-            "jwt_sign_custom" if args.len() == 3 => Some(("mako_native_jwt_sign_es256_header_ptr", &[Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
+            "cmap_has2" if args.len() == 3 => Some((
+                "mako_native_cmap_has2_ptr",
+                &[Type::Opaque, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "cmap_get2" if args.len() == 3 => Some((
+                "mako_native_cmap_get2_ptr",
+                &[Type::Opaque, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "cmap_del2" if args.len() == 3 => Some((
+                "mako_native_cmap_del2_ptr",
+                &[Type::Opaque, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "cmap_has3i" if args.len() == 4 => Some((
+                "mako_native_cmap_has3i_ptr",
+                &[Type::Opaque, Type::Str, Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "cmap_get3i" if args.len() == 4 => Some((
+                "mako_native_cmap_get3i_ptr",
+                &[Type::Opaque, Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "cmap_del3i" if args.len() == 4 => Some((
+                "mako_native_cmap_del3i_ptr",
+                &[Type::Opaque, Type::Str, Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "cmap_set_int" if args.len() == 3 => Some((
+                "mako_native_cmap_set_int_ptr",
+                &[Type::Opaque, Type::Str, Type::I64],
+                None,
+                false,
+            )),
+            "cmap_get_int" if args.len() == 3 => Some((
+                "mako_native_cmap_get_int_ptr",
+                &[Type::Opaque, Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "jwt_sign_es256_header" if args.len() == 3 => Some((
+                "mako_native_jwt_sign_es256_header_ptr",
+                &[Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "jwt_sign_custom" if args.len() == 3 => Some((
+                "mako_native_jwt_sign_es256_header_ptr",
+                &[Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
             // UDP reuseport
-            "udp_bind_reuseport" if args.len() == 1 => Some(("mako_native_udp_bind_reuseport", &[Type::I64], Some(Type::I64), false)),
-            "udp_bind_reuseport_addr" if args.len() == 2 => Some(("mako_native_udp_bind_reuseport_addr_ptr", &[Type::Str, Type::I64], Some(Type::I64), false)),
+            "udp_bind_reuseport" if args.len() == 1 => Some((
+                "mako_native_udp_bind_reuseport",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "udp_bind_reuseport_addr" if args.len() == 2 => Some((
+                "mako_native_udp_bind_reuseport_addr_ptr",
+                &[Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
             // TLS server handle pool
-            "tls_srv_pool_accept" if args.len() == 2 => Some(("mako_native_tls_srv_pool_accept", &[Type::Opaque, Type::I64], Some(Type::I64), false)),
-            "tls_srv_pool_send" if args.len() == 2 => Some(("mako_native_tls_srv_pool_send_ptr", &[Type::I64, Type::Str], Some(Type::I64), false)),
-            "tls_srv_pool_recv" if args.len() == 2 => Some(("mako_native_tls_srv_pool_recv_ptr", &[Type::I64, Type::I64], Some(Type::Str), true)),
-            "tls_srv_pool_fd" if args.len() == 1 => Some(("mako_native_tls_srv_pool_fd", &[Type::I64], Some(Type::I64), false)),
-            "tls_srv_pool_close" if args.len() == 1 => Some(("mako_native_tls_srv_pool_close", &[Type::I64], Some(Type::I64), false)),
-            "tls_server_pool_accept" if args.len() == 2 => Some(("mako_native_tls_srv_pool_accept", &[Type::Opaque, Type::I64], Some(Type::I64), false)),
-            "tls_server_pool_write" if args.len() == 2 => Some(("mako_native_tls_srv_pool_send_ptr", &[Type::I64, Type::Str], Some(Type::I64), false)),
-            "tls_server_pool_read" if args.len() == 2 => Some(("mako_native_tls_srv_pool_recv_ptr", &[Type::I64, Type::I64], Some(Type::Str), true)),
-            "tls_server_pool_fd" if args.len() == 1 => Some(("mako_native_tls_srv_pool_fd", &[Type::I64], Some(Type::I64), false)),
-            "tls_server_pool_close" if args.len() == 1 => Some(("mako_native_tls_srv_pool_close", &[Type::I64], Some(Type::I64), false)),
+            "tls_srv_pool_accept" if args.len() == 2 => Some((
+                "mako_native_tls_srv_pool_accept",
+                &[Type::Opaque, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_srv_pool_send" if args.len() == 2 => Some((
+                "mako_native_tls_srv_pool_send_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_srv_pool_recv" if args.len() == 2 => Some((
+                "mako_native_tls_srv_pool_recv_ptr",
+                &[Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_srv_pool_fd" if args.len() == 1 => Some((
+                "mako_native_tls_srv_pool_fd",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_srv_pool_close" if args.len() == 1 => Some((
+                "mako_native_tls_srv_pool_close",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_server_pool_accept" if args.len() == 2 => Some((
+                "mako_native_tls_srv_pool_accept",
+                &[Type::Opaque, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_server_pool_write" if args.len() == 2 => Some((
+                "mako_native_tls_srv_pool_send_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_server_pool_read" if args.len() == 2 => Some((
+                "mako_native_tls_srv_pool_recv_ptr",
+                &[Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_server_pool_fd" if args.len() == 1 => Some((
+                "mako_native_tls_srv_pool_fd",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "tls_server_pool_close" if args.len() == 1 => Some((
+                "mako_native_tls_srv_pool_close",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
             // TLS cert reload
-            "tls_reload_cert" if args.len() == 3 => Some(("mako_native_tls_reload_cert_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::I64), false)),
+            "tls_reload_cert" if args.len() == 3 => Some((
+                "mako_native_tls_reload_cert_ptr",
+                &[Type::Opaque, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
             // UUID/ULID
-            "uuid_nil" if args.len() == 0 => Some(("mako_native_uuid_nil", &[], Some(Type::Str), true)),
-            "uuid_ns_dns" if args.len() == 0 => Some(("mako_native_uuid_ns_dns", &[], Some(Type::Str), true)),
-            "uuid_ns_url" if args.len() == 0 => Some(("mako_native_uuid_ns_url", &[], Some(Type::Str), true)),
-            "uuid_ns_oid" if args.len() == 0 => Some(("mako_native_uuid_ns_oid", &[], Some(Type::Str), true)),
-            "ulid_new" if args.len() == 0 => Some(("mako_native_ulid_new", &[], Some(Type::Str), true)),
+            "uuid_nil" if args.len() == 0 => {
+                Some(("mako_native_uuid_nil", &[], Some(Type::Str), true))
+            }
+            "uuid_ns_dns" if args.len() == 0 => {
+                Some(("mako_native_uuid_ns_dns", &[], Some(Type::Str), true))
+            }
+            "uuid_ns_url" if args.len() == 0 => {
+                Some(("mako_native_uuid_ns_url", &[], Some(Type::Str), true))
+            }
+            "uuid_ns_oid" if args.len() == 0 => {
+                Some(("mako_native_uuid_ns_oid", &[], Some(Type::Str), true))
+            }
+            "ulid_new" if args.len() == 0 => {
+                Some(("mako_native_ulid_new", &[], Some(Type::Str), true))
+            }
             // TLS handshake helpers
-            "tls_derive_secret" if args.len() == 3 => Some(("mako_native_tls_derive_secret_hex_ptr", &[Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
-            "tls_client_handshake_traffic_secret" if args.len() == 2 => Some(("mako_native_tls_client_handshake_traffic_secret_hex_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
-            "tls_server_handshake_traffic_secret" if args.len() == 2 => Some(("mako_native_tls_server_handshake_traffic_secret_hex_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
-            "tls_client_application_traffic_secret" if args.len() == 2 => Some(("mako_native_tls_client_application_traffic_secret_hex_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
-            "tls_server_application_traffic_secret" if args.len() == 2 => Some(("mako_native_tls_server_application_traffic_secret_hex_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
-            "tls_finished_verify_data" if args.len() == 2 => Some(("mako_native_tls_finished_verify_data_hex_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
-            "tls_encrypted_extensions" if args.len() == 0 => Some(("mako_native_tls_encrypted_extensions_ptr", &[], Some(Type::Str), true)),
-            "tls_serve" if args.len() == 1 => Some(("mako_native_tls_serve_once", &[Type::I64], Some(Type::I64), false)),
+            "tls_derive_secret" if args.len() == 3 => Some((
+                "mako_native_tls_derive_secret_hex_ptr",
+                &[Type::Str, Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_client_handshake_traffic_secret" if args.len() == 2 => Some((
+                "mako_native_tls_client_handshake_traffic_secret_hex_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_server_handshake_traffic_secret" if args.len() == 2 => Some((
+                "mako_native_tls_server_handshake_traffic_secret_hex_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_client_application_traffic_secret" if args.len() == 2 => Some((
+                "mako_native_tls_client_application_traffic_secret_hex_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_server_application_traffic_secret" if args.len() == 2 => Some((
+                "mako_native_tls_server_application_traffic_secret_hex_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_finished_verify_data" if args.len() == 2 => Some((
+                "mako_native_tls_finished_verify_data_hex_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_encrypted_extensions" if args.len() == 0 => Some((
+                "mako_native_tls_encrypted_extensions_ptr",
+                &[],
+                Some(Type::Str),
+                true,
+            )),
+            "tls_serve" if args.len() == 1 => Some((
+                "mako_native_tls_serve_once",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
             // SMTP
-            "smtp_mock_last_message" if args.len() == 0 => Some(("mako_native_smtp_mock_last_message", &[], Some(Type::Str), true)),
-            "smtp_mock_last_rcpt" if args.len() == 0 => Some(("mako_native_smtp_mock_last_rcpt", &[], Some(Type::Str), true)),
-            "smtp_starttls" if args.len() == 0 => Some(("mako_native_smtp_starttls_available", &[], Some(Type::I64), false)),
+            "smtp_mock_last_message" if args.len() == 0 => Some((
+                "mako_native_smtp_mock_last_message",
+                &[],
+                Some(Type::Str),
+                true,
+            )),
+            "smtp_mock_last_rcpt" if args.len() == 0 => Some((
+                "mako_native_smtp_mock_last_rcpt",
+                &[],
+                Some(Type::Str),
+                true,
+            )),
+            "smtp_starttls" if args.len() == 0 => Some((
+                "mako_native_smtp_starttls_available",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
             // LLM
-            "llm_embed" if args.len() == 2 => Some(("mako_native_llm_embed_body_ptr", &[Type::Str, Type::Str], Some(Type::Str), true)),
+            "llm_embed" if args.len() == 2 => Some((
+                "mako_native_llm_embed_body_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
             // WebSocket
-            "ws_echo" if args.len() == 1 => Some(("mako_native_ws_echo_once", &[Type::I64], Some(Type::I64), false)),
+            "ws_echo" if args.len() == 1 => Some((
+                "mako_native_ws_echo_once",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
             // Syscall
-            "syscall_errno_str" if args.len() == 0 => Some(("mako_native_syscall_errno_str", &[], Some(Type::Str), true)),
+            "syscall_errno_str" if args.len() == 0 => {
+                Some(("mako_native_syscall_errno_str", &[], Some(Type::Str), true))
+            }
             // Tasks
-            "tasks_inspect_json" if args.len() == 0 => Some(("mako_native_tasks_inspect_json_ptr", &[], Some(Type::Str), true)),
+            "tasks_inspect_json" if args.len() == 0 => Some((
+                "mako_native_tasks_inspect_json_ptr",
+                &[],
+                Some(Type::Str),
+                true,
+            )),
             // Math
-            "abs_f" if args.len() == 1 => Some(("mako_native_abs_f", &[Type::F64], Some(Type::F64), false)),
-            "ceil_f" if args.len() == 1 => Some(("mako_native_ceil_f", &[Type::F64], Some(Type::F64), false)),
-            "floor_f" if args.len() == 1 => Some(("mako_native_floor_f", &[Type::F64], Some(Type::F64), false)),
-            "clamp_f" if args.len() == 3 => Some(("mako_native_clamp_f", &[Type::F64, Type::F64, Type::F64], Some(Type::F64), false)),
-            "math_abs" if args.len() == 1 => Some(("mako_native_math_abs", &[Type::F64], Some(Type::F64), false)),
-            "math_pow" if args.len() == 2 => Some(("mako_native_math_pow", &[Type::F64, Type::F64], Some(Type::F64), false)),
-            "math_ceil" if args.len() == 1 => Some(("mako_native_math_ceil", &[Type::F64], Some(Type::F64), false)),
-            "math_sin" if args.len() == 1 => Some(("mako_native_math_sin", &[Type::F64], Some(Type::F64), false)),
-            "math_cos" if args.len() == 1 => Some(("mako_native_math_cos", &[Type::F64], Some(Type::F64), false)),
-            "math_log" if args.len() == 1 => Some(("mako_native_math_log", &[Type::F64], Some(Type::F64), false)),
-            "math_exp" if args.len() == 1 => Some(("mako_native_math_exp", &[Type::F64], Some(Type::F64), false)),
-            "math_tan" if args.len() == 1 => Some(("mako_native_math_tan", &[Type::F64], Some(Type::F64), false)),
-            "math_asin" if args.len() == 1 => Some(("mako_native_math_asin", &[Type::F64], Some(Type::F64), false)),
-            "math_acos" if args.len() == 1 => Some(("mako_native_math_acos", &[Type::F64], Some(Type::F64), false)),
-            "math_atan" if args.len() == 1 => Some(("mako_native_math_atan", &[Type::F64], Some(Type::F64), false)),
-            "math_atan2" if args.len() == 2 => Some(("mako_native_math_atan2", &[Type::F64, Type::F64], Some(Type::F64), false)),
-            "math_log2" if args.len() == 1 => Some(("mako_native_math_log2", &[Type::F64], Some(Type::F64), false)),
-            "math_log10" if args.len() == 1 => Some(("mako_native_math_log10", &[Type::F64], Some(Type::F64), false)),
-            "math_round" if args.len() == 1 => Some(("mako_native_math_round", &[Type::F64], Some(Type::F64), false)),
-            "math_min" if args.len() == 2 => Some(("mako_native_math_min", &[Type::F64, Type::F64], Some(Type::F64), false)),
-            "math_max" if args.len() == 2 => Some(("mako_native_math_max", &[Type::F64, Type::F64], Some(Type::F64), false)),
-            "math_clamp" if args.len() == 3 => Some(("mako_native_math_clamp", &[Type::F64, Type::F64, Type::F64], Some(Type::F64), false)),
-            "math_hypot" if args.len() == 2 => Some(("mako_native_math_hypot", &[Type::F64, Type::F64], Some(Type::F64), false)),
-            "math_fmod" if args.len() == 2 => Some(("mako_native_math_fmod", &[Type::F64, Type::F64], Some(Type::F64), false)),
-            "math_trunc" if args.len() == 1 => Some(("mako_native_math_trunc", &[Type::F64], Some(Type::F64), false)),
-            "math_is_nan" if args.len() == 1 => Some(("mako_native_math_is_nan", &[Type::F64], Some(Type::I64), false)),
-            "math_is_inf" if args.len() == 1 => Some(("mako_native_math_is_inf", &[Type::F64], Some(Type::I64), false)),
-            "math_inf" if args.len() == 0 => Some(("mako_native_math_inf", &[], Some(Type::F64), false)),
-            "math_nan" if args.len() == 0 => Some(("mako_native_math_nan", &[], Some(Type::F64), false)),
-            "lerp" if args.len() == 3 => Some(("mako_native_lerp", &[Type::F64, Type::F64, Type::F64], Some(Type::F64), false)),
-            "dist2d" if args.len() == 4 => Some(("mako_native_dist2d", &[Type::F64, Type::F64, Type::F64, Type::F64], Some(Type::F64), false)),
-            "rand_float" if args.len() == 0 => Some(("mako_native_rand_float", &[], Some(Type::F64), false)),
-            "random_bytes" if args.len() == 1 => Some(("mako_native_random_bytes_ptr", &[Type::I64], Some(Type::Str), true)),
+            "abs_f" if args.len() == 1 => {
+                Some(("mako_native_abs_f", &[Type::F64], Some(Type::F64), false))
+            }
+            "ceil_f" if args.len() == 1 => {
+                Some(("mako_native_ceil_f", &[Type::F64], Some(Type::F64), false))
+            }
+            "floor_f" if args.len() == 1 => {
+                Some(("mako_native_floor_f", &[Type::F64], Some(Type::F64), false))
+            }
+            "clamp_f" if args.len() == 3 => Some((
+                "mako_native_clamp_f",
+                &[Type::F64, Type::F64, Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_abs" if args.len() == 1 => {
+                Some(("mako_native_math_abs", &[Type::F64], Some(Type::F64), false))
+            }
+            "math_pow" if args.len() == 2 => Some((
+                "mako_native_math_pow",
+                &[Type::F64, Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_ceil" if args.len() == 1 => Some((
+                "mako_native_math_ceil",
+                &[Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_sin" if args.len() == 1 => {
+                Some(("mako_native_math_sin", &[Type::F64], Some(Type::F64), false))
+            }
+            "math_cos" if args.len() == 1 => {
+                Some(("mako_native_math_cos", &[Type::F64], Some(Type::F64), false))
+            }
+            "math_log" if args.len() == 1 => {
+                Some(("mako_native_math_log", &[Type::F64], Some(Type::F64), false))
+            }
+            "math_exp" if args.len() == 1 => {
+                Some(("mako_native_math_exp", &[Type::F64], Some(Type::F64), false))
+            }
+            "math_tan" if args.len() == 1 => {
+                Some(("mako_native_math_tan", &[Type::F64], Some(Type::F64), false))
+            }
+            "math_asin" if args.len() == 1 => Some((
+                "mako_native_math_asin",
+                &[Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_acos" if args.len() == 1 => Some((
+                "mako_native_math_acos",
+                &[Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_atan" if args.len() == 1 => Some((
+                "mako_native_math_atan",
+                &[Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_atan2" if args.len() == 2 => Some((
+                "mako_native_math_atan2",
+                &[Type::F64, Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_log2" if args.len() == 1 => Some((
+                "mako_native_math_log2",
+                &[Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_log10" if args.len() == 1 => Some((
+                "mako_native_math_log10",
+                &[Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_round" if args.len() == 1 => Some((
+                "mako_native_math_round",
+                &[Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_min" if args.len() == 2 => Some((
+                "mako_native_math_min",
+                &[Type::F64, Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_max" if args.len() == 2 => Some((
+                "mako_native_math_max",
+                &[Type::F64, Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_clamp" if args.len() == 3 => Some((
+                "mako_native_math_clamp",
+                &[Type::F64, Type::F64, Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_hypot" if args.len() == 2 => Some((
+                "mako_native_math_hypot",
+                &[Type::F64, Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_fmod" if args.len() == 2 => Some((
+                "mako_native_math_fmod",
+                &[Type::F64, Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_trunc" if args.len() == 1 => Some((
+                "mako_native_math_trunc",
+                &[Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "math_is_nan" if args.len() == 1 => Some((
+                "mako_native_math_is_nan",
+                &[Type::F64],
+                Some(Type::I64),
+                false,
+            )),
+            "math_is_inf" if args.len() == 1 => Some((
+                "mako_native_math_is_inf",
+                &[Type::F64],
+                Some(Type::I64),
+                false,
+            )),
+            "math_inf" if args.len() == 0 => {
+                Some(("mako_native_math_inf", &[], Some(Type::F64), false))
+            }
+            "math_nan" if args.len() == 0 => {
+                Some(("mako_native_math_nan", &[], Some(Type::F64), false))
+            }
+            "lerp" if args.len() == 3 => Some((
+                "mako_native_lerp",
+                &[Type::F64, Type::F64, Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "dist2d" if args.len() == 4 => Some((
+                "mako_native_dist2d",
+                &[Type::F64, Type::F64, Type::F64, Type::F64],
+                Some(Type::F64),
+                false,
+            )),
+            "rand_float" if args.len() == 0 => {
+                Some(("mako_native_rand_float", &[], Some(Type::F64), false))
+            }
+            "random_bytes" if args.len() == 1 => Some((
+                "mako_native_random_bytes_ptr",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
+            )),
             // Circuit breaker
-            "breaker_new" if args.len() == 3 => Some(("mako_native_breaker_new", &[Type::I64, Type::I64, Type::I64], Some(Type::Opaque), true)),
-            "breaker_allow" if args.len() == 1 => Some(("mako_native_breaker_allow", &[Type::Opaque], Some(Type::I64), false)),
-            "breaker_success" if args.len() == 1 => Some(("mako_native_breaker_success", &[Type::Opaque], None, false)),
-            "breaker_failure" if args.len() == 1 => Some(("mako_native_breaker_failure", &[Type::Opaque], None, false)),
-            "breaker_reset" if args.len() == 1 => Some(("mako_native_breaker_reset", &[Type::Opaque], None, false)),
-            "breaker_state" if args.len() == 1 => Some(("mako_native_breaker_state", &[Type::Opaque], Some(Type::I64), false)),
-            "breaker_free" if args.len() == 1 => Some(("mako_native_breaker_free", &[Type::Opaque], None, false)),
+            "breaker_new" if args.len() == 3 => Some((
+                "mako_native_breaker_new",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::Opaque),
+                true,
+            )),
+            "breaker_allow" if args.len() == 1 => Some((
+                "mako_native_breaker_allow",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "breaker_success" if args.len() == 1 => {
+                Some(("mako_native_breaker_success", &[Type::Opaque], None, false))
+            }
+            "breaker_failure" if args.len() == 1 => {
+                Some(("mako_native_breaker_failure", &[Type::Opaque], None, false))
+            }
+            "breaker_reset" if args.len() == 1 => {
+                Some(("mako_native_breaker_reset", &[Type::Opaque], None, false))
+            }
+            "breaker_state" if args.len() == 1 => Some((
+                "mako_native_breaker_state",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "breaker_free" if args.len() == 1 => {
+                Some(("mako_native_breaker_free", &[Type::Opaque], None, false))
+            }
             // Rate limiter
-            "ratelimit_new" if args.len() == 2 => Some(("mako_native_ratelimit_new", &[Type::I64, Type::I64], Some(Type::Opaque), true)),
-            "ratelimit_allow" if args.len() == 1 => Some(("mako_native_ratelimit_allow", &[Type::Opaque], Some(Type::I64), false)),
-            "ratelimit_free" if args.len() == 1 => Some(("mako_native_ratelimit_free", &[Type::Opaque], None, false)),
-            "ratelimit_remaining" if args.len() == 1 => Some(("mako_native_ratelimit_remaining", &[Type::Opaque], Some(Type::I64), false)),
+            "ratelimit_new" if args.len() == 2 => Some((
+                "mako_native_ratelimit_new",
+                &[Type::I64, Type::I64],
+                Some(Type::Opaque),
+                true,
+            )),
+            "ratelimit_allow" if args.len() == 1 => Some((
+                "mako_native_ratelimit_allow",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "ratelimit_free" if args.len() == 1 => {
+                Some(("mako_native_ratelimit_free", &[Type::Opaque], None, false))
+            }
+            "ratelimit_remaining" if args.len() == 1 => Some((
+                "mako_native_ratelimit_remaining",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
             // Consistent hash
-            "chash_new" if args.len() == 2 => Some(("mako_native_chash_new", &[Type::I64, Type::I64], Some(Type::Opaque), true)),
-            "chash_add_node" if args.len() == 1 => Some(("mako_native_chash_add_node", &[Type::Opaque], Some(Type::I64), false)),
-            "chash_remove_node" if args.len() == 2 => Some(("mako_native_chash_remove_node", &[Type::Opaque, Type::I64], None, false)),
-            "chash_get" if args.len() == 2 => Some(("mako_native_chash_get_ptr", &[Type::Opaque, Type::Str], Some(Type::I64), false)),
-            "chash_node_count" if args.len() == 1 => Some(("mako_native_chash_node_count", &[Type::Opaque], Some(Type::I64), false)),
-            "chash_free" if args.len() == 1 => Some(("mako_native_chash_free", &[Type::Opaque], None, false)),
+            "chash_new" if args.len() == 2 => Some((
+                "mako_native_chash_new",
+                &[Type::I64, Type::I64],
+                Some(Type::Opaque),
+                true,
+            )),
+            "chash_add_node" if args.len() == 1 => Some((
+                "mako_native_chash_add_node",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "chash_remove_node" if args.len() == 2 => Some((
+                "mako_native_chash_remove_node",
+                &[Type::Opaque, Type::I64],
+                None,
+                false,
+            )),
+            "chash_get" if args.len() == 2 => Some((
+                "mako_native_chash_get_ptr",
+                &[Type::Opaque, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "chash_node_count" if args.len() == 1 => Some((
+                "mako_native_chash_node_count",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "chash_free" if args.len() == 1 => {
+                Some(("mako_native_chash_free", &[Type::Opaque], None, false))
+            }
             // Buffer
-            "buf_from_string" if args.len() == 1 => Some(("mako_native_buf_from_string_ptr", &[Type::Str], Some(Type::Opaque), true)),
-            "buf_len" if args.len() == 1 => Some(("mako_native_buf_len", &[Type::Opaque], Some(Type::I64), false)),
-            "buf_pos" if args.len() == 1 => Some(("mako_native_buf_pos", &[Type::Opaque], Some(Type::I64), false)),
-            "buf_seek" if args.len() == 2 => Some(("mako_native_buf_seek", &[Type::Opaque, Type::I64], None, false)),
-            "buf_reset" if args.len() == 1 => Some(("mako_native_buf_reset", &[Type::Opaque], None, false)),
-            "buf_free" if args.len() == 1 => Some(("mako_native_buf_free", &[Type::Opaque], None, false)),
-            "buf_to_string" if args.len() == 1 => Some(("mako_native_buf_to_string_ptr", &[Type::Opaque], Some(Type::Str), true)),
-            "buf_read_str" if args.len() == 1 => Some(("mako_native_buf_read_str_ptr", &[Type::Opaque], Some(Type::Str), true)),
-            "buf_read_bytes" if args.len() == 2 => Some(("mako_native_buf_read_bytes_ptr", &[Type::Opaque, Type::I64], Some(Type::Str), true)),
-            "buf_write_str" if args.len() == 2 => Some(("mako_native_buf_write_str_ptr", &[Type::Opaque, Type::Str], None, false)),
-            "alloc_high_bytes" if args.len() == 0 => Some((
-                "mako_native_alloc_high_bytes",
-                &[],
+            "buf_from_string" if args.len() == 1 => Some((
+                "mako_native_buf_from_string_ptr",
+                &[Type::Str],
+                Some(Type::Opaque),
+                true,
+            )),
+            "buf_len" if args.len() == 1 => Some((
+                "mako_native_buf_len",
+                &[Type::Opaque],
                 Some(Type::I64),
                 false,
             )),
-            "alloc_live_bytes" if args.len() == 0 => Some((
-                "mako_native_alloc_live_bytes",
-                &[],
+            "buf_pos" if args.len() == 1 => Some((
+                "mako_native_buf_pos",
+                &[Type::Opaque],
                 Some(Type::I64),
                 false,
             )),
-            "bytes_buffer" if args.len() == 0 => Some((
-                "mako_native_bytes_buffer",
-                &[],
-                Some(Type::I64),
+            "buf_seek" if args.len() == 2 => Some((
+                "mako_native_buf_seek",
+                &[Type::Opaque, Type::I64],
+                None,
                 false,
             )),
-            "chan_select_value" if args.len() == 0 => Some((
-                "mako_native_chan_select_value",
-                &[],
-                Some(Type::I64),
+            "buf_reset" if args.len() == 1 => {
+                Some(("mako_native_buf_reset", &[Type::Opaque], None, false))
+            }
+            "buf_free" if args.len() == 1 => {
+                Some(("mako_native_buf_free", &[Type::Opaque], None, false))
+            }
+            "buf_to_string" if args.len() == 1 => Some((
+                "mako_native_buf_to_string_ptr",
+                &[Type::Opaque],
+                Some(Type::Str),
+                true,
+            )),
+            "buf_read_str" if args.len() == 1 => Some((
+                "mako_native_buf_read_str_ptr",
+                &[Type::Opaque],
+                Some(Type::Str),
+                true,
+            )),
+            "buf_read_bytes" if args.len() == 2 => Some((
+                "mako_native_buf_read_bytes_ptr",
+                &[Type::Opaque, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "buf_write_str" if args.len() == 2 => Some((
+                "mako_native_buf_write_str_ptr",
+                &[Type::Opaque, Type::Str],
+                None,
                 false,
             )),
+            "alloc_high_bytes" if args.len() == 0 => {
+                Some(("mako_native_alloc_high_bytes", &[], Some(Type::I64), false))
+            }
+            "alloc_live_bytes" if args.len() == 0 => {
+                Some(("mako_native_alloc_live_bytes", &[], Some(Type::I64), false))
+            }
+            "bytes_buffer" if args.len() == 0 => {
+                Some(("mako_native_bytes_buffer", &[], Some(Type::I64), false))
+            }
+            "chan_select_value" if args.len() == 0 => {
+                Some(("mako_native_chan_select_value", &[], Some(Type::I64), false))
+            }
             "crash_report_installed" if args.len() == 0 => Some((
                 "mako_native_crash_report_installed",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "debug_break_hits" if args.len() == 0 => Some((
-                "mako_native_debug_break_hits",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "debug_break_reset" if args.len() == 0 => Some((
-                "mako_native_debug_break_reset",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "debug_break_hits" if args.len() == 0 => {
+                Some(("mako_native_debug_break_hits", &[], Some(Type::I64), false))
+            }
+            "debug_break_reset" if args.len() == 0 => {
+                Some(("mako_native_debug_break_reset", &[], Some(Type::I64), false))
+            }
             "debug_current_task" if args.len() == 0 => Some((
                 "mako_native_debug_current_task",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "debug_frame_depth" if args.len() == 0 => Some((
-                "mako_native_debug_frame_depth",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "debug_pop_frame" if args.len() == 0 => Some((
-                "mako_native_debug_pop_frame",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "debug_frame_depth" if args.len() == 0 => {
+                Some(("mako_native_debug_frame_depth", &[], Some(Type::I64), false))
+            }
+            "debug_pop_frame" if args.len() == 0 => {
+                Some(("mako_native_debug_pop_frame", &[], Some(Type::I64), false))
+            }
             "debug_trap_enabled" if args.len() == 0 => Some((
                 "mako_native_debug_trap_enabled",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "detached_join_all" if args.len() == 0 => Some((
-                "mako_native_detached_join_all",
-                &[],
-                None,
-                false,
-            )),
-            "dtls_available" if args.len() == 0 => Some((
-                "mako_native_dtls_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "evloop_new" if args.len() == 0 => Some((
-                "mako_native_evloop_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "gpu_device_open" if args.len() == 0 => Some((
-                "mako_native_gpu_device_open",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "detached_join_all" if args.len() == 0 => {
+                Some(("mako_native_detached_join_all", &[], None, false))
+            }
+            "dtls_available" if args.len() == 0 => {
+                Some(("mako_native_dtls_available", &[], Some(Type::I64), false))
+            }
+            "evloop_new" if args.len() == 0 => {
+                Some(("mako_native_evloop_new", &[], Some(Type::I64), false))
+            }
+            "gpu_device_open" if args.len() == 0 => {
+                Some(("mako_native_gpu_device_open", &[], Some(Type::I64), false))
+            }
             "hot_reload_plugin_close" if args.len() == 0 => Some((
                 "mako_native_hot_reload_plugin_close",
                 &[],
@@ -26317,36 +26977,21 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "llm_last_status" if args.len() == 0 => Some((
-                "mako_native_llm_last_status",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "mail_msg_new" if args.len() == 0 => Some((
-                "mako_native_mail_msg_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "mono_ns" if args.len() == 0 => Some((
-                "mako_native_mono_ns",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "pcache_new" if args.len() == 0 => Some((
-                "mako_native_pcache_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "quiche_available" if args.len() == 0 => Some((
-                "mako_native_quiche_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "llm_last_status" if args.len() == 0 => {
+                Some(("mako_native_llm_last_status", &[], Some(Type::I64), false))
+            }
+            "mail_msg_new" if args.len() == 0 => {
+                Some(("mako_native_mail_msg_new", &[], Some(Type::I64), false))
+            }
+            "mono_ns" if args.len() == 0 => {
+                Some(("mako_native_mono_ns", &[], Some(Type::I64), false))
+            }
+            "pcache_new" if args.len() == 0 => {
+                Some(("mako_native_pcache_new", &[], Some(Type::I64), false))
+            }
+            "quiche_available" if args.len() == 0 => {
+                Some(("mako_native_quiche_available", &[], Some(Type::I64), false))
+            }
             "range_key" if args.len() == 1 => Some((
                 "mako_native_range_key_at",
                 &[Type::I64],
@@ -26359,66 +27004,40 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "rtp_header_len" if args.len() == 0 => Some((
-                "mako_native_rtp_header_len",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "sip_cseq_new" if args.len() == 0 => Some((
-                "mako_native_sip_cseq_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "sip_view_len" if args.len() == 0 => Some((
-                "mako_native_sip_view_len",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "sip_view_offset" if args.len() == 0 => Some((
-                "mako_native_sip_view_offset",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "slog_flush" if args.len() == 0 => Some((
-                "mako_native_slog_flush",
-                &[],
-                None,
-                false,
-            )),
-            "slog_is_json" if args.len() == 0 => Some((
-                "mako_native_slog_is_json",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "rtp_header_len" if args.len() == 0 => {
+                Some(("mako_native_rtp_header_len", &[], Some(Type::I64), false))
+            }
+            "sip_cseq_new" if args.len() == 0 => {
+                Some(("mako_native_sip_cseq_new", &[], Some(Type::I64), false))
+            }
+            "sip_view_len" if args.len() == 0 => {
+                Some(("mako_native_sip_view_len", &[], Some(Type::I64), false))
+            }
+            "sip_view_offset" if args.len() == 0 => {
+                Some(("mako_native_sip_view_offset", &[], Some(Type::I64), false))
+            }
+            "slog_flush" if args.len() == 0 => Some(("mako_native_slog_flush", &[], None, false)),
+            "slog_is_json" if args.len() == 0 => {
+                Some(("mako_native_slog_is_json", &[], Some(Type::I64), false))
+            }
             "smtp_mock_serve_once" if args.len() == 0 => Some((
                 "mako_native_smtp_mock_serve_once",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "smtp_mock_stop" if args.len() == 0 => Some((
-                "mako_native_smtp_mock_stop",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "smtp_mock_stop" if args.len() == 0 => {
+                Some(("mako_native_smtp_mock_stop", &[], Some(Type::I64), false))
+            }
             "time_local_offset_sec" if args.len() == 0 => Some((
                 "mako_native_time_local_offset_sec",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "tls_hs_is_app" if args.len() == 0 => Some((
-                "mako_native_tls_hs_is_app",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "tls_hs_is_app" if args.len() == 0 => {
+                Some(("mako_native_tls_hs_is_app", &[], Some(Type::I64), false))
+            }
             "tls_hs_session_encrypted_extensions" if args.len() == 0 => Some((
                 "mako_native_tls_hs_session_encrypted_extensions",
                 &[],
@@ -26431,72 +27050,48 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "tls_hs_state" if args.len() == 0 => Some((
-                "mako_native_tls_hs_state",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "tls_hs_state" if args.len() == 0 => {
+                Some(("mako_native_tls_hs_state", &[], Some(Type::I64), false))
+            }
             "tls_server_available" if args.len() == 0 => Some((
                 "mako_native_tls_server_available",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "tmpl_data_new" if args.len() == 0 => Some((
-                "mako_native_tmpl_data_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "wal_next_off" if args.len() == 0 => Some((
-                "mako_native_wal_next_off",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "tmpl_data_new" if args.len() == 0 => {
+                Some(("mako_native_tmpl_data_new", &[], Some(Type::I64), false))
+            }
+            "wal_next_off" if args.len() == 0 => {
+                Some(("mako_native_wal_next_off", &[], Some(Type::I64), false))
+            }
             "ws_last_close_code" if args.len() == 0 => Some((
                 "mako_native_ws_last_close_code",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "ws_last_fin" if args.len() == 0 => Some((
-                "mako_native_ws_last_fin",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "ws_last_opcode" if args.len() == 0 => Some((
-                "mako_native_ws_last_opcode",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "ws_last_status" if args.len() == 0 => Some((
-                "mako_native_ws_last_status",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "wss_available" if args.len() == 0 => Some((
-                "mako_native_wss_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "ws_last_fin" if args.len() == 0 => {
+                Some(("mako_native_ws_last_fin", &[], Some(Type::I64), false))
+            }
+            "ws_last_opcode" if args.len() == 0 => {
+                Some(("mako_native_ws_last_opcode", &[], Some(Type::I64), false))
+            }
+            "ws_last_status" if args.len() == 0 => {
+                Some(("mako_native_ws_last_status", &[], Some(Type::I64), false))
+            }
+            "wss_available" if args.len() == 0 => {
+                Some(("mako_native_wss_available", &[], Some(Type::I64), false))
+            }
             "chan_select_value_str" if args.len() == 0 => Some((
                 "mako_native_chan_select_value_str",
                 &[],
                 Some(Type::Str),
                 true,
             )),
-            "cmap_new" if args.len() == 0 => Some((
-                "mako_native_cmap_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "cmap_new" if args.len() == 0 => {
+                Some(("mako_native_cmap_new", &[], Some(Type::I64), false))
+            }
             "debug_frames_json" if args.len() == 0 => Some((
                 "mako_native_debug_frames_json_ptr",
                 &[],
@@ -26533,54 +27128,30 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "llm_api_key" if args.len() == 0 => Some((
-                "mako_native_llm_api_key",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "llm_base_url" if args.len() == 0 => Some((
-                "mako_native_llm_base_url",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "llm_default_model" if args.len() == 0 => Some((
-                "mako_native_llm_default_model",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "metrics_export" if args.len() == 0 => Some((
-                "mako_native_metrics_export",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "quiche_version" if args.len() == 0 => Some((
-                "mako_native_quiche_version",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "sip_branch" if args.len() == 0 => Some((
-                "mako_native_sip_branch",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "sip_tag" if args.len() == 0 => Some((
-                "mako_native_sip_tag",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
-            "sip_view_copy" if args.len() == 0 => Some((
-                "mako_native_sip_view_copy_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "llm_api_key" if args.len() == 0 => {
+                Some(("mako_native_llm_api_key", &[], Some(Type::Str), true))
+            }
+            "llm_base_url" if args.len() == 0 => {
+                Some(("mako_native_llm_base_url", &[], Some(Type::Str), true))
+            }
+            "llm_default_model" if args.len() == 0 => {
+                Some(("mako_native_llm_default_model", &[], Some(Type::Str), true))
+            }
+            "metrics_export" if args.len() == 0 => {
+                Some(("mako_native_metrics_export", &[], Some(Type::Str), true))
+            }
+            "quiche_version" if args.len() == 0 => {
+                Some(("mako_native_quiche_version", &[], Some(Type::Str), true))
+            }
+            "sip_branch" if args.len() == 0 => {
+                Some(("mako_native_sip_branch", &[], Some(Type::Str), true))
+            }
+            "sip_tag" if args.len() == 0 => {
+                Some(("mako_native_sip_tag", &[], Some(Type::Str), true))
+            }
+            "sip_view_copy" if args.len() == 0 => {
+                Some(("mako_native_sip_view_copy_ptr", &[], Some(Type::Str), true))
+            }
             "smtp_mock_last_from" if args.len() == 0 => Some((
                 "mako_native_smtp_mock_last_from",
                 &[],
@@ -26848,12 +27419,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "hot_reload_stamp" if args.len() == 0 => Some((
-                "mako_native_hot_reload_stamp",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "hot_reload_stamp" if args.len() == 0 => {
+                Some(("mako_native_hot_reload_stamp", &[], Some(Type::I64), false))
+            }
             "http2_stream_priority_dep" if args.len() == 1 => Some((
                 "mako_native_http2_stream_priority_dep",
                 &[Type::I64],
@@ -27080,12 +27648,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "tls_hs_reset" if args.len() == 0 => Some((
-                "mako_native_tls_hs_reset",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "tls_hs_reset" if args.len() == 0 => {
+                Some(("mako_native_tls_hs_reset", &[], Some(Type::I64), false))
+            }
             "http2_stream_state" if args.len() == 0 => Some((
                 "mako_native_http2_stream_state",
                 &[],
@@ -27125,13 +27690,28 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "tls_pool_open_mtls" if args.len() == 6 => Some((
                 "mako_native_tls_pool_open_mtls_ptr",
-                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str, Type::I64],
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
             "tls_pool_open_mtls_full" if args.len() == 7 => Some((
                 "mako_native_tls_pool_open_mtls_full_ptr",
-                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str, Type::I64, Type::I64],
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -27165,7 +27745,7 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-                        "timer_heap_new" if args.len() == 1 => Some((
+            "timer_heap_new" if args.len() == 1 => Some((
                 "mako_native_timer_heap_new",
                 &[Type::I64],
                 Some(Type::I64),
@@ -27201,18 +27781,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "timer_last_kind" if args.len() == 0 => Some((
-                "mako_native_timer_last_kind",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "timer_last_id" if args.len() == 0 => Some((
-                "mako_native_timer_last_id",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "timer_last_kind" if args.len() == 0 => {
+                Some(("mako_native_timer_last_kind", &[], Some(Type::I64), false))
+            }
+            "timer_last_id" if args.len() == 0 => {
+                Some(("mako_native_timer_last_id", &[], Some(Type::I64), false))
+            }
             "timer_heap_count" if args.len() == 1 => Some((
                 "mako_native_timer_heap_count",
                 &[Type::I64],
@@ -27239,7 +27813,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "peer_table_add" if args.len() == 6 => Some((
                 "mako_native_peer_table_add_ptr",
-                &[Type::I64, Type::Str, Type::Str, Type::I64, Type::I64, Type::I64],
+                &[
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -27333,12 +27914,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "sctp_available" if args.len() == 0 => Some((
-                "mako_native_sctp_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "sctp_available" if args.len() == 0 => {
+                Some(("mako_native_sctp_available", &[], Some(Type::I64), false))
+            }
             "sctp_listen" if args.len() == 1 => Some((
                 "mako_native_sctp_listen",
                 &[Type::I64],
@@ -27435,18 +28013,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "sctp_last_stream" if args.len() == 0 => Some((
-                "mako_native_sctp_last_stream",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "sctp_last_ppid" if args.len() == 0 => Some((
-                "mako_native_sctp_last_ppid",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "sctp_last_stream" if args.len() == 0 => {
+                Some(("mako_native_sctp_last_stream", &[], Some(Type::I64), false))
+            }
+            "sctp_last_ppid" if args.len() == 0 => {
+                Some(("mako_native_sctp_last_ppid", &[], Some(Type::I64), false))
+            }
             "sctp_set_streams" if args.len() == 3 => Some((
                 "mako_native_sctp_set_streams",
                 &[Type::I64, Type::I64, Type::I64],
@@ -27513,7 +28085,7 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-                        "diameter_limits_set" if args.len() == 4 => Some((
+            "diameter_limits_set" if args.len() == 4 => Some((
                 "mako_native_diameter_limits_set",
                 &[Type::I64, Type::I64, Type::I64, Type::I64],
                 Some(Type::I64),
@@ -27549,7 +28121,7 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-"diameter_tcm_new" if args.len() == 4 => Some((
+            "diameter_tcm_new" if args.len() == 4 => Some((
                 "mako_native_diameter_tcm_new",
                 &[Type::I64, Type::I64, Type::I64, Type::I64],
                 Some(Type::I64),
@@ -27575,7 +28147,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "diameter_tcm_peer_add" if args.len() == 6 => Some((
                 "mako_native_diameter_tcm_peer_add_ptr",
-                &[Type::I64, Type::Str, Type::Str, Type::I64, Type::I64, Type::I64],
+                &[
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -27737,13 +28316,27 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "diameter_header_build" if args.len() == 6 => Some((
                 "mako_native_diameter_header_build_ptr",
-                &[Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64],
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::Str),
                 true,
             )),
             "diameter_msg_build" if args.len() == 6 => Some((
                 "mako_native_diameter_msg_build_ptr",
-                &[Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::Str],
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::Str,
+                ],
                 Some(Type::Str),
                 true,
             )),
@@ -27831,18 +28424,12 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "diameter_hbh_new" if args.len() == 0 => Some((
-                "mako_native_diameter_hbh_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "diameter_e2e_new" if args.len() == 0 => Some((
-                "mako_native_diameter_e2e_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "diameter_hbh_new" if args.len() == 0 => {
+                Some(("mako_native_diameter_hbh_new", &[], Some(Type::I64), false))
+            }
+            "diameter_e2e_new" if args.len() == 0 => {
+                Some(("mako_native_diameter_e2e_new", &[], Some(Type::I64), false))
+            }
             "diameter_build_cer" if args.len() == 4 => Some((
                 "mako_native_diameter_build_cer_ptr",
                 &[Type::Str, Type::Str, Type::I64, Type::I64],
@@ -27879,12 +28466,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "diameter_conn_new" if args.len() == 0 => Some((
-                "mako_native_diameter_conn_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "diameter_conn_new" if args.len() == 0 => {
+                Some(("mako_native_diameter_conn_new", &[], Some(Type::I64), false))
+            }
             "diameter_conn_free" if args.len() == 1 => Some((
                 "mako_native_diameter_conn_free",
                 &[Type::I64],
@@ -28005,12 +28589,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "diameter_mgr_new" if args.len() == 0 => Some((
-                "mako_native_diameter_mgr_new",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "diameter_mgr_new" if args.len() == 0 => {
+                Some(("mako_native_diameter_mgr_new", &[], Some(Type::I64), false))
+            }
             "diameter_mgr_free" if args.len() == 1 => Some((
                 "mako_native_diameter_mgr_free",
                 &[Type::I64],
@@ -28031,7 +28612,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "diameter_peer_add" if args.len() == 6 => Some((
                 "mako_native_diameter_peer_add_ptr",
-                &[Type::I64, Type::Str, Type::Str, Type::I64, Type::I64, Type::I64],
+                &[
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -28121,7 +28709,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "diameter_mgr_request" if args.len() == 6 => Some((
                 "mako_native_diameter_mgr_request_ptr",
-                &[Type::I64, Type::Str, Type::I64, Type::I64, Type::I64, Type::Str],
+                &[
+                    Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::Str,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -28182,10 +28777,7 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "middleware_allow_methods" if args.len() == 2 => Some((
                 "mako_native_middleware_allow_methods_ptr",
-                &[
-                    Type::OwnedOpaque(OpaqueKind::HttpRequest),
-                    Type::Str,
-                ],
+                &[Type::OwnedOpaque(OpaqueKind::HttpRequest), Type::Str],
                 Some(Type::I64),
                 false,
             )),
@@ -28229,12 +28821,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Opaque),
                 false,
             )),
-            "queue_popped_str" if args.is_empty() => Some((
-                "mako_native_queue_popped_str",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "queue_popped_str" if args.is_empty() => {
+                Some(("mako_native_queue_popped_str", &[], Some(Type::Str), true))
+            }
             "time_equal" if args.len() == 2 => Some((
                 "mako_native_time_equal",
                 &[Type::I64, Type::I64],
@@ -28247,24 +28836,18 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "syscall_errno_str" if args.is_empty() => Some((
-                "mako_native_syscall_errno_str",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "syscall_errno_str" if args.is_empty() => {
+                Some(("mako_native_syscall_errno_str", &[], Some(Type::Str), true))
+            }
             "crash_report_installed" if args.is_empty() => Some((
                 "mako_native_crash_report_installed",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "http2_stream_id" if args.is_empty() => Some((
-                "mako_native_http2_stream_id",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "http2_stream_id" if args.is_empty() => {
+                Some(("mako_native_http2_stream_id", &[], Some(Type::I64), false))
+            }
             "http2_stream_priority_child_count" if args.len() == 1 => Some((
                 "mako_native_http2_stream_priority_child_count",
                 &[Type::I64],
@@ -28313,12 +28896,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "tls_hs_state" if args.is_empty() => Some((
-                "mako_native_tls_hs_state",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "tls_hs_state" if args.is_empty() => {
+                Some(("mako_native_tls_hs_state", &[], Some(Type::I64), false))
+            }
             "tls_peer_cn" if args.len() == 1 => Some((
                 "mako_native_tls_peer_cn",
                 &[Type::Opaque],
@@ -28337,12 +28917,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "nghttp2_available" if args.is_empty() => Some((
-                "mako_native_nghttp2_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "nghttp2_available" if args.is_empty() => {
+                Some(("mako_native_nghttp2_available", &[], Some(Type::I64), false))
+            }
             "sql_rows_ok" if args.len() == 1 => Some((
                 "mako_native_sql_rows_ok",
                 &[Type::I64],
@@ -28361,12 +28938,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "slog_is_json" if args.is_empty() => Some((
-                "mako_native_slog_is_json",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "slog_is_json" if args.is_empty() => {
+                Some(("mako_native_slog_is_json", &[], Some(Type::I64), false))
+            }
             "slog_with2" if args.len() == 6 => Some((
                 "mako_native_slog_with2_6_ptr",
                 &[
@@ -28464,12 +29038,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Opaque),
                 false,
             )),
-            "pg_ok" if args.len() == 1 => Some((
-                "mako_native_pg_ok",
-                &[Type::Opaque],
-                Some(Type::I64),
-                false,
-            )),
+            "pg_ok" if args.len() == 1 => {
+                Some(("mako_native_pg_ok", &[Type::Opaque], Some(Type::I64), false))
+            }
             "mysql_ok" if args.len() == 1 => Some((
                 "mako_native_mysql_ok",
                 &[Type::Opaque],
@@ -28536,12 +29107,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "tls_hs_is_app" if args.is_empty() => Some((
-                "mako_native_tls_hs_is_app",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "tls_hs_is_app" if args.is_empty() => {
+                Some(("mako_native_tls_hs_is_app", &[], Some(Type::I64), false))
+            }
             "tls_server_new_mtls" if args.len() == 3 => Some((
                 "mako_native_tls_server_new_mtls_ptr",
                 &[Type::Str, Type::Str, Type::Str],
@@ -28566,12 +29134,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Opaque),
                 false,
             )),
-            "bytes_buffer" if args.is_empty() => Some((
-                "mako_native_bytes_buffer",
-                &[],
-                Some(Type::Opaque),
-                false,
-            )),
+            "bytes_buffer" if args.is_empty() => {
+                Some(("mako_native_bytes_buffer", &[], Some(Type::Opaque), false))
+            }
             "det_rng_next" if args.len() == 1 => Some((
                 "mako_native_det_rng_next",
                 &[Type::I64],
@@ -28632,12 +29197,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Opaque),
                 false,
             )),
-            "pcache_new" if args.is_empty() => Some((
-                "mako_native_pcache_new",
-                &[],
-                Some(Type::Opaque),
-                false,
-            )),
+            "pcache_new" if args.is_empty() => {
+                Some(("mako_native_pcache_new", &[], Some(Type::Opaque), false))
+            }
             "hindex_new" if args.len() == 1 => Some((
                 "mako_native_hindex_new",
                 &[Type::I64],
@@ -28706,12 +29268,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "debug_break_reset" if args.is_empty() => Some((
-                "mako_native_debug_break_reset",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "debug_break_reset" if args.is_empty() => {
+                Some(("mako_native_debug_break_reset", &[], Some(Type::I64), false))
+            }
             "game_udp_fd" if args.len() == 1 => Some((
                 "mako_native_game_udp_fd",
                 &[Type::Opaque],
@@ -28805,8 +29364,14 @@ impl<'a> FunctionLowerer<'a> {
             "slog_with3" if args.len() == 8 => Some((
                 "mako_native_slog_with3_ptr",
                 &[
-                    Type::Str, Type::Str, Type::Str, Type::Str, Type::Str, Type::Str,
-                    Type::Str, Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
                 ],
                 None,
                 false,
@@ -28883,12 +29448,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "sleep_ns" if args.len() == 1 => Some((
-                "mako_native_sleep_ns",
-                &[Type::I64],
-                None,
-                false,
-            )),
+            "sleep_ns" if args.len() == 1 => {
+                Some(("mako_native_sleep_ns", &[Type::I64], None, false))
+            }
             "mmap_open" if args.len() == 2 => Some((
                 "mako_native_mmap_open_ptr",
                 &[Type::Str, Type::I64],
@@ -28949,12 +29511,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "uuid_v7" if args.is_empty() => Some((
-                "mako_native_uuid_v7",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "uuid_v7" if args.is_empty() => {
+                Some(("mako_native_uuid_v7", &[], Some(Type::Str), true))
+            }
             "redis_close" if args.len() == 1 => Some((
                 "mako_native_redis_close",
                 &[Type::Opaque],
@@ -28991,30 +29550,18 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "detached_join_all" if args.is_empty() => Some((
-                "mako_native_detached_join_all",
-                &[],
-                None,
-                false,
-            )),
-            "alloc_high_bytes" if args.is_empty() => Some((
-                "mako_native_alloc_high_bytes",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "alloc_live_bytes" if args.is_empty() => Some((
-                "mako_native_alloc_live_bytes",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "ws_last_opcode" if args.is_empty() => Some((
-                "mako_native_ws_last_opcode",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "detached_join_all" if args.is_empty() => {
+                Some(("mako_native_detached_join_all", &[], None, false))
+            }
+            "alloc_high_bytes" if args.is_empty() => {
+                Some(("mako_native_alloc_high_bytes", &[], Some(Type::I64), false))
+            }
+            "alloc_live_bytes" if args.is_empty() => {
+                Some(("mako_native_alloc_live_bytes", &[], Some(Type::I64), false))
+            }
+            "ws_last_opcode" if args.is_empty() => {
+                Some(("mako_native_ws_last_opcode", &[], Some(Type::I64), false))
+            }
             "uuid_from_bytes" if args.len() == 1 => Some((
                 "mako_native_uuid_from_bytes_ptr",
                 &[Type::Str],
@@ -29033,12 +29580,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::IntSlice),
                 true,
             )),
-            "debug_bp" if args.len() == 1 => Some((
-                "mako_native_debug_bp",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "debug_bp" if args.len() == 1 => {
+                Some(("mako_native_debug_bp", &[Type::I64], Some(Type::I64), false))
+            }
             "debug_bp_disable" if args.len() == 1 => Some((
                 "mako_native_debug_bp_disable",
                 &[Type::I64],
@@ -29057,24 +29601,18 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "debug_break_hits" if args.is_empty() => Some((
-                "mako_native_debug_break_hits",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "debug_break_hits" if args.is_empty() => {
+                Some(("mako_native_debug_break_hits", &[], Some(Type::I64), false))
+            }
             "debug_current_task" if args.is_empty() => Some((
                 "mako_native_debug_current_task",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "debug_frame_depth" if args.is_empty() => Some((
-                "mako_native_debug_frame_depth",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "debug_frame_depth" if args.is_empty() => {
+                Some(("mako_native_debug_frame_depth", &[], Some(Type::I64), false))
+            }
             "debug_frames_json" if args.is_empty() => Some((
                 "mako_native_debug_frames_json_ptr",
                 &[],
@@ -29111,12 +29649,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "debug_pop_frame" if args.is_empty() => Some((
-                "mako_native_debug_pop_frame",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "debug_pop_frame" if args.is_empty() => {
+                Some(("mako_native_debug_pop_frame", &[], Some(Type::I64), false))
+            }
             "debug_push_frame" if args.len() == 3 => Some((
                 "mako_native_debug_push_frame_ptr",
                 &[Type::Str, Type::I64, Type::Str],
@@ -29195,12 +29730,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "game_udp_close" if args.len() == 1 => Some((
-                "mako_native_game_udp_close",
-                &[Type::Opaque],
-                None,
-                false,
-            )),
+            "game_udp_close" if args.len() == 1 => {
+                Some(("mako_native_game_udp_close", &[Type::Opaque], None, false))
+            }
             "game_udp_send_to" if args.len() == 4 => Some((
                 "mako_native_game_udp_send_to_ptr",
                 &[Type::Opaque, Type::Str, Type::I64, Type::Str],
@@ -29303,12 +29835,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "log_debug" if args.len() == 1 => Some((
-                "mako_native_log_debug_ptr",
-                &[Type::Str],
-                None,
-                false,
-            )),
+            "log_debug" if args.len() == 1 => {
+                Some(("mako_native_log_debug_ptr", &[Type::Str], None, false))
+            }
             "mmap_close" if args.len() == 1 => Some((
                 "mako_native_mmap_close",
                 &[Type::Opaque],
@@ -29363,12 +29892,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::Str),
                 true,
             )),
-            "now_ms" if args.is_empty() => Some((
-                "mako_native_now_ms",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "now_ms" if args.is_empty() => {
+                Some(("mako_native_now_ms", &[], Some(Type::I64), false))
+            }
             "obj_acquire" if args.len() == 1 => Some((
                 "mako_native_obj_acquire",
                 &[Type::I64],
@@ -29567,12 +30093,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "rtp_header_len" if args.is_empty() => Some((
-                "mako_native_rtp_header_len",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "rtp_header_len" if args.is_empty() => {
+                Some(("mako_native_rtp_header_len", &[], Some(Type::I64), false))
+            }
             "rtp_marker" if args.len() == 1 => Some((
                 "mako_native_rtp_marker_ptr",
                 &[Type::Str],
@@ -29623,7 +30146,15 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "sdp_attr_candidate" if args.len() == 7 => Some((
                 "mako_native_sdp_attr_candidate_ptr",
-                &[Type::I64, Type::I64, Type::Str, Type::I64, Type::Str, Type::I64, Type::Str],
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                ],
                 Some(Type::Str),
                 true,
             )),
@@ -29641,7 +30172,15 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "sdp_build_av" if args.len() == 7 => Some((
                 "mako_native_sdp_build_av_ptr",
-                &[Type::Str, Type::Str, Type::Str, Type::I64, Type::Str, Type::I64, Type::Str],
+                &[
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                ],
                 Some(Type::Str),
                 true,
             )),
@@ -29707,7 +30246,16 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "simd_dot_i64_4" if args.len() == 8 => Some((
                 "mako_native_simd_dot_i64_4",
-                &[Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64, Type::I64],
+                &[
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                    Type::I64,
+                ],
                 Some(Type::I64),
                 false,
             )),
@@ -29803,7 +30351,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "sip_reply_with_to_tag" if args.len() == 6 => Some((
                 "mako_native_sip_reply_with_to_tag_ptr",
-                &[Type::Str, Type::I64, Type::Str, Type::Str, Type::Str, Type::Str],
+                &[
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                    Type::Str,
+                ],
                 Some(Type::Str),
                 true,
             )),
@@ -29893,7 +30448,14 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "sip_via_value_nat" if args.len() == 6 => Some((
                 "mako_native_sip_via_value_nat_ptr",
-                &[Type::Str, Type::Str, Type::I64, Type::Str, Type::Str, Type::I64],
+                &[
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                    Type::Str,
+                    Type::Str,
+                    Type::I64,
+                ],
                 Some(Type::Str),
                 true,
             )),
@@ -29915,42 +30477,25 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "sip_view_copy" if args.is_empty() => Some((
-                "mako_native_sip_view_copy_ptr",
-                &[],
-                Some(Type::Str),
-                true,
-            )),
+            "sip_view_copy" if args.is_empty() => {
+                Some(("mako_native_sip_view_copy_ptr", &[], Some(Type::Str), true))
+            }
             "sip_view_eq" if args.len() == 1 => Some((
                 "mako_native_sip_view_eq_ptr",
                 &[Type::Str],
                 Some(Type::I64),
                 false,
             )),
-            "sip_view_len" if args.is_empty() => Some((
-                "mako_native_sip_view_len",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "sip_view_offset" if args.is_empty() => Some((
-                "mako_native_sip_view_offset",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "sleep_ms" if args.len() == 1 => Some((
-                "mako_native_sleep_ms",
-                &[Type::I64],
-                None,
-                false,
-            )),
-            "slog_flush" if args.is_empty() => Some((
-                "mako_native_slog_flush",
-                &[],
-                None,
-                false,
-            )),
+            "sip_view_len" if args.is_empty() => {
+                Some(("mako_native_sip_view_len", &[], Some(Type::I64), false))
+            }
+            "sip_view_offset" if args.is_empty() => {
+                Some(("mako_native_sip_view_offset", &[], Some(Type::I64), false))
+            }
+            "sleep_ms" if args.len() == 1 => {
+                Some(("mako_native_sleep_ms", &[Type::I64], None, false))
+            }
+            "slog_flush" if args.is_empty() => Some(("mako_native_slog_flush", &[], None, false)),
             "slog_set_output" if args.len() == 1 => Some((
                 "mako_native_slog_set_output_ptr",
                 &[Type::Str],
@@ -30263,12 +30808,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "wal_next_off" if args.is_empty() => Some((
-                "mako_native_wal_next_off",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "wal_next_off" if args.is_empty() => {
+                Some(("mako_native_wal_next_off", &[], Some(Type::I64), false))
+            }
             "wal_read_at" if args.len() == 2 => Some((
                 "mako_native_wal_read_at_ptr",
                 &[Type::Opaque, Type::I64],
@@ -30329,30 +30871,21 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "ws_close" if args.len() == 1 => Some((
-                "mako_native_ws_close",
-                &[Type::I64],
-                Some(Type::I64),
-                false,
-            )),
+            "ws_close" if args.len() == 1 => {
+                Some(("mako_native_ws_close", &[Type::I64], Some(Type::I64), false))
+            }
             "ws_last_close_code" if args.is_empty() => Some((
                 "mako_native_ws_last_close_code",
                 &[],
                 Some(Type::I64),
                 false,
             )),
-            "ws_last_fin" if args.is_empty() => Some((
-                "mako_native_ws_last_fin",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
-            "ws_last_status" if args.is_empty() => Some((
-                "mako_native_ws_last_status",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "ws_last_fin" if args.is_empty() => {
+                Some(("mako_native_ws_last_fin", &[], Some(Type::I64), false))
+            }
+            "ws_last_status" if args.is_empty() => {
+                Some(("mako_native_ws_last_status", &[], Some(Type::I64), false))
+            }
             "ws_send_close" if args.len() == 3 => Some((
                 "mako_native_ws_send_close_ptr",
                 &[Type::I64, Type::I64, Type::Str],
@@ -30366,12 +30899,9 @@ impl<'a> FunctionLowerer<'a> {
                 false,
             )),
             // WSS: TLS + WebSocket (Opaque = TlsClient / TlsConn handles).
-            "wss_available" if args.is_empty() => Some((
-                "mako_native_wss_available",
-                &[],
-                Some(Type::I64),
-                false,
-            )),
+            "wss_available" if args.is_empty() => {
+                Some(("mako_native_wss_available", &[], Some(Type::I64), false))
+            }
             "wss_upgrade" if args.len() == 4 => Some((
                 "mako_native_wss_upgrade_ptr",
                 &[Type::Opaque, Type::Str, Type::Str, Type::Str],
@@ -30484,24 +31014,23 @@ impl<'a> FunctionLowerer<'a> {
         for (arg, &expected) in args.iter().zip(param_tys.iter()) {
             let (v, actual, owned) = self.lower_expr(arg)?;
             // ChanI/ChanS/ChanP share the same runtime handle ABI (i64 pointer).
-            let chan_alias = matches!(
-                (expected, actual),
-                (Type::ChanI, Type::ChanS)
-                    | (Type::ChanS, Type::ChanI)
-                    | (Type::ChanI, Type::ChanP(_))
-                    | (Type::ChanP(_), Type::ChanI)
-                    | (Type::ChanS, Type::ChanP(_))
-                    | (Type::ChanP(_), Type::ChanS)
-                    | (Type::Opaque, Type::I64)
-                    | (Type::I64, Type::Opaque)
-            )
-                || matches!((expected, actual), (Type::I64, Type::FnPtr) | (Type::FnPtr, Type::I64))
-                || (expected == Type::I64 && actual.is_ptr_sized() && actual != Type::F64)
-                || (expected == Type::Opaque && actual.is_ptr_sized() && actual != Type::F64);
-            if actual != expected
-                && !(expected == Type::I64 && actual == Type::I1)
-                && !chan_alias
-            {
+            let chan_alias =
+                matches!(
+                    (expected, actual),
+                    (Type::ChanI, Type::ChanS)
+                        | (Type::ChanS, Type::ChanI)
+                        | (Type::ChanI, Type::ChanP(_))
+                        | (Type::ChanP(_), Type::ChanI)
+                        | (Type::ChanS, Type::ChanP(_))
+                        | (Type::ChanP(_), Type::ChanS)
+                        | (Type::Opaque, Type::I64)
+                        | (Type::I64, Type::Opaque)
+                ) || matches!(
+                    (expected, actual),
+                    (Type::I64, Type::FnPtr) | (Type::FnPtr, Type::I64)
+                ) || (expected == Type::I64 && actual.is_ptr_sized() && actual != Type::F64)
+                    || (expected == Type::Opaque && actual.is_ptr_sized() && actual != Type::F64);
+            if actual != expected && !(expected == Type::I64 && actual == Type::I1) && !chan_alias {
                 return Err(IrError::new(format!(
                     "native IR: {function} argument type mismatch"
                 )));
@@ -30542,10 +31071,7 @@ impl<'a> FunctionLowerer<'a> {
         // map_si_set_take similarly consumes the key string (arg 1).
         let consumes_str_arg1 = matches!(
             function,
-            "chan_str_send_take"
-                | "chan_str_try_send_take"
-                | "map_si_set_take"
-                | "map_ss_set_take"
+            "chan_str_send_take" | "chan_str_try_send_take" | "map_si_set_take" | "map_ss_set_take"
         );
         // map_ss_set_take also consumes the value string (arg 2).
         let consumes_str_arg2 = matches!(function, "map_ss_set_take");
@@ -30586,7 +31112,11 @@ impl<'a> FunctionLowerer<'a> {
             if consumes_first
                 && matches!(
                     t,
-                    Type::Str | Type::IntSlice | Type::StrSlice | Type::FloatSlice | Type::ByteSlice
+                    Type::Str
+                        | Type::IntSlice
+                        | Type::StrSlice
+                        | Type::FloatSlice
+                        | Type::ByteSlice
                 )
             {
                 continue;
@@ -30655,12 +31185,7 @@ impl<'a> FunctionLowerer<'a> {
             value = self.emit_clone(value, ty);
         }
         let name = self.structs.layout_name(id);
-        let tag = self
-            .structs
-            .concrete_tags
-            .get(&name)
-            .copied()
-            .unwrap_or(0);
+        let tag = self.structs.concrete_tags.get(&name).copied().unwrap_or(0);
         let tag_v = self.const_int(tag, Type::I64);
         let drop_fn = self.value();
         self.emit(Inst::FuncAddr {
@@ -30804,12 +31329,7 @@ impl<'a> FunctionLowerer<'a> {
                 continue;
             };
             let cname = self.structs.layout_name(sid);
-            let ctag = self
-                .structs
-                .concrete_tags
-                .get(&cname)
-                .copied()
-                .unwrap_or(0);
+            let ctag = self.structs.concrete_tags.get(&cname).copied().unwrap_or(0);
             self.current = test;
             let arm = self.new_block();
             let next = if i + 1 == with_self.len() {
@@ -30974,8 +31494,7 @@ impl<'a> FunctionLowerer<'a> {
             }),
             Type::PtrSlice(vk) => {
                 if matches!(vk, MapValKind::OwnedOpaque(_)) {
-                    let (vkind, vnf, vsm, vnm, vnfp, vnsp) =
-                        self.struct_map_value_meta(vk);
+                    let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                     self.emit(Inst::Call {
                         out: None,
                         function: "mako_native_ptr_slice_drop_typed".into(),
@@ -31030,12 +31549,7 @@ impl<'a> FunctionLowerer<'a> {
 
     /// Take ownership of a value stored into an aggregate field: move an owned
     /// temporary, clone a borrow, and reject an owned scalar (impossible).
-    fn own_field_value(
-        &mut self,
-        value: Value,
-        ty: Type,
-        owned: bool,
-    ) -> Result<Value, IrError> {
+    fn own_field_value(&mut self, value: Value, ty: Type, owned: bool) -> Result<Value, IrError> {
         if ty.is_heap() {
             Ok(if owned {
                 value
@@ -31084,11 +31598,14 @@ impl<'a> FunctionLowerer<'a> {
             }
             probe_tys.push(ty);
         }
-        let info = self.structs.variant_matching(name, &probe_tys).ok_or_else(|| {
-            IrError::new(format!(
-                "native IR: enum payload type mismatch for `{name}` with payload {probe_tys:?}"
-            ))
-        })?;
+        let info = self
+            .structs
+            .variant_matching(name, &probe_tys)
+            .ok_or_else(|| {
+                IrError::new(format!(
+                    "native IR: enum payload type mismatch for `{name}` with payload {probe_tys:?}"
+                ))
+            })?;
         // Rebuild with correct nested monomorphs for each payload slot.
         self.build_variant(info, args)
     }
@@ -31106,7 +31623,9 @@ impl<'a> FunctionLowerer<'a> {
         }
         let mut payload = Vec::with_capacity(args.len());
         for (index, arg) in args.iter().enumerate() {
-            let slot_ty = self.structs.field_type(info.enum_id, info.slot_base + index);
+            let slot_ty = self
+                .structs
+                .field_type(info.enum_id, info.slot_base + index);
             let (value, ty, owned) = self.lower_expr_for_expected(arg, slot_ty)?;
             if ty != slot_ty {
                 return Err(IrError::new(format!(
@@ -31420,9 +31939,7 @@ impl<'a> FunctionLowerer<'a> {
                         });
                         r = b;
                     } else if rt != Type::I1 {
-                        return Err(IrError::new(
-                            "native IR: && right operand must be bool",
-                        ));
+                        return Err(IrError::new("native IR: && right operand must be bool"));
                     }
                     let _ = ro;
                     self.emit(Inst::Store {
@@ -31465,9 +31982,7 @@ impl<'a> FunctionLowerer<'a> {
                         });
                         r = b;
                     } else if rt != Type::I1 {
-                        return Err(IrError::new(
-                            "native IR: || right operand must be bool",
-                        ));
+                        return Err(IrError::new("native IR: || right operand must be bool"));
                     }
                     let _ = ro;
                     self.emit(Inst::Store {
@@ -31537,15 +32052,11 @@ impl<'a> FunctionLowerer<'a> {
     ) -> (Value, Value, Value, Value, Value, Value) {
         let (drop_kind, struct_id) = match kind {
             MapValKind::OwnedStr | MapValKind::StructKeyStr(_) => (1, None),
-            MapValKind::Struct(id) | MapValKind::StructKeyToStruct(_, id) => {
-                (2, Some(id))
-            }
+            MapValKind::Struct(id) | MapValKind::StructKeyToStruct(_, id) => (2, Some(id)),
             MapValKind::IntSlice | MapValKind::StructKeyIntSlice(_) => (3, None),
             MapValKind::StrSlice | MapValKind::StructKeyStrSlice(_) => (4, None),
             MapValKind::FloatSlice | MapValKind::StructKeyFloatSlice(_) => (5, None),
-            MapValKind::StructSlice(id) | MapValKind::StructKeyStructSlice(_, id) => {
-                (6, Some(id))
-            }
+            MapValKind::StructSlice(id) | MapValKind::StructKeyStructSlice(_, id) => (6, Some(id)),
             MapValKind::OwnedOpaque(OpaqueKind::Interface)
             | MapValKind::StructKeyOwnedOpaque(_, OpaqueKind::Interface) => (7, None),
             MapValKind::OwnedOpaque(OpaqueKind::HttpRequest)
@@ -31610,12 +32121,7 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     /// Deep structural equality for a struct/enum layout (returns I1).
-    fn lower_struct_eq(
-        &mut self,
-        left: Value,
-        right: Value,
-        sid: u32,
-    ) -> Result<Value, IrError> {
+    fn lower_struct_eq(&mut self, left: Value, right: Value, sid: u32) -> Result<Value, IrError> {
         // Null pointer identity: both null → true; one null → false.
         let z = self.const_int(0, Type::I64);
         let ln = self.value();
@@ -31837,12 +32343,7 @@ impl<'a> FunctionLowerer<'a> {
         Ok(loaded)
     }
 
-    fn lower_field_eq(
-        &mut self,
-        lv: Value,
-        rv: Value,
-        fty: Type,
-    ) -> Result<Value, IrError> {
+    fn lower_field_eq(&mut self, lv: Value, rv: Value, fty: Type) -> Result<Value, IrError> {
         Ok(match fty {
             Type::Str => {
                 // Null/null → true; one null → false; else string content eq.
@@ -31895,10 +32396,7 @@ impl<'a> FunctionLowerer<'a> {
                 })?;
                 self.current = b_both;
                 let t = self.const_int(1, Type::I1);
-                self.emit(Inst::Store {
-                    ptr: s,
-                    value: t,
-                });
+                self.emit(Inst::Store { ptr: s, value: t });
                 self.terminate(Terminator::Jump(b_merge))?;
                 self.current = b_else;
                 let b_one = self.new_block();
@@ -31910,10 +32408,7 @@ impl<'a> FunctionLowerer<'a> {
                 })?;
                 self.current = b_one;
                 let f = self.const_int(0, Type::I1);
-                self.emit(Inst::Store {
-                    ptr: s,
-                    value: f,
-                });
+                self.emit(Inst::Store { ptr: s, value: f });
                 self.terminate(Terminator::Jump(b_merge))?;
                 self.current = b_cmp;
                 let o = self.value();
@@ -31923,10 +32418,7 @@ impl<'a> FunctionLowerer<'a> {
                     right: rv,
                     negated: false,
                 });
-                self.emit(Inst::Store {
-                    ptr: s,
-                    value: o,
-                });
+                self.emit(Inst::Store { ptr: s, value: o });
                 self.terminate(Terminator::Jump(b_merge))?;
                 self.current = b_merge;
                 let loaded = self.value();
@@ -31997,9 +32489,7 @@ impl<'a> FunctionLowerer<'a> {
             if let Some(info) = self.structs.variant_in_enum("Err", id) {
                 let mut payload = Vec::with_capacity(info.arity);
                 for i in 0..info.arity {
-                    let fty = self
-                        .structs
-                        .field_type(id, info.slot_base + i);
+                    let fty = self.structs.field_type(id, info.slot_base + i);
                     let z = match fty {
                         Type::Str => {
                             let lit = self.value();
@@ -32092,10 +32582,7 @@ impl<'a> FunctionLowerer<'a> {
         let else_id = self.new_block();
         let merge_id = self.new_block();
         let slot = self.value();
-        self.emit(Inst::Alloca {
-            out: slot,
-            ty,
-        });
+        self.emit(Inst::Alloca { out: slot, ty });
         self.terminate(Terminator::Branch {
             condition: is_null,
             then_block: then_id,
@@ -32123,7 +32610,11 @@ impl<'a> FunctionLowerer<'a> {
                 });
                 o
             }
-            Type::FloatSlice | Type::ByteSlice | Type::BoolSlice | Type::StructSlice(_) | Type::PtrSlice(_) => {
+            Type::FloatSlice
+            | Type::ByteSlice
+            | Type::BoolSlice
+            | Type::StructSlice(_)
+            | Type::PtrSlice(_) => {
                 let o = self.value();
                 let z = self.const_int(0, Type::I64);
                 let fname = match ty {
@@ -32152,10 +32643,7 @@ impl<'a> FunctionLowerer<'a> {
             Type::Struct(id) => self.make_zero_struct(id)?,
             other => {
                 let o = self.value();
-                self.emit(Inst::NullHeap {
-                    out: o,
-                    ty: other,
-                });
+                self.emit(Inst::NullHeap { out: o, ty: other });
                 o
             }
         };
@@ -32165,10 +32653,7 @@ impl<'a> FunctionLowerer<'a> {
         });
         self.terminate(Terminator::Jump(merge_id))?;
         self.current = else_id;
-        self.emit(Inst::Store {
-            ptr: slot,
-            value,
-        });
+        self.emit(Inst::Store { ptr: slot, value });
         self.terminate(Terminator::Jump(merge_id))?;
         self.current = merge_id;
         let loaded = self.value();
@@ -32246,8 +32731,7 @@ impl<'a> FunctionLowerer<'a> {
                 ret: Some(ty),
             }),
             Type::PtrSlice(vk) if matches!(vk, MapValKind::OwnedOpaque(_)) => {
-                let (vkind, vnf, vsm, vnm, vnfp, vnsp) =
-                    self.struct_map_value_meta(vk);
+                let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                 self.emit(Inst::Call {
                     out: Some(out),
                     function: "mako_native_ptr_slice_clone_typed".into(),
@@ -32425,7 +32909,10 @@ mod tests {
             .iter()
             .filter(|layout| layout.fields.len() == 2 && layout.fields[0].0 == "0")
             .count();
-        assert_eq!(tuple_layouts, 1, "the (int,int) shape must be interned once");
+        assert_eq!(
+            tuple_layouts, 1,
+            "the (int,int) shape must be interned once"
+        );
         // Every owned tuple is dropped exactly once (no leaks, no double-free).
         let main = module.functions.iter().find(|f| f.name == "main").unwrap();
         let instructions = main
@@ -32474,17 +32961,18 @@ mod tests {
             clones, 0,
             "returning owned Option temp must not StructClone (would leak the source)"
         );
-        let main = module.functions.iter().find(|fn_| fn_.name == "main").unwrap();
+        let main = module
+            .functions
+            .iter()
+            .find(|fn_| fn_.name == "main")
+            .unwrap();
         let main_drops = main
             .blocks
             .iter()
             .flat_map(|b| &b.instructions)
             .filter(|i| matches!(i, Inst::DropStruct { .. }))
             .count();
-        assert!(
-            main_drops >= 1,
-            "main must drop the owned Option local"
-        );
+        assert!(main_drops >= 1, "main must drop the owned Option local");
     }
 
     #[test]
@@ -32517,14 +33005,21 @@ mod tests {
         assert_eq!(shape.fields[0].0, "tag");
         // `describe`'s borrowed param must not be dropped inside the match (the
         // caller owns the copy); its scrutinee is a borrow, so zero drops here.
-        let describe = module.functions.iter().find(|f| f.name == "describe").unwrap();
+        let describe = module
+            .functions
+            .iter()
+            .find(|f| f.name == "describe")
+            .unwrap();
         let describe_drops = describe
             .blocks
             .iter()
             .flat_map(|b| &b.instructions)
             .filter(|i| matches!(i, Inst::DropStruct { .. }))
             .count();
-        assert_eq!(describe_drops, 0, "borrowed enum param is not dropped by callee");
+        assert_eq!(
+            describe_drops, 0,
+            "borrowed enum param is not dropped by callee"
+        );
         // The match dispatches on the tag with `Eq` compares and Branches.
         let branches = describe
             .blocks
@@ -32552,15 +33047,31 @@ mod tests {
         let user = module.structs.iter().find(|l| l.name == "User").unwrap();
         assert_eq!(user.fields[0].1, Type::Str);
         let main = module.functions.iter().find(|f| f.name == "main").unwrap();
-        let insts = main.blocks.iter().flat_map(|b| &b.instructions).collect::<Vec<_>>();
+        let insts = main
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .collect::<Vec<_>>();
         // `var v = u` deep-copies the struct (StructClone); `v.name = "Grace"`
         // clones the literal and drops the old field; both structs drop at exit.
         assert!(insts.iter().any(|i| matches!(i, Inst::StructClone { .. })));
         // Old-field drop on reassignment + two struct drops at scope exit.
-        let drop_strings = insts.iter().filter(|i| matches!(i, Inst::DropString { .. })).count();
-        assert!(drop_strings >= 1, "field reassignment must drop the old string");
-        let drop_structs = insts.iter().filter(|i| matches!(i, Inst::DropStruct { .. })).count();
-        assert_eq!(drop_structs, 2, "both owned Users dropped once at scope exit");
+        let drop_strings = insts
+            .iter()
+            .filter(|i| matches!(i, Inst::DropString { .. }))
+            .count();
+        assert!(
+            drop_strings >= 1,
+            "field reassignment must drop the old string"
+        );
+        let drop_structs = insts
+            .iter()
+            .filter(|i| matches!(i, Inst::DropStruct { .. }))
+            .count();
+        assert_eq!(
+            drop_structs, 2,
+            "both owned Users dropped once at scope exit"
+        );
     }
 
     #[test]
@@ -32579,12 +33090,19 @@ mod tests {
         let bag = module.structs.iter().find(|l| l.name == "Bag").unwrap();
         assert_eq!(bag.fields[0].1, Type::IntSlice);
         let main = module.functions.iter().find(|f| f.name == "main").unwrap();
-        let insts = main.blocks.iter().flat_map(|b| &b.instructions).collect::<Vec<_>>();
+        let insts = main
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .collect::<Vec<_>>();
         // `var c = b` deep-copies (StructClone); both bags drop at scope exit,
         // and the backend recursively clones/drops the []int field.
         assert!(insts.iter().any(|i| matches!(i, Inst::StructClone { .. })));
         assert_eq!(
-            insts.iter().filter(|i| matches!(i, Inst::DropStruct { .. })).count(),
+            insts
+                .iter()
+                .filter(|i| matches!(i, Inst::DropStruct { .. }))
+                .count(),
             2,
             "both owned Bags dropped once at scope exit"
         );
@@ -32618,7 +33136,9 @@ mod tests {
         let insts: Vec<_> = build.blocks.iter().flat_map(|b| &b.instructions).collect();
         // After the move `name = cand`, cand's slot must be nulled (Store of 0)
         // so the scope-exit drop is safe regardless of the if-merge ownership.
-        let has_null_store = insts.iter().any(|i| matches!(i, Inst::ConstInt { value: 0, .. }));
+        let has_null_store = insts
+            .iter()
+            .any(|i| matches!(i, Inst::ConstInt { value: 0, .. }));
         assert!(has_null_store, "conditional move must null the source slot");
     }
 
@@ -32638,14 +33158,24 @@ mod tests {
         let program = Parser::new(tokens).parse().unwrap();
         let module = lower(&program).unwrap();
         let main = module.functions.iter().find(|f| f.name == "main").unwrap();
-        let insts = main.blocks.iter().flat_map(|b| &b.instructions).collect::<Vec<_>>();
+        let insts = main
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .collect::<Vec<_>>();
         // Each owned tuple element is cloned into its binding, and the owned
         // tuple temp is dropped once (recursively freeing its two strings).
-        let clones = insts.iter().filter(|i| matches!(i, Inst::StringClone { .. })).count();
+        let clones = insts
+            .iter()
+            .filter(|i| matches!(i, Inst::StringClone { .. }))
+            .count();
         // 2 for destructured bindings + 1 for the string arg passed to split()
         assert_eq!(clones, 3, "string bindings cloned out + arg clone");
         assert_eq!(
-            insts.iter().filter(|i| matches!(i, Inst::DropStruct { .. })).count(),
+            insts
+                .iter()
+                .filter(|i| matches!(i, Inst::DropStruct { .. }))
+                .count(),
             1,
             "the owned tuple temp is dropped exactly once"
         );
@@ -32672,7 +33202,11 @@ mod tests {
         // `var b = a` deep-copies the enum (StructClone recurses over the string
         // slot null-safely); both enums drop once at scope exit.
         let main = module.functions.iter().find(|f| f.name == "main").unwrap();
-        let insts = main.blocks.iter().flat_map(|b| &b.instructions).collect::<Vec<_>>();
+        let insts = main
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .collect::<Vec<_>>();
         assert!(insts.iter().any(|i| matches!(i, Inst::EnumMake { .. })));
         assert!(insts.iter().any(|i| matches!(i, Inst::StructClone { .. })));
     }
@@ -32744,6 +33278,63 @@ mod tests {
     }
 
     #[test]
+    fn drops_bool_slice_views_and_returned_clones() {
+        let source = r#"
+            fn flip_first(mut xs: []bool) -> []bool {
+                xs[0] = false
+                return xs
+            }
+            fn main() {
+                var flags = make([]bool, 0, 2)
+                flags = append(flags, true)
+                flags = append(flags, false)
+                flags = append(flags, true)
+                let first_two = flags[:2]
+                let changed = flip_first(first_two)
+                print(changed[0])
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let instructions = module
+            .functions
+            .iter()
+            .flat_map(|f| f.blocks.iter())
+            .flat_map(|b| &b.instructions)
+            .collect::<Vec<_>>();
+        let clones = instructions
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    Inst::Call {
+                        function,
+                        ..
+                    } if function == "mako_native_bool_slice_clone_ptr"
+                )
+            })
+            .count();
+        let drops = instructions
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    Inst::Call {
+                        function,
+                        ..
+                    } if function == "mako_native_bool_slice_drop_ptr"
+                )
+            })
+            .count();
+        assert!(clones >= 1, "returning borrowed []bool must clone");
+        assert!(
+            drops >= clones + 2,
+            "owned []bool locals and cloned returns must be dropped (clones={clones}, drops={drops})"
+        );
+    }
+
+    #[test]
     fn lowers_nested_struct_fields() {
         let source = r#"
             struct Addr { city: string, zip: int }
@@ -32759,7 +33350,11 @@ mod tests {
         let person = module.structs.iter().find(|l| l.name == "Person").unwrap();
         assert!(matches!(person.fields[1].1, Type::Struct(_)));
         let main = module.functions.iter().find(|f| f.name == "main").unwrap();
-        let insts = main.blocks.iter().flat_map(|b| &b.instructions).collect::<Vec<_>>();
+        let insts = main
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .collect::<Vec<_>>();
         assert!(insts.iter().any(|i| matches!(i, Inst::StructMake { .. })));
         assert!(insts.iter().any(|i| matches!(i, Inst::DropStruct { .. })));
     }
@@ -32779,8 +33374,16 @@ mod tests {
         let tokens = Lexer::new(source).tokenize().unwrap();
         let program = Parser::new(tokens).parse().unwrap();
         let module = lower(&program).unwrap();
-        let payload = module.functions.iter().find(|f| f.name == "payload").unwrap();
-        let insts = payload.blocks.iter().flat_map(|b| &b.instructions).collect::<Vec<_>>();
+        let payload = module
+            .functions
+            .iter()
+            .find(|f| f.name == "payload")
+            .unwrap();
+        let insts = payload
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .collect::<Vec<_>>();
         // Payload arm clones the borrowed string before the match result is stored.
         assert!(
             insts.iter().any(|i| matches!(i, Inst::StringClone { .. })),
@@ -32826,7 +33429,11 @@ mod tests {
         let tokens = Lexer::new(source).tokenize().unwrap();
         let program = Parser::new(tokens).parse().unwrap();
         let module = lower(&program).unwrap();
-        let classify = module.functions.iter().find(|f| f.name == "classify").unwrap();
+        let classify = module
+            .functions
+            .iter()
+            .find(|f| f.name == "classify")
+            .unwrap();
         let branches = classify
             .blocks
             .iter()
@@ -32900,15 +33507,17 @@ mod tests {
             .iter()
             .find(|function| function.name == helper_name)
             .expect("interface backing structs need a full drop helper");
-        assert!(helper.blocks.iter().flat_map(|block| &block.instructions).any(
-            |instruction| matches!(
+        assert!(helper
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| matches!(
                 instruction,
                 Inst::DropStruct {
                     struct_id,
                     ..
                 } if *struct_id == bag_id
-            )
-        ));
+            )));
         assert!(module
             .functions
             .iter()
@@ -33019,9 +33628,5 @@ mod tests {
         assert!(!calls.iter().any(|name| name.contains("opaque_drop")));
     }
 }
-
- 
- 
- 
 
 // gap-close 1784647512

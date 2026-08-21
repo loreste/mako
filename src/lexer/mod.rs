@@ -554,7 +554,10 @@ impl<'a> Lexer<'a> {
                             col,
                         });
                     }
-                    while matches!(self.peek(), Some(b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' | b'_')) {
+                    while matches!(
+                        self.peek(),
+                        Some(b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' | b'_')
+                    ) {
                         self.bump();
                     }
                     let s = std::str::from_utf8(&self.src[start + 2..self.pos]).unwrap();
@@ -562,7 +565,9 @@ impl<'a> Lexer<'a> {
                     return i64::from_str_radix(&clean, 16)
                         .map(TokenKind::Int)
                         .map_err(|_| LexError::NumberOutOfRange {
-                            literal: std::str::from_utf8(&self.src[start..self.pos]).unwrap().to_string(),
+                            literal: std::str::from_utf8(&self.src[start..self.pos])
+                                .unwrap()
+                                .to_string(),
                             line,
                             col,
                         });
@@ -585,7 +590,9 @@ impl<'a> Lexer<'a> {
                     return i64::from_str_radix(&clean, 2)
                         .map(TokenKind::Int)
                         .map_err(|_| LexError::NumberOutOfRange {
-                            literal: std::str::from_utf8(&self.src[start..self.pos]).unwrap().to_string(),
+                            literal: std::str::from_utf8(&self.src[start..self.pos])
+                                .unwrap()
+                                .to_string(),
                             line,
                             col,
                         });
@@ -608,7 +615,9 @@ impl<'a> Lexer<'a> {
                     return i64::from_str_radix(&clean, 8)
                         .map(TokenKind::Int)
                         .map_err(|_| LexError::NumberOutOfRange {
-                            literal: std::str::from_utf8(&self.src[start..self.pos]).unwrap().to_string(),
+                            literal: std::str::from_utf8(&self.src[start..self.pos])
+                                .unwrap()
+                                .to_string(),
                             line,
                             col,
                         });

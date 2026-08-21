@@ -832,15 +832,15 @@ fn resolve_one(
                 name: dep.name.clone(),
                 version: ver,
                 source: "registry".into(),
-                path: Some(normalized_lock_path(
-                    dest.strip_prefix(project).map_err(|_| {
+                path: Some(normalized_lock_path(dest.strip_prefix(project).map_err(
+                    |_| {
                         format!(
                             "remote registry cache {} is outside project {}",
                             dest.display(),
                             project.display()
                         )
-                    })?,
-                )?),
+                    },
+                )?)?),
                 git: None,
                 rev: None,
                 tag: None,
@@ -951,7 +951,10 @@ fn remote_registry_lookup(
             continue;
         }
         // Find sha256 and url in the following block
-        let block_end = body[vend..].find('}').map(|i| vend + i).unwrap_or(body.len());
+        let block_end = body[vend..]
+            .find('}')
+            .map(|i| vend + i)
+            .unwrap_or(body.len());
         let block = &body[vend..block_end];
         let sha = extract_json_string(block, "sha256").unwrap_or_default();
         let tarball_url = extract_json_string(block, "url").unwrap_or_default();
@@ -992,10 +995,7 @@ fn remote_registry_fetch(
     expected_sha256: &str,
     tarball_url: &str,
 ) -> Result<PathBuf, String> {
-    let cache_dir = project
-        .join(".mako")
-        .join("deps")
-        .join(dep_cache_key(name));
+    let cache_dir = project.join(".mako").join("deps").join(dep_cache_key(name));
     let dest = cache_dir.join(version);
     if dest.exists() {
         // Already fetched — verify digest
@@ -1058,11 +1058,11 @@ fn remote_registry_fetch(
 /// Sign a package digest with ed25519 using the key at `MAKO_SIGN_KEY`.
 /// Writes PACKAGE.sig alongside PACKAGE.sha256.
 pub fn sign_package(dir: &Path) -> Result<(), String> {
-    let key_path = std::env::var("MAKO_SIGN_KEY")
-        .map_err(|_| "MAKO_SIGN_KEY not set — point it to an ed25519 private key PEM".to_string())?;
+    let key_path = std::env::var("MAKO_SIGN_KEY").map_err(|_| {
+        "MAKO_SIGN_KEY not set — point it to an ed25519 private key PEM".to_string()
+    })?;
     let digest_path = dir.join(PACKAGE_DIGEST_FILE);
-    let digest = fs::read_to_string(&digest_path)
-        .map_err(|e| format!("read digest: {e}"))?;
+    let digest = fs::read_to_string(&digest_path).map_err(|e| format!("read digest: {e}"))?;
     // Use openssl to sign: openssl pkeyutl -sign -inkey <key> -in <digest>
     let output = Command::new("openssl")
         .args(["pkeyutl", "-sign", "-inkey"])
@@ -1153,8 +1153,10 @@ pub fn verify_package_signature(dir: &Path) -> Result<(), String> {
 pub fn pkg_get(project: &Path, name: &str, version_req: Option<&str>) -> Result<(), String> {
     let req = version_req.unwrap_or("*");
     // Try remote registry first
-    let url = remote_registry_url(project)
-        .ok_or_else(|| "no remote registry configured (set MAKO_REGISTRY_URL or [registry] url in mako.toml)".to_string())?;
+    let url = remote_registry_url(project).ok_or_else(|| {
+        "no remote registry configured (set MAKO_REGISTRY_URL or [registry] url in mako.toml)"
+            .to_string()
+    })?;
     let found = remote_registry_lookup(&url, name, req)?
         .ok_or_else(|| format!("package `{name}` not found in registry at {url}"))?;
     let (version, sha256, tarball_url) = found;
@@ -1172,7 +1174,10 @@ pub fn pkg_get(project: &Path, name: &str, version_req: Option<&str>) -> Result<
             let dep_line = format!("\"{name}\" = {{ version = \"^{version}\" }}\n");
             let mut new_text = text.clone();
             if let Some(pos) = text.find("[dependencies]") {
-                let insert_at = text[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(text.len());
+                let insert_at = text[pos..]
+                    .find('\n')
+                    .map(|i| pos + i + 1)
+                    .unwrap_or(text.len());
                 new_text.insert_str(insert_at, &dep_line);
             } else {
                 new_text.push_str("\n[dependencies]\n");
@@ -2455,8 +2460,8 @@ fn classify_import(path: &str, module_root: &Path, std_root: Option<&Path>) -> I
 /// root segment here would produce a manifest entry the resolver never finds.
 pub fn manifest_drift(root: &Path) -> Result<(Vec<String>, Vec<String>), String> {
     let imports = scan_module_imports(root)?;
-    let manifest_text = fs::read_to_string(root.join("mako.toml"))
-        .map_err(|e| format!("read mako.toml: {e}"))?;
+    let manifest_text =
+        fs::read_to_string(root.join("mako.toml")).map_err(|e| format!("read mako.toml: {e}"))?;
     let declared: HashSet<String> = parse_manifest_deps(&manifest_text)
         .into_iter()
         .map(|d| d.name)

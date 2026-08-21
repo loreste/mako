@@ -55,6 +55,11 @@ force an explicit choice: a loud name, an unsafe boundary, or a failing return.
 - **Dangerous names are explicit:** helpers such as `*_insecure` are for demos,
   tests, and controlled local development only. They are not part of the safe
   default path and must have a verified alternative next to them.
+- **CI can enforce this:** `mako lint --security` fails on known insecure helper
+  calls unless the exact line carries `// mako: allow-insecure`.
+- **Sanitizer-clean runtime boundaries:** HTTP client DNS/connect uses
+  `getaddrinfo` rather than direct legacy hostent pointer loads, keeping the
+  network path compatible with UBSan alignment checks.
 - **Input injection is rejected at the boundary:** HTTP headers reject CR/LF/NUL,
   SQL has parameterized APIs, URL/path helpers normalize before use, and parsers
   bound lengths before touching buffers.

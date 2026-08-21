@@ -649,7 +649,10 @@ impl TypeChecker {
         );
         fns.insert(
             "str_slice".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "str_trim".into(),
@@ -1391,7 +1394,10 @@ impl TypeChecker {
         );
         fns.insert(
             "math_clamp".into(),
-            Type::Fn(vec![Type::Float, Type::Float, Type::Float], Box::new(Type::Float)),
+            Type::Fn(
+                vec![Type::Float, Type::Float, Type::Float],
+                Box::new(Type::Float),
+            ),
         );
         fns.insert(
             "math_is_nan".into(),
@@ -1401,14 +1407,8 @@ impl TypeChecker {
             "math_is_inf".into(),
             Type::Fn(vec![Type::Float], Box::new(Type::Int)),
         );
-        fns.insert(
-            "math_inf".into(),
-            Type::Fn(vec![], Box::new(Type::Float)),
-        );
-        fns.insert(
-            "math_nan".into(),
-            Type::Fn(vec![], Box::new(Type::Float)),
-        );
+        fns.insert("math_inf".into(), Type::Fn(vec![], Box::new(Type::Float)));
+        fns.insert("math_nan".into(), Type::Fn(vec![], Box::new(Type::Float)));
         fns.insert(
             "ints_contains".into(),
             Type::Fn(
@@ -1719,24 +1719,108 @@ impl TypeChecker {
             ),
         );
         // CMap composite-key helpers
-        fns.insert("cmap_has2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Int)));
-        fns.insert("cmap_get2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::String)));
-        fns.insert("cmap_del2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Int)));
-        fns.insert("cmap_has3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Int)));
-        fns.insert("cmap_get3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::String)));
-        fns.insert("cmap_del3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Int)));
-        fns.insert("cmap_get_int".into(), Type::Fn(vec![Type::CMap, Type::String, Type::Int], Box::new(Type::Int)));
-        fns.insert("cmap_set_int".into(), Type::Fn(vec![Type::CMap, Type::String, Type::Int], Box::new(Type::Void)));
-        fns.insert("cmap_get_int2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Int)));
-        fns.insert("cmap_set_int2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Void)));
+        fns.insert(
+            "cmap_has2".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "cmap_get2".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "cmap_del2".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "cmap_has3i".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "cmap_get3i".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "cmap_del3i".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "cmap_get_int".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "cmap_set_int".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::Int],
+                Box::new(Type::Void),
+            ),
+        );
+        fns.insert(
+            "cmap_get_int2".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "cmap_set_int2".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String, Type::Int],
+                Box::new(Type::Void),
+            ),
+        );
         // UDP reuseport addr
-        fns.insert("nb_udp_bind_reuseport_addr".into(), Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "nb_udp_bind_reuseport_addr".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
         // JWT with custom header (STIR/SHAKEN PASSporT)
-        fns.insert("p256_keygen".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("p256_public_jwk".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("p256_jwk_thumbprint".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("jwt_sign_es256_header".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
-        fns.insert("jwt_sign_custom".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
+        fns.insert(
+            "p256_keygen".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "p256_public_jwk".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "p256_jwk_thumbprint".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "jwt_sign_es256_header".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "jwt_sign_custom".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
         // Direct I/O (mako_dio.h)
         fns.insert(
             "file_open".into(),
@@ -3487,34 +3571,136 @@ impl TypeChecker {
             Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
         // base64url
-        fns.insert("base64url_encode".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("base64url_decode".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "base64url_encode".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "base64url_decode".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         // P-256 helpers for native ACME / ES256 account keys
-        fns.insert("p256_keygen".into(), Type::Fn(vec![Type::String], Box::new(Type::Int)));
-        fns.insert("p256_public_jwk".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
-        fns.insert("p256_jwk_thumbprint".into(), Type::Fn(vec![Type::String], Box::new(Type::String)));
+        fns.insert(
+            "p256_keygen".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "p256_public_jwk".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "p256_jwk_thumbprint".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
         // JWT custom header
-        fns.insert("jwt_sign_es256_header".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
-        fns.insert("jwt_sign_custom".into(), Type::Fn(vec![Type::String, Type::String, Type::String], Box::new(Type::String)));
+        fns.insert(
+            "jwt_sign_es256_header".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "jwt_sign_custom".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
         // CMap composite-key helpers
-        fns.insert("cmap_has2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Int)));
-        fns.insert("cmap_get2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::String)));
-        fns.insert("cmap_del2".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String], Box::new(Type::Int)));
-        fns.insert("cmap_has3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Int)));
-        fns.insert("cmap_get3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::String)));
-        fns.insert("cmap_del3i".into(), Type::Fn(vec![Type::CMap, Type::String, Type::String, Type::Int], Box::new(Type::Int)));
-        fns.insert("cmap_set_int".into(), Type::Fn(vec![Type::CMap, Type::String, Type::Int], Box::new(Type::Void)));
-        fns.insert("cmap_get_int".into(), Type::Fn(vec![Type::CMap, Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "cmap_has2".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "cmap_get2".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "cmap_del2".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "cmap_has3i".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "cmap_get3i".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "cmap_del3i".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "cmap_set_int".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::Int],
+                Box::new(Type::Void),
+            ),
+        );
+        fns.insert(
+            "cmap_get_int".into(),
+            Type::Fn(
+                vec![Type::CMap, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
         // UDP reuseport
-        fns.insert("nb_udp_bind_reuseport_addr".into(), Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "nb_udp_bind_reuseport_addr".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
         // TLS server pool
-        fns.insert("tls_server_pool_accept".into(), Type::Fn(vec![Type::Named("TlsServer".into()), Type::Int], Box::new(Type::Int)));
-        fns.insert("tls_server_pool_read".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)));
-        fns.insert("tls_server_pool_write".into(), Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)));
-        fns.insert("tls_server_pool_fd".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("tls_server_pool_close".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "tls_server_pool_accept".into(),
+            Type::Fn(
+                vec![Type::Named("TlsServer".into()), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "tls_server_pool_read".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "tls_server_pool_write".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_server_pool_fd".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "tls_server_pool_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
         // TLS cert reload
-        fns.insert("tls_reload_cert".into(), Type::Fn(vec![Type::Named("TlsServer".into()), Type::String, Type::String], Box::new(Type::Int)));
+        fns.insert(
+            "tls_reload_cert".into(),
+            Type::Fn(
+                vec![Type::Named("TlsServer".into()), Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
         fns.insert(
             "sort_ints".into(),
             Type::Fn(
@@ -4587,31 +4773,19 @@ impl TypeChecker {
         );
         fns.insert(
             "dtls_peer_fingerprint".into(),
-            Type::Fn(
-                vec![Type::Named("DtlsConn".into())],
-                Box::new(Type::String),
-            ),
+            Type::Fn(vec![Type::Named("DtlsConn".into())], Box::new(Type::String)),
         );
         fns.insert(
             "dtls_local_fingerprint".into(),
-            Type::Fn(
-                vec![Type::Named("DtlsCtx".into())],
-                Box::new(Type::String),
-            ),
+            Type::Fn(vec![Type::Named("DtlsCtx".into())], Box::new(Type::String)),
         );
         fns.insert(
             "dtls_export_srtp_keys".into(),
-            Type::Fn(
-                vec![Type::Named("DtlsConn".into())],
-                Box::new(Type::String),
-            ),
+            Type::Fn(vec![Type::Named("DtlsConn".into())], Box::new(Type::String)),
         );
         fns.insert(
             "dtls_srtp_profile".into(),
-            Type::Fn(
-                vec![Type::Named("DtlsConn".into())],
-                Box::new(Type::String),
-            ),
+            Type::Fn(vec![Type::Named("DtlsConn".into())], Box::new(Type::String)),
         );
         fns.insert(
             "unix_socket_pair".into(),
@@ -6328,10 +6502,7 @@ impl TypeChecker {
             Type::Fn(vec![], Box::new(Type::String)),
         );
         // Redis list messaging (in-process adapter).
-        fns.insert(
-            "redis_mq_new".into(),
-            Type::Fn(vec![], Box::new(Type::Int)),
-        );
+        fns.insert("redis_mq_new".into(), Type::Fn(vec![], Box::new(Type::Int)));
         fns.insert(
             "redis_mq_free".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
@@ -11421,7 +11592,10 @@ impl TypeChecker {
         );
         fns.insert(
             "tls_pool_open".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "tls_pool_open_timeout".into(),
@@ -11479,7 +11653,7 @@ impl TypeChecker {
             "tls_pool_close".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
-                fns.insert(
+        fns.insert(
             "timer_heap_new".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
@@ -11489,7 +11663,10 @@ impl TypeChecker {
         );
         fns.insert(
             "timer_heap_arm".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "timer_heap_cancel".into(),
@@ -11529,7 +11706,17 @@ impl TypeChecker {
         );
         fns.insert(
             "peer_table_add".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::String, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "peer_table_set_conn".into(),
@@ -11557,7 +11744,10 @@ impl TypeChecker {
         );
         fns.insert(
             "peer_table_route_add".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "peer_table_route_lookup".into(),
@@ -11613,7 +11803,10 @@ impl TypeChecker {
         );
         fns.insert(
             "sctp_connect_timeout".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "sctp_close".into(),
@@ -11653,7 +11846,10 @@ impl TypeChecker {
         );
         fns.insert(
             "sctp_send_stream".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "sctp_recv_stream".into(),
@@ -11677,7 +11873,10 @@ impl TypeChecker {
         );
         fns.insert(
             "sctp_send_ex".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "sctp_set_heartbeat".into(),
@@ -11685,19 +11884,31 @@ impl TypeChecker {
         );
         fns.insert(
             "sctp_set_rto".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "sctp_bindx_add".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "sctp_bindx_rem".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "sctp_connectx".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "sctp_getpaddrs".into(),
@@ -11709,11 +11920,17 @@ impl TypeChecker {
         );
         fns.insert(
             "sctp_set_primary".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
-                fns.insert(
+        fns.insert(
             "diameter_limits_set".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_limits_max_msg".into(),
@@ -11735,9 +11952,12 @@ impl TypeChecker {
             "diameter_tcm_set_run_budget".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
         );
-fns.insert(
+        fns.insert(
             "diameter_tcm_new".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_tcm_free".into(),
@@ -11745,7 +11965,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_tcm_set_origin".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_tcm_set_watchdog".into(),
@@ -11753,11 +11976,24 @@ fns.insert(
         );
         fns.insert(
             "diameter_tcm_peer_add".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::String, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_tcm_route_add".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_tcm_route_lookup".into(),
@@ -11765,7 +12001,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_tcm_arm".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_tcm_cancel".into(),
@@ -11793,7 +12032,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_tcm_inject_in".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_tcm_take_out".into(),
@@ -11801,7 +12043,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_tcm_handle_io".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_header_len".into(),
@@ -11861,11 +12106,31 @@ fns.insert(
         );
         fns.insert(
             "diameter_header_build".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_msg_build".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::String], Box::new(Type::String)),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::String,
+                ],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_set_hbh".into(),
@@ -11877,15 +12142,24 @@ fns.insert(
         );
         fns.insert(
             "diameter_avp_encode".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::String], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_avp_put_u32".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_avp_put_str".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::String], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::String],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_avp_at".into(),
@@ -11897,7 +12171,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_avp_find_vendor".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_avp_u32".into(),
@@ -11933,27 +12210,45 @@ fns.insert(
         );
         fns.insert(
             "diameter_build_cer".into(),
-            Type::Fn(vec![Type::String, Type::String, Type::Int, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_build_cea".into(),
-            Type::Fn(vec![Type::String, Type::String, Type::String, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_build_dwr".into(),
-            Type::Fn(vec![Type::String, Type::String, Type::Int, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_build_dwa".into(),
-            Type::Fn(vec![Type::String, Type::String, Type::String, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_build_dpr".into(),
-            Type::Fn(vec![Type::String, Type::String, Type::Int, Type::Int, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_build_dpa".into(),
-            Type::Fn(vec![Type::String, Type::String, Type::String, Type::Int], Box::new(Type::String)),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
         );
         fns.insert(
             "diameter_conn_new".into(),
@@ -11969,7 +12264,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_conn_set_origin".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_conn_state".into(),
@@ -12005,7 +12303,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_conn_register".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_conn_match".into(),
@@ -12021,7 +12322,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_pool_open".into(),
-            Type::Fn(vec![Type::String, Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::String, Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_pool_acquire".into(),
@@ -12049,7 +12353,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_mgr_set_origin".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_mgr_set_watchdog".into(),
@@ -12057,7 +12364,17 @@ fns.insert(
         );
         fns.insert(
             "diameter_peer_add".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::String, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_peer_remove".into(),
@@ -12089,7 +12406,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_route_add".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_route_remove".into(),
@@ -12105,7 +12425,10 @@ fns.insert(
         );
         fns.insert(
             "diameter_mgr_handle_io".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_mgr_poll".into(),
@@ -12117,7 +12440,17 @@ fns.insert(
         );
         fns.insert(
             "diameter_mgr_request".into(),
-            Type::Fn(vec![Type::Int, Type::String, Type::Int, Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::String,
+                    Type::Int,
+                    Type::Int,
+                    Type::Int,
+                    Type::String,
+                ],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "diameter_mgr_flush".into(),
@@ -12129,13 +12462,22 @@ fns.insert(
         );
         fns.insert(
             "diameter_mgr_inject_in".into(),
-            Type::Fn(vec![Type::Int, Type::Int, Type::String], Box::new(Type::Int)),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::String],
+                Box::new(Type::Int),
+            ),
         );
 
         fns.insert(
             "wss_pool_open_ca".into(),
             Type::Fn(
-                vec![Type::String, Type::Int, Type::String, Type::String, Type::String],
+                vec![
+                    Type::String,
+                    Type::Int,
+                    Type::String,
+                    Type::String,
+                    Type::String,
+                ],
                 Box::new(Type::Int),
             ),
         );
@@ -17954,8 +18296,9 @@ fns.insert(
                     // queue[T] methods (language-level message queue)
                     (Type::Queue(inner), "publish" | "push") => {
                         if args.len() != 1 {
-                            return Err(TypeError::new("queue.publish takes 1 value")
-                                .hint("q.publish(x)"));
+                            return Err(
+                                TypeError::new("queue.publish takes 1 value").hint("q.publish(x)")
+                            );
                         }
                         let at = self.check_expr(&args[0])?;
                         if !self.compatible(&at, inner) {

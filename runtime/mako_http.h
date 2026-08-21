@@ -4236,22 +4236,28 @@ static inline MakoString mako_http_request_ct(
         port = atoi(colon + 1);
         *colon = 0;
     }
-    struct hostent *he = gethostbyname(host);
-    if (!he || !he->h_addr_list[0]) return mako_str_from_cstr("");
+    char port_buf[32];
+    snprintf(port_buf, sizeof(port_buf), "%d", port);
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *res = NULL;
+    if (getaddrinfo(host, port_buf, &hints, &res) != 0 || !res) {
+        return mako_str_from_cstr("");
+    }
     int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return mako_str_from_cstr("");
+    if (fd < 0) {
+        freeaddrinfo(res);
+        return mako_str_from_cstr("");
+    }
     mako_http_client_set_timeout(fd, timeout_ms);
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    size_t alen = (size_t)he->h_length;
-    if (alen > sizeof(addr.sin_addr)) alen = sizeof(addr.sin_addr);
-    memcpy(&addr.sin_addr, he->h_addr_list[0], alen);
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    if (connect(fd, res->ai_addr, res->ai_addrlen) < 0) {
+        freeaddrinfo(res);
         mako_sock_close(fd);
         return mako_str_from_cstr("");
     }
+    freeaddrinfo(res);
 
     const char *meth = method.data && method.len ? method.data : "GET";
     char methbuf[16];

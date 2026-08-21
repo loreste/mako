@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Tooling
+
+- Added `mako lint --security`, which fails on known insecure helper calls
+  unless the exact line explicitly opts in with `// mako: allow-insecure`.
+- Hardened HTTP client DNS/connect against sanitizer-visible unaligned
+  `gethostbyname` address loads by using `getaddrinfo`.
+- Fixed native IR ownership for mutable slice/string parameters so cloned
+  by-value headers are dropped by the callee instead of leaking.
+
 ### Documentation
 
 - Added the stdlib memory-safety gate: Mako parity means safe capability

@@ -539,7 +539,7 @@ fn fmt_type(t: &TypeExpr) -> String {
     format!("{t}")
 }
 
-pub fn run_lint(path: &Path, identity: bool) -> Result<(), ()> {
+pub fn run_lint(path: &Path, identity: bool, security: bool) -> Result<(), ()> {
     let files = collect_mako_files(path);
     let mut issues = 0;
     for f in &files {
@@ -584,6 +584,9 @@ pub fn run_lint(path: &Path, identity: bool) -> Result<(), ()> {
         if identity {
             issues += lint_identity_surface(f);
         }
+        if security {
+            issues += lint_security_surface(f);
+        }
         // DCE-based lints: unused variables, unreachable code, shadows.
         crate::dce::warn_unreachable_code(&program);
         crate::dce::warn_unused_variables(&program);
@@ -606,9 +609,19 @@ pub fn run_lint(path: &Path, identity: bool) -> Result<(), ()> {
         }
     }
     if issues == 0 {
-        if identity {
+        if identity && security {
+            println!(
+                "mako lint: ok ({} file(s), identity and security surface clean)",
+                files.len()
+            );
+        } else if identity {
             println!(
                 "mako lint: ok ({} file(s), identity surface clean)",
+                files.len()
+            );
+        } else if security {
+            println!(
+                "mako lint: ok ({} file(s), security surface clean)",
                 files.len()
             );
         } else {
@@ -618,6 +631,108 @@ pub fn run_lint(path: &Path, identity: bool) -> Result<(), ()> {
     } else {
         eprintln!("mako lint: {issues} issue(s)");
         Err(())
+    }
+}
+
+/// Security lint: safe production code should not accidentally use helpers that
+/// skip verification. Tests/demos can opt in on the exact line with
+/// `// mako: allow-insecure`.
+fn lint_security_surface(path: &Path) -> usize {
+    let Ok(src) = fs::read_to_string(path) else {
+        return 0;
+    };
+    let mut n = 0;
+    let checks: &[(&str, &str)] = &[
+        (
+            "tls_get_insecure(",
+            "prefer `tls_get`/verified HTTPS; `tls_get_insecure` skips certificate verification",
+        ),
+        (
+            "tls_client_new_insecure(",
+            "prefer `tls_client_new(ca_pem)`; insecure TLS clients skip peer verification",
+        ),
+        (
+            "wss_client_connect_insecure(",
+            "prefer `wss_client_connect_ca` or `wss_client_connect` with a verified TlsClient",
+        ),
+        (
+            "wss_pool_open_insecure(",
+            "prefer verified WSS pool helpers; insecure pools skip peer verification",
+        ),
+        (
+            ".connect_insecure(",
+            "prefer the verified `connect`/`connect_ca` wrapper",
+        ),
+    ];
+    for (i, line) in src.lines().enumerate() {
+        if line.contains("mako: allow-insecure") {
+            continue;
+        }
+        let code = line.split("//").next().unwrap_or(line);
+        for (pat, msg) in checks {
+            if code.contains(pat) {
+                eprintln!("lint(security): {}:{}: {msg}", path.display(), i + 1);
+                n += 1;
+                break;
+            }
+        }
+    }
+    n
+}
+
+#[cfg(test)]
+mod security_lint_tests {
+    use super::lint_security_surface;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_mko(name: &str, src: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("mako-security-lint-{name}-{nanos}.mko"));
+        fs::write(&path, src).unwrap();
+        path
+    }
+
+    #[test]
+    fn flags_insecure_tls_helpers() {
+        let path = temp_mko(
+            "bad",
+            r#"
+fn main() {
+    let a = tls_get_insecure("example.test", 443, "/")
+    let b = tls_client_new_insecure()
+    let c = wss_client_connect_insecure("example.test", 443, "/", "k")
+    let d = wss_pool_open_insecure("example.test", 443, "/", 100)
+    client.connect_insecure()
+}
+"#,
+        );
+        let issues = lint_security_surface(&path);
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(issues, 5);
+    }
+
+    #[test]
+    fn allows_exact_line_opt_in_and_ignores_comments() {
+        let path = temp_mko(
+            "allow",
+            r#"
+fn main() {
+    // tls_get_insecure("comment-only", 443, "/")
+    let a = tls_get_insecure("example.test", 443, "/") // mako: allow-insecure
+    let b = tls_client_new_insecure()
+}
+"#,
+        );
+        let issues = lint_security_surface(&path);
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(issues, 1);
     }
 }
 

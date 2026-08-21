@@ -1190,7 +1190,10 @@ impl Parser {
             lines.push(line);
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(Block { stmts, source_lines: lines.into_boxed_slice() })
+        Ok(Block {
+            stmts,
+            source_lines: lines.into_boxed_slice(),
+        })
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -1625,7 +1628,10 @@ impl Parser {
             if matches!(self.peek_kind(), TokenKind::If) {
                 // else if → wrap as block with single if stmt
                 let inner = self.parse_if()?;
-                Some(Block { stmts: vec![inner], source_lines: vec![0].into_boxed_slice() })
+                Some(Block {
+                    stmts: vec![inner],
+                    source_lines: vec![0].into_boxed_slice(),
+                })
             } else {
                 Some(self.parse_block()?)
             }
@@ -2769,7 +2775,10 @@ impl Parser {
                     // Degenerate empty switch → no-op.
                     init: None,
                     cond: Expr::Bool(false),
-                    then_block: Block { stmts: vec![], source_lines: Box::default() },
+                    then_block: Block {
+                        stmts: vec![],
+                        source_lines: Box::default(),
+                    },
                     else_block: None,
                 },
                 _ => body_stmts.remove(0),
@@ -2780,7 +2789,10 @@ impl Parser {
         Ok(Stmt::If {
             init: None,
             cond: Expr::Bool(true),
-            then_block: Block { stmts: prelude, source_lines: vec![0].into_boxed_slice() },
+            then_block: Block {
+                stmts: prelude,
+                source_lines: vec![0].into_boxed_slice(),
+            },
             else_block: None,
         })
     }
@@ -2838,7 +2850,13 @@ impl Parser {
             false
         };
         let n = stmts.len();
-        Ok((Block { stmts, source_lines: vec![0; n].into_boxed_slice() }, falls))
+        Ok((
+            Block {
+                stmts,
+                source_lines: vec![0; n].into_boxed_slice(),
+            },
+            falls,
+        ))
     }
 
     fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
