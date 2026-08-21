@@ -1,6 +1,7 @@
 # Mako security
 
-**Status:** actively hardened, not formally proven. The ownership model
+**Status:** actively hardened toward the product goal of **100% memory-safe
+safe Mako**, not formally proven. The ownership model
 prevents many classes of memory bugs by construction, and the full test
 suite is exercised under ASan (with leak detection disabled) and UBSan with
 zero errors. ASan validates invalid accesses, use-after-free, double-free,
@@ -14,6 +15,12 @@ Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make memory corruption and common backend footguns hard to ship —
 by construction where possible, by hard errors where not.
 
+Mako is its own language with its own syntax. Safety decisions are Mako-shaped:
+stdlib parity with Go or Rust never requires exposing their unsafe memory
+surfaces. Safe APIs must uphold Mako ownership, bounds, cleanup, and
+concurrency rules; unsafe or unverifiable integration stays explicit and
+outside the safe claim.
+
 | Pillar | How it shows up |
 |--------|-----------------|
 | **Ownership** | `hold`/`share`/`arena` — deterministic free, no GC |
@@ -21,19 +28,48 @@ by construction where possible, by hard errors where not.
 | **Bounds** | Array/slice bounds checks in all builds (safe release mode) |
 | **Verification** | Full suite runs under ASan, UBSan, and TSan in CI |
 
-Soundness program: [SOUNDNESS.md](SOUNDNESS.md) · Memory model: [MEMORY_MODEL.md](MEMORY_MODEL.md).
+Soundness program: [SOUNDNESS.md](SOUNDNESS.md) · Memory model:
+[MEMORY_MODEL.md](MEMORY_MODEL.md) · Stdlib gate:
+[STDLIB_SAFETY.md](STDLIB_SAFETY.md).
 
 ## Principles
 
-1. **Prevent, don't advise** — illegal states should not compile or should abort
+1. **Prevent, don't advise** -- illegal states should not compile or should abort
    with a clear diagnostic.
-2. **No GC** — all packages stay on ownership, shares, and arenas for
-   predictable latency. There is no collector mode that can weaken
-   hold/share/move rules.
-3. **Secure defaults in the stdlib** — parameterized DB APIs, header validation,
-   constant-time token compare, and explicit secret wiping.
-4. **Speed is the name of the game** — security features that cost cycles stay
+2. **No GC** -- packages stay on ownership, shares, and arenas for predictable
+   latency. There is no collector mode that can weaken hold/share/move rules.
+3. **Secure defaults in stdlib** -- parameterized DB APIs, header validation,
+   constant-time token compare, explicit secret wiping, verified TLS by default.
+4. **Speed is the name of the game** -- security features that cost cycles stay
    opt-in or debug-only; do not silently tax every release binary.
+
+## Footgun Prevention Policy
+
+Safe Mako should make the secure path the short path. APIs that commonly lead
+to memory corruption, credential leaks, injection, or silent downgrade must
+force an explicit choice: a loud name, an unsafe boundary, or a failing return.
+
+- **No hidden insecure fallback:** TLS, HTTPS, JWT, database, and parser helpers
+  fail closed instead of silently downgrading verification, bounds, or
+  algorithm checks.
+- **Dangerous names are explicit:** helpers such as `*_insecure` are for demos,
+  tests, and controlled local development only. They are not part of the safe
+  default path and must have a verified alternative next to them.
+- **CI can enforce this:** `mako lint --security` fails on known insecure helper
+  calls unless the exact line carries `// mako: allow-insecure`.
+- **Sanitizer-clean runtime boundaries:** HTTP client DNS/connect uses
+  `getaddrinfo` rather than direct legacy hostent pointer loads, keeping the
+  network path compatible with UBSan alignment checks.
+- **Input injection is rejected at the boundary:** HTTP headers reject CR/LF/NUL,
+  SQL has parameterized APIs, URL/path helpers normalize before use, and parsers
+  bound lengths before touching buffers.
+- **Secrets are not ordinary strings once classified:** keys, bearer tokens,
+  password material, and session secrets should use `Secret` plus
+  `secret_eq_str`/`const_eq`; docs and examples must not teach `==` for token
+  checks.
+- **Unsafe stays narrow:** raw memory, unchecked indexes, FFI ownership transfer,
+  dynamic loading, and platform-specific handles are excluded from safe parity
+  unless wrapped by checked handles with deterministic cleanup.
 
 ### Concurrency Send seed (kick)
 
@@ -54,7 +90,10 @@ state. The adversarial fixtures are
 `examples/bad/kick_mutable_closure_capture.mko`,
 `kick_mutable_lambda_capture.mko`, and `fan_capture.mko`. TSan remains a
 runtime smoke check (`mako test --race`) for the runtime and FFI boundary.
-**Uuid is Copy** — free re-read under `hold`, kick without move.
+**Uuid is Copy** — free re-read under `hold`, kick without move. The native
+backend clones string-like task arguments, including string-backed `Uuid`, at
+the `kick` boundary so the child task owns its payload without aliasing the
+parent scope.
 
 SMTP TLS: `smtp_send_starttls` uses `SSL_connect`. Set **`MAKO_SMTP_TLS_VERIFY=1`**
 to enable peer certificate verification (`SSL_VERIFY_PEER`); default is off for

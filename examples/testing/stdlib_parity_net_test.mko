@@ -1,0 +1,38 @@
+pull "net"
+pull "net/netip"
+
+fn TestNetNetip() {
+    let h, p, ok = net.split_host_port("127.0.0.1:8080")
+    assert_eq(ok, 1)
+    assert_eq_str(h, "127.0.0.1")
+    assert_eq(p, 8080)
+    let joined = net.join_host_port("example.com", 443)
+    assert(str_contains(joined, "example.com"))
+    assert_eq(net.ip_ok("127.0.0.1"), 1)
+    assert_eq(net.is_loopback("127.0.0.1"), 1)
+    assert_eq(net.is_private("10.0.0.1"), 1)
+
+    let a, ea = netip.parse_addr("192.168.1.10")
+    assert_eq_str(ea, "")
+    assert(netip.is4(a))
+    assert(!netip.is6(a))
+    assert(netip.is_private_addr(a))
+    assert(!netip.is_loopback_addr(a))
+    assert_eq_str(netip.string_addr(a), "192.168.1.10")
+
+    let loopback, el = netip.parse_addr("127.0.0.1")
+    assert_eq_str(el, "")
+    assert(netip.is_loopback_addr(loopback))
+
+    let _, bad = netip.parse_addr("256.0.0.1")
+    assert(str_len(bad) > 0)
+
+    let pref, ep = netip.parse_prefix("10.0.0.0/8")
+    assert_eq_str(ep, "")
+    let inside, ei = netip.parse_addr("10.1.2.3")
+    assert_eq_str(ei, "")
+    assert(netip.prefix_contains(pref, inside))
+    let outside, eo = netip.parse_addr("11.0.0.1")
+    assert_eq_str(eo, "")
+    assert(!netip.prefix_contains(pref, outside))
+}

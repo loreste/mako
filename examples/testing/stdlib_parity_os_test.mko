@@ -1,0 +1,22 @@
+pull "os/env"
+pull "os/user"
+pull "io/fs"
+
+fn TestOsEnvUserFs() {
+    let _ = env.set("MAKO_PARITY_TEST", "xyz")
+    let v, ok = env.lookup("MAKO_PARITY_TEST")
+    assert_eq(ok, 1)
+    assert_eq_str(v, "xyz")
+    assert_eq_str(env.expand("pre-$MAKO_PARITY_TEST-post"), "pre-xyz-post")
+    assert_eq_str(env.expand("x${MAKO_PARITY_TEST}y"), "xxyzy")
+    let _ = env.unset("MAKO_PARITY_TEST")
+    let _, ok2 = env.lookup("MAKO_PARITY_TEST")
+    assert_eq(ok2, 0)
+    assert(str_contains("no such file", "no such"))
+    let u = user.current()
+    assert(str_len(u.uid) > 0)
+    assert(fs.valid_path("a/b"))
+    assert(!fs.valid_path("../x"))
+    assert(!fs.valid_path("/abs"))
+    assert(fs.valid_path("."))
+}

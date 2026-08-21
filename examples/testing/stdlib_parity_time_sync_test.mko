@@ -1,0 +1,45 @@
+pull "time"
+pull "sync"
+
+fn once_inc() -> int { return 1 }
+
+fn TestTimeDuration() {
+    match time.parse_duration("1s") {
+        Ok(ms) => assert_eq(ms, 1000),
+        Err(_) => assert(false),
+    }
+    match time.parse_duration("1h30m") {
+        Ok(ms) => assert_eq(ms, 5400000),
+        Err(_) => assert(false),
+    }
+    match time.parse_duration("-250ms") {
+        Ok(ms) => assert_eq(ms, -250),
+        Err(_) => assert(false),
+    }
+    match time.parse_duration("1.5s") {
+        Ok(ms) => assert_eq(ms, 1500),
+        Err(_) => assert(false),
+    }
+    match time.parse_duration("") {
+        Ok(_) => assert(false),
+        Err(_) => assert(true),
+    }
+    match time.parse_duration("3") {
+        Ok(_) => assert(false),
+        Err(_) => assert(true),
+    }
+    match time.parse_duration("2x") {
+        Ok(_) => assert(false),
+        Err(_) => assert(true),
+    }
+    assert(time.unix_nano() > 0)
+    assert(time.unix_micro() > 0)
+}
+
+fn TestSyncOnce() {
+    let h = sync.once()
+    assert_eq(sync.once_done(h), 0)
+    assert_eq(sync.do_once(h, once_inc), 1)
+    assert_eq(sync.do_once(h, once_inc), 0)
+    assert_eq(sync.once_done(h), 1)
+}

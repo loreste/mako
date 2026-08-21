@@ -284,7 +284,13 @@ Static analysis plus type-checking.
 ```bash
 mako lint .                        # lint everything
 mako lint -p app                   # lint one workspace member
+mako lint --security app/main.mko   # fail on insecure helpers such as TLS verify bypass
 ```
+
+Security lint treats helpers such as `tls_get_insecure`,
+`tls_client_new_insecure`, and `wss_client_connect_insecure` as unsafe-boundary
+footguns. Demo or test code can opt in on the exact line with
+`// mako: allow-insecure`; production code should use the verified alternatives.
 
 ---
 

@@ -1,0 +1,128 @@
+// Close remaining memory-safe Go-stdlib gaps.
+
+pull "compress/zlib"
+pull "compress/flate"
+pull "compress/lzw"
+pull "compress/bzip2"
+pull "crypto/md5"
+pull "crypto/sha3"
+pull "crypto/subtle"
+pull "crypto/rsa"
+pull "math/big"
+pull "hash/crc64"
+pull "expvar"
+pull "unique"
+pull "iter"
+pull "image/color"
+pull "net/textproto"
+pull "net/rpc"
+pull "testing/iotest"
+pull "encoding/asn1"
+pull "net/http/cookiejar"
+pull "image/draw"
+pull "hash/maphash"
+pull "log/syslog"
+
+fn TestMd5Sha3Subtle() {
+    // RFC 1321: MD5("") = d41d8cd98f00b204e9800998ecf8427e
+    assert_eq_str(md5.sum(""), "d41d8cd98f00b204e9800998ecf8427e")
+    assert_eq_str(md5.sum("abc"), "900150983cd24fb0d6963f7d28e17f72")
+    let s3 = sha3.sum256("abc")
+    assert_eq(str_len(s3), 64)
+    assert_eq_str(s3, "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
+    assert(subtle.constant_eq_ok("secret", "secret"))
+    assert(!subtle.constant_eq_ok("secret", "secret!"))
+    assert(str_has_prefix(rsa.pkcs1_digest_info_sha256("ab"), "3031300d"))
+}
+
+fn TestCompressRoundtrip() {
+    let src = "the quick brown fox jumps over the lazy dog the quick brown fox"
+    if lzw.available() == 1 {
+        let c = lzw.compress(src)
+        assert(str_len(c) > 0)
+        assert_eq_str(lzw.decompress(c), src)
+        let empty = lzw.decompress(lzw.compress(""))
+        assert_eq_str(empty, "")
+    }
+    if zlib.available() == 1 {
+        let z = zlib.compress(src)
+        assert(str_len(z) > 0)
+        assert_eq_str(zlib.decompress(z), src)
+    }
+    if flate.available() == 1 {
+        let f = flate.compress(src)
+        assert(str_len(f) > 0)
+        assert_eq_str(flate.decompress(f), src)
+    }
+    if bzip2.available() == 0 {
+        assert_eq_str(bzip2.compress("x"), "")
+    } else {
+        assert_eq_str(bzip2.decompress(bzip2.compress(src)), src)
+    }
+}
+
+fn TestBigRatCrc64() {
+    let a = big.rat_new(big.from_int(1), big.from_int(2))
+    let b = big.rat_new(big.from_int(1), big.from_int(3))
+    let s = big.rat_add(a, b)
+    assert_eq_str(big.rat_string(s), "5/6")
+    let p = big.rat_mul(a, b)
+    assert_eq_str(big.rat_string(p), "1/6")
+    assert_eq(big.rat_cmp(a, b), 1)
+    let c = crc64.checksum_ecma("123456789")
+    assert(c != 0)
+}
+
+fn TestAppPacks() {
+    let mut vars = make(map[string]int)
+    vars["requests"] = 3
+    vars["requests"] = vars["requests"] + 2
+    assert_eq(expvar.get(vars, "requests"), 5)
+    assert(str_contains(expvar.json(vars), "requests"))
+
+    let mut seen = make(map[string]int)
+    let a, s1 = unique.intern(seen, "hello")
+    let b, s2 = unique.intern(s1, "hello")
+    assert_eq_str(a, b)
+    assert(unique.has_interned(s2, "hello"))
+
+    let xs = iter.count(5)
+    assert_eq(len(xs), 5)
+    assert_eq(xs[4], 4)
+    assert(iter.take(xs, 2)[1] == 1)
+    assert_eq(len(iter.drop(xs, 3)), 2)
+
+    let red = color.rgb(255, 0, 0)
+    assert_eq(color.gray(red), 76)
+    assert(color.eq(red, color.unpack(color.pack(red))))
+
+    assert_eq_str(textproto.canonical_mime("content-type"), "Content-Type")
+    assert_eq_str(textproto.mime_header_get("Host: x.com\r\nAccept: */*\r\n", "accept"), "*/*")
+
+    let req = rpc.request(1, "add", "[1,2]")
+    assert_eq_str(rpc.method_of(req), "add")
+    assert_eq(rpc.id_of(req), 1)
+    assert(rpc.is_request(req))
+
+    let chunk, _ = iotest.data_err("hello", 2)
+    assert_eq_str(chunk, "he")
+    assert_eq_str(iotest.one_byte("ab", 1), "b")
+
+    let der = asn1.encode_int(127)
+    let n, err = asn1.decode_int(der)
+    assert_eq_str(err, "")
+    assert_eq(n, 127)
+    let der2 = asn1.encode_int(-1)
+    let n2, e2 = asn1.decode_int(der2)
+    assert_eq_str(e2, "")
+    assert_eq(n2, -1)
+
+    let packed = color.pack(red)
+    assert_eq(draw.src(packed), packed)
+    assert(maphash.hash("a") != maphash.hash("b"))
+    assert(str_has_prefix(syslog.format(syslog.facility_user(), syslog.inform(), "mako", "up"), "<14>"))
+
+    let mut j = cookiejar.new_jar()
+    j = cookiejar.set_cookie(j, "ex.com", "sid=1; Path=/")
+    assert(str_contains(cookiejar.cookie_header(j, "ex.com"), "sid=1"))
+}

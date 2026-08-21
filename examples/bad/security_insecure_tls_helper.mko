@@ -1,0 +1,5 @@
+// EXPECT: lint(security)
+
+fn main() {
+    let _ = tls_client_new_insecure()
+}

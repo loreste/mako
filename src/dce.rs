@@ -110,13 +110,13 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
                         .iter()
                         .any(|r| r.starts_with(&format!("{}_", e.name)))
             }
-            Item::Interface(i) => {
-                reachable_types.contains(&i.name)
-            }
+            Item::Interface(i) => reachable_types.contains(&i.name),
             // On-blocks: keep if the target type is reachable.
             Item::On(on) => {
                 reachable_types.contains(&on.ty)
-                    || reachable_fns.iter().any(|r| r.starts_with(&format!("{}_", on.ty)))
+                    || reachable_fns
+                        .iter()
+                        .any(|r| r.starts_with(&format!("{}_", on.ty)))
             }
             // Keep consts, extern, actors, package/import declarations.
             Item::Const(_)
@@ -210,16 +210,11 @@ pub fn warn_unused_imports(source_file: &Path, program: &Program, roots: &[Strin
             }
         }
         if !has_reachable {
-            let display_path = resolved
-                .strip_prefix(base)
-                .unwrap_or(&resolved)
-                .display();
+            let display_path = resolved.strip_prefix(base).unwrap_or(&resolved).display();
             eprintln!(
                 "warning: unused import `{import_path}` — no reachable functions from {display_path}"
             );
-            eprintln!(
-                "  hint: remove the import or use a function from it"
-            );
+            eprintln!("  hint: remove the import or use a function from it");
         }
     }
 }
@@ -245,7 +240,7 @@ pub fn warn_unused_variables(program: &Program) {
                 continue;
             }
             let mut declared: Vec<(String, bool)> = Vec::new(); // (name, used)
-            // Collect let bindings.
+                                                                // Collect let bindings.
             collect_let_names(&f.body, &mut declared);
             // Mark used names.
             let mut used_names: HashSet<String> = HashSet::new();
@@ -253,10 +248,7 @@ pub fn warn_unused_variables(program: &Program) {
             // Warn about unused.
             for (name, _) in &declared {
                 if name != "_" && !name.starts_with("_") && !used_names.contains(name) {
-                    eprintln!(
-                        "warning: unused variable `{name}` in `{}`",
-                        f.name
-                    );
+                    eprintln!("warning: unused variable `{name}` in `{}`", f.name);
                 }
             }
         }
@@ -274,14 +266,22 @@ fn collect_let_names(block: &Block, out: &mut Vec<(String, bool)>) {
                     out.push((n.clone(), false));
                 }
             }
-            Stmt::If { then_block, else_block, .. } => {
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
                 collect_let_names(then_block, out);
                 if let Some(eb) = else_block {
                     collect_let_names(eb, out);
                 }
             }
-            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. }
-            | Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body }
+            Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::CFor { body, .. }
+            | Stmt::Crew { body, .. }
+            | Stmt::Arena { body, .. }
+            | Stmt::Unsafe { body }
             | Stmt::Defer { body } => {
                 collect_let_names(body, out);
             }
@@ -315,7 +315,12 @@ fn collect_used_names_stmt(stmt: &Stmt, out: &mut HashSet<String>) {
         }
         Stmt::Expr(e) | Stmt::Return(Some(e)) => collect_used_names_expr(e, out),
         Stmt::Return(None) => {}
-        Stmt::If { init, cond, then_block, else_block } => {
+        Stmt::If {
+            init,
+            cond,
+            then_block,
+            else_block,
+        } => {
             if let Some(i) = init {
                 collect_used_names_stmt(i, out);
             }
@@ -329,24 +334,39 @@ fn collect_used_names_stmt(stmt: &Stmt, out: &mut HashSet<String>) {
             collect_used_names_expr(cond, out);
             collect_used_names_block(body, out);
         }
-        Stmt::For { iter, body, binders, .. } => {
+        Stmt::For {
+            iter,
+            body,
+            binders,
+            ..
+        } => {
             for b in binders {
                 out.insert(b.clone()); // loop var is "used" by the loop itself
             }
             collect_used_names_expr(iter, out);
             collect_used_names_block(body, out);
         }
-        Stmt::CFor { init, cond, post, body, .. } => {
+        Stmt::CFor {
+            init,
+            cond,
+            post,
+            body,
+            ..
+        } => {
             collect_used_names_stmt(init, out);
             collect_used_names_expr(cond, out);
             collect_used_names_stmt(post, out);
             collect_used_names_block(body, out);
         }
-        Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body }
+        Stmt::Crew { body, .. }
+        | Stmt::Arena { body, .. }
+        | Stmt::Unsafe { body }
         | Stmt::Defer { body } => {
             collect_used_names_block(body, out);
         }
-        Stmt::Select { arms, default_arm, .. } => {
+        Stmt::Select {
+            arms, default_arm, ..
+        } => {
             for (_ch, body) in arms {
                 collect_used_names_block(body, out);
             }
@@ -360,14 +380,20 @@ fn collect_used_names_stmt(stmt: &Stmt, out: &mut HashSet<String>) {
 
 fn collect_used_names_expr(expr: &Expr, out: &mut HashSet<String>) {
     match expr {
-        Expr::Ident(name) => { out.insert(name.clone()); }
+        Expr::Ident(name) => {
+            out.insert(name.clone());
+        }
         Expr::Call { callee, args } => {
             collect_used_names_expr(callee, out);
-            for a in args { collect_used_names_expr(a, out); }
+            for a in args {
+                collect_used_names_expr(a, out);
+            }
         }
         Expr::Method { receiver, args, .. } => {
             collect_used_names_expr(receiver, out);
-            for a in args { collect_used_names_expr(a, out); }
+            for a in args {
+                collect_used_names_expr(a, out);
+            }
         }
         Expr::Binary { left, right, .. } => {
             collect_used_names_expr(left, out);
@@ -380,33 +406,58 @@ fn collect_used_names_expr(expr: &Expr, out: &mut HashSet<String>) {
             collect_used_names_expr(base, out);
             collect_used_names_expr(index, out);
         }
-        Expr::Slice { base, low, high, max } => {
+        Expr::Slice {
+            base,
+            low,
+            high,
+            max,
+        } => {
             collect_used_names_expr(base, out);
-            if let Some(l) = low { collect_used_names_expr(l, out); }
-            if let Some(h) = high { collect_used_names_expr(h, out); }
-            if let Some(m) = max { collect_used_names_expr(m, out); }
+            if let Some(l) = low {
+                collect_used_names_expr(l, out);
+            }
+            if let Some(h) = high {
+                collect_used_names_expr(h, out);
+            }
+            if let Some(m) = max {
+                collect_used_names_expr(m, out);
+            }
         }
         Expr::Field { base, .. } => collect_used_names_expr(base, out),
         Expr::StructLit { fields, update, .. } => {
-            for (_, e) in fields { collect_used_names_expr(e, out); }
-            if let Some(u) = update { collect_used_names_expr(u, out); }
+            for (_, e) in fields {
+                collect_used_names_expr(e, out);
+            }
+            if let Some(u) = update {
+                collect_used_names_expr(u, out);
+            }
         }
         Expr::StructLitPos { values, .. } | Expr::Array(values) | Expr::Tuple(values) => {
-            for v in values { collect_used_names_expr(v, out); }
+            for v in values {
+                collect_used_names_expr(v, out);
+            }
         }
         Expr::StringInterp(parts) => {
             for p in parts {
-                if let InterpPart::Expr(e, _) = p { collect_used_names_expr(e, out); }
+                if let InterpPart::Expr(e, _) = p {
+                    collect_used_names_expr(e, out);
+                }
             }
         }
         Expr::Match { scrutinee, arms } => {
             collect_used_names_expr(scrutinee, out);
             for arm in arms {
-                if let Some(g) = &arm.guard { collect_used_names_expr(g, out); }
+                if let Some(g) = &arm.guard {
+                    collect_used_names_expr(g, out);
+                }
                 collect_used_names_expr(&arm.body, out);
             }
         }
-        Expr::IfExpr { cond, then_block, else_block } => {
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+        } => {
             collect_used_names_expr(cond, out);
             collect_used_names_block(then_block, out);
             collect_used_names_block(else_block, out);
@@ -418,11 +469,17 @@ fn collect_used_names_expr(expr: &Expr, out: &mut HashSet<String>) {
             collect_used_names_expr(mapper, out);
         }
         Expr::Convert { args, .. } => {
-            for a in args { collect_used_names_expr(a, out); }
+            for a in args {
+                collect_used_names_expr(a, out);
+            }
         }
         Expr::Make { len, cap, .. } => {
-            if let Some(l) = len { collect_used_names_expr(l, out); }
-            if let Some(c) = cap { collect_used_names_expr(c, out); }
+            if let Some(l) = len {
+                collect_used_names_expr(l, out);
+            }
+            if let Some(c) = cap {
+                collect_used_names_expr(c, out);
+            }
         }
         Expr::ChanOpen { cap, .. } => collect_used_names_expr(cap, out),
         Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => {}
@@ -470,14 +527,22 @@ fn check_shadow_block(block: &Block, stack: &mut Vec<HashSet<String>>, fn_name: 
                     scope.insert(name.clone());
                 }
             }
-            Stmt::If { then_block, else_block, .. } => {
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
                 check_shadow_block(then_block, stack, fn_name);
                 if let Some(eb) = else_block {
                     check_shadow_block(eb, stack, fn_name);
                 }
             }
-            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. }
-            | Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body }
+            Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::CFor { body, .. }
+            | Stmt::Crew { body, .. }
+            | Stmt::Arena { body, .. }
+            | Stmt::Unsafe { body }
             | Stmt::Defer { body } => {
                 check_shadow_block(body, stack, fn_name);
             }
@@ -500,10 +565,7 @@ fn check_block_unreachable(block: &Block, fn_name: &str) {
     let stmts = &block.stmts;
     for (i, stmt) in stmts.iter().enumerate() {
         // Check if this statement always diverges AND there are more statements after.
-        let diverges = matches!(
-            stmt,
-            Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_)
-        );
+        let diverges = matches!(stmt, Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_));
         if diverges && i + 1 < stmts.len() {
             // Skip if the next statement is just a closing brace artifact.
             let next = &stmts[i + 1];
@@ -522,14 +584,22 @@ fn check_block_unreachable(block: &Block, fn_name: &str) {
         }
         // Recurse into sub-blocks.
         match stmt {
-            Stmt::If { then_block, else_block, .. } => {
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
                 check_block_unreachable(then_block, fn_name);
                 if let Some(eb) = else_block {
                     check_block_unreachable(eb, fn_name);
                 }
             }
-            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. }
-            | Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body }
+            Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::CFor { body, .. }
+            | Stmt::Crew { body, .. }
+            | Stmt::Arena { body, .. }
+            | Stmt::Unsafe { body }
             | Stmt::Defer { body } => {
                 check_block_unreachable(body, fn_name);
             }
@@ -603,11 +673,21 @@ fn collect_stmt_refs(stmt: &Stmt, queue: &mut Vec<String>, types: &mut HashSet<S
                 collect_block_refs(eb, queue, types);
             }
         }
-        Stmt::While { cond, body, label: _, .. } => {
+        Stmt::While {
+            cond,
+            body,
+            label: _,
+            ..
+        } => {
             collect_expr_refs(cond, queue, types);
             collect_block_refs(body, queue, types);
         }
-        Stmt::For { iter, body, label: _, .. } => {
+        Stmt::For {
+            iter,
+            body,
+            label: _,
+            ..
+        } => {
             collect_expr_refs(iter, queue, types);
             collect_block_refs(body, queue, types);
         }
@@ -633,7 +713,9 @@ fn collect_stmt_refs(stmt: &Stmt, queue: &mut Vec<String>, types: &mut HashSet<S
         Stmt::Arena { body, .. } => {
             collect_block_refs(body, queue, types);
         }
-        Stmt::Select { arms, default_arm, .. } => {
+        Stmt::Select {
+            arms, default_arm, ..
+        } => {
             for (_chan, body) in arms {
                 collect_block_refs(body, queue, types);
             }
@@ -726,7 +808,12 @@ fn collect_expr_refs(expr: &Expr, queue: &mut Vec<String>, types: &mut HashSet<S
         Expr::Field { base, .. } => {
             collect_expr_refs(base, queue, types);
         }
-        Expr::StructLit { name, fields, update, .. } => {
+        Expr::StructLit {
+            name,
+            fields,
+            update,
+            ..
+        } => {
             types.insert(name.clone());
             for (_, e) in fields {
                 collect_expr_refs(e, queue, types);
@@ -822,11 +909,7 @@ fn collect_interp_refs(parts: &[InterpPart], queue: &mut Vec<String>, types: &mu
     }
 }
 
-fn collect_pattern_refs(
-    pattern: &Pattern,
-    queue: &mut Vec<String>,
-    types: &mut HashSet<String>,
-) {
+fn collect_pattern_refs(pattern: &Pattern, queue: &mut Vec<String>, types: &mut HashSet<String>) {
     match pattern {
         Pattern::Variant { name, bindings, .. } => {
             queue.push(name.clone());

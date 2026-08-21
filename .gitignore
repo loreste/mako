@@ -27,6 +27,7 @@
 /docs/internal/
 /docs/CLAIMS.md
 .tokensave/
+graphify-out/
 
 # Website (deployed separately, not part of public repo)
 /website/

@@ -255,7 +255,10 @@ fn main() {
             println!("cargo:rustc-link-search=native={}", lib.display());
             println!("cargo:rustc-link-lib=ssl");
             println!("cargo:rustc-link-lib=crypto");
-            println!("cargo:warning=native-runtime: OpenSSL enabled ({})", inc.display());
+            println!(
+                "cargo:warning=native-runtime: OpenSSL enabled ({})",
+                inc.display()
+            );
         } else {
             println!("cargo:warning=native-runtime: OpenSSL not found; TLS uses header stubs");
         }

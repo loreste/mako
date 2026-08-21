@@ -122,7 +122,7 @@ cargo run -- build --sanitize thread path/to/file.mko -o /tmp/test_tsan
 /tmp/test_tsan
 
 # Run test suite
-cargo test                              # Rust unit tests (133 tests)
+cargo test                              # Rust unit tests (146 as of 2026-08-19)
 cargo run -- test examples/testing/     # Mako integration tests
 ```
 

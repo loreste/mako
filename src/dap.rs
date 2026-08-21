@@ -43,7 +43,10 @@ pub(crate) fn run_stdio() -> Result<(), ()> {
     {
         Ok(c) => c,
         Err(e) => {
-            emit_plain_error(&format!("mako dap: could not spawn {}: {e}", lldb_dap.display()));
+            emit_plain_error(&format!(
+                "mako dap: could not spawn {}: {e}",
+                lldb_dap.display()
+            ));
             return Err(());
         }
     };
@@ -220,7 +223,12 @@ fn find_lldb_dap() -> Option<PathBuf> {
         }
     }
     for name in [
-        "lldb-dap", "lldb-dap-21", "lldb-dap-20", "lldb-dap-19", "lldb-dap-18", "lldb-dap-17",
+        "lldb-dap",
+        "lldb-dap-21",
+        "lldb-dap-20",
+        "lldb-dap-19",
+        "lldb-dap-18",
+        "lldb-dap-17",
         "lldb-dap-16",
     ] {
         if let Some(p) = which(name) {
@@ -315,7 +323,10 @@ pub(crate) fn cmd_debug(path: &Path, package: Option<&str>, args: &[String]) -> 
         cmd.arg("--").arg(&bin).args(args);
     }
     let status = cmd.status().map_err(|e| {
-        emit_plain_error(&format!("mako debug: could not run {}: {e}", lldb.display()));
+        emit_plain_error(&format!(
+            "mako debug: could not run {}: {e}",
+            lldb.display()
+        ));
     })?;
     if !status.success() {
         emit_plain_error(&format!("mako debug: lldb exited with {status}"));

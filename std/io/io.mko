@@ -169,24 +169,13 @@ export fn copy_string(src: string) -> ([]byte, string) {
 
 // drain reads a StringReader to completion and returns the content.
 export fn drain(r: StringReader) -> (string, string) {
-    let mut reader = r
-    let mut out = make([]byte, 0, 256)
-    let mut buf = make([]byte, 1024, 1024)
-    while 1 == 1 {
-        let n, err = reader.read(buf)
-        let mut i = 0
-        while i < n {
-            out = append(out, buf[i])
-            i = i + 1
-        }
-        if str_eq(err, "EOF") {
-            return (string(out), "")
-        }
-        if len(err) > 0 {
-            return (string(out), err)
-        }
+    if r.pos <= 0 {
+        return (r.data, "")
     }
-    return (string(out), "")
+    if r.pos >= len(r.data) {
+        return ("", "")
+    }
+    return (r.data[r.pos:], "")
 }
 
 export fn eof() -> string { return "EOF" }

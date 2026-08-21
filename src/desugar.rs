@@ -489,7 +489,10 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 left: Box::new(Expr::Ident("__tag".into())),
                 right: Box::new(Expr::Int(tag)),
             },
-            then_block: Block { stmts: arm_stmts, source_lines: Box::default() },
+            then_block: Block {
+                stmts: arm_stmts,
+                source_lines: Box::default(),
+            },
             else_block: None,
         });
     }
@@ -519,7 +522,10 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             left: Box::new(Expr::Ident("__run".into())),
             right: Box::new(Expr::Int(1)),
         },
-        body: Block { stmts: while_body, source_lines: Box::default() },
+        body: Block {
+            stmts: while_body,
+            source_lines: Box::default(),
+        },
     });
     loop_stmts.push(Stmt::Expr(Expr::Call {
         callee: Box::new(Expr::Ident("actor_stop".into())),
@@ -537,7 +543,10 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             mutable: false,
         }],
         ret: Some(TypeExpr::Named("int".into())),
-        body: Block { stmts: loop_stmts, source_lines: Box::default() },
+        body: Block {
+            stmts: loop_stmts,
+            source_lines: Box::default(),
+        },
         exported: false,
         is_const: false,
         stability: crate::ast::ApiStability::Unspecified,

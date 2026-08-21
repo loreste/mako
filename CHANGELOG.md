@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Tooling
+
+- Added `mako lint --security`, which fails on known insecure helper calls
+  unless the exact line explicitly opts in with `// mako: allow-insecure`.
+- Hardened HTTP client DNS/connect against sanitizer-visible unaligned
+  `gethostbyname` address loads by using `getaddrinfo`.
+- Fixed native IR ownership for mutable slice/string parameters so cloned
+  by-value headers are dropped by the callee instead of leaking.
+
+### Documentation
+
+- Added the stdlib memory-safety gate: Mako parity means safe capability
+  coverage in Mako's own syntax, not cloning Go/Rust unsafe surfaces.
+- Added a package-by-package stdlib safety matrix covering every checked-in
+  `std/**/*.mko` file.
+- Documented the secure-default footgun prevention policy: insecure helpers
+  must be loud, opt-in, and paired with verified alternatives.
+
+### Bug fixes
+
+- Made `mako test` run graphics tests headless by default and fixed native
+  task-return lowering for string-backed `Uuid` values.
+
 ## 0.5.7 — 2026-08-18 (stdlib expansion, string ops, Go parity push)
 
 ### Compiler

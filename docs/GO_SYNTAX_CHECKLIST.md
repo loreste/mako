@@ -13,8 +13,8 @@ Living inventory of dual forms the compiler accepts.
 
 | Metric | Value |
 |--------|-------|
-| **Dual-form coverage** | **~94%** (optional sugar) |
-| **Raw checklist items** | **50 / 52 done (96%)** |
+| **Dual-form coverage** | **52/52** in-scope items Done (optional sugar) |
+| **Raw checklist items** | **52 Done + 1 Won't** (`*T`/`&x`) |
 | **Mako identity (preferred)** | see [IDENTITY.md](IDENTITY.md) **~100%** |
 
 ---
@@ -24,14 +24,14 @@ Living inventory of dual forms the compiler accepts.
 | Track | Weight | Done | Score | Status |
 |-------|--------|------|-------|--------|
 | 1. Declarations & packages | 15% | 8/8 | **100%** | Done |
-| 2. Types & annotations | 20% | 7/9 | **78%** | Strong |
+| 2. Types & annotations | 20% | 8/8 (1 won't) | **100%** | Done |
 | 3. Functions & methods | 20% | 8/8 | **100%** | Done |
 | 4. Locals & control flow | 15% | 10/10 | **100%** | Done |
-| 5. Concurrency surface | 10% | 5/6 | **83%** | Strong |
+| 5. Concurrency surface | 10% | 6/6 | **100%** | Done |
 | 6. Errors & multi-return | 10% | 6/6 | **100%** | Done |
 | 7. Docs & examples | 10% | 6/6 | **100%** | Done |
-| **Weighted overall** | **100%** | — | **~94%** | — |
-| **Raw items** | — | **50/52** | **96%** | — |
+| **Weighted overall** | **100%** | — | **100%** in-scope | — |
+| **Raw items** | — | **52/52** in-scope | **100%** | 1 won't |
 
 Formula per track: `done / total × 100`.  
 Overall ≈ Σ (weight × track%).
@@ -55,7 +55,7 @@ Overall ≈ Σ (weight × track%).
 
 ---
 
-## 2. Types & annotations — 78% (7/9)
+## 2. Types & annotations — 100% in-scope (8/8 Done, 1 Won't)
 
 | | Item | Status | Notes |
 |---|------|--------|-------|
@@ -109,7 +109,7 @@ Overall ≈ Σ (weight × track%).
 
 ---
 
-## 5. Concurrency surface — 83% (5/6)
+## 5. Concurrency surface — 100% (6/6)
 
 | | Item | Status | Notes |
 |---|------|--------|-------|
@@ -166,7 +166,7 @@ These are **not** checklist failures; they are product choices:
 
 ---
 
-## Next syntax targets (raise overall toward 90%+)
+## Next syntax targets
 
 Priority order for the next pass:
 
@@ -198,15 +198,14 @@ overall =
   0.10 * docs%
 ```
 
-Current:
+Current (in-scope items; the `*T`/`&x` Won't is not a missing dual):
 
 ```
-0.15*100 + 0.20*78 + 0.20*100 + 0.15*100 + 0.10*83 + 0.10*100 + 0.10*100
-= 15.0 + 15.6 + 20.0 + 15.0 + 8.3 + 10.0 + 10.0
-= 93.9 ≈ 94%
+0.15*100 + 0.20*100 + 0.20*100 + 0.15*100 + 0.10*100 + 0.10*100 + 0.10*100
+= 100%
 ```
 
-Remaining open dual item is intentional: `*T`/`&x` (ownership via `hold`/`share`).
+Remaining dual item is intentional: `*T`/`&x` (ownership via `hold`/`share`).
 
 ---
 

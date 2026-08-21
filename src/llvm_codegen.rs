@@ -349,7 +349,7 @@ fn emit_instruction<'ctx>(
                 | Type::MapFI
                 | Type::MapIPtr(_)
                 | Type::MapSPtr(_)
-        | Type::PtrSlice(_)
+                | Type::PtrSlice(_)
                 | Type::ChanI
                 | Type::ChanS
                 | Type::ChanF
@@ -368,10 +368,7 @@ fn emit_instruction<'ctx>(
                 | Type::Struct(_) => {
                     // Null pointer constants for pointer-ABI types.
                     if *value == 0 {
-                        context
-                            .ptr_type(Default::default())
-                            .const_null()
-                            .into()
+                        context.ptr_type(Default::default()).const_null().into()
                     } else {
                         return Err(LlvmError::new("integer constant has aggregate type"));
                     }
@@ -464,11 +461,7 @@ fn emit_instruction<'ctx>(
                     .map(BasicValueEnum::from)
                     .map_err(builder_error)?,
                 (Type::I1, Type::I64) => builder
-                    .build_int_z_extend(
-                        values[value].into_int_value(),
-                        context.i64_type(),
-                        &name,
-                    )
+                    .build_int_z_extend(values[value].into_int_value(), context.i64_type(), &name)
                     .map(BasicValueEnum::from)
                     .map_err(builder_error)?,
                 (Type::F64, Type::I1) => builder
@@ -700,8 +693,7 @@ fn emit_instruction<'ctx>(
                 // Cranelift keeps []int / strings as heap pointers; LLVM uses
                 // value-ABI structs. Convert pointer returns when needed.
                 let value = if *rty == Type::IntSlice
-                    && (function_name.contains("maps_keys")
-                        || function_name.contains("arena_ints"))
+                    && (function_name.contains("maps_keys") || function_name.contains("arena_ints"))
                     && value.is_pointer_value()
                 {
                     let hdr = value.into_pointer_value();
@@ -755,14 +747,15 @@ fn emit_instruction<'ctx>(
             param_tys,
             ret,
         } => {
-            let arg_tys: Vec<BasicTypeEnum> = param_tys
-                .iter()
-                .map(|t| llvm_type(context, *t))
-                .collect();
+            let arg_tys: Vec<BasicTypeEnum> =
+                param_tys.iter().map(|t| llvm_type(context, *t)).collect();
             let fn_ty = match ret {
                 Some(r) => {
                     let rt: BasicTypeEnum = llvm_type(context, *r);
-                    rt.fn_type(&arg_tys.iter().map(|t| (*t).into()).collect::<Vec<_>>(), false)
+                    rt.fn_type(
+                        &arg_tys.iter().map(|t| (*t).into()).collect::<Vec<_>>(),
+                        false,
+                    )
                 }
                 None => context.void_type().fn_type(
                     &arg_tys.iter().map(|t| (*t).into()).collect::<Vec<_>>(),
@@ -980,7 +973,11 @@ fn emit_instruction<'ctx>(
             // Value ABI: string is { data, len }; extract field 1 and clear the
             // immortal/static high bit so callers see the true byte length.
             let raw = builder
-                .build_extract_value(values[value].into_struct_value(), 1, &format!("{}.raw", value_name(*out)))
+                .build_extract_value(
+                    values[value].into_struct_value(),
+                    1,
+                    &format!("{}.raw", value_name(*out)),
+                )
                 .map_err(builder_error)?
                 .into_int_value();
             let mask = context.i64_type().const_int(!(1u64 << 63), false);
@@ -1022,15 +1019,13 @@ fn emit_instruction<'ctx>(
                 | Type::MapIF
                 | Type::MapFI
                 | Type::ChanI
-        | Type::ChanS
+                | Type::ChanS
                 | Type::Arena
                 | Type::Nursery
                 | Type::ShareInt
                 | Type::FloatSlice
                 | Type::ByteSlice
-                | Type::BoolSlice => {
-                    context.ptr_type(Default::default()).const_null().into()
-                }
+                | Type::BoolSlice => context.ptr_type(Default::default()).const_null().into(),
                 _ => {
                     return Err(LlvmError::new(
                         "LLVM backend: NullHeap only applies to heap types",
@@ -1277,7 +1272,11 @@ fn emit_instruction<'ctx>(
                 .build_call(drop, &args, "slice.drop")
                 .map_err(builder_error)?;
         }
-        Inst::StructMake { out, struct_id, fields } => {
+        Inst::StructMake {
+            out,
+            struct_id,
+            fields,
+        } => {
             let struct_ty = struct_types[*struct_id as usize];
             let size = struct_ty
                 .size_of()
@@ -1306,26 +1305,51 @@ fn emit_instruction<'ctx>(
             }
             values.insert(*out, ptr.into());
         }
-        Inst::StructField { out, base, struct_id, index, ty } => {
+        Inst::StructField {
+            out,
+            base,
+            struct_id,
+            index,
+            ty,
+        } => {
             let struct_ty = struct_types[*struct_id as usize];
             let field_ptr = builder
-                .build_struct_gep(struct_ty, values[base].into_pointer_value(), *index, "struct.field")
+                .build_struct_gep(
+                    struct_ty,
+                    values[base].into_pointer_value(),
+                    *index,
+                    "struct.field",
+                )
                 .map_err(|_| LlvmError::new("LLVM backend: struct field GEP failed"))?;
             let loaded = builder
                 .build_load(llvm_type(context, *ty), field_ptr, &value_name(*out))
                 .map_err(builder_error)?;
             values.insert(*out, loaded);
         }
-        Inst::StructFieldStore { base, struct_id, index, value } => {
+        Inst::StructFieldStore {
+            base,
+            struct_id,
+            index,
+            value,
+        } => {
             let struct_ty = struct_types[*struct_id as usize];
             let field_ptr = builder
-                .build_struct_gep(struct_ty, values[base].into_pointer_value(), *index, "struct.field")
+                .build_struct_gep(
+                    struct_ty,
+                    values[base].into_pointer_value(),
+                    *index,
+                    "struct.field",
+                )
                 .map_err(|_| LlvmError::new("LLVM backend: struct field GEP failed"))?;
             builder
                 .build_store(field_ptr, values[value])
                 .map_err(builder_error)?;
         }
-        Inst::StructClone { out, base, struct_id } => {
+        Inst::StructClone {
+            out,
+            base,
+            struct_id,
+        } => {
             let cloned = llvm_emit_struct_clone(
                 context,
                 module,
@@ -1338,7 +1362,13 @@ fn emit_instruction<'ctx>(
             )?;
             values.insert(*out, cloned.into());
         }
-        Inst::EnumMake { out, enum_id, tag, slot_base, payload } => {
+        Inst::EnumMake {
+            out,
+            enum_id,
+            tag,
+            slot_base,
+            payload,
+        } => {
             // calloc a zeroed block so inactive owned slots are null; store the
             // tag and the variant's payload.
             let struct_ty = struct_types[*enum_id as usize];
@@ -1423,14 +1453,15 @@ fn emit_instruction<'ctx>(
                 .array_type(elements.len().max(1) as u32);
             // Use an array of string values; for empty, still allocate one slot.
             let array_ty = if elements.is_empty() {
-                context.struct_type(
-                    &[
-                        context.ptr_type(Default::default()).into(),
-                        context.i64_type().into(),
-                    ],
-                    false,
-                )
-                .array_type(1)
+                context
+                    .struct_type(
+                        &[
+                            context.ptr_type(Default::default()).into(),
+                            context.i64_type().into(),
+                        ],
+                        false,
+                    )
+                    .array_type(1)
             } else {
                 array_ty
             };
@@ -1502,7 +1533,11 @@ fn emit_instruction<'ctx>(
             )?;
             values.insert(*out, element.into());
         }
-        Inst::StrSliceStore { slice, index, value } => {
+        Inst::StrSliceStore {
+            slice,
+            index,
+            value,
+        } => {
             emit_str_slice_store_inline(
                 context,
                 module,
@@ -1615,7 +1650,10 @@ fn emit_instruction<'ctx>(
 /// clones do not fight over phi nodes.
 /// Compute (nfields, str_mask, nest_mask, nest_nf_pack, nest_sm_pack) for
 /// the runtime's struct-key clone/drop helpers.
-fn llvm_struct_key_meta(layouts: &[native_ir::StructLayout], sid: u32) -> (i64, i64, i64, i64, i64) {
+fn llvm_struct_key_meta(
+    layouts: &[native_ir::StructLayout],
+    sid: u32,
+) -> (i64, i64, i64, i64, i64) {
     let fields = &layouts[sid as usize].fields;
     let nfields = fields.len() as i64;
     let mut str_mask: i64 = 0;
@@ -1805,11 +1843,8 @@ fn llvm_emit_struct_clone<'ctx>(
             Type::OwnedOpaque(kind) => {
                 let ptr_ty = context.ptr_type(Default::default());
                 let name = kind.clone_fn();
-                let clone = external_function(
-                    module,
-                    name,
-                    ptr_ty.fn_type(&[ptr_ty.into()], false),
-                );
+                let clone =
+                    external_function(module, name, ptr_ty.fn_type(&[ptr_ty.into()], false));
                 builder
                     .build_call(clone, &[loaded.into()], "clone.owned_opaque")
                     .map_err(builder_error)?
@@ -1833,7 +1868,8 @@ fn llvm_emit_struct_clone<'ctx>(
                     Type::MapFI => "mako_native_map_fi_clone_ptr",
                     _ => unreachable!(),
                 };
-                let clone = external_function(module, name, ptr_ty.fn_type(&[ptr_ty.into()], false));
+                let clone =
+                    external_function(module, name, ptr_ty.fn_type(&[ptr_ty.into()], false));
                 builder
                     .build_call(clone, &[loaded.into()], "clone.map")
                     .map_err(builder_error)?
@@ -1849,20 +1885,28 @@ fn llvm_emit_struct_clone<'ctx>(
                     module,
                     "mako_native_struct_slice_clone_ptr",
                     ptr_ty.fn_type(
-                        &[ptr_ty.into(), i64_ty.into(), i64_ty.into(),
-                          i64_ty.into(), i64_ty.into(), i64_ty.into()],
+                        &[
+                            ptr_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                        ],
                         false,
                     ),
                 );
                 builder
                     .build_call(
                         clone,
-                        &[loaded.into(),
-                          i64_ty.const_int(nf as u64, false).into(),
-                          i64_ty.const_int(sm as u64, false).into(),
-                          i64_ty.const_int(nm as u64, false).into(),
-                          i64_ty.const_int(nfp as u64, false).into(),
-                          i64_ty.const_int(nsp as u64, false).into()],
+                        &[
+                            loaded.into(),
+                            i64_ty.const_int(nf as u64, false).into(),
+                            i64_ty.const_int(sm as u64, false).into(),
+                            i64_ty.const_int(nm as u64, false).into(),
+                            i64_ty.const_int(nfp as u64, false).into(),
+                            i64_ty.const_int(nsp as u64, false).into(),
+                        ],
                         "clone.struct_slice",
                     )
                     .map_err(builder_error)?
@@ -1882,21 +1926,30 @@ fn llvm_emit_struct_clone<'ctx>(
                     module,
                     "mako_native_ptr_slice_clone_typed",
                     ptr_ty.fn_type(
-                        &[ptr_ty.into(), i64_ty.into(), i64_ty.into(),
-                          i64_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into()],
+                        &[
+                            ptr_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                        ],
                         false,
                     ),
                 );
                 builder
                     .build_call(
                         clone,
-                        &[loaded.into(),
-                          i64_ty.const_int(vkind, false).into(),
-                          i64_ty.const_zero().into(),
-                          i64_ty.const_zero().into(),
-                          i64_ty.const_zero().into(),
-                          i64_ty.const_zero().into(),
-                          i64_ty.const_zero().into()],
+                        &[
+                            loaded.into(),
+                            i64_ty.const_int(vkind, false).into(),
+                            i64_ty.const_zero().into(),
+                            i64_ty.const_zero().into(),
+                            i64_ty.const_zero().into(),
+                            i64_ty.const_zero().into(),
+                            i64_ty.const_zero().into(),
+                        ],
                         "clone.ptr_slice_typed",
                     )
                     .map_err(builder_error)?
@@ -1926,7 +1979,8 @@ fn llvm_emit_struct_clone<'ctx>(
                     Type::BoolSlice => "mako_native_bool_slice_clone_ptr",
                     _ => unreachable!(),
                 };
-                let clone = external_function(module, name, ptr_ty.fn_type(&[ptr_ty.into()], false));
+                let clone =
+                    external_function(module, name, ptr_ty.fn_type(&[ptr_ty.into()], false));
                 builder
                     .build_call(clone, &[loaded.into()], "clone.typed_slice")
                     .map_err(builder_error)?
@@ -1941,7 +1995,9 @@ fn llvm_emit_struct_clone<'ctx>(
             .map_err(|_| LlvmError::new("LLVM backend: struct clone GEP failed"))?;
         builder.build_store(dst, stored).map_err(builder_error)?;
     }
-    builder.build_store(result_slot, ptr).map_err(builder_error)?;
+    builder
+        .build_store(result_slot, ptr)
+        .map_err(builder_error)?;
     builder
         .build_unconditional_branch(merge_bb)
         .map_err(builder_error)?;
@@ -2121,20 +2177,28 @@ fn llvm_emit_struct_drop<'ctx>(
                     module,
                     "mako_native_struct_slice_drop_ptr",
                     context.void_type().fn_type(
-                        &[ptr_ty.into(), i64_ty.into(), i64_ty.into(),
-                          i64_ty.into(), i64_ty.into(), i64_ty.into()],
+                        &[
+                            ptr_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                        ],
                         false,
                     ),
                 );
                 builder
                     .build_call(
                         drop,
-                        &[loaded.into(),
-                          i64_ty.const_int(nf as u64, false).into(),
-                          i64_ty.const_int(sm as u64, false).into(),
-                          i64_ty.const_int(nm as u64, false).into(),
-                          i64_ty.const_int(nfp as u64, false).into(),
-                          i64_ty.const_int(nsp as u64, false).into()],
+                        &[
+                            loaded.into(),
+                            i64_ty.const_int(nf as u64, false).into(),
+                            i64_ty.const_int(sm as u64, false).into(),
+                            i64_ty.const_int(nm as u64, false).into(),
+                            i64_ty.const_int(nfp as u64, false).into(),
+                            i64_ty.const_int(nsp as u64, false).into(),
+                        ],
                         "drop.struct_slice.call",
                     )
                     .map_err(builder_error)?;
@@ -2154,26 +2218,40 @@ fn llvm_emit_struct_drop<'ctx>(
                     module,
                     "mako_native_ptr_slice_drop_typed",
                     context.void_type().fn_type(
-                        &[ptr_ty.into(), i64_ty.into(), i64_ty.into(),
-                          i64_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into()],
+                        &[
+                            ptr_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                            i64_ty.into(),
+                        ],
                         false,
                     ),
                 );
                 builder
                     .build_call(
                         drop,
-                        &[loaded.into(),
-                          i64_ty.const_int(vkind, false).into(),
-                          i64_ty.const_zero().into(),
-                          i64_ty.const_zero().into(),
-                          i64_ty.const_zero().into(),
-                          i64_ty.const_zero().into(),
-                          i64_ty.const_zero().into()],
+                        &[
+                            loaded.into(),
+                            i64_ty.const_int(vkind, false).into(),
+                            i64_ty.const_zero().into(),
+                            i64_ty.const_zero().into(),
+                            i64_ty.const_zero().into(),
+                            i64_ty.const_zero().into(),
+                            i64_ty.const_zero().into(),
+                        ],
                         "drop.ptr_slice_typed.call",
                     )
                     .map_err(builder_error)?;
             }
-            Type::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::Struct(_) | native_ir::MapValKind::NestedStruct(_)) => {
+            Type::PtrSlice(vk)
+                if matches!(
+                    vk,
+                    native_ir::MapValKind::Struct(_) | native_ir::MapValKind::NestedStruct(_)
+                ) =>
+            {
                 let loaded = builder
                     .build_load(llvm_type(context, *field_ty), gep, "drop.ptr_slice_struct")
                     .map_err(builder_error)?;
@@ -2223,7 +2301,11 @@ fn llvm_emit_struct_drop<'ctx>(
             }
             Type::Struct(nested_id) => {
                 let loaded = builder
-                    .build_load(llvm_type(context, Type::Struct(*nested_id)), gep, "drop.nested")
+                    .build_load(
+                        llvm_type(context, Type::Struct(*nested_id)),
+                        gep,
+                        "drop.nested",
+                    )
                     .map_err(builder_error)?;
                 llvm_emit_struct_drop(
                     context,
@@ -2331,7 +2413,15 @@ fn slice_parts<'ctx>(
 fn slice_fields<'ctx>(
     builder: &Builder<'ctx>,
     value: StructValue<'ctx>,
-) -> Result<(PointerValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>), LlvmError> {
+) -> Result<
+    (
+        PointerValue<'ctx>,
+        IntValue<'ctx>,
+        IntValue<'ctx>,
+        IntValue<'ctx>,
+    ),
+    LlvmError,
+> {
     let data = builder
         .build_extract_value(value, 0, "slice.data")
         .map_err(builder_error)?
@@ -2761,7 +2851,12 @@ fn map_ii_load_ptrs<'ctx>(
                 ptr_ty,
                 unsafe {
                     builder
-                        .build_gep(i8t, map, &[i64t.const_int(off, false)], &format!("{name}.p"))
+                        .build_gep(
+                            i8t,
+                            map,
+                            &[i64t.const_int(off, false)],
+                            &format!("{name}.p"),
+                        )
                         .map_err(builder_error)?
                 },
                 name,
@@ -2779,7 +2874,12 @@ fn map_ii_load_ptrs<'ctx>(
             i64t,
             unsafe {
                 builder
-                    .build_gep(i8t, map, &[i64t.const_int(MAP_II_OFF_CAP, false)], "m.cap.p")
+                    .build_gep(
+                        i8t,
+                        map,
+                        &[i64t.const_int(MAP_II_OFF_CAP, false)],
+                        "m.cap.p",
+                    )
                     .map_err(builder_error)?
             },
             "m.cap",
@@ -2814,7 +2914,9 @@ fn emit_map_ii_set_inline<'ctx>(
     let mask = builder
         .build_int_sub(cap, one, "m.mask")
         .map_err(builder_error)?;
-    let start = builder.build_and(key, mask, "m.i0").map_err(builder_error)?;
+    let start = builder
+        .build_and(key, mask, "m.i0")
+        .map_err(builder_error)?;
 
     let loop_bb = context.append_basic_block(parent, "map.set.loop");
     let empty_bb = context.append_basic_block(parent, "map.set.empty");
@@ -2893,9 +2995,7 @@ fn emit_map_ii_set_inline<'ctx>(
     let new_len = builder
         .build_int_add(len, one, "m.newlen")
         .map_err(builder_error)?;
-    builder
-        .build_store(len_p, new_len)
-        .map_err(builder_error)?;
+    builder.build_store(len_p, new_len).map_err(builder_error)?;
     builder
         .build_unconditional_branch(done_bb)
         .map_err(builder_error)?;
@@ -3020,7 +3120,9 @@ fn emit_map_ii_get_inline<'ctx>(
     let mask = builder
         .build_int_sub(cap, one, "g.mask")
         .map_err(builder_error)?;
-    let start = builder.build_and(key, mask, "g.i0").map_err(builder_error)?;
+    let start = builder
+        .build_and(key, mask, "g.i0")
+        .map_err(builder_error)?;
 
     // Hand-C get: empty → 0; full+same key → val; else probe (covers tomb).
     let entry = builder.get_insert_block().unwrap();
@@ -3211,9 +3313,7 @@ fn emit_string_clone_or_share<'ctx>(
         .map_err(builder_error)?;
 
     builder.position_at_end(merge_bb);
-    let phi = builder
-        .build_phi(string_ty, name)
-        .map_err(builder_error)?;
+    let phi = builder.build_phi(string_ty, name).map_err(builder_error)?;
     phi.add_incoming(&[(&value, share_bb), (&heap_clone, clone_bb)]);
     Ok(phi.as_basic_value().into_struct_value())
 }
