@@ -2708,7 +2708,9 @@ fn run_test_package(
         native_sources,
     )?;
     let timeout = test_timeout();
-    let child = Command::new(&out_bin).spawn().map_err(|error| {
+    let mut cmd = Command::new(&out_bin);
+    cmd.env("MAKO_GFX_HEADLESS", "1");
+    let child = cmd.spawn().map_err(|error| {
         emit_plain_error(&format!("could not run test binary: {error}"));
     })?;
     let execution = wait_for_test_process(file, child, timeout, false);
@@ -2748,11 +2750,11 @@ fn run_test_package_json(
             );
         }
     };
-    let child = match Command::new(&out_bin)
+    let mut cmd = Command::new(&out_bin);
+    cmd.env("MAKO_GFX_HEADLESS", "1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    let child = match cmd.spawn() {
         Ok(child) => child,
         Err(error) => {
             return tooling::TestExecution::failed(

@@ -2527,9 +2527,13 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
     if let Some(ref hm) = harness_main {
         all_fns.push(hm);
     }
-    // Track `mut self` methods (desugared `on T { fn m(mut self) }` → `T_m`).
+    // Track mut params. `mut self` methods are in-place receivers; other mut
+    // params (for example `read(mut buf: []byte)`) must also receive the
+    // caller's live header rather than a clone.
     let mut mut_self_fns = HashSet::new();
+    let mut mut_param_fns: HashMap<String, Vec<bool>> = HashMap::new();
     for f in &all_fns {
+        mut_param_fns.insert(f.name.clone(), f.params.iter().map(|p| p.mutable).collect());
         if let Some(p) = f.params.first() {
             if p.name == "self" && p.mutable {
                 mut_self_fns.insert(f.name.clone());
@@ -2545,6 +2549,7 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
                     function,
                     &signatures,
                     &mut_self_fns,
+                    &mut_param_fns,
                     &structs,
                     &const_ints,
                     &const_strs,
@@ -2577,6 +2582,7 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
                 lf,
                 &signatures,
                 &mut_self_fns,
+                &mut_param_fns,
                 &structs,
                 &const_ints,
                 &const_strs,
@@ -2712,6 +2718,9 @@ struct FunctionLowerer<'a> {
     /// Free-function names whose first parameter is `mut self` (in-place
     /// receiver). Method calls pass the live struct pointer without clone.
     mut_self_fns: &'a HashSet<String>,
+    /// Function name → param mutability. Used to preserve caller-visible
+    /// mutations for slice/header parameters without weakening by-value safety.
+    mut_param_fns: &'a HashMap<String, Vec<bool>>,
     structs: &'a StructRegistry,
     const_ints: &'a HashMap<String, i64>,
     const_strs: &'a HashMap<String, String>,
@@ -2764,6 +2773,7 @@ impl<'a> FunctionLowerer<'a> {
         source: &FnDef,
         signatures: &'a HashMap<String, (Vec<Type>, Option<Type>)>,
         mut_self_fns: &'a HashSet<String>,
+        mut_param_fns: &'a HashMap<String, Vec<bool>>,
         structs: &'a StructRegistry,
         const_ints: &'a HashMap<String, i64>,
         const_strs: &'a HashMap<String, String>,
@@ -2804,13 +2814,14 @@ impl<'a> FunctionLowerer<'a> {
                 // local or cloned a borrow.  All other heap params
                 // (structs, maps, handles) remain borrows — the caller
                 // passes an owned copy and drops it post-call.
-                let owns = ty.is_consumable_header();
+                let owns = ty.is_consumable_header() && !param.mutable;
                 heap_owned.insert(param.name.clone(), owns);
             }
         }
         Ok(Self {
             signatures,
             mut_self_fns,
+            mut_param_fns,
             structs,
             const_ints,
             const_strs,
@@ -5713,7 +5724,7 @@ impl<'a> FunctionLowerer<'a> {
                 .ok_or_else(|| IrError::new("native IR: kick id missing"))?;
             let name = format!("__mako_kick_{kid}");
             *kid += 1;
-            stubs.push(Self::build_kick_stub(&name, fname, &params)?);
+            stubs.push(Self::build_kick_stub(&name, fname, &params, ret)?);
             name
         };
 
@@ -5763,15 +5774,20 @@ impl<'a> FunctionLowerer<'a> {
             if ty == Type::FnPtr || params[i] == Type::FnPtr {
                 self.move_fnptr_local(arg);
             }
+            if ty.is_consumable_header() {
+                v = self.emit_clone(v, ty);
+            }
             let idx = self.const_int(i as i64, Type::I64);
-            // Borrowed heap args: pass the pointer; callee does not free.
+            // Pack slots are pointer-sized. Consumable headers are cloned for
+            // the child task so by-value callee ownership cannot alias the
+            // parent scope.
             self.emit(Inst::Call {
                 out: None,
                 function: "mako_native_pack_set".into(),
                 args: vec![pack, idx, v],
                 ret: None,
             });
-            if owned && ty.is_heap() {
+            if owned && ty.is_heap() && !ty.is_consumable_header() {
                 // Pack holds a borrow of the pointer for the join lifetime.
                 // Heap temps (struct lits, etc.) are stored in a stack local so
                 // the pointer remains valid until join; drop after spawn via
@@ -5843,6 +5859,7 @@ impl<'a> FunctionLowerer<'a> {
         stub_name: &str,
         target: &str,
         params: &[Type],
+        ret: Option<Type>,
     ) -> Result<Function, IrError> {
         let entry = BlockId(0);
         let mut function = Function {
@@ -5912,14 +5929,51 @@ impl<'a> FunctionLowerer<'a> {
             };
             call_args.push(arg);
         }
+        let ret_ty = match ret {
+            Some(Type::I1) | None => Type::I64,
+            Some(Type::F64) => Type::F64,
+            Some(ty) => ty,
+        };
         let ret_v = next();
         emit(Inst::Call {
             out: Some(ret_v),
             function: target.to_string(),
             args: call_args,
-            ret: Some(Type::I64),
+            ret: Some(ret_ty),
         });
-        function.blocks[0].terminator = Some(Terminator::Return(Some(ret_v)));
+        let ret_raw = match ret {
+            Some(Type::I1) => {
+                let raw = next();
+                emit(Inst::Cast {
+                    out: raw,
+                    value: ret_v,
+                    from: Type::I1,
+                    to: Type::I64,
+                });
+                raw
+            }
+            Some(Type::F64) => {
+                let raw = next();
+                emit(Inst::Call {
+                    out: Some(raw),
+                    function: "mako_native_f64_to_bits".into(),
+                    args: vec![ret_v],
+                    ret: Some(Type::I64),
+                });
+                raw
+            }
+            None => {
+                let zero = next();
+                emit(Inst::ConstInt {
+                    out: zero,
+                    value: 0,
+                    ty: Type::I64,
+                });
+                zero
+            }
+            _ => ret_v,
+        };
+        function.blocks[0].terminator = Some(Terminator::Return(Some(ret_raw)));
         Ok(function)
     }
 
@@ -14325,18 +14379,34 @@ impl<'a> FunctionLowerer<'a> {
                 "native IR: method `{fn_name}` arity mismatch"
             )));
         }
-        for (arg, expected) in args.iter().zip(params.iter().skip(1)) {
+        let mut_flags = self.mut_param_fns.get(&fn_name);
+        for (arg_index, (arg, expected)) in args.iter().zip(params.iter().skip(1)).enumerate() {
             let (mut v, t, o) = self.lower_expr(arg)?;
             if t != *expected {
                 return Err(IrError::new("native IR: method argument type mismatch"));
             }
+            let param_index = arg_index + 1;
+            let is_mut_param = mut_flags
+                .and_then(|flags| flags.get(param_index))
+                .copied()
+                .unwrap_or(false);
             if let Type::Struct(_sid) = t {
-                if !o {
+                if is_mut_param {
+                    if o && !matches!(arg, Expr::Ident(_)) {
+                        temps.push((v, t));
+                    }
+                } else if !o {
                     v = self.emit_clone(v, t);
+                    temps.push((v, t));
+                } else {
+                    temps.push((v, t));
                 }
-                temps.push((v, t));
             } else if t.is_consumable_header() {
-                if !o {
+                if is_mut_param {
+                    if o && !matches!(arg, Expr::Ident(_)) {
+                        temps.push((v, t));
+                    }
+                } else if !o {
                     v = self.emit_clone(v, t);
                 } else if let Expr::Ident(name) = arg {
                     self.heap_owned.insert(name.clone(), false);
@@ -26017,6 +26087,8 @@ impl<'a> FunctionLowerer<'a> {
             "cmap_del3i" if args.len() == 4 => Some(("mako_native_cmap_del3i_ptr", &[Type::Opaque, Type::Str, Type::Str, Type::I64], Some(Type::I64), false)),
             "cmap_set_int" if args.len() == 3 => Some(("mako_native_cmap_set_int_ptr", &[Type::Opaque, Type::Str, Type::I64], None, false)),
             "cmap_get_int" if args.len() == 3 => Some(("mako_native_cmap_get_int_ptr", &[Type::Opaque, Type::Str, Type::I64], Some(Type::I64), false)),
+            "jwt_sign_es256_header" if args.len() == 3 => Some(("mako_native_jwt_sign_es256_header_ptr", &[Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
+            "jwt_sign_custom" if args.len() == 3 => Some(("mako_native_jwt_sign_es256_header_ptr", &[Type::Str, Type::Str, Type::Str], Some(Type::Str), true)),
             // UDP reuseport
             "udp_bind_reuseport" if args.len() == 1 => Some(("mako_native_udp_bind_reuseport", &[Type::I64], Some(Type::I64), false)),
             "udp_bind_reuseport_addr" if args.len() == 2 => Some(("mako_native_udp_bind_reuseport_addr_ptr", &[Type::Str, Type::I64], Some(Type::I64), false)),
@@ -26026,6 +26098,11 @@ impl<'a> FunctionLowerer<'a> {
             "tls_srv_pool_recv" if args.len() == 2 => Some(("mako_native_tls_srv_pool_recv_ptr", &[Type::I64, Type::I64], Some(Type::Str), true)),
             "tls_srv_pool_fd" if args.len() == 1 => Some(("mako_native_tls_srv_pool_fd", &[Type::I64], Some(Type::I64), false)),
             "tls_srv_pool_close" if args.len() == 1 => Some(("mako_native_tls_srv_pool_close", &[Type::I64], Some(Type::I64), false)),
+            "tls_server_pool_accept" if args.len() == 2 => Some(("mako_native_tls_srv_pool_accept", &[Type::Opaque, Type::I64], Some(Type::I64), false)),
+            "tls_server_pool_write" if args.len() == 2 => Some(("mako_native_tls_srv_pool_send_ptr", &[Type::I64, Type::Str], Some(Type::I64), false)),
+            "tls_server_pool_read" if args.len() == 2 => Some(("mako_native_tls_srv_pool_recv_ptr", &[Type::I64, Type::I64], Some(Type::Str), true)),
+            "tls_server_pool_fd" if args.len() == 1 => Some(("mako_native_tls_srv_pool_fd", &[Type::I64], Some(Type::I64), false)),
+            "tls_server_pool_close" if args.len() == 1 => Some(("mako_native_tls_srv_pool_close", &[Type::I64], Some(Type::I64), false)),
             // TLS cert reload
             "tls_reload_cert" if args.len() == 3 => Some(("mako_native_tls_reload_cert_ptr", &[Type::Opaque, Type::Str, Type::Str], Some(Type::I64), false)),
             // UUID/ULID

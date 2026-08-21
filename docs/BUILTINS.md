@@ -1051,11 +1051,11 @@ Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
 | `R` | Behavior |
 |-----|----------|
 | int / bool | Packed in `intptr_t` |
-| string | Heap-boxed across pthread; join unboxes |
+| string / `Uuid` | Heap-boxed across pthread; join unboxes |
 | `Result[T, E]` | Heap-boxed `MakoResultInt`; join unboxes |
 | float | Bitcast through `intptr_t` |
 
-Kick **args** that are sendable: Copy scalars, **POD structs** (int/float/bool/**string** fields, heap-boxed; strings cloned), string (cloned), chan handles, ShareInt/sync handles. Arrays/maps/non-POD structs remain rejected (`examples/bad/kick_non_pod.mko`).
+Kick **args** that are sendable: Copy scalars, **POD structs** (int/float/bool/**string** fields, heap-boxed; strings cloned), string and string-backed `Uuid` (cloned for the child task), chan handles, ShareInt/sync handles. Arrays/maps/non-POD structs remain rejected (`examples/bad/kick_non_pod.mko`).
 
 `reflect_value_of(s)` snapshots reflectable struct fields (POD leaves, nested POD,
 Option/Result/array/map of reflectable; not chan/Arena) into a reflect bag,

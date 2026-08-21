@@ -63,7 +63,10 @@ state. The adversarial fixtures are
 `examples/bad/kick_mutable_closure_capture.mko`,
 `kick_mutable_lambda_capture.mko`, and `fan_capture.mko`. TSan remains a
 runtime smoke check (`mako test --race`) for the runtime and FFI boundary.
-**Uuid is Copy** — free re-read under `hold`, kick without move.
+**Uuid is Copy** — free re-read under `hold`, kick without move. The native
+backend clones string-like task arguments, including string-backed `Uuid`, at
+the `kick` boundary so the child task owns its payload without aliasing the
+parent scope.
 
 SMTP TLS: `smtp_send_starttls` uses `SSL_connect`. Set **`MAKO_SMTP_TLS_VERIFY=1`**
 to enable peer certificate verification (`SSL_VERIFY_PEER`); default is off for

@@ -9,6 +9,11 @@
 - Added a package-by-package stdlib safety matrix covering every checked-in
   `std/**/*.mko` file.
 
+### Bug fixes
+
+- Made `mako test` run graphics tests headless by default and fixed native
+  task-return lowering for string-backed `Uuid` values.
+
 ## 0.5.7 — 2026-08-18 (stdlib expansion, string ops, Go parity push)
 
 ### Compiler
