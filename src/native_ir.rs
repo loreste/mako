@@ -540,6 +540,16 @@ impl Type {
         )
     }
 
+    fn borrow_header_fn(self) -> Option<&'static str> {
+        match self {
+            Type::IntSlice => Some("mako_native_int_slice_borrow_ptr"),
+            Type::FloatSlice => Some("mako_native_float_slice_borrow_ptr"),
+            Type::ByteSlice => Some("mako_native_byte_slice_borrow_ptr"),
+            Type::BoolSlice => Some("mako_native_bool_slice_borrow_ptr"),
+            _ => None,
+        }
+    }
+
     /// Pointer-sized machine value (can ride in i64 slots / chan[int] mailbox).
     fn is_ptr_sized(self) -> bool {
         matches!(
@@ -10733,8 +10743,11 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 let mut lowered = Vec::with_capacity(args.len());
                 let mut temporary_owned = Vec::new();
-                for (arg_expr, ((value0, actual0, mut owned), expected)) in
-                    args.iter().zip(lowered_raw.into_iter().zip(params))
+                let mut_flags = self.mut_param_fns.get(&fn_name);
+                for (arg_index, (arg_expr, ((value0, actual0, mut owned), expected))) in args
+                    .iter()
+                    .zip(lowered_raw.into_iter().zip(params))
+                    .enumerate()
                 {
                     let mut value = value0;
                     let mut actual = actual0;
@@ -10811,8 +10824,27 @@ impl<'a> FunctionLowerer<'a> {
                         lowered.push(value);
                         continue;
                     }
-                    let _ = arg_expr;
                     if actual.is_consumable_header() {
+                        let is_mut_param = mut_flags
+                            .and_then(|flags| flags.get(arg_index))
+                            .copied()
+                            .unwrap_or(false);
+                        if is_mut_param && matches!(arg_expr, Expr::Ident(_)) {
+                            if let Some(function) = actual.borrow_header_fn() {
+                                let borrowed = self.value();
+                                self.emit(Inst::Call {
+                                    out: Some(borrowed),
+                                    function: function.into(),
+                                    args: vec![value],
+                                    ret: Some(actual),
+                                });
+                                value = borrowed;
+                            } else {
+                                value = self.emit_clone(value, actual);
+                            }
+                            lowered.push(value);
+                            continue;
+                        }
                         // By-value semantics: the callee owns its parameter
                         // and may consume it via a consuming API
                         // (strings_copy, append, etc.).  Clone a borrowed
@@ -14461,8 +14493,21 @@ impl<'a> FunctionLowerer<'a> {
                 }
             } else if t.is_consumable_header() {
                 if is_mut_param {
-                    if o && !matches!(arg, Expr::Ident(_)) {
-                        temps.push((v, t));
+                    if matches!(arg, Expr::Ident(_)) {
+                        if let Some(function) = t.borrow_header_fn() {
+                            let borrowed = self.value();
+                            self.emit(Inst::Call {
+                                out: Some(borrowed),
+                                function: function.into(),
+                                args: vec![v],
+                                ret: Some(t),
+                            });
+                            v = borrowed;
+                        } else {
+                            v = self.emit_clone(v, t);
+                        }
+                    } else if !o {
+                        v = self.emit_clone(v, t);
                     }
                 } else if !o {
                     v = self.emit_clone(v, t);

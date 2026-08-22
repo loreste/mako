@@ -4244,6 +4244,10 @@ fn push_allocator_link_args(args: &mut Vec<String>, os: cc::OsKind) {
 
 fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
     let os = cc::classify_target(opts.target.as_deref());
+    // Optional deps are only auto-linked on native same-OS builds. Cross
+    // sysroots rarely match host pkg-config results, and pulling host libs into
+    // a target link breaks otherwise portable artifacts.
+    let native_like = opts.target.is_none() || !cc::is_cross(opts.target.as_deref());
     let mut args = cc::base_link_args(opts);
     // Dead-strip unused sections/symbols from the embedded runtime archive.
     match os {
@@ -4263,11 +4267,12 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
         }
         cc::OsKind::Linux | cc::OsKind::Other => {
             // X11 linked only when dev headers are available; headless servers skip.
-            if std::process::Command::new("pkg-config")
-                .args(["--exists", "x11"])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
+            if native_like
+                && std::process::Command::new("pkg-config")
+                    .args(["--exists", "x11"])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
             {
                 args.push("-DMAKO_HAS_X11".into());
                 args.push("-lX11".into());
@@ -4294,8 +4299,6 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
             }
         }
     }
-    // Optional deps: only auto-link on native (same-OS) builds — cross sysroots rarely have them.
-    let native_like = opts.target.is_none() || !cc::is_cross(opts.target.as_deref());
     if !native_like {
         return args;
     }

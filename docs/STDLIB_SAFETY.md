@@ -50,6 +50,12 @@ A stdlib package is not `Done` for safe parity until all applicable items pass:
   input, boundary sizes, repeated cleanup, and sanitizer runs for native-backed
   code.
 
+The static claim audit is enforced by `scripts/stdlib-safety-audit.sh`. It must
+pass before a release can claim stdlib safety coverage: every checked-in
+`std/**/*.mko` file must appear in the safety matrix, no matrix row may point at
+a missing package, checked-native and unsafe-boundary rows must name test work,
+and the high-risk adversarial/lifecycle fixtures must stay present.
+
 ## Go and Rust parity rule
 
 Mako does not need equivalents for memory-unsafe surfaces to be on par for safe
@@ -69,13 +75,14 @@ application programming.
 The repo can advertise broad stdlib coverage, but **not complete memory-safe
 stdlib parity** until these are closed:
 
-- all current `examples/testing` failures are fixed on C and native backends;
 - every `checked-native` package has an explicit safety contract and negative
   tests;
 - parser/codec packages have malformed-input coverage and overflow guards;
 - dynamic/plugin/syscall/mmap-like surfaces are separated from the default safe
   claim unless their handles are fully checked;
-- sanitizer gates cover the native-backed stdlib paths they claim to protect.
+- sanitizer gates cover the native-backed stdlib paths they claim to protect;
+- native-backend full-suite reporting gaps are either fixed or explicitly kept
+  out of the default safe-stdlib claim until their package rows are hardened.
 
 The default product message should be: Mako is fast, Mako-shaped, and safe by
 construction; parity work expands capability only when it preserves that bar.

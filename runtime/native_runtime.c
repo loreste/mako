@@ -306,6 +306,15 @@ MakoNativeIntSlice *mako_native_int_slice_clone_ptr(const MakoNativeIntSlice *va
     return out;
 }
 
+MakoNativeIntSlice *mako_native_int_slice_borrow_ptr(const MakoNativeIntSlice *value) {
+    if (!value) return NULL;
+    MakoNativeIntSlice *out = malloc(sizeof(*out));
+    if (!out) abort();
+    *out = *value;
+    out->owned = 0;
+    return out;
+}
+
 void mako_native_int_slice_drop_ptr(MakoNativeIntSlice *value) {
     if (!value) return;
     mako_native_int_slice_drop(value->data, value->len, value->cap, value->owned);
@@ -434,6 +443,15 @@ MakoNativeFloatSlice *mako_native_float_slice_clone_ptr(const MakoNativeFloatSli
     return out;
 }
 
+MakoNativeFloatSlice *mako_native_float_slice_borrow_ptr(const MakoNativeFloatSlice *value) {
+    if (!value) return NULL;
+    MakoNativeFloatSlice *out = malloc(sizeof(*out));
+    if (!out) abort();
+    *out = *value;
+    out->owned = 0;
+    return out;
+}
+
 void mako_native_float_slice_drop_ptr(MakoNativeFloatSlice *value) {
     if (!value) return;
     if (value->owned) free(value->data);
@@ -551,6 +569,15 @@ MakoNativeByteSlice *mako_native_byte_slice_clone_ptr(const MakoNativeByteSlice 
     if (!out) abort();
     mako_native_byte_slice_make(out, v->len, v->len);
     if (v->len) memcpy(out->data, v->data, v->len);
+    return out;
+}
+
+MakoNativeByteSlice *mako_native_byte_slice_borrow_ptr(const MakoNativeByteSlice *v) {
+    if (!v) return NULL;
+    MakoNativeByteSlice *out = malloc(sizeof(*out));
+    if (!out) abort();
+    *out = *v;
+    out->owned = 0;
     return out;
 }
 
@@ -3792,6 +3819,10 @@ MakoNativeBoolSlice *mako_native_bool_slice_append_ptr(MakoNativeBoolSlice *v, i
 
 MakoNativeBoolSlice *mako_native_bool_slice_clone_ptr(const MakoNativeBoolSlice *v) {
     return mako_native_byte_slice_clone_ptr(v);
+}
+
+MakoNativeBoolSlice *mako_native_bool_slice_borrow_ptr(const MakoNativeBoolSlice *v) {
+    return mako_native_byte_slice_borrow_ptr(v);
 }
 
 void mako_native_bool_slice_drop_ptr(MakoNativeBoolSlice *v) {

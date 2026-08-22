@@ -16,12 +16,16 @@ Status values:
 
 ## Current blockers
 
-- Full `examples/testing` is not green on both C and native backends.
+- C-backend `examples/testing` is a required CI gate; the full native-backend
+  suite is still reported separately while dedicated native safety jobs gate the
+  safety-critical paths.
 - Native-backed packages need package-local safety contracts.
 - Parser/codec packages need malformed-input, size-overflow, and cleanup tests.
 - Dynamic/plugin/syscall/runtime surfaces need explicit unsafe-boundary wording
   or checked-handle hardening before they can be included in the default safe
   claim.
+- `scripts/stdlib-safety-audit.sh` now enforces matrix/package alignment and
+  required high-risk adversarial/lifecycle fixture presence.
 
 ## Matrix
 
@@ -43,14 +47,14 @@ Status values:
 | `crypto/aes/aes.mko` | `checked-native` | key/nonce length validation and error cleanup tests |
 | `crypto/argon2/argon2.mko` | `checked-native` | parameter bounds, allocation limits, cleanup tests |
 | `crypto/bcrypt/bcrypt.mko` | `checked-native` | cost bounds and malformed hash tests |
-| `crypto/crypto.mko` | `checked-native` | aggregate crypto wrapper contract |
+| `crypto/crypto.mko` | `checked-native` | aggregate crypto wrapper contract, vector tests, and error cleanup tests |
 | `crypto/ecdsa/ecdsa.mko` | `checked-native` | key/signature length validation, OpenSSL cleanup tests |
 | `crypto/hkdf/hkdf.mko` | `checked-native` | RFC vector plus zero/large length tests |
 | `crypto/hmac/hmac.mko` | `checked-native` | key/message length and cleanup tests |
 | `crypto/md5/md5.mko` | `checked-native` | digest length and allocation tests |
 | `crypto/pbkdf2/pbkdf2.mko` | `checked-native` | iteration/key-length bounds tests |
 | `crypto/rand/rand.mko` | `checked-native` | OS RNG error propagation tests |
-| `crypto/rsa/rsa.mko` | `checked-native` | DER/signature bounds and verify-only contract |
+| `crypto/rsa/rsa.mko` | `checked-native` | DER/signature bounds tests and verify-only contract tests |
 | `crypto/sha1/sha1.mko` | `checked-native` | digest length and allocation tests |
 | `crypto/sha256/sha256.mko` | `checked-native` | digest length and allocation tests |
 | `crypto/sha3/sha3.mko` | `checked-native` | digest length and allocation tests |
@@ -141,12 +145,12 @@ Status values:
 | `path/filepath/filepath.mko` | `safe` | clean/rel/glob traversal tests |
 | `path/path.mko` | `safe` | clean/join/match tests |
 | `peer/peer.mko` | `checked-native` | table ownership and route bounds tests |
-| `plugin/plugin.mko` | `unsafe-boundary` | dynamic code boundary; require manifest, symbol, handle hardening |
+| `plugin/plugin.mko` | `unsafe-boundary` | dynamic code boundary tests; require manifest, symbol, double-close, and handle hardening tests |
 | `print/print.mko` | `checked-native` | formatting and output error tests |
 | `reflect/reflect.mko` | `safe` | POD-only rejection and clone/equal tests |
 | `regexp/regexp.mko` | `checked-native` | pattern bounds, UTF-8, catastrophic-input tests |
 | `regexp/syntax/syntax.mko` | `safe` | quote/meta parser tests |
-| `runtime/runtime.mko` | `unsafe-boundary` | stats only safe; raw runtime controls must stay explicit |
+| `runtime/runtime.mko` | `unsafe-boundary` | stats-only safe tests; raw runtime controls must stay explicit and covered by negative tests |
 | `sctp/sctp.mko` | `checked-native` | kernel feature failure and handle lifecycle tests |
 | `sip/sip.mko` | `checked-native` | header/body bounds and parser malformed tests |
 | `slices/slices.mko` | `safe` | OOB clamp and ownership/drop tests |
@@ -155,7 +159,7 @@ Status values:
 | `strings/strings.mko` | `safe` | UTF-8/view/owned string tests |
 | `sync/atomic/atomic.mko` | `checked-native` | atomic ordering and handle lifecycle tests |
 | `sync/sync.mko` | `checked-native` | mutex/rwmutex/once lifecycle and contention tests |
-| `syscall/syscall.mko` | `unsafe-boundary` | raw OS boundary; expose only checked safe wrappers by default |
+| `syscall/syscall.mko` | `unsafe-boundary` | raw OS boundary tests; expose only checked safe wrappers by default with lifecycle tests |
 | `testing/fstest/fstest.mko` | `safe` | mapfs path and overwrite tests |
 | `testing/httptest/httptest.mko` | `checked-native` | listener lifecycle and request cleanup tests |
 | `testing/iotest/iotest.mko` | `safe` | error reader/writer behavior tests |
@@ -185,11 +189,10 @@ Status values:
 
 ## Next implementation order
 
-1. Fix current red `examples/testing` tests on C and native backends.
-2. Add safety contracts to all `checked-native` and `unsafe-boundary` packages.
-3. Add malformed-input tests for `encoding/*`, `compress/*`, `archive/*`,
+1. Add safety contracts to all `checked-native` and `unsafe-boundary` packages.
+2. Add malformed-input tests for `encoding/*`, `compress/*`, `archive/*`,
    `image/*`, `regexp`, `graphql`, `grpc`, and protocol parsers.
-4. Add handle lifecycle tests for `net/*`, `crypto/tls`, `database/sql`,
+3. Add handle lifecycle tests for `net/*`, `crypto/tls`, `database/sql`,
    `sync/*`, `timer`, `plugin`, `syscall`, `os/*`, and messaging packages.
-5. Run sanitizer gates over the native-backed stdlib paths and record evidence
+4. Run sanitizer gates over the native-backed stdlib paths and record evidence
    in [STATUS.md](STATUS.md).

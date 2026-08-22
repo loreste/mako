@@ -1,12 +1,12 @@
 # Mako roadmap
 
-**Product version:** **0.5.7** (tip) · last tagged **v0.5.7** · Last sync: **2026-08-19**.
-**Suite:** **418** `examples/testing` `*_test.mko` files · **2026-08-19:**
-native **413 passed, 5 failed** · C **416 passed, 2 failed** ·
-`cargo test --release` **146 passed, 0 failed** · CI ASan/UBSan/TSan as configured.
+**Product version:** **0.5.8** (tip) · last tagged **v0.5.7** · Last sync: **2026-08-22**.
+**Suite:** **419** `examples/testing` `*_test.mko` files · **2026-08-22:**
+default **419 passed, 0 failed** · C **419 passed, 0 failed** ·
+`cargo test` **150 passed, 0 failed** · memory-safety and claims gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.7`** published; tip train **0.5.7**.
+**Release:** tag **`v0.5.7`** published; tip train **0.5.8**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -39,6 +39,7 @@ native **413 passed, 5 failed** · C **416 passed, 2 failed** ·
 | **0.5.5** | CI fixes, OpaqueHandle, backend regressions | **Shipped** — #34 #35 #36, CMap ASan fix, TLS mutex fix |
 | **0.5.6** | Native heap-argument ownership | **Shipped** |
 | **0.5.7** | Stdlib expansion (144 package files), str_slice, string compare | **Shipped** |
+| **0.5.8** | Memory-safety gates, native mutable slice ownership, claims CI | **Tip** |
 | **0.5.x** | Further patches on 0.5 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
 
@@ -61,6 +62,7 @@ native **413 passed, 5 failed** · C **416 passed, 2 failed** ·
 0.5.5       CI fixes, OpaqueHandle, backend regressions
 0.5.6       native heap-argument ownership
 0.5.7       stdlib expansion, str_slice, string compare
+0.5.8       memory-safety gates, native mutable slice ownership, claims CI
 0.5.x       patches
 1.0         stability freeze
 ```
@@ -88,7 +90,7 @@ stdlib, free `go` outside `crew`, or lifetime parameters.
 | Shared ownership-explicit IR | `src/native_ir.rs` |
 | Cranelift debug backend | `src/native_codegen.rs` |
 | Native bridge + embedded runtime archive | `runtime/native_bridge.c` |
-| Full testing corpus on native | **395/395** on **2026-07-22** (that day's corpus). Current inventory is **418** files; see [STATUS.md](STATUS.md) |
+| Full testing corpus on native | **395/395** on **2026-07-22** (that day's corpus). Current inventory is **419** files; see [STATUS.md](STATUS.md) |
 | Portable IO + concurrent select | seek/read_exact/append3 bridges; TLS select; recv closed vs timeout |
 | Language residual pack | mut-self `for` iterators; multi-stmt mut captures; const `s[i]` |
 | Product version string | `0.4.5` in `Cargo.toml` |

@@ -41,6 +41,9 @@ if ! rg -q 'Tracing GC|no GC|No GC' "$repo_dir/docs/SOUNDNESS.md" "$repo_dir/doc
 fi
 echo "memory-safety-gate: no GC markers ok"
 
+echo "=== memory-safety-gate: stdlib safety claim audit ==="
+"$repo_dir/scripts/stdlib-safety-audit.sh"
+
 fixtures=(
   examples/testing/memory_safety_contract_test.mko
   examples/testing/double_free_guard_test.mko
@@ -48,6 +51,7 @@ fixtures=(
   examples/testing/leak_detector_test.mko
   examples/testing/match_own_free_test.mko
   examples/testing/own_branch_regress_test.mko
+  examples/testing/native_byte_slice_arg_test.mko
   # Builder families that free escape temps — a double-free here aborts on the
   # success path in a plain build, which this gate previously did not cover.
   examples/testing/llm_test.mko

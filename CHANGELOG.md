@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.8 — 2026-08-22 (memory safety, claims CI, faster-than-Rust gates)
+
 ### Tooling
 
 - Added `mako lint --security`, which fails on known insecure helper calls
@@ -10,6 +12,13 @@
   `gethostbyname` address loads by using `getaddrinfo`.
 - Fixed native IR ownership for mutable slice/string parameters so cloned
   by-value headers are dropped by the callee instead of leaking.
+- Added `scripts/stdlib-safety-audit.sh` and wired it into claims and
+  memory-safety gates so stdlib safety coverage cannot drift from the checked-in
+  package matrix.
+- Fixed the release object-cache claim check to pin the C backend and keep
+  default `-O3 -flto` distinct from `MAKO_NO_LTO=1`.
+- Made Zig cross-artifact checks use writable local and global cache directories
+  under the gate temp root.
 
 ### Documentation
 
@@ -24,6 +33,21 @@
 
 - Made `mako test` run graphics tests headless by default and fixed native
   task-return lowering for string-backed `Uuid` values.
+- Fixed native backend mutable slice argument lowering by passing borrowed
+  non-owning headers for named mutable slice locals, preventing caller/callee
+  double-drop while preserving mutations to caller backing storage.
+- Made restricted loopback/socket fixtures soft-skip when sandbox setup denies
+  bind/connect, while preserving hard assertions once a socket is live.
+- Stopped Linux cross builds from pulling host X11 link flags into musl targets.
+
+### Verification
+
+- `claims-gate.sh` passed, including full examples, cross artifacts, identity
+  lint, and strict speed gate.
+- `memory-safety-gate.sh` passed: no GC path, ASan contract fixture, slice RSS
+  soak, and long-run ownership/RSS soak.
+- Strict speed gate versus Rust passed: fib `0.20x`, slice `0.38x`, map `0.16x`
+  Mako/Rust on the 2026-08-22 local run.
 
 ## 0.5.7 — 2026-08-18 (stdlib expansion, string ops, Go parity push)
 

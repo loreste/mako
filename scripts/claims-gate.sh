@@ -107,15 +107,16 @@ fi
 env MAKO_CACHE="$CACHE/full-suite" "$MAKO" test "$ROOT/examples/testing"
 env MAKO_CACHE="$CACHE/cmap" "$MAKO" test "$ROOT/examples/testing/cmap_stress_test.mko"
 MAKO_BIN="$MAKO" MAKO_CACHE="$CACHE/stdlib" "$ROOT/scripts/stdlib-gate.sh"
+"$ROOT/scripts/stdlib-safety-audit.sh"
 
 # A release cache must distinguish the documented default (-O3 -flto) from the
 # explicit MAKO_NO_LTO opt-out.  This catches stale optimized objects being
 # silently reused across materially different release builds.
 OPT_CACHE="$CACHE/release-optimization"
-MAKO_CACHE="$OPT_CACHE" MAKO_CACHE_LOG=1 "$MAKO" build --release \
+MAKO_CACHE="$OPT_CACHE" MAKO_CACHE_LOG=1 "$MAKO" build --release --backend c \
     "$ROOT/examples/bench/micro.mko" -o "$TMP/release-default" \
     >"$TMP/release-default.log" 2>&1
-MAKO_CACHE="$OPT_CACHE" MAKO_CACHE_LOG=1 MAKO_NO_LTO=1 "$MAKO" build --release \
+MAKO_CACHE="$OPT_CACHE" MAKO_CACHE_LOG=1 MAKO_NO_LTO=1 "$MAKO" build --release --backend c \
     "$ROOT/examples/bench/micro.mko" -o "$TMP/release-no-lto" \
     >"$TMP/release-no-lto.log" 2>&1
 if ! rg -q "object MISS" "$TMP/release-no-lto.log"; then
@@ -130,8 +131,9 @@ fi
 if command -v zig >/dev/null 2>&1; then
     CROSS_ROOT="$TMP/cross-artifacts"
     ZIG_LOCAL_CACHE_DIR="$CROSS_ROOT/zig-cache"
-    export ZIG_LOCAL_CACHE_DIR
-    mkdir -p "$CROSS_ROOT" "$ZIG_LOCAL_CACHE_DIR"
+    ZIG_GLOBAL_CACHE_DIR="$CROSS_ROOT/zig-global-cache"
+    export ZIG_LOCAL_CACHE_DIR ZIG_GLOBAL_CACHE_DIR
+    mkdir -p "$CROSS_ROOT" "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
     MAKO_CACHE="$CACHE/cross-windows" "$MAKO" build --release \
         "$ROOT/examples/hello.mko" --target x86_64-pc-windows-gnu \
         -o "$CROSS_ROOT/hello.exe"
