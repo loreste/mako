@@ -1,12 +1,12 @@
 # Mako roadmap
 
-**Product version:** **0.5.8** (tip) · last tagged **v0.5.7** · Last sync: **2026-08-22**.
+**Product version:** **0.5.8** (tip) · last tagged **v0.5.8** · Last sync: **2026-08-22**.
 **Suite:** **419** `examples/testing` `*_test.mko` files · **2026-08-22:**
 default **419 passed, 0 failed** · C **419 passed, 0 failed** ·
 `cargo test` **150 passed, 0 failed** · memory-safety and claims gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.7`** published; tip train **0.5.8**.
+**Release:** tag **`v0.5.8`** published; tip train **0.5.8**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  

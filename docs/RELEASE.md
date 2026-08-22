@@ -1,7 +1,7 @@
 # Mako release & cross-platform guide
 
 **Product version:** **0.5.8** (`Cargo.toml` / `mako version`);
-last published tag **v0.5.7**.
+last published tag **v0.5.8**.
 **Tree status:** `examples/testing` inventory **419** `*_test.mko` files
 (2026-08-22): default **419 passed, 0 failed**; C **419 passed, 0 failed**.
 **Versioning:** small patches preferred — [VERSIONING.md](VERSIONING.md).
