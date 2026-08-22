@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## 0.5.9 — 2026-08-22 (stdlib safety contracts)
+
+### Tooling
+
+- Strengthened `scripts/stdlib-safety-audit.sh` so every `checked-native` and
+  `unsafe-boundary` stdlib matrix row must classify into exactly one enforced
+  safety contract family.
+- Added fixture-marker checks for the three contract families:
+  `codec-parser`, `crypto-secret`, and `handle-lifecycle`.
+- The audit now reports contract-family coverage alongside stdlib file and tier
+  counts.
+- Fixed `scripts/long-run-soak.sh` to measure RSS stability after the warmup
+  sample, matching the documented years-up gate and avoiding cold-start baseline
+  noise.
+
+### Documentation
+
+- Added [STDLIB_SAFETY_CONTRACTS.md](docs/STDLIB_SAFETY_CONTRACTS.md), the
+  release contract for parser/codec, crypto/secret, and handle/lifecycle
+  native-backed stdlib surfaces.
+- Updated release/status/roadmap/version docs for the 0.5.9 safety-contract
+  release train.
+
+### Verification
+
+- `stdlib-safety-audit.sh` passed with 144 std files covered, 102
+  checked-native rows, 38 safe rows, 4 unsafe-boundary rows, and 3 enforced
+  contract families.
+- This release keeps the 0.5.8 memory-safety and faster-than-Rust gates as
+  mandatory release checks.
+
 ## 0.5.8 — 2026-08-22 (memory safety, claims CI, faster-than-Rust gates)
 
 ### Tooling

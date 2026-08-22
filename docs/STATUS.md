@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-08-22** · product **mako0.5.8** (tip; last tag **v0.5.8**) ·
+Last inventory: **2026-08-22** · product **mako0.5.9** (tip; last tag **v0.5.8**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
@@ -18,7 +18,7 @@ CI ASan/UBSan; focused concurrency under TSan · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.5.8** tip · last tag [**v0.5.8**](https://github.com/loreste/mako/releases/tag/v0.5.8) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.5.9** tip · last tag [**v0.5.8**](https://github.com/loreste/mako/releases/tag/v0.5.8) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -209,6 +209,7 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | `mako test examples/testing --backend c` | **419 passed, 0 failed** (2026-08-22) |
 | Memory-safety gate | **Passed** (2026-08-22): no GC path, ASan contract fixture, slice RSS soak, long-run ownership/RSS soak |
 | Claims/speed gate | **Passed** (2026-08-22): strict Rust gate fib `0.20x`, slice `0.38x`, map `0.16x` Mako/Rust |
+| Stdlib safety contracts | **Passed** (2026-08-22): 144 std files, 102 checked-native, 38 safe, 4 unsafe-boundary, 3 enforced contract families |
 | GC removal regression checks | PASS — removed builtin and legacy `[package] gc = true` both fail, including isolated cache paths |
 | Speed gate | PASS — normal ≤2.0× and strict ≤1.5× Rust gates; final measured ratios 0.21×–0.65× |
 | Leba downstream smoke | PASS — current compiler builds/checks Leba; compiled `doctor` reports 0 errors |

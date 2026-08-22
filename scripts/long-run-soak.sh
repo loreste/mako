@@ -97,13 +97,17 @@ for i in range(samples):
     rss_vals.append(peak_rss_kb(bin_path))
     print(f"long-run-soak: sample {i+1}/{samples} peak_rss_kib={rss_vals[-1]}")
 
-base = rss_vals[0]
+stable_vals = rss_vals[1:] if len(rss_vals) > 2 else rss_vals
+base = min(stable_vals)
 if base <= 0:
     print("long-run-soak: RSS base unavailable — skip ratio", file=sys.stderr)
     raise SystemExit(0)
-worst = max(rss_vals) / base
-med = statistics.median(rss_vals)
-print(f"long-run-soak: rss base={base} median={med:.0f} worst_ratio={worst:.3f} (bar {max_ratio})")
+worst = max(stable_vals) / base
+med = statistics.median(stable_vals)
+print(
+    f"long-run-soak: rss base={base} median={med:.0f} "
+    f"worst_ratio={worst:.3f} (bar {max_ratio}; first sample warmup)"
+)
 if worst > max_ratio:
     raise SystemExit(
         f"long-run-soak: RSS grew {worst:.3f}× across samples (max {max_ratio})"

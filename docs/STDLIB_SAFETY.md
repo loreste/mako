@@ -54,7 +54,9 @@ The static claim audit is enforced by `scripts/stdlib-safety-audit.sh`. It must
 pass before a release can claim stdlib safety coverage: every checked-in
 `std/**/*.mko` file must appear in the safety matrix, no matrix row may point at
 a missing package, checked-native and unsafe-boundary rows must name test work,
-and the high-risk adversarial/lifecycle fixtures must stay present.
+all native/unsafe rows must map to one safety contract family in
+[STDLIB_SAFETY_CONTRACTS.md](STDLIB_SAFETY_CONTRACTS.md), and the high-risk
+adversarial/lifecycle fixtures must stay present.
 
 ## Go and Rust parity rule
 
@@ -75,8 +77,8 @@ application programming.
 The repo can advertise broad stdlib coverage, but **not complete memory-safe
 stdlib parity** until these are closed:
 
-- every `checked-native` package has an explicit safety contract and negative
-  tests;
+- every `checked-native` package maps to an enforced safety contract family and
+  has negative/lifecycle fixture coverage;
 - parser/codec packages have malformed-input coverage and overflow guards;
 - dynamic/plugin/syscall/mmap-like surfaces are separated from the default safe
   claim unless their handles are fully checked;
@@ -89,3 +91,5 @@ construction; parity work expands capability only when it preserves that bar.
 
 Package-by-package status is tracked in
 [STDLIB_SAFETY_MATRIX.md](STDLIB_SAFETY_MATRIX.md).
+Contract families are tracked in
+[STDLIB_SAFETY_CONTRACTS.md](STDLIB_SAFETY_CONTRACTS.md).

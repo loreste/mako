@@ -4,7 +4,7 @@ Mako is a compiled language for backend and systems work. You write `.mko`
 files; Mako turns them into standalone native binaries — no garbage collector,
 no VM, nothing extra to install next to them at runtime.
 
-**Status: alpha (v0.5.8).** It works, it compiles real programs, people have
+**Status: alpha (v0.5.9).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 

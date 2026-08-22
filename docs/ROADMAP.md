@@ -1,12 +1,12 @@
 # Mako roadmap
 
-**Product version:** **0.5.8** (tip) · last tagged **v0.5.8** · Last sync: **2026-08-22**.
+**Product version:** **0.5.9** (tip) · last tagged **v0.5.8** · Last sync: **2026-08-22**.
 **Suite:** **419** `examples/testing` `*_test.mko` files · **2026-08-22:**
 default **419 passed, 0 failed** · C **419 passed, 0 failed** ·
 `cargo test` **150 passed, 0 failed** · memory-safety and claims gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.8`** published; tip train **0.5.8**.
+**Release:** tag **`v0.5.8`** published; tip train **0.5.9**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -39,7 +39,8 @@ default **419 passed, 0 failed** · C **419 passed, 0 failed** ·
 | **0.5.5** | CI fixes, OpaqueHandle, backend regressions | **Shipped** — #34 #35 #36, CMap ASan fix, TLS mutex fix |
 | **0.5.6** | Native heap-argument ownership | **Shipped** |
 | **0.5.7** | Stdlib expansion (144 package files), str_slice, string compare | **Shipped** |
-| **0.5.8** | Memory-safety gates, native mutable slice ownership, claims CI | **Tip** |
+| **0.5.8** | Memory-safety gates, native mutable slice ownership, claims CI | **Shipped** |
+| **0.5.9** | Stdlib safety contract families and enforced audit | **Tip** |
 | **0.5.x** | Further patches on 0.5 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
 
@@ -63,6 +64,7 @@ default **419 passed, 0 failed** · C **419 passed, 0 failed** ·
 0.5.6       native heap-argument ownership
 0.5.7       stdlib expansion, str_slice, string compare
 0.5.8       memory-safety gates, native mutable slice ownership, claims CI
+0.5.9       stdlib safety contract families and enforced audit
 0.5.x       patches
 1.0         stability freeze
 ```

@@ -119,7 +119,9 @@ fn main() {
 ./scripts/long-run-soak.sh
 ```
 
-Pass: ownership live-delta **0**, multi-sample RSS growth within the bar.
+Pass: ownership live-delta **0**, multi-sample RSS growth within the bar. The
+first RSS sample is warmup/cold-start; stability is judged on the remaining
+samples when at least three samples are collected.
 
 ### HTTP accept loop (LR-6)
 

@@ -19,13 +19,15 @@ Status values:
 - C-backend `examples/testing` is a required CI gate; the full native-backend
   suite is still reported separately while dedicated native safety jobs gate the
   safety-critical paths.
-- Native-backed packages need package-local safety contracts.
+- Native-backed packages must stay mapped to enforced safety contract families
+  in [STDLIB_SAFETY_CONTRACTS.md](STDLIB_SAFETY_CONTRACTS.md).
 - Parser/codec packages need malformed-input, size-overflow, and cleanup tests.
 - Dynamic/plugin/syscall/runtime surfaces need explicit unsafe-boundary wording
   or checked-handle hardening before they can be included in the default safe
   claim.
-- `scripts/stdlib-safety-audit.sh` now enforces matrix/package alignment and
-  required high-risk adversarial/lifecycle fixture presence.
+- `scripts/stdlib-safety-audit.sh` now enforces matrix/package alignment,
+  contract-family classification, and required high-risk adversarial/lifecycle
+  fixture presence.
 
 ## Matrix
 
@@ -189,8 +191,9 @@ Status values:
 
 ## Next implementation order
 
-1. Add safety contracts to all `checked-native` and `unsafe-boundary` packages.
-2. Add malformed-input tests for `encoding/*`, `compress/*`, `archive/*`,
+1. Keep all `checked-native` and `unsafe-boundary` packages classified by the
+   contract-family audit.
+2. Add package-local malformed-input tests for `encoding/*`, `compress/*`, `archive/*`,
    `image/*`, `regexp`, `graphql`, `grpc`, and protocol parsers.
 3. Add handle lifecycle tests for `net/*`, `crypto/tls`, `database/sql`,
    `sync/*`, `timer`, `plugin`, `syscall`, `os/*`, and messaging packages.
