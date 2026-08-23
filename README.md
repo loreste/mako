@@ -4,7 +4,7 @@ Mako is a compiled language for backend and systems work. You write `.mko`
 files; Mako turns them into standalone native binaries — no garbage collector,
 no VM, nothing extra to install next to them at runtime.
 
-**Status: alpha (v0.5.10).** It works, it compiles real programs, people have
+**Status: alpha (v0.5.11).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -109,11 +109,12 @@ still uneven — [STDLIB.md](docs/STDLIB.md) records what has real tests,
 what is a capability equivalent, and what is intentionally out (`unsafe`,
 `go/*`, `debug/*`, `weak`).
 
-**Backends.** Native object code is the default (Cranelift). The C backend
-remains available via `--backend c` and is used automatically for sanitizers,
-cross-compilation, and emit-c. The `examples/testing` corpus is **420**
+**Backends.** Native object code default (Cranelift). C backend
+remains available via explicit `--backend c` as the oracle for sanitizers,
+cross-compilation, and emit-c; unsupported native/LLVM modes hard-error instead
+of silently falling back. `examples/testing` corpus is **420**
 `*_test.mko` files; measured **2026-08-23** default **420 passed, 0 failed**,
-C **420 passed, 0 failed**. Both backends produce standalone binaries. LLVM release builds available with `--backend llvm --release`.
+C **420 passed, 0 failed**, native **420 passed, 0 failed**. Both backends produce standalone binaries. LLVM release builds available with `--backend llvm --release`.
 On macOS, the native backend ships with a bundled linker (LLD) — no clang or
 Xcode required. On Linux, `gcc` or `clang` is needed for linking.
 
@@ -132,7 +133,7 @@ and inlay hints. VS Code extension.
 
 - Linux native backend requires `gcc` or `clang` for linking (installer handles this)
 - WASM: WASI Preview 1 only — no sockets, no TLS, no Preview 2/WIT/DOM
-- Sanitizers, cross-compilation, and emit-c auto-fall back to the C backend
+- Sanitizers, cross-compilation, and emit-c require explicit `--backend c`
 - No debugger product (lldb works with `#line` source mapping, but no IDE integration beyond seeds)
 - Stdlib coverage is uneven — some APIs are shape-only
 - No stable ABI promise
@@ -215,8 +216,8 @@ mako test --sanitize address examples/testing  # under ASan
 ```
 
 420 `*_test.mko` files under `examples/testing` (inventory 2026-08-23).
-That day: default 420 passed / 0 failed; C 420 passed / 0 failed. The suite
-is exercised under ASan and UBSan in CI.
+That day: default 420 passed / 0 failed; C 420 passed / 0 failed; native 420
+passed / 0 failed. The suite is exercised under ASan and UBSan in CI.
 A focused concurrency subset is exercised under TSan.
 
 ## Docs

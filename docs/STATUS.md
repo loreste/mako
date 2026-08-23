@@ -1,12 +1,13 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-08-23** · product **mako0.5.10** (tip; last tag **v0.5.10**) ·
+Last inventory: **2026-08-23** · product **mako0.5.11** (tip; last tag **v0.5.11**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
 const-fn depth (match/while/for/strings · `s[i]`) · **420** `examples/testing`
 `*_test.mko` files · **2026-08-23:** default **420 passed, 0 failed** ·
-C **420 passed, 0 failed** · `cargo test` **150 passed, 0 failed** ·
+C **420 passed, 0 failed** · native **420 passed, 0 failed** ·
+`cargo test` **152 passed, 0 failed** ·
 claims and memory-safety gates passed locally ·
 CI ASan/UBSan; focused concurrency under TSan · [The Mako Book](book/).
 
@@ -18,7 +19,7 @@ CI ASan/UBSan; focused concurrency under TSan · [The Mako Book](book/).
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.5.10** tip · last tag [**v0.5.10**](https://github.com/loreste/mako/releases/tag/v0.5.10) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.5.11** tip · last tag [**v0.5.11**](https://github.com/loreste/mako/releases/tag/v0.5.11) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -207,6 +208,7 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
 | `mako test examples/testing` (inventory) | **420** `*_test.mko` files; **420 passed, 0 failed** (2026-08-23) |
 | `mako test examples/testing --backend c` | **420 passed, 0 failed** (2026-08-23) |
+| `mako test examples/testing --backend native` | **420 passed, 0 failed** (2026-08-23); Linux/macOS CI hard gate in 0.5.11 |
 | Memory-safety gate | **Passed** (2026-08-22): no GC path, ASan contract fixture, slice RSS soak, long-run ownership/RSS soak |
 | Claims/speed gate | **Passed** (2026-08-22): strict Rust gate fib `0.20x`, slice `0.38x`, map `0.16x` Mako/Rust |
 | Stdlib safety contracts | **Passed** (2026-08-22): 144 std files, 102 checked-native, 38 safe, 4 unsafe-boundary, 3 enforced contract families |

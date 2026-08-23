@@ -87,7 +87,7 @@ map get/set inlining, I/O buffers, and induction-proven bounds-check elision.
 
 ## Current state (v0.4.5)
 
-- **Language gate:** `mako test examples/testing --backend native` → **367/367**
+- **Language gate:** `mako test examples/testing --backend native` → **420/420**
   (2026-07-22). Shared IR + Cranelift debug backend + `runtime/native_bridge.c`
   cover the full testing corpus (structs/enums/maps/nested aggregates, match/`?`,
   concurrency, net/TLS/SQL/HTTP/SIP, fan/crew, mut-self iterators, etc.).
@@ -445,7 +445,7 @@ Unit test: `return_none_moves_without_clone_or_leak`. Intentional OOB fixture
 
 ### Build modes
 - [x] `--overflow trap` on the native shared-IR path (parity gate vs C).
-- [ ] Cross-compilation (native is host-only), WASM, `--static`, sanitizers
+- [ ] Cross-compilation (native is host-only), WASM, `--static-link`, sanitizers
       (`--sanitize`).
 
 ### Gates, infra & cleanup
@@ -579,7 +579,7 @@ gates that certify them.
 - **M3 · Concurrency** — `crew`/`kick`/`fan`/channels/`select` wired to the
   existing runtime scheduler. **Exit:** concurrency corpus passes differential +
   race gates on native.
-- **M4 · Build modes & targets → full parity** — sanitizers, `--static`,
+- **M4 · Build modes & targets → full parity** — sanitizers, `--static-link`,
   cross-compile, WASM (overflow-trap ✅). **Exit: syntax gate = 100%** (full
   corpus, all targets, 0 differential failures).
 

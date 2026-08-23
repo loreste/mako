@@ -1,12 +1,13 @@
 # Mako roadmap
 
-**Product version:** **0.5.10** (tip) · last tagged **v0.5.10** · Last sync: **2026-08-23**.
+**Product version:** **0.5.11** (tip) · last tagged **v0.5.11** · Last sync: **2026-08-23**.
 **Suite:** **420** `examples/testing` `*_test.mko` files · **2026-08-23:**
 default **420 passed, 0 failed** · C **420 passed, 0 failed** ·
-`cargo test` **150 passed, 0 failed** · memory-safety and claims gates passed locally.
+native **420 passed, 0 failed** ·
+`cargo test` **152 passed, 0 failed** · memory-safety and claims gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.10`** published; tip train **0.5.10**.
+**Release:** tag **`v0.5.11`** published; tip train **0.5.11**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -41,7 +42,8 @@ default **420 passed, 0 failed** · C **420 passed, 0 failed** ·
 | **0.5.7** | Stdlib expansion (144 package files), str_slice, string compare | **Shipped** |
 | **0.5.8** | Memory-safety gates, native mutable slice ownership, claims CI | **Shipped** |
 | **0.5.9** | Stdlib safety contract families and enforced audit | **Shipped** |
-| **0.5.10** | Package-local malformed codec coverage and fail-closed Base64 | **Tip** |
+| **0.5.10** | Package-local malformed codec coverage and fail-closed Base64 | **Shipped** |
+| **0.5.11** | Native backend hardening and no silent C fallback | **Tip** |
 | **0.5.x** | Further patches on 0.5 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
 
@@ -67,6 +69,7 @@ default **420 passed, 0 failed** · C **420 passed, 0 failed** ·
 0.5.8       memory-safety gates, native mutable slice ownership, claims CI
 0.5.9       stdlib safety contract families and enforced audit
 0.5.10      package-local malformed codec coverage and fail-closed Base64
+0.5.11      native backend hardening and no silent C fallback
 0.5.x       patches
 1.0         stability freeze
 ```

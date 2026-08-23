@@ -109,6 +109,27 @@ env MAKO_CACHE="$CACHE/cmap" "$MAKO" test "$ROOT/examples/testing/cmap_stress_te
 MAKO_BIN="$MAKO" MAKO_CACHE="$CACHE/stdlib" "$ROOT/scripts/stdlib-gate.sh"
 "$ROOT/scripts/stdlib-safety-audit.sh"
 
+# Native is the default direct backend; unsupported modes must fail closed with
+# an explicit C-backend pointer instead of silently compiling through C.
+expect_failure native-emit-c env MAKO_CACHE="$CACHE/native-emit-c" \
+    "$MAKO" build "$ROOT/examples/hello.mko" --emit-c
+expect_failure native-cross-wasm env MAKO_CACHE="$CACHE/native-cross-wasm" \
+    "$MAKO" build "$ROOT/examples/hello.mko" --target wasm32-wasip1 \
+    -o "$TMP/native-cross.wasm"
+expect_failure native-static-link env MAKO_CACHE="$CACHE/native-static-link" \
+    "$MAKO" build "$ROOT/examples/hello.mko" --static-link \
+    -o "$TMP/native-static"
+expect_failure native-thread-sanitize env MAKO_CACHE="$CACHE/native-thread-sanitize" \
+    "$MAKO" build "$ROOT/examples/hello.mko" --sanitize thread \
+    -o "$TMP/native-tsan"
+for label in native-emit-c native-cross-wasm native-static-link native-thread-sanitize; do
+    if ! rg -q -- "--backend c" "$TMP/$label.out"; then
+        echo "claims-gate: $label did not point at explicit --backend c" >&2
+        cat "$TMP/$label.out" >&2
+        exit 1
+    fi
+done
+
 # A release cache must distinguish the documented default (-O3 -flto) from the
 # explicit MAKO_NO_LTO opt-out.  This catches stale optimized objects being
 # silently reused across materially different release builds.
@@ -134,18 +155,18 @@ if command -v zig >/dev/null 2>&1; then
     ZIG_GLOBAL_CACHE_DIR="$CROSS_ROOT/zig-global-cache"
     export ZIG_LOCAL_CACHE_DIR ZIG_GLOBAL_CACHE_DIR
     mkdir -p "$CROSS_ROOT" "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
-    MAKO_CACHE="$CACHE/cross-windows" "$MAKO" build --release \
+    MAKO_CACHE="$CACHE/cross-windows" "$MAKO" build --release --backend c \
         "$ROOT/examples/hello.mko" --target x86_64-pc-windows-gnu \
         -o "$CROSS_ROOT/hello.exe"
     "$ROOT/scripts/verify-target-artifact.sh" \
         x86_64-pc-windows-gnu "$CROSS_ROOT/hello.exe"
-    MAKO_CACHE="$CACHE/cross-wasi" "$MAKO" build --release \
+    MAKO_CACHE="$CACHE/cross-wasi" "$MAKO" build --release --backend c \
         "$ROOT/examples/hello.mko" --target wasm32-wasip1 \
         -o "$CROSS_ROOT/hello.wasm"
     "$ROOT/scripts/verify-target-artifact.sh" \
         wasm32-wasip1 "$CROSS_ROOT/hello.wasm"
     for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
-        MAKO_CACHE="$CACHE/cross-$target" "$MAKO" build --release \
+        MAKO_CACHE="$CACHE/cross-$target" "$MAKO" build --release --backend c \
             "$ROOT/examples/hello.mko" --target "$target" \
             -o "$CROSS_ROOT/$target"
         "$ROOT/scripts/verify-target-artifact.sh" \

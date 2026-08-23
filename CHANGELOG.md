@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.5.11 — 2026-08-23 (native backend hardening)
+
+### Backend policy
+
+- Removed the remaining implicit native-to-C mode fallback: unsupported
+  native/LLVM modes now hard-error everywhere and point users at explicit
+  `--backend c`.
+- Added Rust policy tests covering native `--emit-c`, `--target wasm32-wasip1`,
+  `--static-link`, and `--sanitize thread` refusal, while keeping native
+  `--sanitize address|leak` on the direct backend.
+
+### CI
+
+- Promoted the Linux/macOS native backend full `examples/testing` suite from a
+  warning-only CI step to a hard gate.
+
+### Verification
+
+- Full native backend suite passed locally: `420 passed, 0 failed`.
+- C remains the oracle backend, but the compiler no longer silently swaps a
+  direct backend request to C.
+
 ## 0.5.10 — 2026-08-23 (package-local malformed codec coverage)
 
 ### Runtime

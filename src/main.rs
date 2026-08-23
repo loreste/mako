@@ -115,9 +115,9 @@ fn backend_label(backend: BackendCli) -> &'static str {
 
 /// Check whether the direct backend supports the requested mode.
 ///
-/// When `auto_fallback` is true (default invocation — user did not explicitly
-/// pass `--backend native`), silently falls back to C for unsupported modes.
-/// When false (user explicitly chose `--backend native`), hard-errors.
+/// 0.5.11 policy: unsupported native/LLVM modes hard-error everywhere. The C
+/// backend remains the oracle, but selecting it must be explicit (`--backend c`);
+/// the compiler must not silently swap a direct backend request to C.
 fn validate_direct_backend_modes(
     backend: BackendCli,
     level: OptLevel,
@@ -129,17 +129,6 @@ fn validate_direct_backend_modes(
     }
     let name = backend_label(backend);
     let use_c = "use `--backend c` (or drop the unsupported flag)";
-
-    // Auto-fallback: when native is the default (not explicitly requested)
-    // and a mode is incompatible, silently use C instead of erroring.
-    let needs_c = emit_c
-        || opts.target.is_some()
-        || matches!(opts.sanitize.as_deref(), Some(s) if !matches!(s, "leak" | "address"))
-        || opts.static_link;
-    let explicit_native = std::env::args().any(|a| a == "--backend" || a.starts_with("--backend="));
-    if needs_c && !explicit_native {
-        return Ok(BackendCli::C);
-    }
 
     if emit_c {
         emit_plain_error(&format!(
@@ -185,7 +174,7 @@ fn validate_direct_backend_modes(
     }
     if opts.static_link {
         emit_plain_error(&format!(
-            "--static is not implemented for --backend {name}; {use_c}"
+            "--static-link is not implemented for --backend {name}; {use_c}"
         ));
         return Err(());
     }
@@ -5543,7 +5532,10 @@ mod lint_cli_tests {
 
 #[cfg(test)]
 mod build_policy_tests {
-    use super::{effective_static_link, static_link_default};
+    use super::{
+        effective_static_link, static_link_default, validate_direct_backend_modes, BackendCli,
+        BuildOpts, OptLevel, OverflowMode,
+    };
 
     #[test]
     fn linux_musl_targets_default_to_static() {
@@ -5570,6 +5562,63 @@ mod build_policy_tests {
             Some("x86_64-unknown-linux-musl"),
             true,
             true
+        ));
+    }
+
+    fn base_opts() -> BuildOpts {
+        BuildOpts {
+            target: None,
+            sanitize: None,
+            static_link: false,
+            overflow: OverflowMode::Wrap,
+            bounds_always: false,
+            native_sources: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn native_unsupported_modes_do_not_fallback_to_c() {
+        let mut opts = base_opts();
+        assert!(
+            validate_direct_backend_modes(BackendCli::Native, OptLevel::Debug, &opts, true)
+                .is_err()
+        );
+
+        opts = base_opts();
+        opts.target = Some("wasm32-wasip1".into());
+        assert!(
+            validate_direct_backend_modes(BackendCli::Native, OptLevel::Debug, &opts, false)
+                .is_err()
+        );
+
+        opts = base_opts();
+        opts.static_link = true;
+        assert!(
+            validate_direct_backend_modes(BackendCli::Native, OptLevel::Debug, &opts, false)
+                .is_err()
+        );
+
+        opts = base_opts();
+        opts.sanitize = Some("thread".into());
+        assert!(
+            validate_direct_backend_modes(BackendCli::Native, OptLevel::Debug, &opts, false)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn native_supported_sanitizers_stay_native() {
+        let mut opts = base_opts();
+        opts.sanitize = Some("address".into());
+        assert!(matches!(
+            validate_direct_backend_modes(BackendCli::Native, OptLevel::Debug, &opts, false),
+            Ok(BackendCli::Native)
+        ));
+
+        opts.sanitize = Some("leak".into());
+        assert!(matches!(
+            validate_direct_backend_modes(BackendCli::Native, OptLevel::Debug, &opts, false),
+            Ok(BackendCli::Native)
         ));
     }
 }

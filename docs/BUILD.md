@@ -1,4 +1,4 @@
-# Mako builds (v0.5.10)
+# Mako builds (v0.5.11)
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — ship small patches often.
 
@@ -44,7 +44,7 @@ Independent object units compile in parallel (owned jobs + channels — no share
 | **native** (default) | **Bundled LLD** — no system tools | `gcc`/`clang` for linking | `clang` |
 | **c** | `clang` (compile + link) | `gcc`/`clang` | `clang` |
 | **llvm** | **Bundled LLD** | `gcc`/`clang` for linking | `clang` |
-| wasm / `--emit-c` / `--sanitize` / cross | Always uses C backend + system compiler |
+| wasm / `--emit-c` / unsupported sanitizers / cross | Use explicit `--backend c` + system compiler |
 
 ## Backend policy
 
@@ -53,8 +53,8 @@ unsupported constructs hard-error on native/LLVM rather than dropping to C.
 
 | Backend | CLI | Role | When to use |
 |---------|-----|------|-------------|
-| **C** (default) | `--backend c` | Mature Mako → C → system `cc` | Default; sanitizers; cross/`--target`; wasm; widest host support |
-| **Native** | `--backend native` | Shared IR → Cranelift object | Fast debug iteration; full language gate (`examples/testing` **367/367**) |
+| **C** | `--backend c` | Mature Mako → C → system `cc` | Explicit oracle; sanitizers; cross/`--target`; wasm; widest host support |
+| **Native** | `--backend native` | Shared IR → Cranelift object | Fast debug iteration; full language gate (`examples/testing` **420/420**) |
 | **LLVM** | `--backend llvm` | Shared IR → LLVM object (release only) | Optimizing release path when built with `--features llvm-backend` + bundled lld |
 
 **Recommended local workflow (0.5 prep):**
@@ -74,7 +74,7 @@ mako test examples/testing --backend c --sanitize address
 
 | Env | Meaning |
 |-----|---------|
-| `MAKO_BACKEND` | Default for `build` / `run` / `test` when CLI is still the default `c` |
+| `MAKO_BACKEND` | Default override for `build` / `run` / `test` when no explicit `--backend` is passed |
 | `MAKO_TEST_BACKEND` | Test-only override (checked before `MAKO_BACKEND`) |
 | Explicit `--backend …` | Always wins over env |
 
@@ -86,8 +86,8 @@ dedicated **macOS** job (`llvm-backend`) that bootstraps static lld and executes
 local/optional scripts. Install smoke: `scripts/install-smoke.sh` (`doctor` +
 init/run).
 
-**Product default:** remains **c** until 0.5.0 flips the default after policy +
-CI confidence; use env/`--backend` today for native-first workflows.
+**Product default:** native is the default debug path. Unsupported direct-backend
+modes hard-error; choose `--backend c` explicitly when you need C-only modes.
 
 ## Native / LLVM backends
 
@@ -110,7 +110,7 @@ a pointer at the C backend (**no silent fallback**).
 | `wasm32-wasip1` | yes | **hard-error** | **hard-error** |
 | `--sanitize=leak\|address` | yes | yes (see note) | yes (see note) |
 | `--sanitize=thread\|memory` / `--race` | yes | **hard-error** | **hard-error** |
-| `--static` | yes (non-macOS) | **hard-error** | **hard-error** |
+| `--static-link` | yes (non-macOS) | **hard-error** | **hard-error** |
 | `--emit-c` | yes | **hard-error** | **hard-error** |
 | `--overflow wrap` | yes | yes | yes |
 | `--overflow trap` | yes | yes (shared IR) | yes (shared IR) |
