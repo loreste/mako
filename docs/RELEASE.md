@@ -377,6 +377,7 @@ Layout inside tarball/zip:
 - [ ] `mako --version` matches `Cargo.toml`
 - [ ] `mako doctor` passes on a clean installed prefix
 - [ ] `mako update --from . --prefix <tmp>` refreshes a test prefix
+- [ ] `scripts/claims-gate.sh` uses checkout `std/` and `runtime/`; only set `MAKO_CLAIMS_STD` / `MAKO_CLAIMS_RUNTIME` for an intentional alternate audit
 - [ ] `scripts/package-release.*` artifact includes runtime headers + native support sources, stdlib, docs, editor scaffold, install/uninstall scripts, checksums
 - [ ] Unpacked artifact installs with `scripts/install.* --skip-build` and installed `mako doctor` passes
 - [ ] `scripts/install-release.sh --base-url file://<dist> --artifact <name>` verifies checksum and installs

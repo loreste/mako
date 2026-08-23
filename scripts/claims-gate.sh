@@ -6,8 +6,10 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 MAKO=${MAKO_BIN:-$ROOT/target/release/mako}
 # Prefer in-tree std/runtime so gates track the checkout, not a stale install.
-export MAKO_STD=${MAKO_STD:-$ROOT/std}
-export MAKO_RUNTIME=${MAKO_RUNTIME:-$ROOT/runtime}
+# A normal environment override would make this release gate verify old files
+# under ~/.local/share/mako; require an explicit claims-gate override instead.
+export MAKO_STD=${MAKO_CLAIMS_STD:-$ROOT/std}
+export MAKO_RUNTIME=${MAKO_CLAIMS_RUNTIME:-$ROOT/runtime}
 CACHE=${MAKO_CACHE:-/tmp/mako-claims-gate-cache-$(date +%s)}
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/mako-claims.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
