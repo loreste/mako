@@ -116,13 +116,13 @@ MAKO_BIN="$MAKO" MAKO_CACHE="$CACHE/stdlib" "$ROOT/scripts/stdlib-gate.sh"
 
 # Native is the default direct backend. Unsupported modes fail closed and point
 # at explicit --backend c instead of silently compiling through C.
-expect_failure native-emit-c env MAKO_CACHE="$CACHE/native-emit-c" \
+expect_failure native-emit-c env MAKO_BACKEND=native MAKO_CACHE="$CACHE/native-emit-c" \
   "$MAKO" build "$ROOT/examples/hello.mko" --emit-c
-expect_failure native-cross-wasm env MAKO_CACHE="$CACHE/native-cross-wasm" \
+expect_failure native-cross-wasm env MAKO_BACKEND=native MAKO_CACHE="$CACHE/native-cross-wasm" \
   "$MAKO" build "$ROOT/examples/hello.mko" --target wasm32-wasip1 -o "$TMP/native-cross.wasm"
-expect_failure native-static-link env MAKO_CACHE="$CACHE/native-static-link" \
+expect_failure native-static-link env MAKO_BACKEND=native MAKO_CACHE="$CACHE/native-static-link" \
   "$MAKO" build "$ROOT/examples/hello.mko" --static-link -o "$TMP/native-static"
-expect_failure native-thread-sanitize env MAKO_CACHE="$CACHE/native-thread-sanitize" \
+expect_failure native-thread-sanitize env MAKO_BACKEND=native MAKO_CACHE="$CACHE/native-thread-sanitize" \
   "$MAKO" build "$ROOT/examples/hello.mko" --sanitize thread -o "$TMP/native-tsan"
 
 for label in native-emit-c native-cross-wasm native-static-link native-thread-sanitize; do
