@@ -7654,14 +7654,41 @@ static inline MakoString mako_base64_decode(MakoString s) {
     size_t n = s.len;
     size_t cap = n / 4 * 3 + 4;
     char *o = (char *)malloc(cap + 1);
+    if (!o) abort();
+    size_t clean_len = 0;
+    size_t pad = 0;
+    int seen_pad = 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = s.data[i];
+        if (c == '\n' || c == '\r') continue;
+        if (c == '=') {
+            seen_pad = 1;
+            pad++;
+            clean_len++;
+            if (pad > 2) {
+                free(o);
+                return mako_str_from_cstr("");
+            }
+            continue;
+        }
+        if (seen_pad || mako_b64_val(c) < 0) {
+            free(o);
+            return mako_str_from_cstr("");
+        }
+        clean_len++;
+    }
+    if ((clean_len % 4) != 0) {
+        free(o);
+        return mako_str_from_cstr("");
+    }
     size_t j = 0;
     unsigned int buf = 0;
     int bits = 0;
     for (size_t i = 0; i < n; i++) {
         char c = s.data[i];
-        if (c == '=' || c == '\n' || c == '\r') continue;
+        if (c == '=') break;
+        if (c == '\n' || c == '\r') continue;
         int v = mako_b64_val(c);
-        if (v < 0) continue;
         buf = (buf << 6) | (unsigned)v;
         bits += 6;
         if (bits >= 8) {

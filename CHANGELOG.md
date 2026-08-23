@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.5.10 — 2026-08-23 (package-local malformed codec coverage)
+
+### Runtime
+
+- Hardened `base64_decode` on C and native runtime paths so malformed input,
+  invalid characters, impossible padding, and partial groups fail closed instead
+  of skipping bad bytes and returning garbage.
+
+### Testing
+
+- Added `stdlib_codec_malformed_test.mko` with package-local malformed-input
+  coverage for archive, image, binary codec, mail, XML, GraphQL, and gRPC
+  surfaces.
+- Strengthened `scripts/stdlib-safety-audit.sh` so the codec/parser safety
+  family requires the new package-local malformed-input fixture.
+
+### Verification
+
+- `stdlib_codec_malformed_test.mko` passed on default and C backends.
+- Full memory-safety, examples, claims, and strict Rust speed gates remain
+  mandatory for the 0.5.10 tag.
+
 ## 0.5.9 — 2026-08-22 (stdlib safety contracts)
 
 ### Tooling

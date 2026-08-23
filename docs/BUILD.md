@@ -1,4 +1,4 @@
-# Mako builds (v0.5.9)
+# Mako builds (v0.5.10)
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — ship small patches often.
 

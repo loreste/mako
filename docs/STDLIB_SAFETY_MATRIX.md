@@ -193,8 +193,10 @@ Status values:
 
 1. Keep all `checked-native` and `unsafe-boundary` packages classified by the
    contract-family audit.
-2. Add package-local malformed-input tests for `encoding/*`, `compress/*`, `archive/*`,
-   `image/*`, `regexp`, `graphql`, `grpc`, and protocol parsers.
+2. Keep package-local malformed-input tests for `encoding/*`, `compress/*`,
+   `archive/*`, `image/*`, `graphql`, `grpc`, and protocol parsers in
+   `stdlib_codec_malformed_test.mko`; broaden `regexp` and deeper protocol
+   parsers as surfaces grow.
 3. Add handle lifecycle tests for `net/*`, `crypto/tls`, `database/sql`,
    `sync/*`, `timer`, `plugin`, `syscall`, `os/*`, and messaging packages.
 4. Run sanitizer gates over the native-backed stdlib paths and record evidence

@@ -115,6 +115,11 @@ contract_families = {
             "sip_test.mko": ["sip_header", "sip_msg_complete"],
             "yaml_toml_test.mko": ["TestYaml", "TestToml"],
             "serialization_formats_test.mko": ["TestYamlTomlSeeds", "TestBinaryFormatSeeds"],
+            "stdlib_codec_malformed_test.mko": [
+                "TestCodecMalformedPackageLocal",
+                "TestArchiveImageMalformedPackageLocal",
+                "TestProtocolMalformedPackageLocal",
+            ],
         },
     },
     "crypto-secret": {

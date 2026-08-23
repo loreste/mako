@@ -30,6 +30,8 @@ Required evidence:
   and JSON-RPC/textproto escape behavior;
 - codec tests for CBOR, MessagePack, Avro, YAML, TOML, JSON, CSV, protobuf,
   GraphQL, gRPC, and SIP framing;
+- package-local malformed-input tests for archive, image, binary codec, mail,
+  XML, GraphQL, and gRPC fail-closed behavior;
 - full `examples/testing` and `memory-safety-gate.sh` coverage for release
   claims.
 

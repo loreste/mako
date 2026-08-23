@@ -1,13 +1,13 @@
 # Mako release & cross-platform guide
 
-**Product version:** **0.5.9** (`Cargo.toml` / `mako version`);
-last published tag **v0.5.8**.
-**Tree status:** `examples/testing` inventory **419** `*_test.mko` files
-(2026-08-22): default **419 passed, 0 failed**; C **419 passed, 0 failed**.
+**Product version:** **0.5.10** (`Cargo.toml` / `mako version`);
+last published tag **v0.5.10**.
+**Tree status:** `examples/testing` inventory **420** `*_test.mko` files
+(2026-08-23): default **420 passed, 0 failed**; C **420 passed, 0 failed**.
 **Versioning:** small patches preferred — [VERSIONING.md](VERSIONING.md).
 **Backends:** default **c**; recommend `MAKO_BACKEND=native` for debug and
 `--backend llvm --release` for optimizing builds (see [BUILD.md § Backend policy](BUILD.md)).
-**Train:** **0.5.9** stdlib safety contract families + enforced audit.
+**Train:** **0.5.10** package-local malformed codec coverage + fail-closed Base64.
 **Modes:** native/LLVM refuse sanitize/static/cross/wasm/emit-c — use `--backend c` (see [BUILD.md § Modes matrix](BUILD.md)).
 **Published release:** last tagged GitHub release may lag the tree — check
 [releases](https://github.com/loreste/mako/releases). Platform-specific workflow

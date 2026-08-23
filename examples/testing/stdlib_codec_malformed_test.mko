@@ -1,0 +1,76 @@
+// Package-local malformed-input coverage for parser/codec stdlib surfaces.
+// These assertions are deliberately fail-closed: bad wire data must return an
+// empty/default result, never echo unchecked input or read past bounds.
+
+pull "mime/quotedprintable"
+
+fn TestCodecMalformedPackageLocal() {
+    assert_eq_str(base64_decode("not@@base64"), "")
+    assert_eq_str(base64_decode("="), "")
+    assert_eq_str(hex_decode("f"), "")
+    assert_eq_str(hex_decode("zz"), "")
+
+    let qp1, qpe1 = quotedprintable.decode("=")
+    assert_eq_str(qp1, "")
+    assert(str_len(qpe1) > 0)
+    let qp2, qpe2 = quotedprintable.decode("=GG")
+    assert_eq_str(qp2, "")
+    assert(str_len(qpe2) > 0)
+
+    assert_eq(msgpack_decode_int(""), 0)
+    assert_eq_str(msgpack_decode_string(""), "")
+    assert_eq(len(msgpack_decode_array_int("")), 0)
+
+    assert_eq(cbor_decode_int(""), 0)
+    assert_eq_str(cbor_decode_string(""), "")
+    assert_eq(len(cbor_decode_array_int("")), 0)
+
+    assert_eq(avro_decode_long(""), 0)
+    assert_eq_str(avro_decode_string(""), "")
+    assert_eq(len(avro_decode_array_long("")), 0)
+
+    assert_eq(pb_decode_varint(""), 0)
+    assert(pb_varint_len("") <= 0)
+    assert(pb_bytes_len("") <= 0)
+    assert_eq_str(pb_simple_name(""), "")
+    assert_eq(pb_simple_id(""), 0)
+}
+
+fn TestArchiveImageMalformedPackageLocal() {
+    assert_eq_str(zip_first_name("/tmp/mako-no-such-zip-file.zip"), "")
+    assert_eq_str(zip_read_file("/tmp/mako-no-such-zip-file.zip", "x"), "")
+    assert_eq(len(zip_list("/tmp/mako-no-such-zip-file.zip")), 0)
+    assert_eq_str(tar_first_name("/tmp/mako-no-such-tar-file.tar"), "")
+
+    if png_available() == 1 {
+        assert_eq(png_width("not-png"), 0)
+        assert_eq(png_height("not-png"), 0)
+        assert_eq_str(png_decode_gray("not-png"), "")
+    }
+
+    assert_eq(jpeg_width("not-jpeg"), 0)
+    assert_eq(jpeg_height("not-jpeg"), 0)
+    assert_eq(jpeg_has_sof0("not-jpeg"), 0)
+    assert_eq_str(jpeg_decode_gray("not-jpeg"), "")
+
+    assert_eq(gif_width("not-gif"), 0)
+    assert_eq(gif_height("not-gif"), 0)
+    assert_eq_str(gif_decode_rgb("not-gif"), "")
+}
+
+fn TestProtocolMalformedPackageLocal() {
+    assert_eq_str(grpc_message_payload(""), "")
+    assert_eq_str(grpc_message_payload("abc"), "")
+
+    assert_eq(graphql_is_query(""), 0)
+    assert_eq(graphql_is_mutation("{ missing"), 0)
+    assert_eq_str(graphql_operation_name("query {"), "")
+    assert_eq(graphql_has_field("", "health"), 0)
+
+    assert_eq(mail_address_ok("not an address"), 0)
+    assert_eq(mail_address_ok(mail_parse_address("not an address")), 0)
+    assert_eq_str(mail_header_get("BadHeader\r\n", "Subject"), "")
+
+    assert_eq_str(xml_tag_text("<a>", "a"), "")
+    assert_eq_str(xml_tag_text("", "a"), "")
+}

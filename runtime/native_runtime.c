@@ -3689,14 +3689,40 @@ MakoNativeString *mako_native_base64_decode_ptr(const MakoNativeString *s) {
     size_t cap = n / 4 * 3 + 4;
     char *o = malloc(cap + 1);
     if (!o) abort();
+    const char *data = s && s->data ? s->data : "";
+    size_t clean_len = 0;
+    size_t pad = 0;
+    int seen_pad = 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = data[i];
+        if (c == '\n' || c == '\r') continue;
+        if (c == '=') {
+            seen_pad = 1;
+            pad++;
+            clean_len++;
+            if (pad > 2) {
+                free(o);
+                return mako_native_string_literal_ptr("", 0);
+            }
+            continue;
+        }
+        if (seen_pad || mako_native_b64_val(c) < 0) {
+            free(o);
+            return mako_native_string_literal_ptr("", 0);
+        }
+        clean_len++;
+    }
+    if ((clean_len % 4) != 0) {
+        free(o);
+        return mako_native_string_literal_ptr("", 0);
+    }
     size_t j = 0;
     unsigned int buf = 0;
     int bits = 0;
-    const char *data = s && s->data ? s->data : "";
     for (size_t i = 0; i < n; i++) {
         if (data[i] == '=') break;
+        if (data[i] == '\n' || data[i] == '\r') continue;
         int v = mako_native_b64_val(data[i]);
-        if (v < 0) continue;
         buf = (buf << 6) | (unsigned int)v;
         bits += 6;
         if (bits >= 8) {

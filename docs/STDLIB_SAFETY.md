@@ -80,6 +80,8 @@ stdlib parity** until these are closed:
 - every `checked-native` package maps to an enforced safety contract family and
   has negative/lifecycle fixture coverage;
 - parser/codec packages have malformed-input coverage and overflow guards;
+- package-local parser/codec malformed-input fixtures stay enforced by
+  `scripts/stdlib-safety-audit.sh`;
 - dynamic/plugin/syscall/mmap-like surfaces are separated from the default safe
   claim unless their handles are fully checked;
 - sanitizer gates cover the native-backed stdlib paths they claim to protect;

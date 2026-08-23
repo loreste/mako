@@ -2,10 +2,10 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.5.9**. Patch train: **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
+**Product tip:** **0.5.10**. Patch train: **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
 **0.5.2** runtime trust soaks, **0.5.5** CI/OpaqueHandle, **0.5.7** stdlib expansion,
 **0.5.8** memory-safety gates and claims CI, **0.5.9** stdlib safety
-contract-family enforcement.
+contract-family enforcement, **0.5.10** package-local malformed codec coverage.
 See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 
 Mako's product contract is:

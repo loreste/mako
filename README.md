@@ -4,7 +4,7 @@ Mako is a compiled language for backend and systems work. You write `.mko`
 files; Mako turns them into standalone native binaries — no garbage collector,
 no VM, nothing extra to install next to them at runtime.
 
-**Status: alpha (v0.5.9).** It works, it compiles real programs, people have
+**Status: alpha (v0.5.10).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -111,9 +111,9 @@ what is a capability equivalent, and what is intentionally out (`unsafe`,
 
 **Backends.** Native object code is the default (Cranelift). The C backend
 remains available via `--backend c` and is used automatically for sanitizers,
-cross-compilation, and emit-c. The `examples/testing` corpus is **419**
-`*_test.mko` files; measured **2026-08-22** default **419 passed, 0 failed**,
-C **419 passed, 0 failed**. Both backends produce standalone binaries. LLVM release builds available with `--backend llvm --release`.
+cross-compilation, and emit-c. The `examples/testing` corpus is **420**
+`*_test.mko` files; measured **2026-08-23** default **420 passed, 0 failed**,
+C **420 passed, 0 failed**. Both backends produce standalone binaries. LLVM release builds available with `--backend llvm --release`.
 On macOS, the native backend ships with a bundled linker (LLD) — no clang or
 Xcode required. On Linux, `gcc` or `clang` is needed for linking.
 
@@ -214,8 +214,8 @@ mako test -r TestAdd -v                   # filter + verbose
 mako test --sanitize address examples/testing  # under ASan
 ```
 
-419 `*_test.mko` files under `examples/testing` (inventory 2026-08-22).
-That day: default 419 passed / 0 failed; C 419 passed / 0 failed. The suite
+420 `*_test.mko` files under `examples/testing` (inventory 2026-08-23).
+That day: default 420 passed / 0 failed; C 420 passed / 0 failed. The suite
 is exercised under ASan and UBSan in CI.
 A focused concurrency subset is exercised under TSan.
 
