@@ -8,6 +8,7 @@ on:
 
 env:
   MAKO_GFX_HEADLESS: "1"
+  MAKO_STD: ${{ github.workspace }}/std
 
 jobs:
   native:

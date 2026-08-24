@@ -19,6 +19,8 @@
   warning-only CI step to a hard gate.
 - Added focused native/C regression coverage for `strings.fields_fn` callback
   splitting across ASCII and UTF-8 input.
+- Pinned CI stdlib resolution to the checked-out `std/` tree so native/C gates
+  cannot accidentally run a new compiler against stale installed stdlib files.
 
 ### Verification
 
