@@ -284,7 +284,8 @@ fn fields_fn(s: string, is_sep: fn(int) -> bool) -> []string {
         let r = utf8_decode_rune(s, i)
         let mut step = utf8_decode_size(s, i)
         if step <= 0 { step = 1 }
-        if is_sep(r) {
+        let sep: bool = is_sep(r)
+        if sep {
             if in_field {
                 out = append(out, field)
                 field = ""
