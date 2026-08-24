@@ -27,6 +27,8 @@
 - Full native backend suite passed locally: `421 passed, 0 failed`.
 - Fixed the Linux native full-suite failure where `strings.fields_fn` could
   return an empty result under the native backend.
+- Hardened native first-class `fn(int)->bool` condition calls so Linux ABI
+  high bits cannot make a false callback result read as true.
 - C remains the oracle backend, but the compiler no longer silently swaps a
   direct backend request to C.
 

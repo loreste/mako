@@ -4425,7 +4425,12 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 let owned_before = self.heap_owned.clone();
                 let locals_before = self.locals.clone();
-                let (condition, ty, condition_owned) = self.lower_expr(cond)?;
+                let (condition, ty, condition_owned) =
+                    if let Some(condition) = self.lower_fnptr_bool_condition(cond)? {
+                        (condition, Type::I1, false)
+                    } else {
+                        self.lower_expr(cond)?
+                    };
                 if condition_owned {
                     return Err(IrError::new("native IR: owned string condition"));
                 }
@@ -5612,6 +5617,53 @@ impl<'a> FunctionLowerer<'a> {
             ret: Some(Type::FnPtr),
         });
         Ok((out, Type::FnPtr, true))
+    }
+
+    /// Call a one-argument function pointer in a boolean condition.
+    fn lower_fnptr_bool_condition(&mut self, cond: &Expr) -> Result<Option<Value>, IrError> {
+        let Expr::Call { callee, args } = cond else {
+            return Ok(None);
+        };
+        if args.len() != 1 {
+            return Ok(None);
+        }
+        let Expr::Ident(function) = callee.as_ref() else {
+            return Ok(None);
+        };
+        let Some((slot, Type::FnPtr)) = self.locals.get(function).copied() else {
+            return Ok(None);
+        };
+
+        let fp = self.value();
+        self.emit(Inst::Load {
+            out: fp,
+            ptr: slot,
+            ty: Type::FnPtr,
+        });
+        let (arg, ty, owned) = self.lower_expr(&args[0])?;
+        if owned || ty != Type::I64 {
+            return Err(IrError::new(
+                "native IR: fn pointer bool condition expects an int argument",
+            ));
+        }
+
+        let raw = self.value();
+        self.emit(Inst::Call {
+            out: Some(raw),
+            function: "mako_native_fn_call1_bool".into(),
+            args: vec![fp, arg],
+            ret: Some(Type::I64),
+        });
+        let zero = self.const_int(0, Type::I64);
+        let out = self.value();
+        self.emit(Inst::Binary {
+            out,
+            op: BinOp::Ne,
+            left: raw,
+            right: zero,
+            ty: Type::I64,
+        });
+        Ok(Some(out))
     }
 
     /// Call through a function pointer expression.

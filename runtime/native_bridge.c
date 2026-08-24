@@ -10024,6 +10024,14 @@ int64_t mako_native_fn_call1(int64_t fbox, int64_t a0) {
         return ((int64_t (*)(void *, int64_t))f->fn)(f->env, a0);
     return ((int64_t (*)(int64_t))f->fn)(a0);
 }
+int64_t mako_native_fn_call1_bool(int64_t fbox, int64_t a0) {
+    if (!fbox) return 0;
+    MakoFn *f = (MakoFn *)(intptr_t)fbox;
+    int32_t ret = f->env
+        ? ((int32_t (*)(void *, int64_t))f->fn)(f->env, a0)
+        : ((int32_t (*)(int64_t))f->fn)(a0);
+    return ret ? 1 : 0;
+}
 int64_t mako_native_fn_call2(int64_t fbox, int64_t a0, int64_t a1) {
     if (!fbox) return 0;
     MakoFn *f = (MakoFn *)(intptr_t)fbox;
