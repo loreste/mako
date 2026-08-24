@@ -206,11 +206,11 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` (inventory) | **420** `*_test.mko` files; **420 passed, 0 failed** (2026-08-23) |
-| `mako test examples/testing --backend c` | **420 passed, 0 failed** (2026-08-23) |
-| `mako test examples/testing --backend native` | **420 passed, 0 failed** (2026-08-23); Linux/macOS CI hard gate in 0.5.11 |
-| Memory-safety gate | **Passed** (2026-08-22): no GC path, ASan contract fixture, slice RSS soak, long-run ownership/RSS soak |
-| Claims/speed gate | **Passed** (2026-08-22): strict Rust gate fib `0.20x`, slice `0.38x`, map `0.16x` Mako/Rust |
+| `mako test examples/testing` (inventory) | **421** `*_test.mko` files; native suite **421 passed, 0 failed** locally (2026-08-24) |
+| `mako test examples/testing --backend c` | **421 passed, 0 failed** in CI default C suite (2026-08-24) |
+| `mako test examples/testing --backend native` | **421 passed, 0 failed** locally (2026-08-24); Linux/macOS CI hard gate in 0.5.11 |
+| Memory-safety gate | **Passed** (2026-08-24): no GC path, ASan contract fixture, slice RSS soak, long-run ownership/RSS soak |
+| Claims/speed gate | **Passed** (2026-08-24): strict Rust gate fib `0.10x`, slice `0.51x`, map `0.14x` Mako/Rust |
 | Stdlib safety contracts | **Passed** (2026-08-22): 144 std files, 102 checked-native, 38 safe, 4 unsafe-boundary, 3 enforced contract families |
 | Package-local malformed codec coverage | **Passed** (2026-08-23): archive/image/protocol and binary codec malformed-input fixture on default + C backends |
 | GC removal regression checks | PASS — removed builtin and legacy `[package] gc = true` both fail, including isolated cache paths |

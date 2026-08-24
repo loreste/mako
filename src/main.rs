@@ -2624,11 +2624,9 @@ fn run_file_json(file: &Path) -> tooling::TestExecution {
             );
         }
     };
-    let child = match Command::new(&out_bin)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+    let mut cmd = Command::new(&out_bin);
+    prepare_test_command(&mut cmd);
+    let child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(child) => child,
         Err(error) => {
             return tooling::TestExecution::failed(
@@ -2681,6 +2679,7 @@ fn run_test_package(
     let out_bin = compile_test_package(file, program, test_fns, sanitize, backend, native_sources)?;
     let timeout = test_timeout();
     let mut cmd = Command::new(&out_bin);
+    prepare_test_command(&mut cmd);
     cmd.env("MAKO_GFX_HEADLESS", "1");
     let child = cmd.spawn().map_err(|error| {
         emit_plain_error(&format!("could not run test binary: {error}"));
@@ -2717,6 +2716,7 @@ fn run_test_package_json(
             }
         };
     let mut cmd = Command::new(&out_bin);
+    prepare_test_command(&mut cmd);
     cmd.env("MAKO_GFX_HEADLESS", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -2838,6 +2838,7 @@ fn wait_for_test_process(
     timeout: std::time::Duration,
     capture: bool,
 ) -> tooling::TestExecution {
+    let child_id = child.id();
     let stdout_reader = if capture {
         read_pipe(child.stdout.take())
     } else {
@@ -2852,12 +2853,15 @@ fn wait_for_test_process(
     let failure = loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                cleanup_test_process_group(child_id);
                 break (!status.success()).then(|| test_process_failure(file, &status));
             }
             Ok(None) => {
                 if start.elapsed() >= timeout {
+                    terminate_test_process_group(child_id);
                     let _ = child.kill();
                     let _ = child.wait();
+                    cleanup_test_process_group(child_id);
                     let failure = tooling::TestFailure::new(
                         tooling::TestFailureKind::Timeout {
                             seconds: timeout.as_secs(),
@@ -2873,8 +2877,10 @@ fn wait_for_test_process(
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             Err(error) => {
+                terminate_test_process_group(child_id);
                 let _ = child.kill();
                 let _ = child.wait();
+                cleanup_test_process_group(child_id);
                 break Some(tooling::TestFailure::new(
                     tooling::TestFailureKind::Runner,
                     format!("could not wait on test binary: {error}"),
@@ -2928,6 +2934,37 @@ fn join_pipe(reader: Option<std::thread::JoinHandle<(Vec<u8>, bool)>>) -> (Strin
         .unwrap_or_default();
     (String::from_utf8_lossy(&bytes).into_owned(), truncated)
 }
+
+fn prepare_test_command(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+}
+
+#[cfg(unix)]
+fn terminate_test_process_group(child_id: u32) {
+    unsafe extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    const SIGTERM: i32 = 15;
+    let pgid = -(child_id as i32);
+    unsafe {
+        let _ = kill(pgid, SIGTERM);
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_test_process_group(_child_id: u32) {}
+
+#[cfg(unix)]
+fn cleanup_test_process_group(child_id: u32) {
+    terminate_test_process_group(child_id);
+}
+
+#[cfg(not(unix))]
+fn cleanup_test_process_group(_child_id: u32) {}
 
 fn test_process_failure(file: &Path, status: &std::process::ExitStatus) -> tooling::TestFailure {
     #[cfg(unix)]
@@ -5625,7 +5662,10 @@ mod build_policy_tests {
 
 #[cfg(test)]
 mod test_process_tests {
-    use super::{join_pipe, read_pipe, wait_for_test_process, TEST_OUTPUT_CAPTURE_LIMIT};
+    use super::{
+        join_pipe, prepare_test_command, read_pipe, wait_for_test_process,
+        TEST_OUTPUT_CAPTURE_LIMIT,
+    };
     use std::io::{self, Cursor, Read};
     use std::path::Path;
     use std::process::{Command, Stdio};
@@ -5689,6 +5729,27 @@ mod test_process_tests {
             failure.kind,
             super::tooling::TestFailureKind::Exit { code: 7 }
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn captured_test_process_reaps_background_pipe_holders() {
+        let mut command = shell("(sleep 30) & printf done");
+        prepare_test_command(&mut command);
+        let child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let execution = wait_for_test_process(
+            Path::new("sample_test.mko"),
+            child,
+            Duration::from_secs(10),
+            true,
+        );
+
+        assert!(execution.failure.is_none());
+        assert_eq!(execution.stdout.trim(), "done");
     }
 
     #[test]

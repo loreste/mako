@@ -194,6 +194,11 @@ mako test --count 3                     # run suite 3 times
 mako test --race                        # enable ThreadSanitizer
 ```
 
+Each compiled test fixture runs as a separate process. `MAKO_TEST_TIMEOUT_SECS`
+sets the per-fixture timeout; on Unix the runner also isolates fixtures in their
+own process group so timed-out or orphaned descendants are cleaned up with the
+test process.
+
 **Test file structure:**
 
 ```mko

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- 0.5.11 CI follow-up: native `fn(int)->bool` callback dispatch now reads the
+  Cranelift 8-bit bool return ABI, fixing the Ubuntu native
+  `strings.fields_fn` parity failure.
+- 0.5.11 CI follow-up: Unix test fixtures now run in their own process group so
+  timed-out/orphaned descendants cannot hold captured stdout/stderr pipes open.
+
 ## 0.5.11 — 2026-08-23 (native backend hardening)
 
 ### Backend policy
