@@ -17,10 +17,14 @@
 
 - Promoted the Linux/macOS native backend full `examples/testing` suite from a
   warning-only CI step to a hard gate.
+- Added focused native/C regression coverage for `strings.fields_fn` callback
+  splitting across ASCII and UTF-8 input.
 
 ### Verification
 
-- Full native backend suite passed locally: `420 passed, 0 failed`.
+- Full native backend suite passed locally: `421 passed, 0 failed`.
+- Fixed the Linux native full-suite failure where `strings.fields_fn` could
+  return an empty result under the native backend.
 - C remains the oracle backend, but the compiler no longer silently swaps a
   direct backend request to C.
 

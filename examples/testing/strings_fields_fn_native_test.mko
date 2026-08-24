@@ -1,0 +1,18 @@
+pull "strings"
+
+fn is_comma_or_e_acute(r: int) -> bool {
+    return r == 44 || r == 233
+}
+
+fn TestFieldsFnCallbackUtf8() {
+    let f = strings.fields_fn("a,b,,c", is_comma_or_e_acute)
+    assert_eq(len(f), 3)
+    assert_eq_str(f[0], "a")
+    assert_eq_str(f[1], "b")
+    assert_eq_str(f[2], "c")
+
+    let u = strings.fields_fn("caf" + utf8_encode_rune(233) + ",z", is_comma_or_e_acute)
+    assert_eq(len(u), 2)
+    assert_eq_str(u[0], "caf")
+    assert_eq_str(u[1], "z")
+}

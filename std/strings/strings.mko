@@ -278,7 +278,12 @@ fn fields_fn(s: string, is_sep: fn(int) -> bool) -> []string {
     let mut out: []string = []
     let mut field = ""
     let mut in_field = false
-    for _, r in range s {
+    let mut i = 0
+    let slen = str_len(s)
+    while i < slen {
+        let r = utf8_decode_rune(s, i)
+        let mut step = utf8_decode_size(s, i)
+        if step <= 0 { step = 1 }
         if is_sep(r) {
             if in_field {
                 out = append(out, field)
@@ -289,6 +294,7 @@ fn fields_fn(s: string, is_sep: fn(int) -> bool) -> []string {
             field = field + utf8_encode_rune(r)
             in_field = true
         }
+        i = i + step
     }
     if in_field {
         out = append(out, field)
