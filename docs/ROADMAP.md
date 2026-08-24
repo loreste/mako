@@ -1,13 +1,12 @@
 # Mako roadmap
 
-**Product version:** **0.5.11** (tip) · last tagged **v0.5.11** · Last sync: **2026-08-23**.
-**Suite:** **420** `examples/testing` `*_test.mko` files · **2026-08-23:**
-default **420 passed, 0 failed** · C **420 passed, 0 failed** ·
-native **420 passed, 0 failed** ·
-`cargo test` **152 passed, 0 failed** · memory-safety and claims gates passed locally.
+**Product version:** **0.5.12** (tip) · last tagged **v0.5.12** · Last sync: **2026-08-24**.
+**Suite:** **421** `examples/testing` `*_test.mko` files · **2026-08-24:**
+C **421 passed, 0 failed** · native **421 passed, 0 failed** ·
+`cargo test` **153 passed, 0 failed** · memory-safety, claims, sanitizer, speed, and CI honesty gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.11`** published; tip train **0.5.11**.
+**Release:** tag **`v0.5.12`** published; tip train **0.5.12**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -43,7 +42,8 @@ native **420 passed, 0 failed** ·
 | **0.5.8** | Memory-safety gates, native mutable slice ownership, claims CI | **Shipped** |
 | **0.5.9** | Stdlib safety contract families and enforced audit | **Shipped** |
 | **0.5.10** | Package-local malformed codec coverage and fail-closed Base64 | **Shipped** |
-| **0.5.11** | Native backend hardening and no silent C fallback | **Tip** |
+| **0.5.11** | Native backend hardening and no silent C fallback | **Shipped** |
+| **0.5.12** | Flake and CI honesty: hard gates plus explicit quarantine | **Tip** |
 | **0.5.x** | Further patches on 0.5 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
 
@@ -70,6 +70,7 @@ native **420 passed, 0 failed** ·
 0.5.9       stdlib safety contract families and enforced audit
 0.5.10      package-local malformed codec coverage and fail-closed Base64
 0.5.11      native backend hardening and no silent C fallback
+0.5.12      flake and CI honesty
 0.5.x       patches
 1.0         stability freeze
 ```

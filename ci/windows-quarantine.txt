@@ -1,0 +1,9 @@
+# Windows-only full-suite quarantine for CI honesty.
+#
+# Every entry must be a fixture path normalized with forward slashes.
+# The Windows quarantine gate fails on any unlisted failure and also fails when
+# a listed fixture starts passing, so the list cannot quietly grow or go stale.
+
+examples/testing/deterministic_sim_test.mko
+examples/testing/diameter_mgr_test.mko
+examples/testing/domain_tracks_test.mko

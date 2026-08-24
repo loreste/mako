@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.5.12 — 2026-08-24 (flake and CI honesty)
+
+### CI
+
+- Removed workflow-level `continue-on-error` soft failure paths from the main CI workflow.
+- Added a hard CI honesty policy job that rejects future `continue-on-error` usage and verifies quarantine plumbing.
+- Replaced the Windows warning-only full suite with an explicit quarantine gate: known platform failures live in `ci/windows-quarantine.txt`, unknown failures fail CI, and recovered quarantines fail until removed.
+- Made Windows LLVM/clang setup fail honestly when clang cannot be installed or found.
+
+### Testing
+
+- Added `scripts/windows-quarantine-gate.sh --self-test` so quarantine parsing is tested locally without a Windows runner.
+- Kept environmental smoke tests separate from hard gates; optional external dependency skips must stay explicit diagnostics, not green evidence.
+
+### 0.5.11 CI follow-up
+
 - 0.5.11 CI follow-up: native `fn(int)->bool` callback dispatch now reads the
   Cranelift 8-bit bool return ABI, fixing the Ubuntu native
   `strings.fields_fn` parity failure.

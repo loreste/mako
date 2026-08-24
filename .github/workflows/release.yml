@@ -39,10 +39,31 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang
 
-      - name: Install LLVM (Windows)
+      - name: Ensure LLVM/clang (Windows)
         if: runner.os == 'Windows'
-        run: choco install llvm -y
-        continue-on-error: true
+        shell: pwsh
+        run: |
+          $clang = Get-Command clang -ErrorAction SilentlyContinue
+          if (-not $clang) {
+            choco install llvm -y
+            $candidates = @(
+              "C:\Program Files\LLVM\bin",
+              "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin",
+              "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\x64\bin"
+            )
+            foreach ($c in $candidates) {
+              if (Test-Path "$c\clang.exe") {
+                echo "$c" >> $env:GITHUB_PATH
+                break
+              }
+            }
+          }
+          $clang = Get-Command clang -ErrorAction SilentlyContinue
+          if (-not $clang) {
+            Write-Error "clang is required for Windows release packaging"
+            exit 1
+          }
+          clang --version
 
       # macOS: bootstrap bundled LLD so the release binary is self-contained
       # (no clang/Xcode needed to compile or link Mako programs).

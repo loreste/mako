@@ -1,6 +1,7 @@
 name: Product seeds
 
-# Dry-run / optional product paths that need secrets or cross toolchains.
+# Product seed paths are explicit: dry-run packaging steps are hard checks, while
+# signing/notarization only runs on manual dispatch where secrets can be present.
 on:
   workflow_dispatch:
   push:
@@ -14,6 +15,7 @@ on:
 
 jobs:
   packaging-dry-run:
+    name: Packaging dry-run hard gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,20 +25,17 @@ jobs:
       - run: bash scripts/publish-winget-seed.sh
 
   cross-compile-seed:
+    name: Cross-compile seed hard gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install clang + zig (optional cross)
+      - name: Install clang + zig
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang
-          # zig often speeds cross; continue if missing
-          if ! command -v zig; then
-            curl -sL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | tar -xJ
-            echo "$PWD/zig-linux-x86_64-0.13.0" >> "$GITHUB_PATH"
-          fi
-        continue-on-error: true
+          sudo apt-get install -y clang xz-utils
+          curl -sL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | sudo tar -xJ -C /opt
+          echo "/opt/zig-linux-x86_64-0.13.0" >> "$GITHUB_PATH"
       - name: Build host mako
         run: cargo build --release
       - name: Cross-target seed script
@@ -44,20 +43,18 @@ jobs:
       - name: Smoke --target list via mako help
         run: ./target/release/mako build --help | head -40
 
-  # Signed MSI / notarize only when secrets present (otherwise skip).
-  release-sign-optional:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+  release-signing-smoke:
+    name: Release signing smoke (manual/secrets)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: MSI dry-run
         run: bash scripts/package-msi-seed.sh
-      - name: Notarize dry-run (needs APPLE_* secrets for real run)
+      - name: macOS notarize dry-run when APPLE_* secrets are present
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/package-notarize-seed.sh
-      - name: Note
-        run: |
-          echo "Real Authenticode/notarize requires secrets + platform runners."
-          echo "See scripts/package-msi-notes.md and package-macos-notarize-notes.md"
+      - name: Authenticode/notarize docs present
+        run: test -f scripts/package-msi-notes.md && test -f scripts/package-macos-notarize-notes.md

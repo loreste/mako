@@ -57,6 +57,7 @@ See [ROADMAP.md](ROADMAP.md) version map. Tip after `v0.4.5`:
 0.5.9  stdlib safety contract families and enforced audit
 0.5.10 package-local malformed codec coverage and fail-closed Base64
 0.5.11 native backend hardening and no silent C fallback
+0.5.12 flake and CI honesty
 0.5.x  further patches as needed
 1.0    stability freeze
 ```
