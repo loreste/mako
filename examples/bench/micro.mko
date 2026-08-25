@@ -1,6 +1,11 @@
-// High-res microbench: fib + pre-sized slice fill + pre-sized map.
+// High-res microbench: fib + struct + slice + pre-sized map + strings + channels.
 // Uses now_ns + black_box so -O3/LTO cannot erase kernels.
 // Compare: ./scripts/bench-vs-go-rust.sh
+
+struct Pair {
+    x: int
+    y: int
+}
 
 fn fib(n: int) -> int {
     if n < 2 {
@@ -32,6 +37,19 @@ fn bench_slice() -> int {
     return black_box(len(a))
 }
 
+fn bench_struct() -> int {
+    let n = black_box(1000000)
+    let mut sum = 0
+    let mut i = 0
+    while i < n {
+        let x = black_box(i)
+        let p = Pair { x: x, y: x + 1 }
+        sum = sum + p.x + p.y
+        i = i + 1
+    }
+    return black_box(sum)
+}
+
 fn bench_map() -> int {
     let n = black_box(50000)
     let mut m = make(map[int]int, n)
@@ -49,28 +67,72 @@ fn bench_map() -> int {
     return black_box(sum)
 }
 
+fn bench_strings() -> int {
+    let n = black_box(20000)
+    let mut total = 0
+    let mut i = 0
+    while i < n {
+        let s = "item-" + string(i)
+        total = total + len(s)
+        i = i + 1
+    }
+    return black_box(total)
+}
+
+fn bench_channels() -> int {
+    let n = black_box(50000)
+    let ch = chan_open[int](1)
+    let mut sum = 0
+    let mut i = 0
+    while i < n {
+        let _ = ch.send(black_box(i))
+        sum = sum + ch.recv()
+        i = i + 1
+    }
+    ch.close()
+    return black_box(sum)
+}
+
 fn main() {
     let _ = bench_fib()
+    let _ = bench_struct()
     let _ = bench_slice()
     let _ = bench_map()
+    let _ = bench_strings()
+    let _ = bench_channels()
 
     let t0 = now_ns()
     let f = bench_fib()
     let t1 = now_ns()
-    let s = bench_slice()
+    let st = bench_struct()
     let t2 = now_ns()
-    let m = bench_map()
+    let s = bench_slice()
     let t3 = now_ns()
+    let m = bench_map()
+    let t4 = now_ns()
+    let str = bench_strings()
+    let t5 = now_ns()
+    let ch = bench_channels()
+    let t6 = now_ns()
 
     print("lang")
     print("mako")
     print("fib30x5")
     print_int(f)
     print_int(t1 - t0)
+    print("struct1m")
+    print_int(st)
+    print_int(t2 - t1)
     print("slice100k")
     print_int(s)
-    print_int(t2 - t1)
+    print_int(t3 - t2)
     print("map50k")
     print_int(m)
-    print_int(t3 - t2)
+    print_int(t4 - t3)
+    print("string20k")
+    print_int(str)
+    print_int(t5 - t4)
+    print("chan50k")
+    print_int(ch)
+    print_int(t6 - t5)
 }

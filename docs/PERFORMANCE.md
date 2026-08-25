@@ -10,10 +10,14 @@ vs 148.9 ms (Mako C), 147.8 ms (hand C), 148.0 ms (Rust). Correctness gate:
 `scripts/llvm-backend-test.sh`. Those numbers are for that workload, not a
 ranking of languages.
 
-Performance is something we design for; it isn’t a finished claim. Coverage
-today is three microkernels — fib, slice, map. HTTP, JSON, allocation
-pressure, concurrent channels are in progress and not yet published with a
-method anyone can re-run cleanly.
+Performance is something we design for; it isn’t a finished claim. Mako 0.5.13
+locks workload-specific budgets in
+[`benchmarks/performance-contract.json`](../benchmarks/performance-contract.json)
+and CI enforces the reproducible subset with
+`./scripts/performance-contract.sh`. A faster-than-Rust statement applies only
+to rows marked `strict_rust_claim: true`; bounded channel send/recv is measured
+against Rust but remains a regression-only budget until the runtime closes that
+gap.
 
 Bias toward the fast design. Convenience that costs belongs off the hot path
 or behind an opt-in. Measure vs hand-C and Rust per workload
@@ -36,6 +40,7 @@ Don’t invent numbers. Re-run locally:
 # Microbenchmarks (fib, slice, map):
 ./scripts/bench-gate.sh
 ./scripts/bench-gate.sh 1.5   # stricter threshold
+./scripts/performance-contract.sh
 
 # Direct-native parity against Mako C, hand C, and Rust
 # (core ≤1.25×; map ≤2.50×; io ≤2.00×; + regression vs baselines JSON):
@@ -62,9 +67,15 @@ python3 scripts/bench-compile.py --output out/compile-bench.json
 python3 scripts/bench-compile.py --build --output out/compile-build-bench.json
 ```
 
-The CI bench gate verifies that three microkernels stay within 2× of a
-compiled baseline. This is a regression gate, not a general performance
-claim. Broader runtime benchmarks are tracked in `scripts/bench-http.sh`.
+The CI performance contract verifies six runtime kernels against matching Rust
+programs and parser hot-path smoke budgets. The strict faster-than-Rust claim
+set is `fib30x5`, `struct1m`, `slice100k`, `map50k`, and `string20k`, all capped
+at 1.5× Rust in the hard gate. `chan50k` is intentionally separate: it has a
+3.5× regression budget and is not a faster-than-Rust claim. Broader HTTP
+throughput is tracked in `scripts/bench-http.sh` with the method and minimum
+budget recorded in the contract JSON; CI keeps HTTP correctness/RSS as hard
+soak gates because load-generator availability and loopback scheduling are
+environmental.
 Compiler fixtures cover exact 1k, 10k, and 100k source sizes across four
 project shapes. CI validates the complete generated matrix on Linux, exercises
 a 10k full build there, and records a 1k smoke sample on every platform without

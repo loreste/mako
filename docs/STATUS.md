@@ -1,6 +1,6 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-08-24** · product **mako0.5.12** (tip; last tag **v0.5.12**) ·
+Last inventory: **2026-08-25** · product **mako0.5.13** (tip; last tag **v0.5.13**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
@@ -18,7 +18,7 @@ CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard fa
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.5.12** tip · last tag [**v0.5.12**](https://github.com/loreste/mako/releases/tag/v0.5.12) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.5.13** tip · last tag [**v0.5.13**](https://github.com/loreste/mako/releases/tag/v0.5.13) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -389,16 +389,16 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | `fan` uses HW concurrency (not fixed 4 threads) | Done |
 | `fan` on `[]float` (`mako_par_map_float`) | Done |
 | ShareInt/Arena rejected across kick | Done |
-| `scripts/bench-gate.sh` vs Rust (fib/slice/map, default ≤2.5×) | Done |
+| `scripts/performance-contract.sh` vs Rust (fib/struct/slice/map/string strict, channel regression-only) | Done |
 | `chan_open[string]` + kick with chan handle | Done |
 | `error_context` (wrap_err alias) | Done |
 | `mako lint --identity` (dual spellings as style) | Done |
 | Atomic `share` RC + `share_set` | Done |
 | `fan` on `[]string` (`mako_par_map_str`) | Done |
 | `error_join` combine Results | Done |
-| bench-gate default ≤2.0× Rust (fib/slice/map) | Done |
+| performance-contract strict Rust claims ≤1.5× (fib/struct/slice/map/string) | Done |
 | ShareInt + string kick auto-clone heap pack | Done |
-| bench-gate strict 1.5× (`MAKO_BENCH_STRICT=1` or arg) | Done (passes locally) |
+| `chan50k` regression-only budget ≤3.5× Rust | Done (not a speed claim) |
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 

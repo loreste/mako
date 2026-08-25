@@ -3176,12 +3176,13 @@ Test: `examples/testing/trace_log_test.mko`.
 | `--bounds always` | Legacy-compatible spelling; safe bounds checks are always retained |
 | `mako test --race` | ThreadSanitizer (also `mako build --sanitize thread`) |
 | `mako dev [file]` | Watch mtime → rebuild + rerun (hot reload seed) |
-| `./scripts/bench-gate.sh [2.0\|1.5]` | Microbench vs Rust (CI job on ubuntu) |
+| `./scripts/performance-contract.sh` | Runtime/parser performance contract (CI hard gate on ubuntu) |
+| `./scripts/bench-gate.sh [2.0\|1.5]` | Runtime microbench vs Rust (`fib`, `struct`, `slice`, `map`, `string`, `chan`) |
 
 Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
 `examples/bad/multi_error.mko` (`mako check` reports all top-level parse errors).
 
-**CI** (`.github/workflows/ci.yml`): native matrix · cross-smoke · **bench-gate** · **TSan** concurrency smoke, including fixed-seed channel/select stress. Replay locally with `MAKO_RT_STRESS_SEED=7 MAKO_RT_STRESS_ROUNDS=8 mako test --race examples/testing/chan_select_stress_test.mko`.
+**CI** (`.github/workflows/ci.yml`): native matrix · cross-smoke · **performance-contract** · **TSan** concurrency smoke, including fixed-seed channel/select stress. Replay locally with `MAKO_RT_STRESS_SEED=7 MAKO_RT_STRESS_ROUNDS=8 mako test --race examples/testing/chan_select_stress_test.mko`.
 
 ---
 

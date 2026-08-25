@@ -426,11 +426,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang
       - name: Build mako
         run: cargo build --release
-      - name: Run bench-gate (≤2.0× Rust)
+      - name: Run bench-gate contract budgets
         run: ./scripts/bench-gate.sh
 
   bench-gate-strict:
-    name: Bench gate strict 1.5×
+    name: Performance contract strict 1.5×
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -440,8 +440,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang
       - name: Build mako
         run: cargo build --release
-      - name: Run bench-gate 1.5×
-        run: ./scripts/bench-gate.sh 1.5
+      - name: Run performance contract
+        run: ./scripts/performance-contract.sh
 
   claims-gate:
     name: Product claims gate
@@ -451,7 +451,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install native dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libssl-dev libsqlite3-dev ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libssl-dev libsqlite3-dev ripgrep xz-utils
+          curl -sL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | sudo tar -xJ -C /opt
+          echo "/opt/zig-linux-x86_64-0.13.0" >> "$GITHUB_PATH"
       - name: Build mako
         run: cargo build --release
       - name: Verify claims and regression fixtures

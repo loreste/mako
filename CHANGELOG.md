@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.5.13 — 2026-08-25 (performance contract)
+
+### Performance
+
+- Added `benchmarks/performance-contract.json` as the release source of truth
+  for workload-specific speed budgets.
+- Extended the Rust comparison microbench from fib/slice/map to include
+  stack-struct field access, string conversion/concat/length, and bounded
+  channel send/recv.
+- Added `scripts/performance-contract.sh`, which enforces the strict
+  faster-than-Rust workloads and parser hot-path budgets in one CI gate.
+- Kept channel send/recv honest as a regression-only budget: it is measured
+  against Rust but is not claimed faster than Rust until the channel runtime is
+  tightened.
+
+### CI
+
+- Replaced the strict bench job with the performance-contract gate so CI checks
+  runtime ratios and parser budget metadata together.
+- Made missing `rustc` a hard failure for `scripts/bench-gate.sh`; the Rust
+  comparison can no longer silently skip.
+
 ## 0.5.12 — 2026-08-24 (flake and CI honesty)
 
 ### CI

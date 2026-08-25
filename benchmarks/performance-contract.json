@@ -1,0 +1,65 @@
+{
+  "schema": "mako.performance-contract.v1",
+  "version": "0.5.13",
+  "policy": "Ratios are median Mako release wall-clock time divided by the matching Rust release workload time. A lower ratio is better. Workloads with strict_rust_claim=true are capped at the strict Rust gate. Workloads without that flag are regression budgets only, not faster-than-Rust claims.",
+  "runtime_vs_rust": [
+    {
+      "name": "fib30x5",
+      "area": "scalar recursion",
+      "max_ratio_vs_rust": 1.5,
+      "strict_rust_claim": true
+    },
+    {
+      "name": "struct1m",
+      "area": "stack struct construction and field reads",
+      "max_ratio_vs_rust": 1.5,
+      "strict_rust_claim": true
+    },
+    {
+      "name": "slice100k",
+      "area": "pre-sized slice append",
+      "max_ratio_vs_rust": 1.5,
+      "strict_rust_claim": true
+    },
+    {
+      "name": "map50k",
+      "area": "pre-sized map insert and lookup",
+      "max_ratio_vs_rust": 1.5,
+      "strict_rust_claim": true
+    },
+    {
+      "name": "string20k",
+      "area": "string conversion, concat, and length",
+      "max_ratio_vs_rust": 1.5,
+      "strict_rust_claim": true
+    },
+    {
+      "name": "chan50k",
+      "area": "bounded channel send and recv",
+      "max_ratio_vs_rust": 3.5,
+      "strict_rust_claim": false,
+      "note": "Regression budget only. This workload is not part of faster-than-Rust claims until the channel runtime is tightened."
+    }
+  ],
+  "parser_hot_paths": [
+    {
+      "name": "single-1k-check-cold",
+      "command": "python3 scripts/bench-compile.py --sizes 1000 --shapes single --repeat 1 --output out/perf-contract-compile.json",
+      "metric": "fixtures[0].metrics.check.cold.median_ms",
+      "max_ms": 5000
+    },
+    {
+      "name": "backend-1k-check-cold",
+      "command": "python3 scripts/bench-compile.py --sizes 1000 --shapes backend --repeat 1 --output out/perf-contract-compile.json",
+      "metric": "fixtures[0].metrics.check.cold.median_ms",
+      "max_ms": 5000
+    }
+  ],
+  "http": {
+    "name": "loopback-http-throughput",
+    "command": "./scripts/bench-http.sh --duration 10 --connections 100 --threads 4",
+    "min_requests_per_second": 1000,
+    "hard_gate": false,
+    "reason": "Load generators and loopback scheduling are host-dependent. CI keeps HTTP soak as a hard correctness/RSS gate; throughput claims require this explicit command and setup."
+  }
+}

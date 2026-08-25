@@ -156,7 +156,9 @@ Parallelism should be **easy to spell** and **hard to misuse** (scoped, joinable
 Runnable: `examples/concurrency.mko`, `examples/parallel.mko` · tests:
 `crew_fan_test.mko`, `fan_struct_test.mko`, `fan_float_test.mko`, `kick_send_test.mko`.
 
-**CI speed bar:** `./scripts/bench-gate.sh` (ubuntu job; default ≤2.0× Rust).
+**CI speed bar:** `./scripts/performance-contract.sh` (ubuntu hard gate). The
+strict faster-than-Rust set is workload-specific and capped at ≤1.5× Rust;
+channel send/recv is measured as a regression budget, not a speed claim.
 
 ### Send-like kick (seed)
 
@@ -213,9 +215,10 @@ let ss = fan(["a", "b"], |x| x + "!")
 ### Speed gate
 
 ```bash
-./scripts/bench-gate.sh              # fib + slice + map vs Rust (default max 2.0×)
+./scripts/bench-gate.sh              # fib + struct + slice + map + string + chan vs Rust
 ./scripts/bench-gate.sh 1.5          # strict stretch goal
 MAKO_BENCH_STRICT=1 ./scripts/bench-gate.sh
+./scripts/performance-contract.sh    # 0.5.13 contract: runtime + parser budgets
 ./scripts/bench-vs-go-rust.sh        # full microbench table
 ```
 

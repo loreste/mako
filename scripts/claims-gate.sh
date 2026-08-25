@@ -146,9 +146,14 @@ if ! rg -q "object MISS" "$TMP/release-no-lto.log"; then
   exit 1
 fi
 
-# GitHub cross-artifact checks. Native-only claims gate remains usable without
-# installing a foreign-target toolchain.
-if command -v zig >/dev/null 2>&1; then
+# GitHub cross-artifact checks. Keep them hard on Linux/CI, where the release
+# workflow verifies foreign ELF/PE/WASI artifacts; non-Linux local runs can
+# force the same checks with MAKO_CLAIMS_CROSS=1.
+if [[ "${MAKO_CLAIMS_CROSS:-}" == "1" || "$(uname -s)" == "Linux" ]]; then
+  if ! command -v zig >/dev/null 2>&1; then
+    echo "claims-gate: zig required for cross-artifact checks on this host" >&2
+    exit 1
+  fi
   CROSS_ROOT="$TMP/cross-artifacts"
   ZIG_LOCAL_CACHE_DIR="$CROSS_ROOT/zig-cache"
   ZIG_GLOBAL_CACHE_DIR="$CROSS_ROOT/zig-global-cache"
@@ -175,7 +180,7 @@ if command -v zig >/dev/null 2>&1; then
       "$target" "$CROSS_ROOT/$target" --static
   done
 else
-  echo "claims-gate: cross-artifact checks skipped (zig not installed)"
+  echo "claims-gate: cross-artifact checks skipped on $(uname -s) (set MAKO_CLAIMS_CROSS=1 to force)"
 fi
 
 env MAKO_CACHE="$CACHE/identity" "$MAKO" lint --identity "$ROOT/examples/mako_style.mko"
