@@ -1339,6 +1339,25 @@ let _ = tcp_close(c)
 let peer = tcp_connect("127.0.0.1", 18082)
 ```
 
+### Unix sockets
+
+```mko
+let path = path_join(temp_dir(), "mako.sock")
+let _ = unix_unlink(path)
+let listener = unix_listen(path)
+let client = unix_connect(path)
+let server = unix_accept(listener)
+let _ = unix_write(client, "ping")
+let msg = unix_read(server, 16)
+let _ = unix_close(client)
+let _ = unix_close(server)
+let _ = unix_close(listener)
+let _ = unix_unlink(path)
+```
+
+Unix-domain stream sockets are POSIX-only. Empty or oversized paths fail with
+`-1`, and `unix_listen` never removes a stale path implicitly.
+
 ### Upstream pool & reverse proxy
 
 | Helper | Meaning |

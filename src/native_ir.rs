@@ -22202,6 +22202,30 @@ impl<'a> FunctionLowerer<'a> {
             "unix_socket_pair" if args.len() == 0 => {
                 Some(("mako_native_unix_socket_pair", &[], Some(Type::I64), false))
             }
+            "unix_listen" if args.len() == 1 => Some((
+                "mako_native_unix_listen_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "unix_accept" if args.len() == 1 => Some((
+                "mako_native_unix_accept",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "unix_connect" if args.len() == 1 => Some((
+                "mako_native_unix_connect_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "unix_unlink" if args.len() == 1 => Some((
+                "mako_native_unix_unlink_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
             "utf8_utf_max" if args.len() == 0 => {
                 Some(("mako_native_utf8_utf_max", &[], Some(Type::I64), false))
             }

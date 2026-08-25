@@ -4796,6 +4796,22 @@ impl TypeChecker {
             Type::Fn(vec![], Box::new(Type::Int)),
         );
         fns.insert(
+            "unix_listen".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "unix_accept".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "unix_connect".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "unix_unlink".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
             "unix_write".into(),
             Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
         );

@@ -21334,6 +21334,26 @@ impl Codegen {
                         "unix_socket_pair_peer" => {
                             return ("int64_t".into(), "mako_unix_socket_pair_peer()".into());
                         }
+                        "unix_listen" => {
+                            let (_, path) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("uxl");
+                            self.line(&format!("int64_t {tmp} = mako_unix_listen({path});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "unix_accept" => {
+                            let (_, fd) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_unix_accept({fd})"));
+                        }
+                        "unix_connect" => {
+                            let (_, path) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("uxc");
+                            self.line(&format!("int64_t {tmp} = mako_unix_connect({path});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "unix_unlink" => {
+                            let (_, path) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_unix_unlink({path})"));
+                        }
                         "unix_write" => {
                             let (_, fd) = self.emit_expr(&args[0]);
                             let (_, data) = self.emit_expr(&args[1]);

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Networking
+
+- Added POSIX path-based Unix-domain stream sockets: `unix_listen`,
+  `unix_accept`, `unix_connect`, and `unix_unlink`.
+- Added adversarial Unix socket path tests for empty/oversized paths, stale path
+  refusal, failed connect, invalid fd operations, and explicit cleanup.
+
 ## 0.5.14 — 2026-08-25 (stdlib safety completion)
 
 ### Safety

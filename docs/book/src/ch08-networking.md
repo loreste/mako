@@ -1422,6 +1422,7 @@ fn handle_form_submit(c: int) {
 | Event Loop | `evloop_new`, `evloop_add`, `evloop_wait`, `evloop_event_fd`, `evloop_close` |
 | Non-blocking I/O | `nb_listen`, `nb_accept`, `nb_read`, `nb_write`, `nb_close` |
 | Game UDP | `game_udp_bind`, `game_udp_recv`, `game_udp_send`, `game_udp_broadcast` |
+| Unix sockets | `unix_listen`, `unix_accept`, `unix_connect`, `unix_write`, `unix_read`, `unix_close`, `unix_unlink` |
 | HTTP Engine | `httpengine_new`, `httpengine_route`, `httpengine_start`, `httpengine_stop` |
 | Shutdown | `http_shutdown_begin`, `http_shutdown_requested`, `http_active_connections` |
 | Sessions/Auth | `session_id_new`, `cookie_get`, `cookie_make`, `auth_bearer`, `auth_check_bearer`, `csrf_token`, `csrf_check` |

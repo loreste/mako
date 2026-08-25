@@ -134,7 +134,7 @@ Status values:
 | `net/http/httptrace/httptrace.mko` | `checked-native` | event buffer ownership tests |
 | `net/http/httputil/httputil.mko` | `checked-native` | proxy escape and connection cleanup tests |
 | `net/mail/mail.mko` | `checked-native` | malformed address and header injection tests |
-| `net/net.mko` | `checked-native` | socket handle lifecycle and timeout tests |
+| `net/net.mko` | `checked-native` | socket handle lifecycle, Unix socket path bounds/cleanup, and timeout tests |
 | `net/netip/netip.mko` | `safe` | parse bounds and prefix tests |
 | `net/rpc/rpc.mko` | `checked-native` | JSON-RPC escape and malformed request tests |
 | `net/smtp/smtp.mko` | `checked-native` | STARTTLS verify policy and auth cleanup tests |

@@ -5260,6 +5260,22 @@ int64_t mako_native_unix_socket_pair(void) {
     return (int64_t)mako_unix_socket_pair();
 }
 
+int64_t mako_native_unix_listen_ptr(MakoNativeString *a0) {
+    return (int64_t)mako_unix_listen(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_unix_accept(int64_t a0) {
+    return (int64_t)mako_unix_accept(a0);
+}
+
+int64_t mako_native_unix_connect_ptr(MakoNativeString *a0) {
+    return (int64_t)mako_unix_connect(bridge_borrow_str(a0));
+}
+
+int64_t mako_native_unix_unlink_ptr(MakoNativeString *a0) {
+    return (int64_t)mako_unix_unlink(bridge_borrow_str(a0));
+}
+
 int64_t mako_native_utf8_utf_max(void) {
     return (int64_t)mako_utf8_utf_max();
 }

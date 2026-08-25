@@ -1,0 +1,51 @@
+fn TestUnixSocketPathRoundtrip() {
+    let path = path_join(temp_dir(), "mako_unix_socket_path_test.sock")
+    let _ = unix_unlink(path)
+
+    let lfd = unix_listen(path)
+    if lfd < 0 {
+        return
+    }
+
+    let cfd = unix_connect(path)
+    assert(cfd >= 0)
+    let sfd = unix_accept(lfd)
+    assert(sfd >= 0)
+
+    assert_eq(unix_write(cfd, "unix-ok"), 7)
+    assert_eq_str(unix_read(sfd, 16), "unix-ok")
+    assert_eq(unix_write(sfd, "reply"), 5)
+    assert_eq_str(unix_read(cfd, 16), "reply")
+
+    let _ = unix_close(cfd)
+    let _ = unix_close(sfd)
+    let _ = unix_close(lfd)
+    assert_eq(unix_unlink(path), 0)
+}
+
+fn TestUnixSocketPathAdversarial() {
+    let path = path_join(temp_dir(), "mako_unix_socket_path_adv.sock")
+    let _ = unix_unlink(path)
+
+    assert_eq(unix_listen(""), -1)
+    assert_eq(unix_connect(path), -1)
+
+    let too_long = "/tmp/mako_unix_socket_path_that_is_intentionally_far_too_long_for_sockaddr_un_sun_path_and_must_fail_closed_because_truncating_socket_paths_would_connect_to_the_wrong_endpoint.sock"
+    assert_eq(unix_listen(too_long), -1)
+    assert_eq(unix_connect(too_long), -1)
+
+    let lfd = unix_listen(path)
+    if lfd < 0 {
+        return
+    }
+
+    assert_eq(unix_listen(path), -1)
+    assert_eq(unix_accept(-1), -1)
+    assert_eq(unix_write(-1, "x"), -1)
+    assert_eq_str(unix_read(-1, 8), "")
+    assert_eq(unix_close(-1), 0)
+
+    let _ = unix_close(lfd)
+    assert_eq(unix_unlink(path), 0)
+    assert_eq(unix_unlink(path), -1)
+}

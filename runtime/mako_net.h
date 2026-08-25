@@ -974,9 +974,92 @@ static inline int64_t mako_unix_socket_pair_peer(void) {
     return mako_unix_socket_pair_last_peer;
 }
 
+#if !defined(_WIN32)
+static inline int mako_unix_path_ok(MakoString path, struct sockaddr_un *addr, socklen_t *len) {
+    if (!addr || !len || !path.data || path.len == 0) return 0;
+    if (path.len >= sizeof(addr->sun_path)) return 0;
+    memset(addr, 0, sizeof(*addr));
+    addr->sun_family = AF_UNIX;
+    memcpy(addr->sun_path, path.data, path.len);
+    addr->sun_path[path.len] = '\0';
+    *len = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + path.len + 1);
+    return 1;
+}
+#endif
+
+static inline int64_t mako_unix_listen(MakoString path) {
+#if !defined(_WIN32)
+    struct sockaddr_un addr;
+    socklen_t len = 0;
+    if (!mako_unix_path_ok(path, &addr, &len)) return -1;
+    mako_sock_t fd = mako_sock_create_af(AF_UNIX, SOCK_STREAM);
+    if (fd == MAKO_INVALID_SOCK) return -1;
+    if (bind(fd, (struct sockaddr *)&addr, len) != 0) {
+        mako_sock_close(fd);
+        return -1;
+    }
+    if (listen(fd, 128) != 0) {
+        mako_sock_close(fd);
+        return -1;
+    }
+    return (int64_t)fd;
+#else
+    (void)path;
+    return -1;
+#endif
+}
+
+static inline int64_t mako_unix_accept(int64_t listen_fd) {
+#if !defined(_WIN32)
+    if (listen_fd < 0) return -1;
+    mako_sock_t cfd = accept((mako_sock_t)listen_fd, NULL, NULL);
+    if (cfd == MAKO_INVALID_SOCK) return -1;
+    mako_sock_set_cloexec(cfd);
+    return (int64_t)cfd;
+#else
+    (void)listen_fd;
+    return -1;
+#endif
+}
+
+static inline int64_t mako_unix_connect(MakoString path) {
+#if !defined(_WIN32)
+    struct sockaddr_un addr;
+    socklen_t len = 0;
+    if (!mako_unix_path_ok(path, &addr, &len)) return -1;
+    mako_sock_t fd = mako_sock_create_af(AF_UNIX, SOCK_STREAM);
+    if (fd == MAKO_INVALID_SOCK) return -1;
+    if (connect(fd, (struct sockaddr *)&addr, len) != 0) {
+        mako_sock_close(fd);
+        return -1;
+    }
+    return (int64_t)fd;
+#else
+    (void)path;
+    return -1;
+#endif
+}
+
+static inline int64_t mako_unix_unlink(MakoString path) {
+#if !defined(_WIN32)
+    if (!path.data || path.len == 0 || path.len >= 4096) return -1;
+    char buf[4096];
+    memcpy(buf, path.data, path.len);
+    buf[path.len] = '\0';
+    return unlink(buf) == 0 ? 0 : -1;
+#else
+    (void)path;
+    return -1;
+#endif
+}
+
 static inline int64_t mako_unix_write(int64_t fd, MakoString data) {
     if (fd < 0) return -1;
+#if defined(MSG_NOSIGNAL)
+    return (int64_t)send((mako_sock_t)fd, data.data, data.len, MSG_NOSIGNAL);
+#else
     return (int64_t)send((mako_sock_t)fd, data.data, data.len, 0);
+#endif
 }
 
 static inline MakoString mako_unix_read(int64_t fd, int64_t max_bytes) {

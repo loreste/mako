@@ -1675,9 +1675,18 @@ Tests: `examples/testing/proxy_pool_test.mko`, `examples/testing/proxy_edge_test
 |----------|-----------|-------------|
 | `unix_socket_pair` | `unix_socket_pair() -> int` | Create a Unix socket pair (returns first fd) |
 | `unix_socket_pair_peer` | `unix_socket_pair_peer() -> int` | Get the peer fd of the last socket pair |
+| `unix_listen` | `unix_listen(path: string) -> int` | POSIX Unix-domain stream listener; fails if the path exists |
+| `unix_accept` | `unix_accept(listener: int) -> int` | Accept one Unix-domain stream connection |
+| `unix_connect` | `unix_connect(path: string) -> int` | Connect to a Unix-domain stream listener |
+| `unix_unlink` | `unix_unlink(path: string) -> int` | Remove a Unix socket path; cleanup is explicit |
 | `unix_write` | `unix_write(fd: int, data: string) -> int` | Write to a Unix socket |
 | `unix_read` | `unix_read(fd: int, max: int) -> string` | Read from a Unix socket |
 | `unix_close` | `unix_close(fd: int) -> int` | Close a Unix socket |
+
+Path-based Unix sockets are POSIX-only checked-native builtins. Empty or
+oversized paths fail with `-1`; Windows returns unsupported (`-1`). `unix_listen`
+does not unlink an existing path, so callers must choose cleanup policy with
+`unix_unlink`.
 
 ---
 

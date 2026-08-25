@@ -762,8 +762,12 @@ See BUILTINS § GPU / Local models.
 
 UDP/Unix: `udp_bind` / `udp_bind_addr`, `udp_send_to`, `udp_recv` /
 `udp_recv_from` + `udp_last_sender*`, `udp_local_port`, `udp_close`,
-`unix_socket_pair`, `unix_socket_pair_peer`, `unix_write`,
-`unix_read`, `unix_close`.
+`unix_socket_pair`, `unix_socket_pair_peer`, `unix_listen`, `unix_accept`,
+`unix_connect`, `unix_unlink`, `unix_write`, `unix_read`, `unix_close`.
+
+Path-based Unix-domain stream sockets are POSIX-only checked-native builtins.
+They fail closed on empty or oversized paths, do not silently remove stale socket
+files, and return unsupported (`-1`) on Windows until named pipes are designed.
 
 ### Typed `HttpRequest`
 

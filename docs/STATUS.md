@@ -205,9 +205,9 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` (inventory) | **422** `*_test.mko` files; native/default suite **422 passed, 0 failed** locally (2026-08-25) |
-| `mako test examples/testing --backend c` | **422 passed, 0 failed** locally with `MAKO_TEST_TIMEOUT_SECS=120` (2026-08-25) |
-| `mako test examples/testing --backend native` | **422 passed, 0 failed** locally (2026-08-25); Linux/macOS CI hard gate in 0.5.11 |
+| `mako test examples/testing` (inventory) | **423** `*_test.mko` files; native/default suite **423 passed, 0 failed** locally with `MAKO_RUNTIME=runtime` (2026-08-25) |
+| `mako test examples/testing --backend c` | **423 passed, 0 failed** locally with `MAKO_RUNTIME=runtime MAKO_TEST_TIMEOUT_SECS=120` (2026-08-25) |
+| `mako test examples/testing --backend native` | focused Unix socket path fixture passed locally with `MAKO_RUNTIME=runtime`; Linux/macOS CI hard gate in 0.5.11 |
 | CI honesty / quarantine | **0.5.12** hard gate: no workflow `continue-on-error`; Windows full-suite failures must match the 18-entry deterministic `ci/windows-quarantine.txt` plus the 3-entry explicit flaky `ci/windows-flaky-quarantine.txt`; unknown failures and recovered deterministic quarantines fail CI |
 | Memory-safety gate | **Passed** (2026-08-24): no GC path, ASan contract fixture, slice RSS soak, long-run ownership/RSS soak |
 | Claims/speed gate | **Passed** (2026-08-24): strict Rust gate fib `0.10x`, slice `0.51x`, map `0.14x` Mako/Rust |
