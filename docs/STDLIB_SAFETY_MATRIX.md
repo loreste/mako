@@ -21,13 +21,16 @@ Status values:
   safety-critical paths.
 - Native-backed packages must stay mapped to enforced safety contract families
   in [STDLIB_SAFETY_CONTRACTS.md](STDLIB_SAFETY_CONTRACTS.md).
+- Every `checked-native` package must have a package-local evidence marker in
+  `examples/testing/stdlib_package_local_safety_test.mko`; missing evidence is a
+  release-blocking audit failure.
 - Parser/codec packages need malformed-input, size-overflow, and cleanup tests.
 - Dynamic/plugin/syscall/runtime surfaces need explicit unsafe-boundary wording
-  or checked-handle hardening before they can be included in the default safe
-  claim.
+  and are excluded from the default-safe claim until checked-handle hardening
+  lets them be reclassified.
 - `scripts/stdlib-safety-audit.sh` now enforces matrix/package alignment,
-  contract-family classification, and required high-risk adversarial/lifecycle
-  fixture presence.
+  contract-family classification, package-local evidence, unsafe-boundary
+  exclusions, and required high-risk adversarial/lifecycle fixture presence.
 
 ## Matrix
 
@@ -192,12 +195,14 @@ Status values:
 ## Next implementation order
 
 1. Keep all `checked-native` and `unsafe-boundary` packages classified by the
-   contract-family audit.
+   contract-family and package-local evidence audit.
 2. Keep package-local malformed-input tests for `encoding/*`, `compress/*`,
    `archive/*`, `image/*`, `graphql`, `grpc`, and protocol parsers in
    `stdlib_codec_malformed_test.mko`; broaden `regexp` and deeper protocol
    parsers as surfaces grow.
 3. Add handle lifecycle tests for `net/*`, `crypto/tls`, `database/sql`,
    `sync/*`, `timer`, `plugin`, `syscall`, `os/*`, and messaging packages.
-4. Run sanitizer gates over the native-backed stdlib paths and record evidence
+4. Keep `unsafe-boundary` package exclusions explicit until hardening moves them
+   into `checked-native`.
+5. Run sanitizer gates over the native-backed stdlib paths and record evidence
    in [STATUS.md](STATUS.md).

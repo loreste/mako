@@ -8,7 +8,8 @@ mapping and fails if any `checked-native` or `unsafe-boundary` row in
 These contracts do not replace package tests. They define the minimum release
 bar that lets Mako talk about safe stdlib coverage honestly while native-backed
 packages continue to use C, OpenSSL, zlib, OS handles, and platform APIs behind
-checked wrappers.
+checked wrappers. In 0.5.14 every checked-native package also needs
+package-local evidence in `examples/testing/stdlib_package_local_safety_test.mko`.
 
 ### `codec-parser`
 
@@ -34,6 +35,7 @@ Required evidence:
   XML, GraphQL, and gRPC fail-closed behavior;
 - full `examples/testing` and `memory-safety-gate.sh` coverage for release
   claims.
+- package-local checked-native evidence for each codec/parser package row.
 
 ### `crypto-secret`
 
@@ -55,6 +57,7 @@ Required evidence:
 - password/hash malformed-input tests;
 - TLS pool invalid argument, timeout, host-injection, and close tests;
 - UUID/ULID parse and byte-length parity tests.
+- package-local checked-native evidence for each crypto/secret package row.
 
 ### `handle-lifecycle`
 
@@ -79,12 +82,16 @@ Required evidence:
 - socket, UDP, TLS, watch, syscall, plugin, runtime stats, timer, and queue
   lifecycle tests;
 - long-run ownership/RSS soak in `memory-safety-gate.sh`.
+- package-local checked-native evidence for each handle-backed package row, and
+  explicit excluded-from-default-safe evidence for unsafe-boundary rows.
 
 ## Release Rule
 
 For a release to claim stdlib safety coverage, all of the following must pass:
 
 - `scripts/stdlib-safety-audit.sh`;
+- package-local evidence for every `checked-native` row and explicit
+  default-safe exclusion evidence for every `unsafe-boundary` row;
 - `scripts/memory-safety-gate.sh`;
 - full `examples/testing` on the default backend;
 - full `examples/testing --backend c`;

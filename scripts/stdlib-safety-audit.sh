@@ -3,8 +3,9 @@
 #
 # This does not replace sanitizer or runtime tests. It prevents claim drift:
 # every checked-in std package must appear in the safety matrix, every matrix
-# entry must refer to a real package, and high-risk native wrapper categories
-# must keep adversarial/lifecycle fixtures checked in.
+# entry must refer to a real package, high-risk native wrapper categories must
+# keep adversarial/lifecycle fixtures checked in, and every checked-native row
+# must have package-local evidence so broad family coverage cannot hide gaps.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -18,12 +19,16 @@ root = Path(sys.argv[1])
 matrix_path = root / "docs" / "STDLIB_SAFETY_MATRIX.md"
 contracts_path = root / "docs" / "STDLIB_SAFETY_CONTRACTS.md"
 testing_dir = root / "examples" / "testing"
+package_evidence_path = testing_dir / "stdlib_package_local_safety_test.mko"
 
 if not matrix_path.exists():
     print("stdlib-safety-audit: missing docs/STDLIB_SAFETY_MATRIX.md", file=sys.stderr)
     raise SystemExit(1)
 if not contracts_path.exists():
     print("stdlib-safety-audit: missing docs/STDLIB_SAFETY_CONTRACTS.md", file=sys.stderr)
+    raise SystemExit(1)
+if not package_evidence_path.exists():
+    print("stdlib-safety-audit: missing examples/testing/stdlib_package_local_safety_test.mko", file=sys.stderr)
     raise SystemExit(1)
 
 std_files = {
@@ -227,6 +232,30 @@ tests = {
     path.name: path.read_text(encoding="utf-8", errors="replace")
     for path in testing_dir.glob("*.mko")
 }
+package_evidence_text = package_evidence_path.read_text(encoding="utf-8", errors="replace")
+
+missing_package_evidence = []
+missing_unsafe_exclusions = []
+for name, (tier, _) in rows.items():
+    if tier == "checked-native":
+        marker = f"package-local checked-native: std/{name}"
+        if marker not in package_evidence_text:
+            missing_package_evidence.append(name)
+    elif tier == "unsafe-boundary":
+        marker = f"unsafe-boundary excluded-from-default-safe: std/{name}"
+        if marker not in package_evidence_text:
+            missing_unsafe_exclusions.append(name)
+
+if missing_package_evidence:
+    failures.append(
+        "checked-native rows without package-local evidence:\n  "
+        + "\n  ".join(sorted(missing_package_evidence))
+    )
+if missing_unsafe_exclusions:
+    failures.append(
+        "unsafe-boundary rows without explicit default-safe exclusion evidence:\n  "
+        + "\n  ".join(sorted(missing_unsafe_exclusions))
+    )
 
 coverage_requirements = {
     "stdlib_parity_adversarial_test.mko": [
@@ -324,6 +353,6 @@ ordered = ", ".join(f"{tier}={counts[tier]}" for tier in sorted(counts))
 print(
     f"stdlib-safety-audit: {len(std_files)} std files covered; {ordered}; "
     f"contract-families={len(contract_families)}; "
-    "required adversarial/lifecycle fixtures present"
+    "package-local evidence present; required adversarial/lifecycle fixtures present"
 )
 PY

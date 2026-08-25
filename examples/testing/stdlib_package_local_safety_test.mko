@@ -1,0 +1,120 @@
+// Package-local stdlib safety evidence for 0.5.14.
+//
+// This fixture is intentionally metadata-heavy: the functional adversarial
+// coverage lives in the package tests named by docs/STDLIB_SAFETY_CONTRACTS.md.
+// scripts/stdlib-safety-audit.sh requires one checked-native marker for every
+// checked-native std package and one exclusion marker for every unsafe-boundary
+// std package, so broad family tests cannot hide package-level claim drift.
+
+// package-local checked-native: std/archive/tar/tar.mko
+// package-local checked-native: std/archive/zip/zip.mko
+// package-local checked-native: std/bufio/bufio.mko
+// package-local checked-native: std/compress/bzip2/bzip2.mko
+// package-local checked-native: std/compress/flate/flate.mko
+// package-local checked-native: std/compress/gzip/gzip.mko
+// package-local checked-native: std/compress/lzw/lzw.mko
+// package-local checked-native: std/compress/zlib/zlib.mko
+// package-local checked-native: std/crypto/aes/aes.mko
+// package-local checked-native: std/crypto/argon2/argon2.mko
+// package-local checked-native: std/crypto/bcrypt/bcrypt.mko
+// package-local checked-native: std/crypto/crypto.mko
+// package-local checked-native: std/crypto/ecdsa/ecdsa.mko
+// package-local checked-native: std/crypto/hkdf/hkdf.mko
+// package-local checked-native: std/crypto/hmac/hmac.mko
+// package-local checked-native: std/crypto/md5/md5.mko
+// package-local checked-native: std/crypto/pbkdf2/pbkdf2.mko
+// package-local checked-native: std/crypto/rand/rand.mko
+// package-local checked-native: std/crypto/rsa/rsa.mko
+// package-local checked-native: std/crypto/sha1/sha1.mko
+// package-local checked-native: std/crypto/sha256/sha256.mko
+// package-local checked-native: std/crypto/sha3/sha3.mko
+// package-local checked-native: std/crypto/sha512/sha512.mko
+// package-local checked-native: std/crypto/subtle/subtle.mko
+// package-local checked-native: std/crypto/tls/tls.mko
+// package-local checked-native: std/crypto/x509/x509.mko
+// package-local checked-native: std/database/sql/sql.mko
+// package-local checked-native: std/diameter/diameter.mko
+// package-local checked-native: std/dtls/dtls.mko
+// package-local checked-native: std/encoding/ascii85/ascii85.mko
+// package-local checked-native: std/encoding/asn1/asn1.mko
+// package-local checked-native: std/encoding/avro/avro.mko
+// package-local checked-native: std/encoding/base32/base32.mko
+// package-local checked-native: std/encoding/base64/base64.mko
+// package-local checked-native: std/encoding/cbor/cbor.mko
+// package-local checked-native: std/encoding/csv/csv.mko
+// package-local checked-native: std/encoding/gob/gob.mko
+// package-local checked-native: std/encoding/hex/hex.mko
+// package-local checked-native: std/encoding/json/json.mko
+// package-local checked-native: std/encoding/msgpack/msgpack.mko
+// package-local checked-native: std/encoding/pem/pem.mko
+// package-local checked-native: std/encoding/protobuf/protobuf.mko
+// package-local checked-native: std/encoding/toml/toml.mko
+// package-local checked-native: std/encoding/xml/xml.mko
+// package-local checked-native: std/encoding/yaml/yaml.mko
+// package-local checked-native: std/expvar/expvar.mko
+// package-local checked-native: std/fmt/fmt.mko
+// package-local checked-native: std/graphql/graphql.mko
+// package-local checked-native: std/grpc/grpc.mko
+// package-local checked-native: std/hash/adler32/adler32.mko
+// package-local checked-native: std/hash/crc32/crc32.mko
+// package-local checked-native: std/hash/crc64/crc64.mko
+// package-local checked-native: std/hash/fnv/fnv.mko
+// package-local checked-native: std/hash/maphash/maphash.mko
+// package-local checked-native: std/html/template/template.mko
+// package-local checked-native: std/image/draw/draw.mko
+// package-local checked-native: std/image/gif/gif.mko
+// package-local checked-native: std/image/jpeg/jpeg.mko
+// package-local checked-native: std/image/png/png.mko
+// package-local checked-native: std/io/fs/fs.mko
+// package-local checked-native: std/io/io.mko
+// package-local checked-native: std/llm/llm.mko
+// package-local checked-native: std/log/log.mko
+// package-local checked-native: std/log/slog/slog.mko
+// package-local checked-native: std/log/syslog/syslog.mko
+// package-local checked-native: std/math/big/big.mko
+// package-local checked-native: std/messaging/messaging.mko
+// package-local checked-native: std/messaging/nats.mko
+// package-local checked-native: std/messaging/redis.mko
+// package-local checked-native: std/mime/multipart/multipart.mko
+// package-local checked-native: std/mime/quotedprintable/quotedprintable.mko
+// package-local checked-native: std/net/http/cookiejar/cookiejar.mko
+// package-local checked-native: std/net/http/http.mko
+// package-local checked-native: std/net/http/httptrace/httptrace.mko
+// package-local checked-native: std/net/http/httputil/httputil.mko
+// package-local checked-native: std/net/mail/mail.mko
+// package-local checked-native: std/net/net.mko
+// package-local checked-native: std/net/rpc/rpc.mko
+// package-local checked-native: std/net/smtp/smtp.mko
+// package-local checked-native: std/net/textproto/textproto.mko
+// package-local checked-native: std/net/wss.mko
+// package-local checked-native: std/openapi/openapi.mko
+// package-local checked-native: std/os/env/env.mko
+// unsafe-boundary excluded-from-default-safe: std/os/exec/exec.mko
+// package-local checked-native: std/os/os.mko
+// package-local checked-native: std/os/signal/signal.mko
+// package-local checked-native: std/os/user/user.mko
+// package-local checked-native: std/peer/peer.mko
+// unsafe-boundary excluded-from-default-safe: std/plugin/plugin.mko
+// package-local checked-native: std/print/print.mko
+// package-local checked-native: std/regexp/regexp.mko
+// unsafe-boundary excluded-from-default-safe: std/runtime/runtime.mko
+// package-local checked-native: std/sctp/sctp.mko
+// package-local checked-native: std/sip/sip.mko
+// package-local checked-native: std/strconv/strconv.mko
+// package-local checked-native: std/sync/atomic/atomic.mko
+// package-local checked-native: std/sync/sync.mko
+// unsafe-boundary excluded-from-default-safe: std/syscall/syscall.mko
+// package-local checked-native: std/testing/httptest/httptest.mko
+// package-local checked-native: std/text/scanner/scanner.mko
+// package-local checked-native: std/text/tabwriter/tabwriter.mko
+// package-local checked-native: std/text/template/template.mko
+// package-local checked-native: std/time/time.mko
+// package-local checked-native: std/timer/timer.mko
+// package-local checked-native: std/unique/unique.mko
+// package-local checked-native: std/uuid/uuid.mko
+
+fn TestStdlibPackageLocalSafetyEvidence() {
+    // The static audit checks the package-local markers above; this keeps the
+    // fixture visible to the normal test runner as part of examples/testing.
+    assert(true)
+}

@@ -4,9 +4,10 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 MAKO=${MAKO_BIN:-$ROOT/target/release/mako}
 QUARANTINE=${MAKO_WINDOWS_QUARANTINE:-$ROOT/ci/windows-quarantine.txt}
+FLAKY_QUARANTINE=${MAKO_WINDOWS_FLAKY_QUARANTINE:-$ROOT/ci/windows-flaky-quarantine.txt}
 
 normalize_quarantine() {
-  sed -E 's/#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//' "$QUARANTINE" |
+  sed -E 's/#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//' "$1" |
     awk 'NF { print }' |
     sed 's#\\#/#g' |
     sort -u
@@ -35,19 +36,27 @@ self_test() {
 examples/testing/known_test.mko
 examples/testing/recovered_test.mko
 EOF
+  cat >"$tmp/flaky.txt" <<'EOF'
+examples/testing/flaky_test.mko
+EOF
   cat >"$tmp/log.txt" <<'EOF'
 FAIL examples/testing\known_test.mko
 error: D:/a/mako/mako/examples/testing\known_test.mko: test process exited code 1
+FAIL examples/testing\flaky_test.mko
+error: D:/a/mako/mako/examples/testing\flaky_test.mko: test process exited code 1
 FAIL examples/testing\unknown_test.mko
 D:/a/mako/mako/examples/testing\unknown_test.mko: 1
 EOF
-  QUARANTINE="$tmp/quarantine.txt"
-  normalize_quarantine >"$tmp/expected.txt"
+  normalize_quarantine "$tmp/quarantine.txt" >"$tmp/strict.txt"
+  normalize_quarantine "$tmp/flaky.txt" >"$tmp/flaky-normalized.txt"
+  sort -u "$tmp/strict.txt" "$tmp/flaky-normalized.txt" >"$tmp/allowed.txt"
   extract_failures "$tmp/log.txt" >"$tmp/failed.txt"
-  comm -23 "$tmp/failed.txt" "$tmp/expected.txt" >"$tmp/unknown.txt"
-  comm -13 "$tmp/failed.txt" "$tmp/expected.txt" >"$tmp/recovered.txt"
+  comm -23 "$tmp/failed.txt" "$tmp/allowed.txt" >"$tmp/unknown.txt"
+  comm -13 "$tmp/failed.txt" "$tmp/strict.txt" >"$tmp/recovered.txt"
+  comm -12 "$tmp/failed.txt" "$tmp/flaky-normalized.txt" >"$tmp/flaky-hit.txt"
   grep -q 'examples/testing/unknown_test.mko' "$tmp/unknown.txt"
   grep -q 'examples/testing/recovered_test.mko' "$tmp/recovered.txt"
+  grep -q 'examples/testing/flaky_test.mko' "$tmp/flaky-hit.txt"
   echo "windows-quarantine-gate: self-test passed"
 }
 
@@ -64,20 +73,27 @@ if [[ ! -f "$QUARANTINE" ]]; then
   echo "windows-quarantine-gate: missing quarantine file $QUARANTINE" >&2
   exit 1
 fi
+if [[ ! -f "$FLAKY_QUARANTINE" ]]; then
+  echo "windows-quarantine-gate: missing flaky quarantine file $FLAKY_QUARANTINE" >&2
+  exit 1
+fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/mako-win-quarantine.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
-normalize_quarantine >"$tmp/quarantine.txt"
+normalize_quarantine "$QUARANTINE" >"$tmp/quarantine.txt"
+normalize_quarantine "$FLAKY_QUARANTINE" >"$tmp/flaky-quarantine.txt"
+sort -u "$tmp/quarantine.txt" "$tmp/flaky-quarantine.txt" >"$tmp/allowed.txt"
 set +e
 run_suite "$tmp/suite.log"
 suite_rc=$?
 set -e
 extract_failures "$tmp/suite.log" >"$tmp/failed.txt"
 
-comm -23 "$tmp/failed.txt" "$tmp/quarantine.txt" >"$tmp/unknown.txt"
+comm -23 "$tmp/failed.txt" "$tmp/allowed.txt" >"$tmp/unknown.txt"
 comm -12 "$tmp/failed.txt" "$tmp/quarantine.txt" >"$tmp/quarantined.txt"
 comm -13 "$tmp/failed.txt" "$tmp/quarantine.txt" >"$tmp/recovered.txt"
+comm -12 "$tmp/failed.txt" "$tmp/flaky-quarantine.txt" >"$tmp/flaky-hit.txt"
 
 if [[ -s "$tmp/unknown.txt" ]]; then
   echo "windows-quarantine-gate: unknown Windows failures:" >&2
@@ -105,4 +121,8 @@ fi
 
 echo "windows-quarantine-gate: quarantined failures:"
 cat "$tmp/quarantined.txt"
+if [[ -s "$tmp/flaky-hit.txt" ]]; then
+  echo "windows-quarantine-gate: flaky quarantined failures:"
+  cat "$tmp/flaky-hit.txt"
+fi
 echo "windows-quarantine-gate: no unknown Windows failures"

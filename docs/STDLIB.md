@@ -6,7 +6,7 @@ not importing their unsafe surfaces.
 
 Batteries for **web and backends**, with naming conventions adapted to Mako.
 
-**Product tip:** **0.5.x**. Application packs have Go-equivalent surfaces
+**Product tip:** **0.5.14**. Application packs have Go-equivalent surfaces
 (2026-08-18 wave) — snake_case, no panic-on-OOB, `Result` / `(value, err)`
 instead of nil. Not a syntax clone and not every Go toolchain package.
 Lower-level hot path remains builtins over C runtime headers.
@@ -18,6 +18,12 @@ or unverifiable behavior is excluded from safe parity or isolated behind an
 explicit unsafe boundary. See [STDLIB_SAFETY.md](STDLIB_SAFETY.md).
 Package-level classification is tracked in
 [STDLIB_SAFETY_MATRIX.md](STDLIB_SAFETY_MATRIX.md).
+
+Default-safe means `safe` plus audited `checked-native` packages with
+package-local evidence and passing hard gates. `unsafe-boundary` packages
+(`os/exec`, `plugin`, `runtime`, `syscall`) and external/environmental behavior
+are excluded from that claim unless a future release hardens and reclassifies
+them.
 
 Call builtins directly (`str_split`, `path_join`, …) **or** import std packages:
 

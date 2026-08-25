@@ -1,0 +1,9 @@
+# Windows-only flaky quarantine for the full-suite CI honesty gate.
+#
+# Entries here are known to pass and fail across Windows runners. They do not
+# count as recovered when they pass, but they still must stay listed explicitly
+# so flakiness is visible and new failures cannot hide behind it.
+
+examples/testing/diameter_mgr_test.mko
+examples/testing/profile_sample_test.mko
+examples/testing/time_latency_test.mko

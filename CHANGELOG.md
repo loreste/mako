@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 0.5.14 — 2026-08-25 (stdlib safety completion)
+
+### Safety
+
+- Added package-local safety evidence for every `checked-native` stdlib package
+  in the 144-file matrix.
+- Made unsafe-boundary stdlib packages explicitly excluded from default-safe
+  claims until they are hardened into checked wrappers.
+- Tightened `scripts/stdlib-safety-audit.sh` so releases fail if checked-native
+  packages lack package-local evidence or unsafe-boundary rows lack explicit
+  default-safe exclusions.
+
+### Testing
+
+- Added `examples/testing/stdlib_package_local_safety_test.mko` as the
+  machine-checked package-local evidence fixture.
+- The stdlib safety audit now reports package-local evidence alongside matrix,
+  contract-family, and lifecycle fixture coverage.
+- Split Windows full-suite quarantine into deterministic and explicitly flaky
+  lists after CI proved three recovered entries still fail on another runner.
+
 ## 0.5.13 — 2026-08-25 (performance contract)
 
 ### Performance

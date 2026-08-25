@@ -1,12 +1,12 @@
 # Mako roadmap
 
-**Product version:** **0.5.13** (tip) · last tagged **v0.5.13** · Last sync: **2026-08-25**.
-**Suite:** **421** `examples/testing` `*_test.mko` files · **2026-08-24:**
-C **421 passed, 0 failed** · native **421 passed, 0 failed** ·
+**Product version:** **0.5.14** (tip) · last tagged **v0.5.14** · Last sync: **2026-08-25**.
+**Suite:** **422** `examples/testing` `*_test.mko` files · **2026-08-25:**
+C **422 passed, 0 failed** · native **422 passed, 0 failed** ·
 `cargo test` **153 passed, 0 failed** · memory-safety, claims, sanitizer, speed, and CI honesty gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.13`**; tip train **0.5.13**.
+**Release:** tag **`v0.5.14`**; tip train **0.5.14**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -44,7 +44,8 @@ C **421 passed, 0 failed** · native **421 passed, 0 failed** ·
 | **0.5.10** | Package-local malformed codec coverage and fail-closed Base64 | **Shipped** |
 | **0.5.11** | Native backend hardening and no silent C fallback | **Shipped** |
 | **0.5.12** | Flake and CI honesty: hard gates plus explicit quarantine | **Shipped** |
-| **0.5.13** | Performance contract: workload-specific Rust budgets and parser hot-path gates | **Tip** |
+| **0.5.13** | Performance contract: workload-specific Rust budgets and parser hot-path gates | **Shipped** |
+| **0.5.14** | Stdlib safety completion: package-local evidence and explicit unsafe-boundary exclusions | **Tip** |
 | **0.5.x** | Further patches on 0.5 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
 
@@ -73,6 +74,7 @@ C **421 passed, 0 failed** · native **421 passed, 0 failed** ·
 0.5.11      native backend hardening and no silent C fallback
 0.5.12      flake and CI honesty
 0.5.13      performance contract and workload-specific budgets
+0.5.14      stdlib safety completion and package-local evidence
 0.5.x       patches
 1.0         stability freeze
 ```

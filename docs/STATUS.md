@@ -1,12 +1,12 @@
 # Mako status (adversarial / verified)
 
-Last inventory: **2026-08-25** · product **mako0.5.13** (tip; last tag **v0.5.13**) ·
+Last inventory: **2026-08-25** · product **mako0.5.14** (tip; last tag **v0.5.14**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings · `s[i]`) · **421** `examples/testing`
-`*_test.mko` files · **2026-08-24:** C **421 passed, 0 failed** ·
-native **421 passed, 0 failed** · `cargo test` **153 passed, 0 failed** ·
+const-fn depth (match/while/for/strings · `s[i]`) · **422** `examples/testing`
+`*_test.mko` files · **2026-08-25:** C **422 passed, 0 failed** ·
+native **422 passed, 0 failed** · `cargo test` **153 passed, 0 failed** ·
 claims and memory-safety gates passed locally ·
 CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard failures/quarantines · [The Mako Book](book/).
 
@@ -18,13 +18,13 @@ CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard fa
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.5.13** tip · last tag [**v0.5.13**](https://github.com/loreste/mako/releases/tag/v0.5.13) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.5.14** tip · last tag [**v0.5.14**](https://github.com/loreste/mako/releases/tag/v0.5.14) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
 | **Target pain coverage** | **22/24** scoreboard rows Strong (1 Partial, 1 mixed) — [PAIN_POINTS.md](PAIN_POINTS.md) |
 | **Dual-form coverage (optional sugar)** | **52/52** in-scope items Done (1 intentional Won't: `*T`/`&x`) — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
-| **Standard library** | Application packs have Go-equivalent surfaces (2026-08-18 wave), but safe parity requires the memory-safety gate in [STDLIB_SAFETY.md](STDLIB_SAFETY.md) and package matrix in [STDLIB_SAFETY_MATRIX.md](STDLIB_SAFETY_MATRIX.md). Not every Go toolchain/`unsafe` package — see [STDLIB.md](STDLIB.md) |
+| **Standard library** | Application packs have Go-equivalent surfaces (2026-08-18 wave). The default-safe claim covers `safe` and audited `checked-native` packages only; `unsafe-boundary`, `blocked`, `won't`, and external/environmental surfaces are excluded unless hardened and reclassified. Evidence lives in [STDLIB_SAFETY.md](STDLIB_SAFETY.md) and [STDLIB_SAFETY_MATRIX.md](STDLIB_SAFETY_MATRIX.md). Not every Go toolchain/`unsafe` package — see [STDLIB.md](STDLIB.md) |
 | **Soundness (SAFE/RT core)** | Introduced in 0.2.4, actively hardened — [SOUNDNESS.md](SOUNDNESS.md); soaks and edge cases remain |
 
 ---
@@ -205,13 +205,13 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
 | Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` (inventory) | **421** `*_test.mko` files; native suite **421 passed, 0 failed** locally (2026-08-24) |
-| `mako test examples/testing --backend c` | **421 passed, 0 failed** in CI default C suite (2026-08-24) |
-| `mako test examples/testing --backend native` | **421 passed, 0 failed** locally (2026-08-24); Linux/macOS CI hard gate in 0.5.11 |
-| CI honesty / quarantine | **0.5.12** hard gate: no workflow `continue-on-error`; Windows full-suite failures must match the 20-entry `ci/windows-quarantine.txt`, unknown failures and recovered quarantines fail CI |
+| `mako test examples/testing` (inventory) | **422** `*_test.mko` files; native/default suite **422 passed, 0 failed** locally (2026-08-25) |
+| `mako test examples/testing --backend c` | **422 passed, 0 failed** locally with `MAKO_TEST_TIMEOUT_SECS=120` (2026-08-25) |
+| `mako test examples/testing --backend native` | **422 passed, 0 failed** locally (2026-08-25); Linux/macOS CI hard gate in 0.5.11 |
+| CI honesty / quarantine | **0.5.12** hard gate: no workflow `continue-on-error`; Windows full-suite failures must match the 18-entry deterministic `ci/windows-quarantine.txt` plus the 3-entry explicit flaky `ci/windows-flaky-quarantine.txt`; unknown failures and recovered deterministic quarantines fail CI |
 | Memory-safety gate | **Passed** (2026-08-24): no GC path, ASan contract fixture, slice RSS soak, long-run ownership/RSS soak |
 | Claims/speed gate | **Passed** (2026-08-24): strict Rust gate fib `0.10x`, slice `0.51x`, map `0.14x` Mako/Rust |
-| Stdlib safety contracts | **Passed** (2026-08-22): 144 std files, 102 checked-native, 38 safe, 4 unsafe-boundary, 3 enforced contract families |
+| Stdlib safety completion | **Passed** (2026-08-25): 144 std files, 102 checked-native packages with package-local evidence, 38 safe, 4 unsafe-boundary explicitly excluded from default-safe claims, 3 enforced contract families |
 | Package-local malformed codec coverage | **Passed** (2026-08-23): archive/image/protocol and binary codec malformed-input fixture on default + C backends |
 | GC removal regression checks | PASS — removed builtin and legacy `[package] gc = true` both fail, including isolated cache paths |
 | Speed gate | PASS — normal ≤2.0× and strict ≤1.5× Rust gates; final measured ratios 0.21×–0.65× |
