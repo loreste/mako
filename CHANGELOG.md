@@ -9,6 +9,7 @@
 - Removed workflow-level `continue-on-error` soft failure paths from the main CI workflow.
 - Added a hard CI honesty policy job that rejects future `continue-on-error` usage and verifies quarantine plumbing.
 - Replaced the Windows warning-only full suite with an explicit quarantine gate: known platform failures live in `ci/windows-quarantine.txt`, unknown failures fail CI, and recovered quarantines fail until removed.
+- Seeded the Windows quarantine with the current 20 platform failures from CI.
 - Made Windows LLVM/clang setup fail honestly when clang cannot be installed or found.
 
 ### Testing

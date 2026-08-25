@@ -208,7 +208,7 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | `mako test examples/testing` (inventory) | **421** `*_test.mko` files; native suite **421 passed, 0 failed** locally (2026-08-24) |
 | `mako test examples/testing --backend c` | **421 passed, 0 failed** in CI default C suite (2026-08-24) |
 | `mako test examples/testing --backend native` | **421 passed, 0 failed** locally (2026-08-24); Linux/macOS CI hard gate in 0.5.11 |
-| CI honesty / quarantine | **0.5.12** hard gate: no workflow `continue-on-error`; Windows full-suite failures must match `ci/windows-quarantine.txt`, unknown failures and recovered quarantines fail CI |
+| CI honesty / quarantine | **0.5.12** hard gate: no workflow `continue-on-error`; Windows full-suite failures must match the 20-entry `ci/windows-quarantine.txt`, unknown failures and recovered quarantines fail CI |
 | Memory-safety gate | **Passed** (2026-08-24): no GC path, ASan contract fixture, slice RSS soak, long-run ownership/RSS soak |
 | Claims/speed gate | **Passed** (2026-08-24): strict Rust gate fib `0.10x`, slice `0.51x`, map `0.14x` Mako/Rust |
 | Stdlib safety contracts | **Passed** (2026-08-22): 144 std files, 102 checked-native, 38 safe, 4 unsafe-boundary, 3 enforced contract families |

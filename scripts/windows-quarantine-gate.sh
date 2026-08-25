@@ -13,8 +13,8 @@ normalize_quarantine() {
 }
 
 extract_failures() {
-  grep -E '^FAIL[[:space:]]+examples/testing[\\/].*\.mko$' "$1" |
-    sed -E 's/^FAIL[[:space:]]+//; s#\\#/#g' |
+  grep -E '(FAIL[[:space:]]+.*examples/testing[\\/].*\.mko$|error: .*examples/testing[\\/].*\.mko: test process exited|examples/testing[\\/].*\.mko: [0-9]+$)' "$1" |
+    sed -E 's#.*(examples/testing[\\/][^:[:space:]]+\.mko).*#\1#; s#\\#/#g' |
     sort -u
 }
 
@@ -23,7 +23,6 @@ run_suite() {
   set +e
   "$MAKO" test "$ROOT/examples/testing" 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
-  set -e
   return "$rc"
 }
 
@@ -38,7 +37,9 @@ examples/testing/recovered_test.mko
 EOF
   cat >"$tmp/log.txt" <<'EOF'
 FAIL examples/testing\known_test.mko
+error: D:/a/mako/mako/examples/testing\known_test.mko: test process exited code 1
 FAIL examples/testing\unknown_test.mko
+D:/a/mako/mako/examples/testing\unknown_test.mko: 1
 EOF
   QUARANTINE="$tmp/quarantine.txt"
   normalize_quarantine >"$tmp/expected.txt"
