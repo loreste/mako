@@ -19910,7 +19910,9 @@ impl TypeChecker {
             return Ok(()); // no matching generic template
         }
         let tag_str = &mono_name[tag_start..];
-        let template = self.generic_structs.get(&base_name).cloned().unwrap();
+        let Some(template) = self.generic_structs.get(&base_name).cloned() else {
+            return Ok(());
+        };
         // Split tag_str into N parts matching the number of type params.
         // For 1 param, the entire tag_str is the tag (even if it contains __).
         // For N params, split on __ but only N-1 times.
@@ -20007,7 +20009,9 @@ impl TypeChecker {
             return Ok(());
         }
         let tag_str = &mono_name[tag_start..];
-        let template = self.generic_enums.get(&base_name).cloned().unwrap();
+        let Some(template) = self.generic_enums.get(&base_name).cloned() else {
+            return Ok(());
+        };
         let tag_parts: Vec<&str> = if template.type_params.len() == 1 {
             vec![tag_str]
         } else {
