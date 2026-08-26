@@ -4704,6 +4704,26 @@ impl Codegen {
                 }
             }
         }
+        // Forward-declare map/array types referenced by struct fields so the
+        // struct typedef can use them as pointers before the full definition.
+        {
+            let mut fwd: Vec<String> = Vec::new();
+            for info in self.structs.values() {
+                for (_fname, fty) in &info.fields {
+                    let base = fty.trim_end_matches('*').trim();
+                    if (base.starts_with("MakoMap") || base.starts_with("MakoArr_"))
+                        && !fwd.contains(&base.to_string())
+                    {
+                        fwd.push(base.to_string());
+                    }
+                }
+            }
+            fwd.sort();
+            for ty in &fwd {
+                let _ = writeln!(self.out, "struct {ty};");
+                let _ = writeln!(self.out, "typedef struct {ty} {ty};");
+            }
+        }
         // Emit C structs + []T helpers + gated scalar-key maps.
         for item in &program.items {
             if let Item::Struct(s) = item {
@@ -7645,7 +7665,7 @@ impl Codegen {
         };
         let free_str_key = key_suf == "s";
 
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
         let _ = writeln!(self.out, "    {key_c} *keys;");
         let _ = writeln!(self.out, "    {val_c} *vals;");
@@ -8005,7 +8025,7 @@ impl Codegen {
         let hash = format!("mako_hash_{key_c}(key)");
         let key_eq = format!("mako_eq_{key_c}(m->keys[i], key)");
 
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
         let _ = writeln!(self.out, "    {key_c} *keys;");
         let _ = writeln!(self.out, "    {val_c} *vals;");
@@ -8332,7 +8352,7 @@ impl Codegen {
             "av.data[j] != bv.data[j]".to_string()
         };
 
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
         let _ = writeln!(self.out, "    {key_c} *keys;");
         let _ = writeln!(self.out, "    {val_c} *vals;");
@@ -8730,7 +8750,7 @@ impl Codegen {
             "av.data[j] != bv.data[j]".to_string()
         };
 
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
         let _ = writeln!(self.out, "    {key_c} *keys;");
         let _ = writeln!(self.out, "    {val_c} *vals;");
@@ -9275,7 +9295,7 @@ impl Codegen {
         let free_str_key = key_suf == "s";
         let zero_val = "NULL";
 
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
         let _ = writeln!(self.out, "    {key_c} *keys;");
         let _ = writeln!(self.out, "    {val_c} *vals;");
@@ -9634,7 +9654,7 @@ impl Codegen {
         let key_eq = format!("mako_eq_{key_c}(m->keys[i], key)");
         let zero_val = "NULL";
 
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
         let _ = writeln!(self.out, "    {key_c} *keys;");
         let _ = writeln!(self.out, "    {val_c} *vals;");
