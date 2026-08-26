@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 0.5.15 - 2026-08-26 (tooling polish)
+
+### Tooling
+
+- Added `mako fmt --check` as a failing formatter gate for CI and editors.
+- Made `mako lint` fail clearly when a target contains no `.mko` sources.
+- Hardened `mako doctor` to validate native runtime support sources and parse
+  install manifests as structured JSON with version, binary, runtime, and stdlib
+  fields.
+- Fixed semantic type errors, including equality mismatch diagnostics from
+  issue #39, so human and JSON check output include source line/column when the
+  typechecker can infer the offending expression.
+- Tightened the integer channel hot path by avoiding unnecessary global select
+  notifications, modulo ring advancement, and repeated global peak-depth CAS
+  after the local high-water mark is known.
+
+### Packaging
+
+- Updated official install manifests to split plain `version` from full
+  `versionLine` and include the installed binary path.
+- Added `share/mako/package-metadata.json` to release archives so packaged
+  builds report the same product facts as installed builds.
+- Kept official shell and PowerShell installer output plain and consistent.
+
 ### Networking
 
 - Added POSIX path-based Unix-domain stream sockets: `unix_listen`,

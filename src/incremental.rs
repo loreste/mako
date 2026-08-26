@@ -306,6 +306,8 @@ fn emit_type_error(path: &str, src_for_diag: &str, error: TypeError) {
     } = error;
     let span = if line > 0 {
         Span::new(line, col)
+    } else if let Some(span) = crate::diag::infer_span_from_message(src_for_diag, &message) {
+        span
     } else {
         Span::unknown()
     };

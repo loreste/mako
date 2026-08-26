@@ -8,7 +8,7 @@ mapping and fails if any `checked-native` or `unsafe-boundary` row in
 These contracts do not replace package tests. They define the minimum release
 bar that lets Mako talk about safe stdlib coverage honestly while native-backed
 packages continue to use C, OpenSSL, zlib, OS handles, and platform APIs behind
-checked wrappers. In 0.5.14 every checked-native package also needs
+checked wrappers. In 0.5.15 every checked-native package also needs
 package-local evidence in `examples/testing/stdlib_package_local_safety_test.mko`.
 
 ### `codec-parser`

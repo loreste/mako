@@ -80,6 +80,7 @@ static atomic_llong mako_rt_channel_try_send_drops = 0;
 static atomic_llong mako_rt_channel_recvs = 0;
 static atomic_llong mako_rt_channel_select_timeouts = 0;
 static atomic_llong mako_rt_channel_peak_depth = 0;
+static atomic_int mako_rt_select_waiters = 0;
 /* Lock / cond wait contention (channel mutex waits). */
 static atomic_llong mako_rt_lock_waits = 0;
 static atomic_llong mako_rt_lock_wait_ns = 0;
@@ -4940,7 +4941,9 @@ typedef struct {
     size_t head;
     size_t tail;
     size_t count;     /* buffered depth, or 0/1 handoff for unbuffered */
+    size_t peak_depth;
     bool closed;
+    int waiters_send; /* threads blocked in send */
     int waiters_recv; /* threads blocked in recv (for unbuffered try_send) */
     pthread_mutex_t mu;
     pthread_cond_t can_send;
@@ -4950,6 +4953,13 @@ typedef struct {
 /* Storage slots: unbuffered still needs one handoff cell. */
 static inline size_t mako_chan_alloc_slots(size_t cap) {
     return cap < 1 ? 1 : cap;
+}
+
+static inline void mako_chan_observe_depth(MakoChan *c, size_t depth) {
+    if (depth > c->peak_depth) {
+        c->peak_depth = depth;
+        mako_rt_observe_channel_depth(depth);
+    }
 }
 
 static inline MakoChan *mako_chan_new(int64_t capacity) {
@@ -4972,7 +4982,9 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
         /* Rendezvous: wait for free handoff, post, then wait until taken. */
         while (c->count != 0 && !c->closed) {
             int64_t t0 = mako_now_ns();
+            c->waiters_send++;
             pthread_cond_wait(&c->can_send, &c->mu);
+            c->waiters_send--;
             mako_rt_note_lock_wait(mako_now_ns() - t0);
         }
         if (c->closed) {
@@ -4982,11 +4994,13 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
         c->buf[0] = v;
         c->count = 1;
         mako_rt_counter_inc(&mako_rt_channel_sends);
-        mako_rt_observe_channel_depth(1);
+        mako_chan_observe_depth(c, 1);
         pthread_cond_broadcast(&c->can_recv);
         while (c->count != 0 && !c->closed) {
             int64_t t0 = mako_now_ns();
+            c->waiters_send++;
             pthread_cond_wait(&c->can_send, &c->mu);
+            c->waiters_send--;
             mako_rt_note_lock_wait(mako_now_ns() - t0);
         }
         int64_t ok = (c->count == 0) ? 1 : 0; /* 0 if closed with handoff stuck */
@@ -4996,7 +5010,9 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
     }
     while (c->count == c->cap && !c->closed) {
         int64_t t0 = mako_now_ns();
+        c->waiters_send++;
         pthread_cond_wait(&c->can_send, &c->mu);
+        c->waiters_send--;
         mako_rt_note_lock_wait(mako_now_ns() - t0);
     }
     if (c->closed) {
@@ -5004,10 +5020,11 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
         return 0; /* fail */
     }
     c->buf[c->tail] = v;
-    c->tail = (c->tail + 1) % c->cap;
+    c->tail++;
+    if (c->tail == c->cap) c->tail = 0;
     c->count++;
     mako_rt_counter_inc(&mako_rt_channel_sends);
-    mako_rt_observe_channel_depth(c->count);
+    mako_chan_observe_depth(c, c->count);
     pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     mako_select_notify();
@@ -5026,7 +5043,7 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
         c->buf[0] = v;
         c->count = 1;
         mako_rt_counter_inc(&mako_rt_channel_sends);
-        mako_rt_observe_channel_depth(1);
+        mako_chan_observe_depth(c, 1);
         pthread_cond_broadcast(&c->can_recv);
         pthread_mutex_unlock(&c->mu);
         mako_select_notify();
@@ -5038,10 +5055,11 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
         return 0;
     }
     c->buf[c->tail] = v;
-    c->tail = (c->tail + 1) % c->cap;
+    c->tail++;
+    if (c->tail == c->cap) c->tail = 0;
     c->count++;
     mako_rt_counter_inc(&mako_rt_channel_sends);
-    mako_rt_observe_channel_depth(c->count);
+    mako_chan_observe_depth(c, c->count);
     pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     mako_select_notify();
@@ -5078,7 +5096,8 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
         c->count = 0;
     } else {
         v = c->buf[c->head];
-        c->head = (c->head + 1) % c->cap;
+        c->head++;
+        if (c->head == c->cap) c->head = 0;
         c->count--;
     }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
@@ -5105,7 +5124,8 @@ static inline int64_t mako_chan_recv_ok(MakoChan *c, int64_t *out) {
         c->count = 0;
     } else {
         v = c->buf[c->head];
-        c->head = (c->head + 1) % c->cap;
+        c->head++;
+        if (c->head == c->cap) c->head = 0;
         c->count--;
     }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
@@ -5263,6 +5283,9 @@ static inline void mako_select_sync_ensure(void) {
 
 /* Called by chan_send / try_send after enqueue — wakes select waiters. */
 static inline void mako_select_notify(void) {
+    if (atomic_load_explicit(&mako_rt_select_waiters, memory_order_relaxed) <= 0) {
+        return;
+    }
     mako_select_sync_ensure();
     pthread_mutex_lock(&mako_select_mu);
     pthread_cond_broadcast(&mako_select_cv);
@@ -5304,6 +5327,7 @@ static inline int64_t mako_chan_selectn(
          * between try_recv and wait. */
         mako_select_sync_ensure();
         pthread_mutex_lock(&mako_select_mu);
+        atomic_fetch_add_explicit(&mako_rt_select_waiters, 1, memory_order_relaxed);
         struct timespec abstime;
         {
             struct timeval tv;
@@ -5315,6 +5339,7 @@ static inline int64_t mako_chan_selectn(
                     ((now.tv_sec - start.tv_sec) * 1000 +
                      (now.tv_usec - start.tv_usec) / 1000);
                 if (remaining <= 0) {
+                    atomic_fetch_sub_explicit(&mako_rt_select_waiters, 1, memory_order_relaxed);
                     pthread_mutex_unlock(&mako_select_mu);
                     mako_rt_counter_inc(&mako_rt_channel_select_timeouts);
                     return -1;
@@ -5328,6 +5353,7 @@ static inline int64_t mako_chan_selectn(
             abstime.tv_nsec = (long)(nsec % 1000000000LL);
         }
         pthread_cond_timedwait(&mako_select_cv, &mako_select_mu, &abstime);
+        atomic_fetch_sub_explicit(&mako_rt_select_waiters, 1, memory_order_relaxed);
         pthread_mutex_unlock(&mako_select_mu);
     }
 }

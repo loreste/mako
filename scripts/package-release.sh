@@ -62,7 +62,7 @@ fi
 
 BIN="$ROOT/target/release/mako"
 if [[ ! -x "$BIN" ]]; then
-  echo "Building full release binary with cargo (this machine only — end users never run this)…"
+  echo "Building full release binary with cargo (this machine only; end users never run this)..."
   cargo build --release
 fi
 if [[ ! -x "$BIN" ]]; then
@@ -82,6 +82,13 @@ chmod +x "$STAGE/bin/mako"
 if command -v strip >/dev/null 2>&1; then
   strip "$STAGE/bin/mako" 2>/dev/null || true
 fi
+VER_LINE="$("$STAGE/bin/mako" version 2>/dev/null || "$STAGE/bin/mako" --version 2>/dev/null || echo unknown)"
+VERSION="$(printf '%s' "$VER_LINE" | awk '{print $3}' | sed 's/^mako//')"
+if [[ -z "$VERSION" ]]; then
+  VERSION="unknown"
+fi
+HOST="$(uname -s 2>/dev/null || echo unknown)-$(uname -m 2>/dev/null || echo unknown)"
+TS="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"
 
 for h in "$ROOT"/runtime/*.h; do
   cp "$h" "$STAGE/share/mako/runtime/"
@@ -133,15 +140,16 @@ MODE_LABEL="slim"
 [[ "$FULL" -eq 1 ]] && MODE_LABEL="full"
 
 cat > "$STAGE/README.txt" << EOF
-Mako release layout ($NAME) — $MODE_LABEL package
+Mako release layout ($NAME) - $MODE_LABEL package
 
-  bin/mako                 — compiler CLI (stripped)
-  share/mako/runtime/      — runtime headers and native support sources
-  share/mako/std/          — standard library sources
-  scripts/install.sh       — install this artifact into PREFIX
-  scripts/install-release.sh — one-shot download + verify + install
-  scripts/install-linux.sh — Linux alias for install-release.sh
-  scripts/uninstall.sh     — remove files installed under PREFIX
+  bin/mako                  - compiler CLI (stripped)
+  share/mako/runtime/       - runtime headers and native support sources
+  share/mako/std/           - standard library sources
+  share/mako/package-metadata.json - packaged release metadata
+  scripts/install.sh        - install this artifact into PREFIX
+  scripts/install-release.sh - one-shot download + verify + install
+  scripts/install-linux.sh  - Linux alias for install-release.sh
+  scripts/uninstall.sh      - remove files installed under PREFIX
 
 One-shot install (from GitHub Releases):
   curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-linux.sh | bash
@@ -151,6 +159,24 @@ From this unpacked tree:
 
 Requires a C compiler on the target machine (clang). No Rust toolchain needed.
 Docs: https://github.com/loreste/mako/blob/main/docs/RELEASE.md
+EOF
+
+cat > "$STAGE/share/mako/package-metadata.json" << EOF
+{
+  "schema": "mako.package.v1",
+  "version": "$(printf '%s' "$VERSION" | tr -d '\n' | sed 's/"/\\"/g')",
+  "versionLine": "$(printf '%s' "$VER_LINE" | tr -d '\n' | sed 's/"/\\"/g')",
+  "artifact": "$(printf '%s' "$NAME" | sed 's/"/\\"/g')",
+  "mode": "$MODE_LABEL",
+  "host": "$(printf '%s' "$HOST" | sed 's/"/\\"/g')",
+  "createdAt": "$TS",
+  "includes": {
+    "runtime": true,
+    "stdlib": true,
+    "installScripts": true,
+    "docs": $([[ "$FULL" -eq 1 ]] && echo true || echo false)
+  }
+}
 EOF
 
 tar --owner=0 --group=0 -C "$DIST" -czf "$DIST/$NAME.tar.gz" "$NAME"
@@ -180,6 +206,6 @@ done
 BYTES="$(wc -c < "$DIST/$NAME.tar.gz" | tr -d ' ')"
 BIN_BYTES="$(wc -c < "$DIST/$NAME" | tr -d ' ')"
 echo "Packed cargo release binary into $DIST/$NAME.tar.gz ($BYTES bytes, $MODE_LABEL)"
-echo "  binary:  $DIST/$NAME ($BIN_BYTES bytes) — full mako CLI from cargo, no Rust on install host"
+echo "  binary:  $DIST/$NAME ($BIN_BYTES bytes) - full mako CLI from cargo, no Rust on install host"
 echo "  checksum:$DIST/$NAME.sha256"
 echo "  install: install-release.sh / install-linux.sh"

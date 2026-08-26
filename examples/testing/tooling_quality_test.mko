@@ -1,26 +1,26 @@
-fn TestCoverageCategoryUnit() {
+export fn TestCoverageCategoryUnit() {
     assert_eq(1 + 1, 2)
 }
 
-fn FuzzParserSmoke() {
+export fn FuzzParserSmoke() {
     assert(str_contains("fn main() {}", "main"))
 }
 
-fn PropertyAdditionCommutative() {
+export fn PropertyAdditionCommutative() {
     let a = 7
     let b = 11
     assert_eq(a + b, b + a)
 }
 
-fn SnapshotRenderedText() {
+export fn SnapshotRenderedText() {
     assert_eq_str(str_replace("hello NAME", "NAME", "mako"), "hello mako")
 }
 
-fn MockServiceCall() {
+export fn MockServiceCall() {
     assert_eq_str(json_get_string(json_object("status", "ok"), "status"), "ok")
 }
 
-fn FixtureSeedData() {
+export fn FixtureSeedData() {
     let arr = json_array_strings2("alpha", "beta")
     assert_eq(json_array_len(arr), 2)
 }

@@ -27,7 +27,7 @@ The target is **100% memory-safe safe Mako**:
 
 ## Default-Safe Claim
 
-The checked-in 0.5.14 stdlib matrix covers **144** package files:
+The checked-in 0.5.15 stdlib matrix covers **144** package files:
 
 - **38 `safe`** files are in the default-safe claim.
 - **102 `checked-native`** files are in the default-safe claim only when

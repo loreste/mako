@@ -29,6 +29,107 @@ impl Span {
     }
 }
 
+pub fn infer_span_from_message(source: &str, message: &str) -> Option<Span> {
+    for name in backtick_names(message) {
+        if let Some(span) = find_word(source, &name) {
+            return Some(span);
+        }
+    }
+    if message.contains("cannot apply arithmetic")
+        || message.contains("cannot compare")
+        || message.contains("equality type mismatch")
+        || message.contains("binary")
+    {
+        if let Some(span) = find_any(
+            source,
+            &["+", "-", "*", "/", "%", "==", "!=", "<=", ">=", "<", ">"],
+        ) {
+            return Some(span);
+        }
+    }
+    if message.contains("return type mismatch") || message.contains("trailing expression") {
+        if let Some(span) = last_expr_like_line(source) {
+            return Some(span);
+        }
+    }
+    None
+}
+
+fn backtick_names(message: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = message;
+    while let Some(start) = rest.find('`') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('`') else {
+            break;
+        };
+        let name = &after[..end];
+        if !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c == '_' || c == '.' || c.is_ascii_alphanumeric())
+        {
+            out.push(name.to_string());
+        }
+        rest = &after[end + 1..];
+    }
+    out
+}
+
+fn find_word(source: &str, word: &str) -> Option<Span> {
+    for (line_idx, line) in source.lines().enumerate() {
+        let mut search_from = 0usize;
+        while let Some(pos) = line[search_from..].find(word) {
+            let col0 = search_from + pos;
+            let before = line[..col0].chars().next_back();
+            let after = line[col0 + word.len()..].chars().next();
+            let boundary_before = before
+                .map(|c| !(c == '_' || c.is_ascii_alphanumeric()))
+                .unwrap_or(true);
+            let boundary_after = after
+                .map(|c| !(c == '_' || c.is_ascii_alphanumeric()))
+                .unwrap_or(true);
+            if boundary_before && boundary_after {
+                return Some(Span::new(line_idx + 1, col0 + 1));
+            }
+            search_from = col0 + word.len();
+        }
+    }
+    None
+}
+
+fn find_any(source: &str, needles: &[&str]) -> Option<Span> {
+    for (line_idx, line) in source.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            continue;
+        }
+        let mut best: Option<usize> = None;
+        for needle in needles {
+            if let Some(pos) = line.find(needle) {
+                best = Some(best.map(|b| b.min(pos)).unwrap_or(pos));
+            }
+        }
+        if let Some(pos) = best {
+            return Some(Span::new(line_idx + 1, pos + 1));
+        }
+    }
+    None
+}
+
+fn last_expr_like_line(source: &str) -> Option<Span> {
+    let lines: Vec<_> = source.lines().enumerate().collect();
+    for (line_idx, line) in lines.into_iter().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed == "}" || trimmed.starts_with("//") {
+            continue;
+        }
+        let col = line.find(|c: char| !c.is_whitespace()).unwrap_or(0) + 1;
+        return Some(Span::new(line_idx + 1, col));
+    }
+    None
+}
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub severity: Severity,

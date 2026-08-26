@@ -95,6 +95,8 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
         } = e;
         let span = if line > 0 {
             Span::new(line, col)
+        } else if let Some(span) = crate::diag::infer_span_from_message(&src, &message) {
+            span
         } else {
             Span::unknown()
         };
@@ -351,6 +353,8 @@ fn diagnostic_from_type_error(file: &str, src: &str, err: TypeError) -> Diagnost
     } = err;
     let span = if line > 0 {
         Span::new(line, col)
+    } else if let Some(span) = crate::diag::infer_span_from_message(src, &message) {
+        span
     } else {
         Span::unknown()
     };
@@ -493,6 +497,7 @@ pub struct FmtOptions {
     pub write: bool,
     pub list: bool,
     pub diff: bool,
+    pub check: bool,
 }
 
 pub fn run_fmt(path: &Path, opts: FmtOptions) -> Result<(), ()> {
@@ -502,6 +507,7 @@ pub fn run_fmt(path: &Path, opts: FmtOptions) -> Result<(), ()> {
         return Err(());
     }
     let multi = files.len() > 1 || path.is_dir();
+    let mut changed = 0usize;
     for f in &files {
         let original = fs::read_to_string(f).map_err(|e| {
             eprintln!("mako fmt: read {}: {e}", f.display());
@@ -513,8 +519,11 @@ pub fn run_fmt(path: &Path, opts: FmtOptions) -> Result<(), ()> {
         if formatted == original {
             continue;
         }
+        changed += 1;
         let display = f.display().to_string();
-        if opts.list {
+        if opts.check {
+            println!("{display}");
+        } else if opts.list {
             println!("{display}");
         } else if opts.diff {
             print!(
@@ -532,7 +541,12 @@ pub fn run_fmt(path: &Path, opts: FmtOptions) -> Result<(), ()> {
             print!("{formatted}");
         }
     }
-    Ok(())
+    if opts.check && changed > 0 {
+        eprintln!("mako fmt: {changed} file(s) need formatting");
+        Err(())
+    } else {
+        Ok(())
+    }
 }
 
 fn fmt_type(t: &TypeExpr) -> String {
@@ -541,6 +555,10 @@ fn fmt_type(t: &TypeExpr) -> String {
 
 pub fn run_lint(path: &Path, identity: bool, security: bool) -> Result<(), ()> {
     let files = collect_mako_files(path);
+    if files.is_empty() {
+        eprintln!("mako lint: no .mko files under {}", path.display());
+        return Err(());
+    }
     let mut issues = 0;
     for f in &files {
         let Ok(program) = check_file(f) else {
@@ -4340,6 +4358,49 @@ mod metadata_tests {
         assert!(report.contains(r#""severity":"error"#));
         assert!(report.contains(r#""line":"#));
         assert!(report.contains(r#""column":"#));
+    }
+
+    #[test]
+    fn check_json_reports_type_error_location() {
+        let path = temp_mko(
+            "json-type-err",
+            "fn main() {\n    let x = 1 + \"nope\"\n}\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(!ok);
+        let value: Value = serde_json::from_str(&report).unwrap();
+        let diagnostic = &value["diagnostics"][0];
+        assert_eq!(diagnostic["line"], 2);
+        assert!(diagnostic["column"].as_u64().unwrap_or(0) > 0);
+        assert!(
+            diagnostic["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("arithmetic"),
+            "{report}"
+        );
+        assert_eq!(diagnostic["sourceLine"], "    let x = 1 + \"nope\"");
+    }
+
+    #[test]
+    fn check_json_reports_equality_type_error_location() {
+        let path = temp_mko("json-eq-err", "fn main() {\n    let bad = true == 1\n}\n");
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(!ok);
+        let value: Value = serde_json::from_str(&report).unwrap();
+        let diagnostic = &value["diagnostics"][0];
+        assert_eq!(diagnostic["line"], 2);
+        assert!(diagnostic["column"].as_u64().unwrap_or(0) > 0);
+        assert!(
+            diagnostic["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("equality type mismatch"),
+            "{report}"
+        );
+        assert_eq!(diagnostic["sourceLine"], "    let bad = true == 1");
     }
 
     #[test]

@@ -269,6 +269,7 @@ mako fmt -w main.mko              # write formatted back to file
 mako fmt -w .                     # format all files in directory
 mako fmt -l .                     # list files that need formatting
 mako fmt -d .                     # show diffs
+mako fmt --check .                # fail if files need formatting
 mako fmt -w -p lib                # format one workspace member
 ```
 
@@ -278,6 +279,7 @@ mako fmt -w -p lib                # format one workspace member
 | `-w, --write` | Write result to file (default: stdout) |
 | `-l, --list` | List files that differ from canonical format |
 | `-d, --diff` | Show diffs |
+| `--check` | List non-canonical files and exit non-zero if any differ |
 | `-p, --package <NAME>` | Focus one workspace member |
 
 ---
@@ -359,8 +361,9 @@ Verify your installation is healthy.
 mako doctor
 ```
 
-Checks: compiler binary, runtime headers, stdlib, clang, zig (optional),
-VS Code extension.
+Checks: compiler binary, runtime headers, native runtime support sources,
+structured install manifest fields, stdlib, clang, zig (optional), and VS Code
+extension.
 
 ---
 

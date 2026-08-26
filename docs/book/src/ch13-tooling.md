@@ -606,7 +606,7 @@ mako deploy plugin my-plugin --name my-plugin --kind native
 | `mako build`       | Compile to native binary             | `--release`, `-j`, `--target`|
 | `mako run`         | Compile and execute                  | `-- args...`                 |
 | `mako test`        | Discover and run tests               | `-r`, `-v`, `--coverage`, `--json` |
-| `mako fmt`         | Format source code                   | `-w`, `-l`, `-d`             |
+| `mako fmt`         | Format source code                   | `-w`, `-l`, `-d`, `--check` |
 | `mako lint`        | Lint with additional rules           | `-p`                         |
 | `mako bench`       | Run benchmarks                       | `--json`, `-p`               |
 | `mako profile`     | Time frontend/backend/run            | `--json`, `--release`        |

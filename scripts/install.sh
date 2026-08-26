@@ -22,7 +22,7 @@ echo "  runtime: $RUNTIME_DST"
 echo "  std:     $STD_DST"
 
 if [[ "$SKIP_BUILD" -ne 1 ]]; then
-  echo "Building release binary…"
+  echo "Building release binary..."
   (cd "$ROOT" && cargo build --release --quiet)
 fi
 
@@ -103,15 +103,21 @@ if [[ -f "$ROOT/editors/lldb/mako_formatters.py" ]]; then
   install -m 644 "$ROOT/editors/lldb/mako_formatters.py" "$SHARE_DIR/mako_formatters.py"
 fi
 
-# Install manifest for doctor / support (P3 polish).
+# Install manifest for doctor / support.
 VER_LINE="$("$BIN_DIR/mako" version 2>/dev/null || "$BIN_DIR/mako" --version 2>/dev/null || echo unknown)"
+VERSION="$(printf '%s' "$VER_LINE" | awk '{print $3}' | sed 's/^mako//')"
+if [[ -z "$VERSION" ]]; then
+  VERSION="unknown"
+fi
 HOST="$(uname -s 2>/dev/null || echo unknown)-$(uname -m 2>/dev/null || echo unknown)"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"
 cat > "$SHARE_DIR/install-manifest.json" <<EOF
 {
   "schema": "mako.install.v1",
-  "version": "$(printf '%s' "$VER_LINE" | tr -d '\n' | sed 's/"/\\"/g')",
+  "version": "$(printf '%s' "$VERSION" | tr -d '\n' | sed 's/"/\\"/g')",
+  "versionLine": "$(printf '%s' "$VER_LINE" | tr -d '\n' | sed 's/"/\\"/g')",
   "prefix": "$(printf '%s' "$PREFIX" | sed 's/"/\\"/g')",
+  "binary": "$(printf '%s' "$BIN_DIR/mako" | sed 's/"/\\"/g')",
   "host": "$(printf '%s' "$HOST" | sed 's/"/\\"/g')",
   "installedAt": "$TS",
   "runtime": "$(printf '%s' "$RUNTIME_DST" | sed 's/"/\\"/g')",
@@ -120,13 +126,13 @@ cat > "$SHARE_DIR/install-manifest.json" <<EOF
 EOF
 
 echo "Installed $BIN_DIR/mako ($VER_LINE)"
-echo "Installed runtime → $RUNTIME_DST"
-echo "Installed stdlib  → $STD_DST"
+echo "Installed runtime -> $RUNTIME_DST"
+echo "Installed stdlib  -> $STD_DST"
 if [[ -d "$EDITORS_DST/vscode" ]]; then
-  echo "Installed VS Code scaffold → $EDITORS_DST/vscode"
+  echo "Installed VS Code scaffold -> $EDITORS_DST/vscode"
 fi
 echo "Manifest: $SHARE_DIR/install-manifest.json"
-echo "Discovery: MAKO_RUNTIME → $PREFIX/share/mako/runtime (via binary) → checkout"
+echo "Discovery: MAKO_RUNTIME -> $PREFIX/share/mako/runtime (via binary) -> checkout"
 echo "Optional: export MAKO_RUNTIME=$RUNTIME_DST"
 echo "Verify: $BIN_DIR/mako doctor"
 echo "Docs: $ROOT/docs/RELEASE.md"

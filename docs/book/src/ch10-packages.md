@@ -566,6 +566,9 @@ mako fmt -l .
 
 # Show diff of what would change
 mako fmt -d .
+
+# Fail if anything is not canonical
+mako fmt --check .
 ```
 
 ### What the formatter does

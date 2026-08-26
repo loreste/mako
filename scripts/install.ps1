@@ -90,12 +90,16 @@ if (Test-Path $VsSrc) {
 $ShareDir = Join-Path $Prefix "share\mako"
 $VerLine = & (Join-Path $BinDir "mako.exe") version 2>$null
 if (-not $VerLine) { $VerLine = "unknown" }
+$Version = "unknown"
+if ($VerLine -match "mako([0-9]+\.[0-9]+\.[0-9]+)") { $Version = $Matches[1] }
 $HostId = "$([System.Environment]::OSVersion.Platform)-$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"
 $Ts = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
 $Manifest = @{
     schema = "mako.install.v1"
-    version = "$VerLine"
+    version = "$Version"
+    versionLine = "$VerLine"
     prefix = "$Prefix"
+    binary = "$(Join-Path $BinDir 'mako.exe')"
     host = "$HostId"
     installedAt = "$Ts"
     runtime = "$RuntimeDst"
@@ -106,10 +110,10 @@ New-Item -ItemType Directory -Force -Path $ShareDir | Out-Null
 Set-Content -Path $ManifestPath -Value $Manifest -Encoding UTF8
 
 Write-Host "Installed $(Join-Path $BinDir 'mako.exe')"
-Write-Host "Installed runtime → $RuntimeDst"
-Write-Host "Installed stdlib  → $StdDst"
+Write-Host "Installed runtime -> $RuntimeDst"
+Write-Host "Installed stdlib  -> $StdDst"
 if (Test-Path (Join-Path $EditorsDst "vscode")) {
-    Write-Host "Installed VS Code scaffold → $(Join-Path $EditorsDst 'vscode')"
+    Write-Host "Installed VS Code scaffold -> $(Join-Path $EditorsDst 'vscode')"
 }
 Write-Host "Manifest: $ManifestPath"
 Write-Host "Add to PATH: $BinDir"

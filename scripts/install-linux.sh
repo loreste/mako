@@ -533,7 +533,7 @@ fi
 
 if [[ "$RUN_DOCTOR" -eq 1 ]]; then
   echo ""
-  echo "running mako doctor …"
+  echo "running mako doctor..."
   if ! "$BIN_DIR/mako" doctor; then
     echo "warning: doctor reported issues (install still completed)" >&2
   fi

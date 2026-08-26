@@ -343,7 +343,7 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Format `.mko` sources (gofmt-compatible: stdout by default; `-w` write, `-l` list, `-d` diff)
+    /// Format `.mko` sources (stdout by default; `-w` write, `-l` list, `-d` diff, `--check` gate)
     Fmt {
         /// Files or directories (default: `.`; workspace-aware with `-p`)
         #[arg(default_value = ".")]
@@ -360,6 +360,9 @@ enum Commands {
         /// Display diffs instead of rewriting files
         #[arg(short = 'd', long = "diff", default_value_t = false)]
         diff: bool,
+        /// Fail if any file differs from canonical formatting
+        #[arg(long, default_value_t = false)]
+        check: bool,
     },
     /// Discover and run *_test.mko (Test/Fuzz/Property/Snapshot/Mock/Fixture)
     Test {
@@ -965,7 +968,7 @@ fn cmd_doctor() -> Result<(), ()> {
     match runtime_include_dir() {
         Ok(rt) => {
             println!("  runtime: ok ({})", rt.display());
-            for header in [
+            for runtime_file in [
                 "mako_rt.h",
                 "mako_http.h",
                 "mako_db.h",
@@ -973,50 +976,68 @@ fn cmd_doctor() -> Result<(), ()> {
                 "mako_plugin.h",
                 "mako_trace.h",
                 "mako_std.h",
+                "native_runtime.c",
+                "native_bridge.c",
             ] {
-                if rt.join(header).exists() {
-                    println!("    {header}: ok");
+                if rt.join(runtime_file).exists() {
+                    println!("    {runtime_file}: ok");
                 } else {
                     ok = false;
-                    println!("    {header}: FAIL missing");
+                    println!("    {runtime_file}: FAIL missing");
                 }
             }
-            // Install manifest next to share/mako (validate schema + host seed).
+            // Install manifest next to share/mako (validate schema + release fields).
             if let Some(share) = rt.parent() {
                 let man = share.join("install-manifest.json");
                 if man.exists() {
                     match std::fs::read_to_string(&man) {
-                        Ok(body) => {
-                            let schema_ok = body.contains("mako.install.v1");
-                            let has_ver = body.contains("\"version\"");
-                            let has_prefix = body.contains("\"prefix\"");
-                            let host_line = body
-                                .lines()
-                                .find(|l| l.contains("\"host\""))
-                                .unwrap_or("")
-                                .trim()
-                                .to_string();
-                            let cur_host =
-                                format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
-                            // uname-style host in manifest is Darwin-arm64; consts is macos/aarch64.
-                            let host_ok = !host_line.is_empty();
-                            if schema_ok && has_ver && has_prefix {
-                                println!(
-                                    "  install: ok (manifest {} · {})",
-                                    man.display(),
-                                    if host_ok { host_line.as_str() } else { "host?" }
-                                );
-                                println!(
-                                    "  install host now: {} / {}",
-                                    std::env::consts::OS,
-                                    std::env::consts::ARCH
-                                );
-                                let _ = cur_host;
-                            } else {
-                                ok = false;
-                                println!("  install: FAIL manifest missing schema/version/prefix");
+                        Ok(body) => match serde_json::from_str::<serde_json::Value>(&body) {
+                            Ok(parsed) => {
+                                let schema = parsed.get("schema").and_then(|v| v.as_str());
+                                let version = parsed.get("version").and_then(|v| v.as_str());
+                                let version_line =
+                                    parsed.get("versionLine").and_then(|v| v.as_str());
+                                let prefix = parsed.get("prefix").and_then(|v| v.as_str());
+                                let runtime = parsed.get("runtime").and_then(|v| v.as_str());
+                                let std = parsed.get("std").and_then(|v| v.as_str());
+                                let binary = parsed.get("binary").and_then(|v| v.as_str());
+                                let host = parsed
+                                    .get("host")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+                                let version_ok = version == Some(env!("CARGO_PKG_VERSION"))
+                                    || version_line
+                                        .map(|v| {
+                                            v.contains(&format!(
+                                                "mako{}",
+                                                env!("CARGO_PKG_VERSION")
+                                            ))
+                                        })
+                                        .unwrap_or(false);
+                                if schema != Some("mako.install.v1")
+                                    || !version_ok
+                                    || prefix.is_none()
+                                    || runtime.is_none()
+                                    || std.is_none()
+                                    || binary.is_none()
+                                {
+                                    ok = false;
+                                    println!("  install: FAIL manifest missing schema/version/prefix/runtime/std/binary");
+                                } else {
+                                    println!("  install: ok ({})", man.display());
+                                    println!(
+                                        "    version: {}",
+                                        version.unwrap_or(env!("CARGO_PKG_VERSION"))
+                                    );
+                                    println!("    host:    {host}");
+                                    println!("    prefix:  {}", prefix.unwrap());
+                                }
                             }
-                        }
+                            Err(e) => {
+                                ok = false;
+                                println!("  install: FAIL manifest json ({e})");
+                            }
+                        },
                         Err(e) => {
                             ok = false;
                             println!("  install: FAIL read manifest ({e})");
@@ -1394,6 +1415,7 @@ fn run(cli: Cli) -> Result<(), ()> {
             write,
             list,
             diff,
+            check,
         } => {
             let roots = if paths.is_empty() {
                 vec![PathBuf::from(".")]
@@ -1403,7 +1425,15 @@ fn run(cli: Cli) -> Result<(), ()> {
             let mut ok = true;
             for path in &roots {
                 let r = cmd_tool_paths(path, package.as_deref(), |member| {
-                    tooling::run_fmt(member, tooling::FmtOptions { write, list, diff })
+                    tooling::run_fmt(
+                        member,
+                        tooling::FmtOptions {
+                            write,
+                            list,
+                            diff,
+                            check,
+                        },
+                    )
                 });
                 if r.is_err() {
                     ok = false;
@@ -5545,6 +5575,28 @@ mod lint_cli_tests {
     use super::{Cli, Commands};
     use clap::Parser;
     use std::path::PathBuf;
+
+    #[test]
+    fn fmt_check_flag_is_parsed() {
+        let cli = Cli::try_parse_from(["mako", "fmt", "--check", "app/main.mko"]).unwrap();
+        match cli.command {
+            Commands::Fmt {
+                paths,
+                write,
+                list,
+                diff,
+                check,
+                ..
+            } => {
+                assert_eq!(paths, vec![PathBuf::from("app/main.mko")]);
+                assert!(!write);
+                assert!(!list);
+                assert!(!diff);
+                assert!(check);
+            }
+            _ => panic!("expected fmt command"),
+        }
+    }
 
     #[test]
     fn lint_security_flag_is_parsed() {

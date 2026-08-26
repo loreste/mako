@@ -60,6 +60,7 @@ See [ROADMAP.md](ROADMAP.md) version map. Tip after `v0.4.5`:
 0.5.12 flake and CI honesty
 0.5.13 performance contract and workload-specific Rust budgets
 0.5.14 stdlib safety completion and package-local evidence
+0.5.15 tooling polish: doctor/install/release metadata + fmt/lint/doc gates
 0.5.x  further patches as needed
 1.0    stability freeze
 ```

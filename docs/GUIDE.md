@@ -2375,7 +2375,7 @@ mako build path.mko -o bin   # → C → .o cache → link (debug -O0; --release
 mako build -j 8 --no-incremental path.mko   # parallel jobs; disable cache
 mako run path.mko [-- args...]   # compile + run; trailing args → argc/args
 mako test [path] [--run PAT] [-v] [--count N] [--coverage] [--json] [--race] [--sanitize TYPE] [-p NAME]  # tests + categories
-mako fmt [paths...] [-w|-l|-d] [-p NAME]   # formatter: stdout / write / list / diff
+mako fmt [paths...] [-w|-l|-d|--check] [-p NAME] # formatter: stdout / write / list / diff / check
 mako lint [path] [-p NAME]            # workspace-aware typecheck + rules
 mako bench [path] [-p NAME] [--json]  # workspace-aware bench_*.mko wall time
 mako profile [path] [-p NAME] [--release] [--json] -- [args...]  # compile/run profile
