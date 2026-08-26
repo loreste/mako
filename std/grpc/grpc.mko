@@ -28,8 +28,8 @@ export fn message_len(msg: string) -> int {
     return grpc_message_len(msg)
 }
 
-export fn message_within_limit(msg: string) -> int {
-    return grpc_message_within_limit(msg)
+export fn message_within_limit(msg: string, limit: int) -> int {
+    return grpc_message_within_limit(msg, limit)
 }
 
 export fn default_max_message() -> int {
@@ -79,8 +79,8 @@ export fn service_name(id: int) -> string {
 }
 
 // ── Unary request parsing ──────────────────────────────────────
-export fn unary_request(data: string) -> string {
-    return grpc_unary_request(data)
+export fn unary_request(method: string, id: int) -> string {
+    return grpc_unary_request(method, id)
 }
 
 export fn unary_name(data: string) -> string {

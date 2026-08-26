@@ -8,6 +8,8 @@
   `f(value, args)`.
 - Added `live fn` parsing/AST propagation for future hot-reload lowering. This
   is accepted syntax, but runtime hot-swap semantics are not complete yet.
+- Fixed `std/grpc` wrappers to match the checked builtin signatures for message
+  limit checks and unary request construction.
 
 ## 0.5.15 - 2026-08-26 (tooling polish)
 
