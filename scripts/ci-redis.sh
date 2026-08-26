@@ -29,5 +29,5 @@ done
 
 export MAKO_REDIS_PORT="$PORT"
 cd "$ROOT"
-cargo run --quiet -- run examples/ci/redis_live.mko
+cargo run --quiet --bin mako -- run examples/ci/redis_live.mko
 echo "ok: ci-redis (port ${PORT})"

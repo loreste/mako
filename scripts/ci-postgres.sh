@@ -34,5 +34,5 @@ done
 
 export MAKO_PG_PORT="$PORT"
 cd "$ROOT"
-cargo run --quiet -- run examples/ci/pg_live.mko
+cargo run --quiet --bin mako -- run examples/ci/pg_live.mko
 echo "ok: ci-postgres (port ${PORT})"
