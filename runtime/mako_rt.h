@@ -6643,6 +6643,9 @@ static void *mako_sched_worker_main(void *arg) {
 }
 
 static inline void mako_sched_ensure_pool(void) {
+#if defined(MAKO_WASI)
+    return; /* WASI: no threads — tasks run synchronously via mako_spawn_ex */
+#endif
     int want = atomic_load_explicit(&mako_sched_workers_cfg, memory_order_acquire);
     if (want <= 0) return;
     if (mako_sched.running && mako_sched.nworkers == want) return;
@@ -6814,11 +6817,18 @@ static inline MakoTask *mako_spawn_ex(MakoNursery *n, MakoTaskFn fn, void *arg, 
         }
         t->pooled = 0;
     }
+#if defined(MAKO_WASI)
+    /* WASI has no threads — run the task synchronously.
+     * crew/kick still works: tasks execute sequentially instead of in parallel.
+     * This avoids crashes and deadlocks while keeping programs correct. */
+    mako_task_trampoline(t);
+#else
     if (pthread_create(&t->thread, NULL, mako_task_trampoline, t) != 0) {
         n->len--;
         free(t);
         mako_abort("task: unable to create worker thread");
     }
+#endif
     mako_task_reg_add(t);
     return t;
 }

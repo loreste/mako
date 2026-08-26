@@ -75,8 +75,16 @@ function setVFile(path, bytes) {
   VFILES.set("/" + n.replace(/^\//, ""), bytes);
 }
 
+/** Validate guest pointer + length fits within WASM linear memory. */
+function boundsCheck(memory, ptr, len) {
+  return ptr >= 0 && len >= 0 && ptr + len <= memory.buffer.byteLength;
+}
+
 /** fd_write: stdout/stderr → console; writable virtual fd → append to buffer. */
 function fd_write(memory, fd, iovs_ptr, iovs_len, nwritten_ptr) {
+  const memLen = memory.buffer.byteLength;
+  if (!boundsCheck(memory, iovs_ptr, iovs_len * 8)) return 21; // EFAULT
+  if (!boundsCheck(memory, nwritten_ptr, 4)) return 21;
   const view = new DataView(memory.buffer);
   const file = openFiles.get(fd);
   if (file && file.writable) {
@@ -86,6 +94,7 @@ function fd_write(memory, fd, iovs_ptr, iovs_len, nwritten_ptr) {
       const base = iovs_ptr + i * 8;
       const buf = view.getUint32(base, true);
       const len = view.getUint32(base + 4, true);
+      if (!boundsCheck(memory, buf, len)) return 21; // EFAULT
       chunks.push(new Uint8Array(memory.buffer, buf, len).slice());
       written += len;
     }
@@ -114,6 +123,7 @@ function fd_write(memory, fd, iovs_ptr, iovs_len, nwritten_ptr) {
     const base = iovs_ptr + i * 8;
     const buf = view.getUint32(base, true);
     const len = view.getUint32(base + 4, true);
+    if (!boundsCheck(memory, buf, len)) return 21; // EFAULT
     const bytes = new Uint8Array(memory.buffer, buf, len);
     text += new TextDecoder().decode(bytes);
     written += len;
@@ -136,6 +146,7 @@ function writeEmptyPointerList(memory, list_ptr) {
 
 /** WASI clock_time_get: write u64 ns timestamp (little-endian) at timestamp_ptr. */
 function clock_time_get(memory, _clock_id, _precision, timestamp_ptr) {
+  if (!boundsCheck(memory, timestamp_ptr, 8)) return 21; // EFAULT
   const view = new DataView(memory.buffer);
   const ns = BigInt(Date.now()) * 1000000n;
   view.setBigUint64(timestamp_ptr, ns, true);
@@ -144,6 +155,7 @@ function clock_time_get(memory, _clock_id, _precision, timestamp_ptr) {
 
 /** WASI random_get: fill buffer with crypto.getRandomValues when available. */
 function random_get(memory, buf, len) {
+  if (!boundsCheck(memory, buf, len)) return 21; // EFAULT
   const bytes = new Uint8Array(memory.buffer, buf, len);
   if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
     crypto.getRandomValues(bytes);
@@ -154,6 +166,7 @@ function random_get(memory, buf, len) {
 }
 
 function readGuestPath(memory, pathPtr, pathLen) {
+  if (!boundsCheck(memory, pathPtr, pathLen)) return "";
   const bytes = new Uint8Array(memory.buffer, pathPtr, pathLen);
   return new TextDecoder().decode(bytes);
 }
@@ -173,6 +186,7 @@ function wasiPolyfill(getMemory) {
         const file = openFiles.get(fd);
         if (!file) return 8; // EBADF
         const mem = getMemory();
+        if (!boundsCheck(mem, offset_out_ptr, 8)) return 21;
         const view = new DataView(mem.buffer);
         const off = typeof offset === "bigint" ? Number(offset) : offset;
         let next = file.pos;
@@ -188,6 +202,7 @@ function wasiPolyfill(getMemory) {
       fd_tell(fd, offset_out_ptr) {
         const file = openFiles.get(fd);
         if (!file) return 8;
+        if (!boundsCheck(getMemory(), offset_out_ptr, 8)) return 21;
         new DataView(getMemory().buffer).setBigUint64(
           offset_out_ptr,
           BigInt(file.pos),
@@ -204,6 +219,7 @@ function wasiPolyfill(getMemory) {
         const file = openFiles.get(fd);
         if (!file) return 8; // EBADF
         const mem = getMemory();
+        if (!boundsCheck(mem, buf, 64)) return 21; // EFAULT
         const view = new DataView(mem.buffer);
         // Zero first 64 bytes of filestat
         for (let i = 0; i < 64; i++) view.setUint8(buf + i, 0);
@@ -358,6 +374,8 @@ function wasiPolyfill(getMemory) {
       },
       fd_read(fd, iovs, iovs_len, nread_ptr) {
         const mem = getMemory();
+        if (!boundsCheck(mem, iovs, iovs_len * 8)) return 21;
+        if (!boundsCheck(mem, nread_ptr, 4)) return 21;
         const view = new DataView(mem.buffer);
         const file = openFiles.get(fd);
         if (!file) {
@@ -377,6 +395,7 @@ function wasiPolyfill(getMemory) {
           const base = iovs + i * 8;
           const buf = view.getUint32(base, true);
           const len = view.getUint32(base + 4, true);
+          if (!boundsCheck(mem, buf, len)) return 21; // EFAULT
           const avail = file.bytes.length - file.pos;
           if (avail <= 0) break;
           const n = Math.min(len, avail);
