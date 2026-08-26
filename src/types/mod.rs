@@ -197,6 +197,8 @@ pub enum TypeError {
         hint: Option<String>,
         line: usize,
         col: usize,
+        /// Origin file for errors in pulled modules (None = entry file).
+        source_file: Option<String>,
     },
 }
 
@@ -207,6 +209,7 @@ impl TypeError {
             hint: None,
             line: 0,
             col: 0,
+            source_file: None,
         }
     }
 
@@ -217,12 +220,19 @@ impl TypeError {
             hint: None,
             line,
             col,
+            source_file: None,
         }
     }
 
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
         let TypeError::At { hint: h, .. } = &mut self;
         *h = Some(hint.into());
+        self
+    }
+
+    pub fn in_file(mut self, file: String) -> Self {
+        let TypeError::At { source_file, .. } = &mut self;
+        *source_file = Some(file);
         self
     }
 
@@ -13896,7 +13906,9 @@ impl TypeChecker {
                         .iter()
                         .map(|(n, t, _)| Ok((n.clone(), self.resolve_type(t)?)))
                         .collect();
-                    let fields = fields?;
+                    let fields = fields.map_err(|e: TypeError| {
+                        if let Some(ref sf) = s.source_file { e.in_file(sf.clone()) } else { e }
+                    })?;
                     // Register field defaults for struct-lit fill.
                     for (n, _, def) in &s.fields {
                         if let Some(d) = def {
@@ -13924,7 +13936,9 @@ impl TypeChecker {
                     for v in &e.variants {
                         let fields: Result<Vec<_>, _> =
                             v.fields.iter().map(|t| self.resolve_type(t)).collect();
-                        let fields = fields?;
+                        let fields = fields.map_err(|e2| {
+                            if let Some(ref sf) = e.source_file { e2.in_file(sf.clone()) } else { e2 }
+                        })?;
                         self.variants.insert(
                             v.name.clone(),
                             VariantCtor {
@@ -13955,18 +13969,21 @@ impl TypeChecker {
                         self.fn_mut_params
                             .insert(f.name.clone(), f.params.iter().map(|p| p.mutable).collect());
                     } else {
+                        let sf = f.source_file.clone();
+                        let wrap = |e: TypeError| if let Some(ref s) = sf { e.in_file(s.clone()) } else { e };
                         let params: Result<Vec<_>, _> =
                             f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
                         let ret = f
                             .ret
                             .as_ref()
                             .map(|t| self.resolve_type(t))
-                            .transpose()?
+                            .transpose()
+                            .map_err(&wrap)?
                             .unwrap_or(Type::Void);
                         self.fn_mut_params
                             .insert(f.name.clone(), f.params.iter().map(|p| p.mutable).collect());
                         self.fns
-                            .insert(f.name.clone(), Type::Fn(params?, Box::new(ret)));
+                            .insert(f.name.clone(), Type::Fn(params.map_err(wrap)?, Box::new(ret)));
                     }
                 }
                 Item::Actor(_) | Item::On(_) | Item::Package { .. } => {
@@ -14016,13 +14033,14 @@ impl TypeChecker {
                         self.const_strs.insert(c.name.clone(), s);
                         self.define(&c.name, Type::String, false);
                     } else {
-                        return Err(TypeError::new(format!(
+                        let err = TypeError::new(format!(
                             "const `{}` initializer is not a compile-time int or string",
                             c.name
                         ))
                         .hint(
                             "use integer ops / const fn, or string literals / `+` concat / const string names",
-                        ));
+                        );
+                        return Err(if let Some(ref sf) = c.source_file { err.in_file(sf.clone()) } else { err });
                     }
                 }
             }
@@ -14052,7 +14070,9 @@ impl TypeChecker {
         for item in &program.items {
             if let Item::Fn(f) = item {
                 if f.type_params.is_empty() {
-                    self.check_fn(f)?;
+                    self.check_fn(f).map_err(|e| {
+                        if let Some(ref sf) = f.source_file { e.in_file(sf.clone()) } else { e }
+                    })?;
                     if f.is_const {
                         // Ensure body is const-evaluable with dummy zeros / empty strings.
                         let mut env = self.const_ints.clone();
@@ -17093,7 +17113,10 @@ impl TypeChecker {
                         }
                     }
                     BinOp::Eq | BinOp::Ne => {
-                        if self.compatible(&lt, &rt) {
+                        // Bool ↔ Int coercion for equality only: `str_eq(a,b) == 1`.
+                        let eq_compatible = self.compatible(&lt, &rt)
+                            || matches!((&lt, &rt), (Type::Bool, Type::Int) | (Type::Int, Type::Bool));
+                        if eq_compatible {
                             Ok(Type::Bool)
                         } else {
                             Err(TypeError::new(format!(
@@ -19834,22 +19857,23 @@ impl TypeChecker {
         // Find the base generic struct name by trying known templates.
         // e.g. for "Wrapper__Pair__int", try "Wrapper" first (it's a known template).
         // The rest ("Pair__int") is the tag for type param T.
-        let mut base = "";
-        let mut tag_str = "";
+        let mut base_name = String::new();
+        let mut tag_start = 0usize;
         for name in self.generic_structs.keys() {
             if let Some(rest) = mono_name.strip_prefix(name.as_str()) {
-                if let Some(rest) = rest.strip_prefix("__") {
-                    if base.is_empty() || name.len() > base.len() {
-                        base = unsafe { &*(name.as_str() as *const str) };
-                        tag_str = unsafe { &*(rest as *const str) };
+                if let Some(_rest) = rest.strip_prefix("__") {
+                    if base_name.is_empty() || name.len() > base_name.len() {
+                        base_name = name.clone();
+                        tag_start = name.len() + 2; // skip "__"
                     }
                 }
             }
         }
-        if base.is_empty() {
+        if base_name.is_empty() {
             return Ok(()); // no matching generic template
         }
-        let template = self.generic_structs.get(base).cloned().unwrap();
+        let tag_str = &mono_name[tag_start..];
+        let template = self.generic_structs.get(&base_name).cloned().unwrap();
         // Split tag_str into N parts matching the number of type params.
         // For 1 param, the entire tag_str is the tag (even if it contains __).
         // For N params, split on __ but only N-1 times.
@@ -19860,7 +19884,7 @@ impl TypeChecker {
         };
         if tag_parts.len() != template.type_params.len() {
             return Err(TypeError::new(format!(
-                "generic struct `{base}` has {} type params, got {} in `{mono_name}`",
+                "generic struct `{base_name}` has {} type params, got {} in `{mono_name}`",
                 template.type_params.len(),
                 tag_parts.len()
             )));
@@ -19884,6 +19908,7 @@ impl TypeChecker {
             fields: mono_fields,
             derives: template.derives.clone(),
             exported: template.exported,
+            source_file: None,
         };
         // Register the concrete struct type
         let fields: Result<Vec<_>, _> = mono_struct
@@ -19929,22 +19954,23 @@ impl TypeChecker {
         if self.mono_enum_generated.contains(mono_name) {
             return Ok(());
         }
-        let mut base = "";
-        let mut tag_str = "";
+        let mut base_name = String::new();
+        let mut tag_start = 0usize;
         for name in self.generic_enums.keys() {
             if let Some(rest) = mono_name.strip_prefix(name.as_str()) {
-                if let Some(rest) = rest.strip_prefix("__") {
-                    if base.is_empty() || name.len() > base.len() {
-                        base = unsafe { &*(name.as_str() as *const str) };
-                        tag_str = unsafe { &*(rest as *const str) };
+                if let Some(_rest) = rest.strip_prefix("__") {
+                    if base_name.is_empty() || name.len() > base_name.len() {
+                        base_name = name.clone();
+                        tag_start = name.len() + 2; // skip "__"
                     }
                 }
             }
         }
-        if base.is_empty() {
+        if base_name.is_empty() {
             return Ok(());
         }
-        let template = self.generic_enums.get(base).cloned().unwrap();
+        let tag_str = &mono_name[tag_start..];
+        let template = self.generic_enums.get(&base_name).cloned().unwrap();
         let tag_parts: Vec<&str> = if template.type_params.len() == 1 {
             vec![tag_str]
         } else {
@@ -19952,7 +19978,7 @@ impl TypeChecker {
         };
         if tag_parts.len() != template.type_params.len() {
             return Err(TypeError::new(format!(
-                "generic enum `{base}` has {} type params, got {} in `{mono_name}`",
+                "generic enum `{base_name}` has {} type params, got {} in `{mono_name}`",
                 template.type_params.len(),
                 tag_parts.len()
             )));
@@ -19980,6 +20006,7 @@ impl TypeChecker {
             type_params: Vec::new(),
             variants: mono_variants,
             exported: template.exported,
+            source_file: None,
         };
         // Register variants and the concrete enum type
         let mut typed_variants = Vec::new();
@@ -22477,6 +22504,7 @@ pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, 
         exported: template.exported,
         is_const: template.is_const,
         stability: template.stability.clone(),
+        source_file: template.source_file.clone(),
     }
 }
 

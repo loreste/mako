@@ -5591,6 +5591,7 @@ mod tests {
             exported: false,
             is_const: false,
             stability: ApiStability::Unspecified,
+            source_file: None,
         })
     }
 
@@ -5644,6 +5645,7 @@ mod tests {
             exported: false,
             is_const: false,
             stability: ApiStability::Unspecified,
+            source_file: None,
         }
     }
 
@@ -5864,6 +5866,7 @@ mod tests {
                     ],
                     derives: vec![],
                     exported: false,
+                    source_file: None,
                 }),
                 function(
                     "main",

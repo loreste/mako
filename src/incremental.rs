@@ -303,15 +303,28 @@ fn emit_type_error(path: &str, src_for_diag: &str, error: TypeError) {
         hint,
         line,
         col,
+        source_file,
     } = error;
+    // When the error originates in a pulled module, use that file's source
+    // so the diagnostic points at the real line instead of the pull statement.
+    let (diag_path, diag_src_owned);
+    let diag_src: &str;
+    if let Some(ref sf) = source_file {
+        diag_path = sf.as_str();
+        diag_src_owned = std::fs::read_to_string(sf).unwrap_or_default();
+        diag_src = &diag_src_owned;
+    } else {
+        diag_path = path;
+        diag_src = src_for_diag;
+    }
     let span = if line > 0 {
         Span::new(line, col)
-    } else if let Some(span) = crate::diag::infer_span_from_message(src_for_diag, &message) {
+    } else if let Some(span) = crate::diag::infer_span_from_message(diag_src, &message) {
         span
     } else {
         Span::unknown()
     };
-    let mut diagnostic = Diagnostic::error(path, src_for_diag, span, message);
+    let mut diagnostic = Diagnostic::error(diag_path, diag_src, span, message);
     if let Some(h) = hint {
         diagnostic = diagnostic.with_hint(h);
     }

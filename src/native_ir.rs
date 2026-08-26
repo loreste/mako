@@ -2581,6 +2581,7 @@ fn monomorphize_generics(
             exported: tmpl.exported,
             is_const: tmpl.is_const,
             stability: tmpl.stability.clone(),
+            source_file: tmpl.source_file.clone(),
         });
     }
     Ok(out)
@@ -2700,6 +2701,7 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
             exported: false,
             is_const: false,
             stability: crate::ast::ApiStability::Unspecified,
+            source_file: None,
         };
         signatures.insert("main".into(), (vec![], Some(Type::I64)));
         Some(main_fn)
@@ -5525,6 +5527,7 @@ impl<'a> FunctionLowerer<'a> {
             exported: false,
             is_const: false,
             stability: crate::ast::ApiStability::Unspecified,
+            source_file: None,
         });
         // Code address of stub.
         let code = self.value();

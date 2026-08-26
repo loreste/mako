@@ -92,6 +92,7 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
             hint,
             line,
             col,
+            source_file: _,
         } = e;
         let span = if line > 0 {
             Span::new(line, col)
@@ -350,6 +351,7 @@ fn diagnostic_from_type_error(file: &str, src: &str, err: TypeError) -> Diagnost
         hint,
         line,
         col,
+        source_file: _,
     } = err;
     let span = if line > 0 {
         Span::new(line, col)
@@ -3149,6 +3151,8 @@ fn merge_path_deps_from_manifest(
                 None => parse_program_file(&canon)?,
             };
             strip_main_fn(&mut imported);
+            let dep_path = canon.display().to_string();
+            stamp_source_file(&mut imported, &dep_path);
             pkg_prog.items.extend(imported.items);
         }
         if !pkg_prog.items.is_empty() {
@@ -3324,7 +3328,7 @@ fn resolve_imports_rec(
                         continue; // already merged (cycle or duplicate)
                     }
                     any_new = true;
-                    let imported = parse_program_file_raw(&canon, locked_roots)?;
+                    let mut imported = parse_program_file_raw(&canon, locked_roots)?;
                     if pkg_name.is_none() {
                         pkg_name = package_name_of(&imported);
                     } else if let (Some(a), Some(b)) = (&pkg_name, package_name_of(&imported)) {
@@ -3339,6 +3343,8 @@ fn resolve_imports_rec(
                     if path_alias.is_none() {
                         path_alias = path_default_alias(&path, target);
                     }
+                    let file_path = canon.display().to_string();
+                    stamp_source_file(&mut imported, &file_path);
                     let mut unit = resolve_imports_rec(
                         &canon,
                         imported,
@@ -3389,6 +3395,20 @@ fn resolve_imports_rec(
         }
     }
     Ok(out)
+}
+
+/// Tag every item in `program` with its origin file so diagnostics
+/// can point into pulled modules instead of the entry file.
+fn stamp_source_file(program: &mut Program, file: &str) {
+    for item in &mut program.items {
+        match item {
+            Item::Fn(f) => f.source_file = Some(file.to_string()),
+            Item::Struct(s) => s.source_file = Some(file.to_string()),
+            Item::Enum(e) => e.source_file = Some(file.to_string()),
+            Item::Const(c) => c.source_file = Some(file.to_string()),
+            _ => {}
+        }
+    }
 }
 
 /// First `package name` in a program, if any.
@@ -3736,6 +3756,8 @@ pub fn merge_package_dir_siblings(entry: &Path, mut program: Program) -> Result<
             }
             _ => {}
         }
+        let sib_path = sib_canon.display().to_string();
+        stamp_source_file(&mut extra, &sib_path);
         extra
             .items
             .retain(|i| !matches!(i, Item::Package { .. } | Item::Import { .. }));
@@ -4385,7 +4407,7 @@ mod metadata_tests {
 
     #[test]
     fn check_json_reports_equality_type_error_location() {
-        let path = temp_mko("json-eq-err", "fn main() {\n    let bad = true == 1\n}\n");
+        let path = temp_mko("json-eq-err", "fn main() {\n    let bad = true == \"no\"\n}\n");
         let (ok, report) = check_file_json_report(&path);
         let _ = fs::remove_file(&path);
         assert!(!ok);
@@ -4400,7 +4422,7 @@ mod metadata_tests {
                 .contains("equality type mismatch"),
             "{report}"
         );
-        assert_eq!(diagnostic["sourceLine"], "    let bad = true == 1");
+        assert_eq!(diagnostic["sourceLine"], "    let bad = true == \"no\"");
     }
 
     #[test]

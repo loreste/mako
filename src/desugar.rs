@@ -99,6 +99,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
         exported: s.exported,
         is_const: false,
         stability: crate::ast::ApiStability::Unspecified,
+        source_file: None,
     }));
 
     for (fname_field, ty, _) in &s.fields {
@@ -127,6 +128,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
             exported: s.exported,
             is_const: false,
             stability: crate::ast::ApiStability::Unspecified,
+            source_file: None,
         }));
     }
 
@@ -271,6 +273,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             fields: actor.fields.clone(),
             derives: Vec::new(),
             exported: false,
+            source_file: None,
         }));
     }
 
@@ -306,6 +309,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             exported: false,
             is_const: false,
             stability: crate::ast::ApiStability::Unspecified,
+            source_file: None,
         }));
     }
 
@@ -329,6 +333,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         exported: false,
         is_const: false,
         stability: crate::ast::ApiStability::Unspecified,
+        source_file: None,
     }));
 
     // Session_spawn_cap(cap) -> chan[int]
@@ -355,6 +360,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         exported: false,
         is_const: false,
         stability: crate::ast::ApiStability::Unspecified,
+        source_file: None,
     }));
 
     // Session_send(mbox, tag) -> bool
@@ -385,6 +391,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         exported: false,
         is_const: false,
         stability: crate::ast::ApiStability::Unspecified,
+        source_file: None,
     }));
 
     // Session_loop(mbox) — message dispatch (+ optional state)
@@ -550,6 +557,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         exported: false,
         is_const: false,
         stability: crate::ast::ApiStability::Unspecified,
+        source_file: None,
     }));
 
     items

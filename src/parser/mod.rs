@@ -548,7 +548,7 @@ impl Parser {
         if matches!(self.peek_kind(), TokenKind::Semicolon) {
             self.bump();
         }
-        Ok(ConstDef { name, value })
+        Ok(ConstDef { name, value, source_file: None })
     }
 
     fn parse_actor(&mut self) -> Result<ActorDef, ParseError> {
@@ -959,6 +959,7 @@ impl Parser {
             exported: false,
             is_const: false,
             stability: crate::ast::ApiStability::Unspecified,
+            source_file: None,
         })
     }
 
@@ -1006,6 +1007,7 @@ impl Parser {
             fields,
             derives: Vec::new(),
             exported: false,
+            source_file: None,
         })
     }
 
@@ -1058,6 +1060,7 @@ impl Parser {
             type_params,
             variants,
             exported: false,
+            source_file: None,
         })
     }
 

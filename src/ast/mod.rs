@@ -79,6 +79,8 @@ pub struct OnDef {
 pub struct ConstDef {
     pub name: String,
     pub value: Expr,
+    /// Origin file path for pulled modules (diagnostics).
+    pub source_file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -138,6 +140,8 @@ pub struct FnDef {
     pub is_const: bool,
     /// Compiler-checked API stability (`#[stable]` / `#[deprecated(...)]`).
     pub stability: ApiStability,
+    /// Origin file path for pulled modules (diagnostics).
+    pub source_file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -157,6 +161,8 @@ pub struct StructDef {
     /// e.g. ["json"] from `#[derive(json)]`
     pub derives: Vec<String>,
     pub exported: bool,
+    /// Origin file path for pulled modules (diagnostics).
+    pub source_file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -166,6 +172,8 @@ pub struct EnumDef {
     pub type_params: Vec<String>,
     pub variants: Vec<EnumVariant>,
     pub exported: bool,
+    /// Origin file path for pulled modules (diagnostics).
+    pub source_file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
