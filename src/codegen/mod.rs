@@ -4711,7 +4711,12 @@ impl Codegen {
             for info in self.structs.values() {
                 for (_fname, fty) in &info.fields {
                     let base = fty.trim_end_matches('*').trim();
-                    if (base.starts_with("MakoMap") || base.starts_with("MakoArr_"))
+                    if (base.starts_with("MakoArr_")
+                        || base.starts_with("MakoMapI_")
+                        || base.starts_with("MakoMapS_")
+                        || base.starts_with("MakoMapF_")
+                        || base.starts_with("MakoMapB_")
+                        || base.starts_with("MakoMapK_"))
                         && !fwd.contains(&base.to_string())
                     {
                         fwd.push(base.to_string());
@@ -5120,7 +5125,7 @@ impl Codegen {
     fn emit_enum_typedef(&mut self, e: &EnumDef) {
         let info = self.enums.get(&e.name).unwrap().clone();
         let c_name = info.c_name.clone();
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {c_name} {{");
         let _ = writeln!(self.out, "    int tag;");
         let _ = writeln!(self.out, "    int64_t i0;");
         let _ = writeln!(self.out, "    int64_t i1;");
@@ -5252,7 +5257,7 @@ impl Codegen {
     fn emit_enum_array_and_maps(&mut self, short: &str, c_ty: &str) {
         // --- []Enum ---
         let arr = format!("MakoArr_{short}");
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {arr} {{");
         let _ = writeln!(self.out, "    {c_ty} *data;");
         let _ = writeln!(self.out, "    size_t len;");
         let _ = writeln!(self.out, "    size_t cap;");
@@ -6086,7 +6091,7 @@ impl Codegen {
     fn emit_struct_typedef(&mut self, s: &StructDef) {
         let info = self.structs.get(&s.name).unwrap().clone();
         let c_name = info.c_name.clone();
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {c_name} {{");
         for (fname, fty) in &info.fields {
             let _ = writeln!(self.out, "    {fty} {fname};");
         }
@@ -6127,7 +6132,7 @@ impl Codegen {
         let _ = writeln!(self.out, "    return h;");
         let _ = writeln!(self.out, "}}");
         let arr = format!("MakoArr_{c_name}");
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {arr} {{");
         let _ = writeln!(self.out, "    {c_name} *data;");
         let _ = writeln!(self.out, "    size_t len;");
         let _ = writeln!(self.out, "    size_t cap;");
@@ -6296,7 +6301,7 @@ impl Codegen {
         }
         let mt = format!("MakoArr_{tag}");
         let pref = format!("mako_arr_{tag}");
-        let _ = writeln!(self.out, "typedef struct {{");
+        let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    {elem_c} *data;");
         let _ = writeln!(self.out, "    size_t len;");
         let _ = writeln!(self.out, "    size_t cap;");

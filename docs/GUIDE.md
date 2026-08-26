@@ -1,4 +1,4 @@
-# Mako language guide
+# Makori language guide
 
 **What works today** — syntax and APIs the compiler accepts, with examples under
 `examples/`. Sources use the **`.mko`** extension (not `.mk`).
@@ -12,7 +12,7 @@
 | **This guide** | Verified syntax + how to use it |
 | **[IDENTITY.md](IDENTITY.md)** | Our syntax identity + **% checklist** |
 | [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) | Optional dual-form inventory (not preferred) |
-| **[The Mako Book](book/)** | Guided tour (idiomatic Mako) |
+| **[The Makori Book](book/)** | Guided tour (idiomatic Mako) |
 | [COMPAT.md](COMPAT.md) | Dual forms / backward compatibility |
 | [STATUS.md](STATUS.md) | Done matrix (adversarial) |
 | [BUILD.md](BUILD.md) | Incremental cache, backends (c / native / llvm), `-j` |
@@ -33,7 +33,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish is the only external bl
 
 ---
 
-## Mako-native syntax (preferred)
+## Makori-native syntax (preferred)
 
 Canonical sample: [`examples/mako_style.mko`](../examples/mako_style.mko).
 
@@ -85,7 +85,7 @@ fn main() {
 | `hold` / `share` / `arena` | — |
 
 Goal: **simple everyday code**, **systems-grade control**, **unique Mako surface** —
-addressing real backend [pain points](PAIN_POINTS.md) with Mako's own tools.
+addressing real backend [pain points](PAIN_POINTS.md) with Makori's own tools.
 
 ## Quickstart (install + init)
 
@@ -112,10 +112,10 @@ mako check .
 mako run -p app
 ```
 
-`mako version` (also `mako --version` / `-V`) prints `mako version mako0.4.0 darwin/arm64`. Use `mako version -v` for an optional commit line.
+`makori version` (also `mako --version` / `-V`) prints `makori version mako0.4.0 darwin/arm64`. Use `makori version -v` for an optional commit line.
 Override headers if needed: `export MAKO_RUNTIME=/path/to/runtime`.
 
-Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `mako build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): optimized on microbenches).
+Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `makori build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): optimized on microbenches).
 
 For speed: pre-size `make([]T, 0, n)` / `make(map[K]V, n)`, use arenas for request
 scope, prefer `hold` over `share`, short-lived POD lits stay on the stack
@@ -151,7 +151,7 @@ cargo run --release -- run examples/hello.mko
 Local path deps are the useful surface today; remote git fetch is thin (needs `git`).
 
 ```bash
-mako pkg init mylib                 # same scaffold as `mako init`
+mako pkg init mylib                 # same scaffold as `makori init`
 mako pkg list                       # name + deps; path/git status on disk
 mako pkg fetch                      # clone git deps into `.mako/deps/` (needs git + network)
 mako pkg add helper ../helper       # record / update path dep in [dependencies]
@@ -177,7 +177,7 @@ from `.mako/registry/<key>/<ver>/` (highest match). Scoped names use a
 single-segment key (`scope/util` becomes `scope!util`) — see
 `examples/pkg_registry/`.
 
-`mako pkg list` exits non-zero if a path dep is missing **or** a git dep is not under `.mako/deps/` yet. `mako check` / `build` / `run` fail with the same **MISSING** wording (`run mako pkg fetch first` for git). Default CI does **not** live-fetch.
+`makori pkg list` exits non-zero if a path dep is missing **or** a git dep is not under `.mako/deps/` yet. `makori check` / `build` / `run` fail with the same **MISSING** wording (`run mako pkg fetch first` for git). Default CI does **not** live-fetch.
 
 Local helpers:
 
@@ -202,11 +202,11 @@ When you `check` / `build` / `run` a `.mko` under a project with `mako.toml`, lo
 
 Symbols are namespaced by the dependency key declared by the **parent** package: `"helper" = { path = "…" }` → call `helper.add(...)` (same pattern as `import "…" as helper`). Nested packages keep the names their own manifests use (`helper` may call `core.scale`).
 
-Demo: `examples/pkg_path_dep/` — `app` → `helper` → `core` (`mako run examples/pkg_path_dep/app/main.mko`).
+Demo: `examples/pkg_path_dep/` — `app` → `helper` → `core` (`makori run examples/pkg_path_dep/app/main.mko`).
 
 ### Workspace sketch (local-only)
 
-Scaffold with `mako init DIR --workspace` (keeps default single-package `mako init` unchanged):
+Scaffold with `makori init DIR --workspace` (keeps default single-package `makori init` unchanged):
 
 ```bash
 mako init myws --workspace
@@ -225,15 +225,15 @@ From that root:
 
 | Command | Behavior |
 |---------|----------|
-| `mako check .` | Typecheck each member’s `main.mko` or `lib.mko` |
-| `mako build .` | Link each member that has `main.mko` (lib-only members skipped) |
-| `mako test .` | Run `*_test.mko` under members that have tests |
-| `mako fmt .` / `mako lint .` | Format / lint each member (optional `-p`) |
+| `makori check .` | Typecheck each member’s `main.mko` or `lib.mko` |
+| `makori build .` | Link each member that has `main.mko` (lib-only members skipped) |
+| `makori test .` | Run `*_test.mko` under members that have tests |
+| `makori fmt .` / `makori lint .` | Format / lint each member (optional `-p`) |
 | `mako bench .` | Run `bench_*.mko` under members that have benches (optional `-p`) |
 | `mako profile . -p app --json` | Build/run one member and report frontend/backend/run timings |
-| `mako run .` | Run the unique member with `main.mko`, or error asking for `-p NAME` |
-| `mako run -p app` | Run that member’s `main.mko` |
-| `mako check/build/test/fmt/lint/bench -p NAME` | Focus a single workspace member |
+| `makori run .` | Run the unique member with `main.mko`, or error asking for `-p NAME` |
+| `makori run -p app` | Run that member’s `main.mko` |
+| `makori check/build/test/fmt/lint/bench -p NAME` | Focus a single workspace member |
 
 Path deps between members still use `[dependencies]` path entries. See `examples/pkg_path_dep/`.
 
@@ -341,7 +341,7 @@ print(string(buf))
 `float` ≡ `float64` today. Prefer **`[]byte(s)`** or `bytes(s)`.
 
 Compile-time range: constant `int8(n)` / `byte(n)` / `uint64(n)` checked at
-`mako check`; non-constants still runtime-abort.
+`makori check`; non-constants still runtime-abort.
 
 ### Rules enforced today
 
@@ -355,7 +355,7 @@ Compile-time range: constant `int8(n)` / `byte(n)` / `uint64(n)` checked at
 - Interfaces require `Iface_method` implementations
 
 Good: `examples/types_ok.mko`, `examples/integers.mko`. Intentional failures: `examples/bad/*.mko`
-(`mako check` must error).
+(`makori check` must error).
 
 ```mko
 fn add(a: int, b: int) -> int {
@@ -470,7 +470,7 @@ rows = append(rows, [10, 20])
 | `[]bool` / `[]Enum` | Bool and enum element slices |
 | `s[i:j]`, `len`/`cap`/`append`/`copy` | Slice operations |
 
-Compile-time: `int8(200)` / `byte(300)` rejected at `mako check` when the arg is a constant
+Compile-time: `int8(200)` / `byte(300)` rejected at `makori check` when the arg is a constant
 (`examples/bad/int8_literal_oor.mko`, `byte_literal_oor.mko`). Runtime still aborts for non-const OOR.
 
 `append` / `copy` and chained index writes are type-safe and bounds-checked.
@@ -1122,7 +1122,7 @@ x = 9
 print_int(x)
 ```
 
-Intentional failures (must `mako check` error):
+Intentional failures (must `makori check` error):
 
 - `examples/bad/hold_use_after_move.mko`
 - `examples/bad/hold_double_move.mko`
@@ -1692,7 +1692,7 @@ When `libnghttp2` is detected, prefer `nghttp2_get` / `nghttp2_post` for product
 
 ### Building APIs
 
-Mako is a **backend language**: HTTP handlers, JSON, routing, and service templates.
+Makori is a **backend language**: HTTP handlers, JSON, routing, and service templates.
 **How-to:** [howto/02-http-apis.md](howto/02-http-apis.md) · **STDLIB:** [STDLIB.md](STDLIB.md).
 
 ```bash
@@ -1854,7 +1854,7 @@ Ownership (`hold`/`share`), arenas, bytes, and files — no GC:
 
 ### Building databases / storage engines
 
-Beyond SQL **clients** (SQLite/Postgres): ship a mini **embedded** engine in Mako.
+Beyond SQL **clients** (SQLite/Postgres): ship a mini **embedded** engine in Makori.
 
 | Piece | Path |
 |-------|------|
@@ -1889,7 +1889,7 @@ unit-test seeds — prefer the live OpenSSL builtins above for integration.
 
 ## 11b. Event Loop (Non-blocking I/O)
 
-Mako provides a high-performance event loop for non-blocking I/O multiplexing
+Makori provides a high-performance event loop for non-blocking I/O multiplexing
 (uses epoll on Linux, kqueue on macOS under the hood). Runtime: `runtime/mako_evloop.h`.
 
 ### Event Loop Core
@@ -2246,7 +2246,7 @@ Regex seed supports literals, `.`, `X*`/`X+`/`X?`, `|`, `[abc]`/`[a-z]`/`[^…]`
 ### Pulls (Mako packs)
 
 Normal pulls always bind a **pack name** used as a qualifier. That keeps call
-sites clear — with Mako flair (see [IDENTITY.md](IDENTITY.md)).
+sites clear — with Makori flair (see [IDENTITY.md](IDENTITY.md)).
 
 ```mko
 // Default name from `pack lib` in the pulled file (or last path segment)
@@ -2304,9 +2304,9 @@ pull . "./import_lib.mko"
 6. `.mako/pkg/<path>/`
 
 See `examples/import_paths/` for a full service-style import block.  
-`mako fmt` groups into `pull ( … )` with blank lines between std / remote / relative.
+`makori fmt` groups into `pull ( … )` with blank lines between std / remote / relative.
 
-`mako run prog.mko -- arg1 arg2` forwards args to the program.
+`makori run prog.mko -- arg1 arg2` forwards args to the program.
 
 ---
 
@@ -2316,12 +2316,12 @@ See `examples/import_paths/` for a full service-style import block.
 |---------|--------|
 | Test file | `foo_test.mko` (same dir as code) |
 | Test function | `fn TestAdd() { … }` |
-| Run all | `mako test [path]` |
-| Filter | `mako test --run TestAdd` or `-r 'Test*'` or `-r '/^TestAdd$/'` |
-| Verbose | `mako test -v` / `--verbose` (lists matched test functions) |
-| Repeat | `mako test --count N` (stops at the first failing iteration) |
-| Coverage | `mako test --coverage` |
-| JSON report | `mako test --json` (schema version 1; captures output and exits nonzero on failure) |
+| Run all | `makori test [path]` |
+| Filter | `makori test --run TestAdd` or `-r 'Test*'` or `-r '/^TestAdd$/'` |
+| Verbose | `makori test -v` / `--verbose` (lists matched test functions) |
+| Repeat | `makori test --count N` (stops at the first failing iteration) |
+| Coverage | `makori test --coverage` |
+| JSON report | `makori test --json` (schema version 1; captures output and exits nonzero on failure) |
 | Categories | `fn FuzzXxx()` / `PropertyXxx()` / `SnapshotXxx()` / `MockXxx()` / `FixtureXxx()` |
 | Subtests | `t_run("name")` · nest with `t_run_nested("child")` → `Parent/child` |
 
@@ -2414,7 +2414,7 @@ mako deploy plugin my-plugin --name my-plugin --kind native
 
 VS Code support under `editors/vscode/` includes syntax highlighting, snippets,
 tasks, command palette actions, `mako-native` debug launch configs, and a
-dependency-free client for `mako lsp` covering diagnostics, hover, completion,
+dependency-free client for `makori lsp` covering diagnostics, hover, completion,
 definitions, references, rename, code actions, symbols, and signature help.
 Configure the executable path with `mako.path`; native debugging spawns the
 built-in `mako dap` adapter directly (no CodeLLDB or Microsoft C/C++
@@ -2426,18 +2426,18 @@ Linux musl targets default to static linking; glibc Linux, macOS, Windows, and
 WASM stay dynamic/default unless static linking is explicitly supported and requested.
 See [BUILD.md](BUILD.md) · [PERFORMANCE.md](PERFORMANCE.md) · [SECURITY.md](SECURITY.md).
 
-`mako deploy docker` writes a multi-stage Dockerfile plus `.dockerignore`.
+`makori deploy docker` writes a multi-stage Dockerfile plus `.dockerignore`.
 Default mode builds a static `x86_64-unknown-linux-musl` binary and copies it
 into `scratch`; `--mode debian` uses `debian:bookworm-slim` with CA certificates
 for apps that need OS trust stores or shell/debug tooling.
-`mako deploy serverless` builds on that Dockerfile and writes provider starter
+`makori deploy serverless` builds on that Dockerfile and writes provider starter
 manifests: `cloudrun.service.yaml` for Cloud Run or `fly.toml` for Fly.io.
 Cloud Run requires an explicit `--image` pointing to an image you have pushed;
 Fly builds from the generated Dockerfile and does not use that option.
-`mako deploy wasm` writes a browser/edge static starter around the WASI
+`makori deploy wasm` writes a browser/edge static starter around the WASI
 preview1 loader: `index.html`, `mako-wasi-loader.js`, `build-wasm.sh`, and a
 README that names the preview2/component boundary.
-`mako deploy plugin` writes native or WASM plugin starters using the ABI
+`makori deploy plugin` writes native or WASM plugin starters using the ABI
 in `runtime/mako_plugin.h`; see [ABI.md](ABI.md).
 
 ### Security APIs (stdlib)
@@ -2670,7 +2670,7 @@ python3 -m http.server -d wasm-dist 8080
 ## Target / roadmap (not in this guide as “works”)
 
 **Already Done** (see STATUS): CFG NLL, HTTP/1.1 + HTTPS + H2 TLS beachhead,
-gRPC/H3-client pieces, WASI preview1, operators/imports/`mako version`,
+gRPC/H3-client pieces, WASI preview1, operators/imports/`makori version`,
 stdlib Waves 1–9 plus the 2026-08-18 Go-equivalent wave and wave-3 close
 (application packs; not every Go toolchain/`unsafe` package — [STDLIB.md](STDLIB.md)).
 
@@ -2681,7 +2681,7 @@ Huffman JPEG viewer parity (mako APP7 layout checks + roundtrip + DCT/huff evide
 SIMD/GPU, deep LSP, homebrew-core publish (external). See [VISION.md](VISION.md)
 and [STATUS.md](STATUS.md).
 
-**Book:** [The Mako Book](book/).
+**Book:** [The Makori Book](book/).
 
 ---
 

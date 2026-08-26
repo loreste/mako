@@ -32,7 +32,7 @@ function activeTarget(defaultTarget) {
 
 function runInTerminal(command, args) {
   const terminal = vscode.window.createTerminal({
-    name: "Mako",
+    name: "Makori",
     cwd: workspaceCwd()
   });
   const quoted = [command, ...args].map(shellQuote).join(" ");

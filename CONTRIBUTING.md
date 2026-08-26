@@ -1,4 +1,4 @@
-# Contributing to Mako
+# Contributing to Makori
 
 Thanks for being interested in helping out. Here's how to get set up and what
 we expect from contributions.
@@ -54,7 +54,7 @@ examples/         Example programs and test suite
   testing/        Test files (*_test.mko)
   bad/            Negative tests (expected compiler errors)
 docs/             Documentation
-  book/           The Mako Book (mdBook)
+  book/           The Makori Book (mdBook)
   howto/          Task-oriented guides
 editors/vscode/   VS Code extension
 scripts/          Build, test, and release scripts
@@ -114,7 +114,7 @@ Never `git add -A` / `git add .` blindly — stage only source, tests, docs, and
 - Keep it simple. Don't over-abstract.
 - Match the existing code style in whatever file you're editing.
 - Runtime C code follows the existing naming: `mako_` prefix, snake_case.
-- Mako source files use `.mko` extension.
+- Makori source files use `.mko` extension.
 
 ## Adding to the standard library
 

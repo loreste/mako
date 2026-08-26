@@ -40,7 +40,7 @@ mako version -v
 
 ## Create a project
 
-Mako provides scaffolding for three project shapes:
+Makori provides scaffolding for three project shapes:
 
 ```bash
 # Simple application
@@ -57,7 +57,7 @@ Each creates a directory with `mako.toml` and a `main.mko` entry point.
 
 ## Project structure
 
-After `mako init hello --name hello`:
+After `makori init hello --name hello`:
 
 ```
 hello/
@@ -123,14 +123,14 @@ Inside the program, use `argc()`, `arg_get(i)`, or `args()` to read them.
 
 | Command | Purpose |
 |---------|---------|
-| `mako check file.mko` | Typecheck (incremental, fast) |
-| `mako run file.mko` | Compile and execute |
-| `mako build file.mko` | Produce a binary |
-| `mako build --release file.mko` | Optimized release binary |
-| `mako build -j 8 file.mko` | Parallel compilation |
-| `mako test path/` | Run tests |
-| `mako fmt file.mko` | Format source code |
-| `mako version` | Print version and platform |
+| `makori check file.mko` | Typecheck (incremental, fast) |
+| `makori run file.mko` | Compile and execute |
+| `makori build file.mko` | Produce a binary |
+| `makori build --release file.mko` | Optimized release binary |
+| `makori build -j 8 file.mko` | Parallel compilation |
+| `makori test path/` | Run tests |
+| `makori fmt file.mko` | Format source code |
+| `makori version` | Print version and platform |
 
 ## Running from source (no install)
 

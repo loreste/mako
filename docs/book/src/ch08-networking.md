@@ -1,6 +1,6 @@
 # 8. Networking & HTTP
 
-Mako provides a systems-level HTTP stack: synchronous, one-request-at-a-time
+Makori provides a systems-level HTTP stack: synchronous, one-request-at-a-time
 per connection, with no colored async. You scale concurrency by running handlers
 inside crew blocks. This chapter covers TCP, HTTP/1.1, HTTPS, HTTP/2, WebSockets,
 REST APIs, and request routing patterns.
@@ -9,7 +9,7 @@ REST APIs, and request routing patterns.
 
 ## TCP Fundamentals
 
-At the lowest level, Mako provides raw TCP socket operations:
+At the lowest level, Makori provides raw TCP socket operations:
 
 ```mko
 fn main() {
@@ -371,7 +371,7 @@ fn main() {
 
 ## TLS / HTTPS
 
-When OpenSSL is linked, Mako supports HTTPS with TLS termination:
+When OpenSSL is linked, Makori supports HTTPS with TLS termination:
 
 ```mko
 fn main() {
@@ -703,7 +703,7 @@ if proxy_io_ok(io) == 1 {
 }
 ```
 
-**C-side request parse** (avoid repeated `str_split` in Mako):
+**C-side request parse** (avoid repeated `str_split` in Makori):
 
 ```mko
 let req = http_parse(raw_bytes)
@@ -793,7 +793,7 @@ fn main() {
 
 ## WebSocket
 
-Mako provides WebSocket server support with RFC6455 upgrade, text/binary frames,
+Makori provides WebSocket server support with RFC6455 upgrade, text/binary frames,
 and automatic ping/pong handling.
 
 ### Echo server
@@ -1100,7 +1100,7 @@ Design accordingly:
 ## Event Loop and Non-blocking I/O
 
 For servers that must handle many concurrent connections without a thread per
-connection, Mako provides a non-blocking event loop (`runtime/mako_evloop.h`).
+connection, Makori provides a non-blocking event loop (`runtime/mako_evloop.h`).
 It uses epoll on Linux and kqueue on macOS under the hood.
 
 ### Non-blocking TCP Server
@@ -1170,7 +1170,7 @@ Test it with `printf 'hello' | nc 127.0.0.1 9099`.
 
 ## Game UDP Networking
 
-For real-time game servers, Mako provides a dedicated UDP networking subsystem
+For real-time game servers, Makori provides a dedicated UDP networking subsystem
 (`runtime/mako_game.h`) that tracks connected peers and supports broadcast:
 
 ```mko
@@ -1263,7 +1263,7 @@ fn main() {
 ## HTTP Engine (Declarative Routing)
 
 For applications that want declarative route registration instead of manual
-path matching, Mako provides an HTTP engine (`runtime/mako_httpengine.h`):
+path matching, Makori provides an HTTP engine (`runtime/mako_httpengine.h`):
 
 ```mko
 fn main() {
@@ -1296,7 +1296,7 @@ loop.
 
 ## Sessions and Authentication
 
-Mako provides built-in session management and authentication primitives that
+Makori provides built-in session management and authentication primitives that
 integrate with the HTTP server. These live in `runtime/mako_security.h` and
 use constant-time comparisons throughout to prevent timing attacks.
 

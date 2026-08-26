@@ -1,4 +1,4 @@
-# Mako keywords
+# Makori keywords
 
 Source of truth: `src/lexer/mod.rs` → `lex_ident` (**48** reserved words, including duals; `pack`/`pull`/`go`/`switch` are contextual).  
 Every identifier that matches one of these strings is always a keyword token — never
@@ -15,7 +15,7 @@ conversions `T(x)` / `bytes(s)`, `Ok`/`Err`/`assert*`/`t_run`, `len`/`cap`/`appe
 `rune_count`/`has`/`delete`/`str_builder`/`builder_*`/`uuid_*` / `graphql_parse` / `mq_*`, etc.
 See [GUIDE.md](GUIDE.md).
 
-Guided tour: [The Mako Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) · Design: [LANGUAGE.md](LANGUAGE.md).
+Guided tour: [The Makori Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) · Design: [LANGUAGE.md](LANGUAGE.md).
 
 ---
 

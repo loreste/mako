@@ -1,4 +1,4 @@
-# Mako roadmap
+# Makori roadmap
 
 **Product version:** **0.5.15** (tip) · last tagged **v0.5.15** · Last sync: **2026-08-26**.
 **Suite:** **423** `examples/testing` `*_test.mko` files · **2026-08-26:**
@@ -9,7 +9,7 @@ C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) �
 **Release:** tag **`v0.5.15`**; tip train **0.5.15**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
-**Book:** [The Mako Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
+**Book:** [The Makori Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
 **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).  
 **Native plan detail:** [NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md).
 
@@ -28,7 +28,7 @@ C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) �
 | **0.4.16** | Memory-safety audit · anneal naming · hot-site tests | **Shipped** |
 | **0.4.17** | Ownership fixes · Windows mutexes · portable crypto · LSP · security audit | **Shipped** |
 | **0.4.18** | Hex/bin/oct literals · security hardening (white-hat audit) | **Shipped** |
-| **0.4.19** | Remote HTTPS registry · ed25519 package signing · `mako pkg get` | **Shipped** |
+| **0.4.19** | Remote HTTPS registry · ed25519 package signing · `makori pkg get` | **Shipped** |
 | **0.4.20** | `#line` source mapping directives · debugger-friendly C output | **Shipped** |
 | **0.4.21** | Public package registry · default registry URL · wildcard version fix | **Shipped** |
 | **0.5.0** | Native-first **default** (CLI default flip — minor theme) | **Shipped** |
@@ -115,7 +115,7 @@ LLVM is the release optimizer; Cranelift stays debug / fast-compile.
 
 | ID | Deliverable | Acceptance |
 |----|-------------|------------|
-| **A1** | `mako build --backend llvm --release` on host arm64/x86_64 (`--features llvm-backend`) | Builds + links with bundled lld; end user needs no system clang for that path |
+| **A1** | `makori build --backend llvm --release` on host arm64/x86_64 (`--features llvm-backend`) | Builds + links with bundled lld; end user needs no system clang for that path |
 | **A2** | Broad workload gate vs C backend + hand C + Rust | Extend `./scripts/native-bench-gate.sh` (or sibling) for **slice, map, I/O, CPU, RSS** — medians, not one-offs |
 | **A3** | Honest published numbers | Update [NATIVE_COMPILER_PLAN.md](NATIVE_COMPILER_PLAN.md) / [PERFORMANCE.md](PERFORMANCE.md) / [SPEED.md](SPEED.md) with hardware + flags |
 | **A4** | Compile latency + binary-size gates | Documented bounds (compile vs C backend; size bar where applicable) |
@@ -132,7 +132,7 @@ LLVM is the release optimizer; Cranelift stays debug / fast-compile.
 | **B3** | Install scripts pin v0.4.5 | `install-release.sh` / `install-linux.sh --version v0.4.5` |
 | **B4** | GitHub Release | Tag `v0.4.5`, notes from CHANGELOG, artifacts + checksums |
 | **B5** | Homebrew / winget seeds | Real SHA for the tag (soft-fail only while pending) |
-| **B6** | Clean-install doctor | `mako doctor` reports runtime + std + version |
+| **B6** | Clean-install doctor | `makori doctor` reports runtime + std + version |
 
 **Exit B:** curl\|bash install works for at least Linux x86_64 and macOS arm64 (or documented exceptions).
 
@@ -142,7 +142,7 @@ LLVM is the release optimizer; Cranelift stays debug / fast-compile.
 |----|-------------|------------|
 | **C1** | Sanitizer / overflow / static on native/LLVM | Implement **or** hard-error pointing at C backend |
 | **C2** | Cross-compile + WASM status | Document working triples; fail closed otherwise |
-| **C3** | CI matrix | `mako test examples/testing --backend c` + `--backend native` on PR; optional LLVM job |
+| **C3** | CI matrix | `makori test examples/testing --backend c` + `--backend native` on PR; optional LLVM job |
 | **C4** | Leak / RSS / size in packaging CI | Fail on regression thresholds |
 | **C5** | Optional soundness soaks (non-blocking for tag) | TSan capture matrix; channel monomorph take matrix — nightly/optional |
 | **C6** | Doc drift | Corpus **367**, residual pack Done, version lines consistent |
@@ -220,7 +220,7 @@ silently falling back to C.
 |----|-------------|--------|
 | **47-A** | Sanitize / static / emit-c / target on native/LLVM | **Done** — `validate_direct_backend_modes` fail-closed |
 | **47-B** | Modes matrix documented | **Done** — [BUILD.md § Modes matrix](BUILD.md) |
-| **47-C** | Doctor reports mode support | **Done** — `mako doctor` backends / modes block |
+| **47-C** | Doctor reports mode support | **Done** — `makori doctor` backends / modes block |
 | **47-D** | LLVM tests use release opt level | **Done** — harness honors release-only llvm |
 
 ---
@@ -274,18 +274,18 @@ hiding failures. Ordered by leverage, not by size.
 ### Module management — reconcile the manifest with the source
 
 **Also not from scratch.** `mako.toml` is the manifest and `mako.lock` the
-resolved, content-hashed lock; `mako pkg add` / `remove` / `install` / `update`
+resolved, content-hashed lock; `makori pkg add` / `remove` / `install` / `update`
 maintain them. What is missing is the link between the manifest and what the
 code actually imports: nothing in `pkg.rs` reads `pull` statements, so
 dependencies are recorded by hand and drift from the source silently.
 
 | ID | Deliverable | Notes |
 |----|-------------|-------|
-| **417-M1** | Import scan | **Done** — `mako pkg imports` |
-| **417-M2** | `mako pkg tidy` | **Done** — `mako pkg tidy`, with `--check` and opt-in `--prune` |
+| **417-M1** | Import scan | **Done** — `makori pkg imports` |
+| **417-M2** | `makori pkg tidy` | **Done** — `makori pkg tidy`, with `--check` and opt-in `--prune` |
 | **417-M3** | Import path → package identity | **Done** — settled by reading the resolver: the manifest key is the full import path |
-| **417-M4** | Resolve on build | A `pull` with no manifest entry currently fails at resolution. It should either resolve and record automatically, or fail with the exact `mako pkg` command that fixes it. Automatic is friendlier; explicit is more predictable for reproducible builds — pick one deliberately and document why. |
-| **417-M5** | `mako pkg why <pkg>` | Show which import pulled a dependency in. Falls out of 417-M1 and is what makes a large dependency set debuggable. |
+| **417-M4** | Resolve on build | A `pull` with no manifest entry currently fails at resolution. It should either resolve and record automatically, or fail with the exact `makori pkg` command that fixes it. Automatic is friendlier; explicit is more predictable for reproducible builds — pick one deliberately and document why. |
+| **417-M5** | `makori pkg why <pkg>` | Show which import pulled a dependency in. Falls out of 417-M1 and is what makes a large dependency set debuggable. |
 
 Verification note: 417-M2 edits the manifest, so it needs fixtures covering a
 missing dependency, an unused one, and a package imported from more than one
@@ -318,9 +318,9 @@ fault before labelling anything flaky.
 |----|-------------|--------|
 | **417-P1** | Registry index format | **Done** — `<name>/index.json` with versions, SHA-256, tarball URLs |
 | **417-P2** | Remote registry source | **Done** — HTTPS registry alongside path/git/local (0.4.19) |
-| **417-P3** | `mako pkg get <pkg>` | **Done** — resolve, fetch, verify SHA-256, record in mako.toml (0.4.19) |
+| **417-P3** | `makori pkg get <pkg>` | **Done** — resolve, fetch, verify SHA-256, record in mako.toml (0.4.19) |
 | **417-P4** | Publish to a remote | **Done** — `scripts/publish-registry.sh` pushes to GitHub Pages registry (0.4.21) |
-| **417-P5** | Discovery | Open — `mako pkg search` not yet implemented |
+| **417-P5** | Discovery | Open — `makori pkg search` not yet implemented |
 
 Default public registry: `https://loreste.github.io/mako-packages` (GitHub
 Pages, static files). Flat namespace. Packages optionally signed with ed25519.
@@ -362,7 +362,7 @@ Tarball integrity verified via SHA-256 before extraction.
 | **50-A** | Backend policy in GUIDE/BUILD/RELEASE | **Done seed** in 0.4.6 — [BUILD.md](BUILD.md) |
 | **50-B** | CI: c + native required | **Done** on Linux/macOS CI jobs |
 | **50-C** | Optional LLVM CI job | **Done** in **0.4.9** (macOS `llvm-backend` job) |
-| **50-D** | **Default backend flip** | `mako build` / `test` default native (or documented MAKO_BACKEND default=native); `--backend c` override |
+| **50-D** | **Default backend flip** | `makori build` / `test` default native (or documented MAKO_BACKEND default=native); `--backend c` override |
 | **50-E** | Cross / WASM / static matrix | Prefer land in **0.4.7** |
 | **50-F** | Perf regression budget | Prefer land in **0.4.8** |
 
@@ -375,7 +375,7 @@ Tarball integrity verified via SHA-256 before extraction.
 ### Non-goals for 0.5.0
 
 - Removing the C backend.
-- Self-hosting the full compiler in Mako.
+- Self-hosting the full compiler in Makori.
 - Full IDE debugger product (that is 0.5.1).
 
 ---
@@ -397,7 +397,7 @@ Coherent **official toolchain**: LSP, debug, docs, bench, and doctor feel like o
 | **51-C** | `mako doc` + package docs | Publishable API docs for std and user packs |
 | **51-D** | `mako bench` + gate scripts | Official microbench entry; documents vs C/Rust |
 | **51-E** | Editor extension polish | VS Code tasks, problem matcher, launch configs match 0.5 defaults |
-| **51-F** | `mako doctor` / install matrix | Catches missing runtime/std/LLVM-optional components cleanly |
+| **51-F** | `makori doctor` / install matrix | Catches missing runtime/std/LLVM-optional components cleanly |
 
 ### Exit 0.5.1
 
@@ -589,7 +589,7 @@ Tests: `generic_struct_test`, `generic_enum_test`, `generic_bounds_test`,
 [Leba](https://github.com/loreste/leba) (v0.7.0) is an independently maintained
 Mako application and systems-programming showcase. Its deployment and
 production claims belong to the Leba repository; this roadmap does not use it
-as evidence that every Mako program or the Mako toolchain is production-ready.
+as evidence that every Makori program or the Mako toolchain is production-ready.
 It exercises channels, TLS, HTTP proxying, structured concurrency, and the
 networking stdlib. Recent work:
 
@@ -602,16 +602,16 @@ networking stdlib. Recent work:
 
 ---
 
-## v0.2.0 — Stdlib in Mako
+## v0.2.0 — Stdlib in Makori
 
-The standard library moves from C runtime wrappers to real Mako code. The stdlib
+The standard library moves from C runtime wrappers to real Makori code. The stdlib
 must be idiomatic Mako and serve as example code for the community.
 
 | Feature | Description |
 |---------|-------------|
 | **io.Reader / io.Writer** | Composable I/O interfaces — bufio, compression, TLS all work through them |
-| **Generic collections** | `List[T]`, `Set[T]`, `Queue[T]`, `PriorityQueue[T]` written in Mako |
-| **encoding/json** | Struct-aware marshal/unmarshal using reflect — written in Mako, not C |
+| **Generic collections** | `List[T]`, `Set[T]`, `Queue[T]`, `PriorityQueue[T]` written in Makori |
+| **encoding/json** | Struct-aware marshal/unmarshal using reflect — written in Makori, not C |
 | **net/http middleware** | Handler chains, request context, streaming bodies |
 | **context cancellation** | Deadline propagation, cancel trees, timeout scoping |
 | **database/sql pool** | Connection pooling, prepared statements, transactions |
@@ -718,7 +718,7 @@ Move beyond what the C backend can give.
 |---------|-------------|
 | **Syntax frozen** | No breaking changes to the language |
 | **Stdlib API stable** | Semver guarantees on all public symbols |
-| **Self-hosting compiler** | The Mako compiler written in Mako |
+| **Self-hosting compiler** | The Makori compiler written in Makori |
 | **Formal memory model** | Documented guarantees for concurrent access |
 | **Ecosystem** | Package registry with community packages, IDE plugins, CI templates |
 
@@ -835,9 +835,9 @@ Move beyond what the C backend can give.
 ## Landed (foundation — do not re-open)
 
 - Compiler → C → native; `.mko`; crew / actors / arenas / `Result` / `Option`
-- Mako operators · packs/pulls · `mako version` / `test` / `check` / `build` / `run`
+- Mako operators · packs/pulls · `makori version` / `test` / `check` / `build` / `run`
 - Core stdlib + Waves 1–9 · suite **165+**
-- **The Mako Book** (`docs/book/`)
+- **The Makori Book** (`docs/book/`)
 - Full map/slice/bag *language* surface with demand-driven monomorph emission
 - Backend app surface, API protocols, SQL/data, toolchain/IDE tracks at intention **100%**
 - TLS/HTTP/2/H3/QUIC seeds · crypto digests/AEAD/KDF/SCRAM core · session/auth helpers
@@ -1072,7 +1072,7 @@ Percentages are weighted; update when a task flips.
 
 ### 9. Installer, distribution, and portability — 10%
 
-- [x] Native single binary · install scripts · release docs · `mako doctor` · update/uninstall.
+- [x] Native single binary · install scripts · release docs · `makori doctor` · update/uninstall.
 - [x] One-command install with version selection and checksum verification.
 - [x] Installer ships compiler, runtime headers, stdlib, VS Code scaffold.
 - [x] Release archives + checksums + install smoke + CI installer smoke.

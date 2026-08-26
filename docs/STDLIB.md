@@ -1,10 +1,10 @@
-# Mako standard library
+# Makori standard library
 
-Mako is its own language with its own syntax and ownership model. Standard
+Makori is its own language with its own syntax and ownership model. Standard
 library parity means safe capability coverage, not Go/Rust syntax cloning and
 not importing their unsafe surfaces.
 
-Batteries for **web and backends**, with naming conventions adapted to Mako.
+Batteries for **web and backends**, with naming conventions adapted to Makori.
 
 **Product tip:** **0.5.15**. Application packs have Go-equivalent surfaces
 (2026-08-18 wave) — snake_case, no panic-on-OOB, `Result` / `(value, err)`
@@ -695,7 +695,7 @@ session controls (`tcp_set_timeout`, `tcp_keepalive`, `tcp_nodelay`,
 | Closures | `fn_drop` / `fn_has_env` (auto drop on scope; kick moves env) |
 | Logs + trace | `log_*` and `slog_with` print `trace=<hex>` when a trace is active |
 
-See [BUILTINS.md](BUILTINS.md) §§71–75 and [CLI.md](CLI.md) (`mako dev`, `--race`).
+See [BUILTINS.md](BUILTINS.md) §§71–75 and [CLI.md](CLI.md) (`makori dev`, `--race`).
 
 ### Upstream pool & reverse proxy
 
@@ -747,7 +747,7 @@ HTTPS/H2/H3/gRPC/WS: `tls_*` (including multi-certificate SNI), `http2_*` (64-st
 `h3_server_*` / `quiche_h3_*` (HTTP/3 when quiche linked; 64 KiB body cap),
 `nghttp2_*`, **`ws_*` (RFC 6455)** — client/server frames, mask, fragmentation,
 auto-pong, close codes; loopback tests in `ws_api_test.mko`. WSS = `tls_*` +
-`ws_*` (compose in Mako). The supported H2 server path is
+`ws_*` (compose in Makori). The supported H2 server path is
 `tls_server_new` + `http2_conn_*`
 (not the `tls_serve_h2_routes` demo helper).
 
@@ -782,7 +782,7 @@ files, and return unsupported (`-1`) on Windows until named pipes are designed.
 | `reqctx_*` / `middleware_*` | per-request context store and middleware chain/policy helpers |
 
 Same parse shape applies after TLS decrypt (feed plaintext to `http_request_parse`).
-Route patterns use Mako's compact `{name}` segment capture form:
+Route patterns use Makoriri's compact `{name}` segment capture form:
 `/users/{user}/posts/{post}`.
 Example: `examples/http_lib/request_type.mko` · test: `http_request_type_test.mko`.
 
@@ -1032,7 +1032,7 @@ if crypto.scram_verify_proof(stored_key, auth, client_proof) == 1 {
 
 RFC 7677 vector: `examples/testing/scram_test.mko`. Full Postgres wire
 (SASLInitialResponse / SASLContinue / SASLFinal) is **intentionally application
-code** — Mako is **crypto core only**, not a SASL state machine.
+code** — Makori is **crypto core only**, not a SASL state machine.
 
 ### PEM + cert lab (`pull "crypto"` → `crypto.x509` / `crypto.tls`)
 
@@ -1110,7 +1110,7 @@ material is a plain `string` — route it through `export_srtp_secret` (or
 
 ## `llm` (LLM programming)
 
-OpenAI-compatible chat runtime for **low-latency agent/tool loops** in Mako.
+OpenAI-compatible chat runtime for **low-latency agent/tool loops** in Makori.
 
 | Area | Symbols |
 |------|---------|
@@ -1235,7 +1235,7 @@ import "sync"
 
 The compiler rejects unsynchronized mutable closure captures and unknown
 function environments across `kick`; `fan` mappers cannot capture locals.
-Race smoke: `mako test --race` (CI TSan job), which covers runtime and FFI
+Race smoke: `makori test --race` (CI TSan job), which covers runtime and FFI
 edges that are outside the safe-language boundary.
 
 ### Mutex usage example
@@ -1314,7 +1314,7 @@ fn main() {
 | Area | Builtins |
 |------|----------|
 | errors | `error` / `errorf` / `wrap_err` / `error_is` / `error_string` / `?` |
-| testing | `mako test`, `assert` / `assert_eq` / `assert_eq_str`, `t_run`, `--race` / `--sanitize` |
+| testing | `makori test`, `assert` / `assert_eq` / `assert_eq_str`, `t_run`, `--race` / `--sanitize` |
 | regexp | `regex_match` / `regex_find` / `regex_capture` |
 | log | Strong slog: `slog_set_level` / `set_json` / `set_service` / `set_output` / `with*` / `log_*` aliases |
 | math | `abs` / `min` / `max` / `clamp`, `math_sqrt` / `pow` / `floor` / `ceil` / `sin` / `cos` / `log` / `exp` / `math_abs` |
@@ -1559,7 +1559,7 @@ fn main() {
 }
 ```
 
-Run: `mako run server.mko -- --host 0.0.0.0 --port 9090 --verbose`
+Run: `makori run server.mko -- --host 0.0.0.0 --port 9090 --verbose`
 
 ### Unicode/UTF-8 usage example
 
@@ -1806,12 +1806,12 @@ Package mirror: `pull "std/sip"` (`std/sip/sip.mko`).
 Tests: `examples/testing/sip_test.mko` · demo: `examples/sip_ua.mko`.
 
 **Not shipped as product libraries:** a complete softphone, SBCs, SRTP media
-encryption, or browser WebRTC. Those are **Mako programs** on top of this
+encryption, or browser WebRTC. Those are **Makori programs** on top of this
 surface (the DTLS-SRTP handshake itself ships as `std/dtls`).
 
 ---
 
-## Local packages (`mako.toml` / `mako pkg`)
+## Local packages (`mako.toml` / `makori pkg`)
 
 ```bash
 mako pkg init

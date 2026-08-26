@@ -1,4 +1,4 @@
-# Mako Security Audit Scope
+# Makori Security Audit Scope
 
 **Project**: Mako programming language — compiler + C runtime  
 **Target**: White-hat penetration test / adversarial code review  
@@ -9,7 +9,7 @@
 
 ## Overview
 
-Mako compiles `.mko` sources to native binaries via C (clang/zig). The attack
+Makori compiles `.mko` sources to native binaries via C (clang/zig). The attack
 surface spans: a C runtime (~15 header files, ~40K LOC), a Rust compiler
 (~38K LOC codegen), and a native bridge (FFI layer, ~9K LOC C). The runtime
 handles networking (HTTP/1.1, HTTP/2, WebSocket, SIP, SCTP, TLS), structured
@@ -55,7 +55,7 @@ box freelist, slice/map containers).
 
 ### Out of scope
 
-- Mako language semantics (type system soundness, borrow checker correctness)
+- Makori language semantics (type system soundness, borrow checker correctness)
 - LSP server (`src/lsp.rs`) — local IPC only, no remote attack surface
 - GraphQL executor — operates on trusted in-process schema
 - Documentation, CI pipeline, packaging scripts
@@ -123,7 +123,7 @@ cargo run -- build --sanitize thread path/to/file.mko -o /tmp/test_tsan
 
 # Run test suite
 cargo test                              # Rust unit tests (146 as of 2026-08-19)
-cargo run -- test examples/testing/     # Mako integration tests
+cargo run -- test examples/testing/     # Makori integration tests
 ```
 
 Runtime headers live in `runtime/` and are installed to

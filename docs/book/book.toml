@@ -1,6 +1,6 @@
 [book]
-title = "The Mako Book"
-description = "A guided tour of the Mako language — memory-safe backends without a mandatory GC"
+title = "The Makori Book"
+description = "A guided tour of the Makori language — memory-safe backends without a mandatory GC"
 authors = ["Mako contributors"]
 language = "en"
 src = "src"

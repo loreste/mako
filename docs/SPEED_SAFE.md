@@ -82,7 +82,7 @@ ranking.
 
 Pre-size when you know the shape (`make([]T, 0, n)`, `make(map[K]V, n)`). Keep
 request work on short-lived owns or arenas. Leave `share` / RC off the common
-path unless you need sharing. Ship with `mako build --release` (LLVM if you
+path unless you need sharing. Ship with `makori build --release` (LLVM if you
 have it). Run `memory-safety-gate` and `native-bench-gate` when they apply.
 For long-running services, look at RSS with the soak scripts — mean latency
 alone won’t catch creep.

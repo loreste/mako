@@ -1,6 +1,6 @@
 # 9. Data: JSON, SQL, and Files
 
-This chapter covers Mako's data handling capabilities: JSON encoding/decoding,
+This chapter covers Makori's data handling capabilities: JSON encoding/decoding,
 SQLite and PostgreSQL database access, file I/O, and the broader encoding family.
 All database APIs enforce parameterized queries to prevent injection attacks.
 
@@ -81,7 +81,7 @@ fn safe_read(path: string) -> string {
 
 ## JSON
 
-Mako provides both low-level JSON helpers and a derive macro for struct
+Makori provides both low-level JSON helpers and a derive macro for struct
 serialization.
 
 ### Building JSON objects
@@ -631,7 +631,7 @@ fn query_user_count(driver: string, connstr: string) -> int {
 
 ## Encoding Family
 
-Beyond JSON, Mako provides encoders/decoders for common formats:
+Beyond JSON, Makori provides encoders/decoders for common formats:
 
 ### Base64
 
@@ -794,7 +794,7 @@ fn main() {
 ## Memory-Mapped Files (MMap)
 
 For workloads that need fast random access to large datasets -- indexes, caches,
-shared memory between processes -- Mako provides memory-mapped file I/O through
+shared memory between processes -- Makori provides memory-mapped file I/O through
 the `MMap` type.
 
 ### Creating and Writing

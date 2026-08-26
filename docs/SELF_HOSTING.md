@@ -1,6 +1,6 @@
 # Self-hosted native compiler
 
-Mako's production compiler is intended to be written in Mako and to emit
+Makori's production compiler is intended to be written in Makori and to emit
 native object code directly. The existing Rust implementation and C backend
 are stage-0 bootstrap tools and behavioral oracles; they are not the final
 compiler architecture.
@@ -15,7 +15,7 @@ compiler architecture.
    build metadata.
 
 A compiler is not called self-hosted until stage 1 successfully produces a
-working stage 2. A Mako wrapper around the Rust compiler, generated C, Clang,
+working stage 2. A Makori wrapper around the Rust compiler, generated C, Clang,
 LLVM command-line tools, or another compiler does not satisfy this contract.
 
 ## Required compiler pipeline

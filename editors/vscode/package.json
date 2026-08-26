@@ -1,7 +1,7 @@
 {
   "name": "mako-vscode",
-  "displayName": "Mako",
-  "description": "VS Code support for the Mako programming language.",
+  "displayName": "Makori",
+  "description": "VS Code support for the Makori programming language.",
   "version": "0.1.0",
   "publisher": "mako-lang",
   "license": "MIT",
@@ -32,7 +32,7 @@
       {
         "id": "mako",
         "aliases": [
-          "Mako",
+          "Makori",
           "mako"
         ],
         "extensions": [
@@ -50,7 +50,7 @@
     ],
     "themes": [
       {
-        "label": "Mako Dark",
+        "label": "Makori Dark",
         "uiTheme": "vs-dark",
         "path": "./themes/mako-dark.json"
       }
@@ -149,12 +149,12 @@
       }
     ],
     "configuration": {
-      "title": "Mako",
+      "title": "Makori",
       "properties": {
         "mako.path": {
           "type": "string",
           "default": "mako",
-          "description": "Path to the Mako compiler executable."
+          "description": "Path to the Makoriri compiler executable."
         },
         "mako.lsp.enabled": {
           "type": "boolean",
@@ -176,7 +176,7 @@
             "properties": {
               "program": {
                 "type": "string",
-                "description": "Mako source file (.mko) or prebuilt binary to debug. Defaults to the active editor file. The adapter builds .mko sources with debug info before launching."
+                "description": "Makori source file (.mko) or prebuilt binary to debug. Defaults to the active editor file. The adapter builds .mko sources with debug info before launching."
               },
               "cwd": {
                 "type": "string",
@@ -200,7 +200,7 @@
         "configurationSnippets": [
           {
             "label": "Mako: Debug active file",
-            "description": "Build the active .mko file with debug info, then launch it under lldb via the Mako DAP adapter.",
+            "description": "Build the active .mko file with debug info, then launch it under lldb via the Makori DAP adapter.",
             "body": {
               "type": "mako-native",
               "request": "launch",
@@ -247,7 +247,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Additional arguments for the Mako command."
+            "description": "Additional arguments for the Makori command."
           }
         }
       }

@@ -1,4 +1,4 @@
-# Native compiler plan (Mako 0.4.5)
+# Native compiler plan (Makori 0.4.5)
 
 ## Goal
 
@@ -31,7 +31,7 @@ depend on no external toolchain.
 - **Linker = bundled `lld`** (ships with LLVM). No external `ld` needed.
 - **Runtime C library** is precompiled once (when mako is built) into a static
   archive shipped inside mako and linked by `lld`. No per-program C compilation.
-  Hot pieces migrate to Mako over time.
+  Hot pieces migrate to Makori over time.
 
 ### Why not Cranelift alone
 
@@ -87,7 +87,7 @@ map get/set inlining, I/O buffers, and induction-proven bounds-check elision.
 
 ## Current state (v0.4.5)
 
-- **Language gate:** `mako test examples/testing --backend native` → **420/420**
+- **Language gate:** `makori test examples/testing --backend native` → **420/420**
   (2026-07-22). Shared IR + Cranelift debug backend + `runtime/native_bridge.c`
   cover the full testing corpus (structs/enums/maps/nested aggregates, match/`?`,
   concurrency, net/TLS/SQL/HTTP/SIP, fan/crew, mut-self iterators, etc.).
@@ -190,7 +190,7 @@ compile as early as possible.
      `examples/native/native_structs.mko`. Deferred: struct fields of
      string/slice/struct type (needs struct drops + nested layout), and methods.
      NOTE: native fixtures live in `examples/native/`, not `examples/testing/` —
-     `mako test` compiles the latter's non-`_test.mko` files as shared sources.
+     `makori test` compiles the latter's non-`_test.mko` files as shared sources.
    - *3d [done]* — **scalar-field structs in the backend-neutral IR** (both
      Cranelift and LLVM consume them; this is what unblocks aggregates on the
      LLVM release backend). `src/native_ir.rs` gains `Type::Struct(id)`, a
@@ -493,7 +493,7 @@ gates that certify them.
   user generics monomorphization, CMap, chan[string], ExternC, tuple match,
   and the bulk interop surface (H2/H3/SIP/LLM/mail/model/nb) is in place.
   Prior milestones: ~64% (102/160) → ~88% (137/156) → **100% (156/156)**.
-- **`mako test --backend native`:** wired (CLI + `MAKO_TEST_BACKEND=native`).
+- **`makori test --backend native`:** wired (CLI + `MAKO_TEST_BACKEND=native`).
   Synthetic harness main via `native_ir::lower_with_tests`; CRT `main(argc,argv)`
   seeds process args; abort-based `assert`/`assert_eq`/`assert_eq_str`. Multi-monomorph
   Ok/Err/Some resolution + auto-intern for untyped constructors. ~200 simple

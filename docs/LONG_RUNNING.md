@@ -40,7 +40,7 @@ later if you’re lucky. One binary to deploy. Ownership is explicit:
 `hold`, `share`, `arena`.
 
 Other stacks may still beat us on peak throughput or tooling depth. Fine.
-Years-up proof for Mako is soaks and gates, not a blog chart. Throughput still
+Years-up proof for Makoriri is soaks and gates, not a blog chart. Throughput still
 moves with LLVM release, LTO, optional PGO, and allocator choice — still
 without a GC.
 
@@ -144,11 +144,11 @@ If the host has a better allocator:
 ```bash
 # Homebrew mimalloc
 MAKO_ALLOCATOR=mimalloc MAKO_LDFLAGS="-L$(brew --prefix mimalloc)/lib" \
-  mako build --release app.mko -o app
+  makori build --release app.mko -o app
 
 # jemalloc
 MAKO_ALLOCATOR=jemalloc MAKO_LDFLAGS="-L/usr/local/lib" \
-  mako build --release app.mko -o app
+  makori build --release app.mko -o app
 
 # Static archive
 MAKO_ALLOCATOR=/path/to/libmimalloc.a mako build --release app.mko -o app

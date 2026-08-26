@@ -76,7 +76,7 @@ The incremental cache fingerprints the release optimization mode and C compiler
 identity, so switching between default LTO and `MAKO_NO_LTO=1` cannot reuse
 objects from the other mode. `MAKO_CFLAGS` and PGO builds bypass incremental
 reuse because external headers and profile contents are not fully represented
-by Mako source fingerprints.
+by Makori source fingerprints.
 
 ## Profile-guided optimization (PGO)
 
@@ -105,7 +105,7 @@ vs the system `malloc` (measure with `scripts/long-run-soak.sh` /
 
 ```bash
 MAKO_ALLOCATOR=mimalloc MAKO_LDFLAGS="-L$(brew --prefix mimalloc 2>/dev/null)/lib" \
-  mako build --release main.mko -o server
+  makori build --release main.mko -o server
 MAKO_ALLOCATOR=jemalloc mako build --release main.mko -o server
 MAKO_ALLOCATOR=/path/to/libmimalloc.a mako build --release main.mko -o server
 ```
@@ -138,7 +138,7 @@ scripts/verify-target-artifact.sh \
 ```
 
 Windows GNU is also cross-compiled and checked as a PE32+ x86-64 artifact, but
-it is not claimed to be statically linked by Mako's default policy.
+it is not claimed to be statically linked by Makori's default policy.
 
 To force dynamic linking:
 

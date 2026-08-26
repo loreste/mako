@@ -593,7 +593,7 @@ fn main() {
 ```
 
 Bind, accept, match, respond — no framework ceremony, no GC tax, no async
-coloring. That is the target density for Mako backends.
+coloring. That is the target density for Makori backends.
 
 ---
 
@@ -603,7 +603,7 @@ Before adding syntax or APIs:
 
 1. Does the **happy path** get shorter or longer?
 2. Is extra typing only required when safety/performance needs it?
-3. Does it still look like **Mako** ([IDENTITY.md](IDENTITY.md))?
+3. Does it still look like **Makori** ([IDENTITY.md](IDENTITY.md))?
 4. Does it close a [pain point](PAIN_POINTS.md) without importing Go/Rust ceremony?
 
 If (1) is “longer” without a safety win, reject it.

@@ -5,7 +5,7 @@ organizing larger projects into workspaces.
 
 ## Package basics
 
-Every Mako project has a `mako.toml` at its root:
+Every Makori project has a `mako.toml` at its root:
 
 ```toml
 name = "myapp"
@@ -129,12 +129,12 @@ mako pkg lock
 
 This writes lockfile version 2 with deterministic SHA-256 hashes of the root
 manifest and recursive `.mko` sources. Commit it to version control. The
-`mako pkg install`, `mako build`, `mako run`, and `mako check` commands rehash
+`makori pkg install`, `makori build`, `makori run`, and `makori check` commands rehash
 locked dependencies and fail if their content changed, including nested source
 files. They also fail closed when a transitive manifest cannot be read or the
 lockfile has malformed or contradictory fields.
 
-Use `mako pkg update` only after inspecting an intentional dependency change.
+Use `makori pkg update` only after inspecting an intentional dependency change.
 The same command migrates legacy version 1 lockfiles; install does not silently
 trust their older non-cryptographic hashes.
 
@@ -142,14 +142,14 @@ trust their older non-cryptographic hashes.
 
 | Command | Purpose |
 |---------|---------|
-| `mako pkg init mylib` | Create a new package |
-| `mako pkg add name path=../name` | Add or update a path dependency |
-| `mako pkg add name ../name` | Same (positional) |
-| `mako pkg remove name` | Remove a dependency |
-| `mako pkg list` | Show packages and their status |
-| `mako pkg fetch` | Clone git dependencies |
-| `mako pkg lock` | Write/update mako.lock |
-| `mako pkg audit` | Check advisories and license policy |
+| `makori pkg init mylib` | Create a new package |
+| `makori pkg add name path=../name` | Add or update a path dependency |
+| `makori pkg add name ../name` | Same (positional) |
+| `makori pkg remove name` | Remove a dependency |
+| `makori pkg list` | Show packages and their status |
+| `makori pkg fetch` | Clone git dependencies |
+| `makori pkg lock` | Write/update mako.lock |
+| `makori pkg audit` | Check advisories and license policy |
 
 ## Workspaces
 
@@ -185,14 +185,14 @@ From the workspace root:
 
 | Command | Behavior |
 |---------|----------|
-| `mako check .` | Typecheck all members |
-| `mako build .` | Build members with `main.mko` |
-| `mako test .` | Run tests in all members |
-| `mako fmt .` | Format all members |
-| `mako run -p app` | Run a specific member |
-| `mako check -p lib` | Check a single member |
+| `makori check .` | Typecheck all members |
+| `makori build .` | Build members with `main.mko` |
+| `makori test .` | Run tests in all members |
+| `makori fmt .` | Format all members |
+| `makori run -p app` | Run a specific member |
+| `makori check -p lib` | Check a single member |
 
-If only one member has `main.mko`, `mako run .` runs it directly.
+If only one member has `main.mko`, `makori run .` runs it directly.
 
 ## Security audits
 
@@ -227,7 +227,7 @@ This checks offline -- no network required.
 ## Pulls (multi-file)
 
 Most real projects need more than one file. Mako **pulls** are always
-**pack-qualified** so call sites stay clear. `mako run` compiles everything
+**pack-qualified** so call sites stay clear. `makori run` compiles everything
 that’s pulled.
 
 ### Basic file pull
@@ -388,7 +388,7 @@ pull (
 )
 ```
 
-`mako fmt` rewrites separate `pull` lines into this grouped form automatically.
+`makori fmt` rewrites separate `pull` lines into this grouped form automatically.
 
 ### Standard library
 

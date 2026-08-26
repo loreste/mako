@@ -1,7 +1,7 @@
-# Mako by example
+# Makori by example
 
 Complete, runnable programs that demonstrate core Mako features. Copy any
-example into a `.mko` file and run it with `mako run`.
+example into a `.mko` file and run it with `makori run`.
 
 **Preferred style is Mako-native** (`fn`, `let`, `on`, `crew`, `hold`…).  
 See [IDENTITY.md](IDENTITY.md) and [`examples/mako_style.mko`](../examples/mako_style.mko).  
@@ -766,7 +766,7 @@ arena done
 
 ## 13. Multi-file project
 
-Mako supports multi-file projects using `import` and `mako.toml` package
+Makori supports multi-file projects using `import` and `mako.toml` package
 dependencies.
 
 ### Project layout

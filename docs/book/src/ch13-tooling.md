@@ -7,7 +7,7 @@ optional integration limits are called out where they apply.
 
 ---
 
-## `mako version`
+## `makori version`
 
 Prints the installed version, operating system, and architecture.
 
@@ -25,7 +25,7 @@ mako version -v       # verbose: includes git commit hash if available
 
 ---
 
-## `mako check`
+## `makori check`
 
 Runs the full frontend pipeline -- lexing, parsing, and type checking -- without
 producing a binary. This is the fastest way to verify correctness.
@@ -71,10 +71,10 @@ unknown fields added to v1. Both formats exit non-zero when any target fails.
 
 ---
 
-## `mako build`
+## `makori build`
 
 Compiles a `.mko` file to a native binary. The pipeline is:
-Mako source -> C code -> object files -> linked executable.
+Makori source -> C code -> object files -> linked executable.
 
 ```bash
 mako build main.mko                 # debug binary (same name as source, minus .mko)
@@ -110,9 +110,9 @@ mako build -p app                   # build one workspace member
 
 ---
 
-## `mako run`
+## `makori run`
 
-Compiles and immediately runs the program. Equivalent to `mako build` followed
+Compiles and immediately runs the program. Equivalent to `makori build` followed
 by executing the binary.
 
 ```bash
@@ -145,7 +145,7 @@ mako run cli.mko -- hello world
 
 ---
 
-## `mako test`
+## `makori test`
 
 Discovers and runs test functions. Test files end in `_test.mko`. Test functions
 start with `Test` (e.g., `fn TestAdd()`).
@@ -199,7 +199,7 @@ Repeats stop at the first failing iteration.
 
 ### JSON Reports
 
-`mako test --json` emits one object with `schemaVersion: 1`. It records each
+`makori test --json` emits one object with `schemaVersion: 1`. It records each
 iteration and test file, matched function names, duration, captured stdout and
 stderr, and structured exit, signal, timeout, compile, runner, or load failures.
 Coverage data is included when `--coverage` is also present. Test-process output
@@ -287,9 +287,9 @@ The process exits non-zero if any test failed.
 
 ---
 
-## `mako fmt`
+## `makori fmt`
 
-Formats Mako source code. By default prints formatted output to stdout.
+Formats Makori source code. By default prints formatted output to stdout.
 
 ```bash
 mako fmt main.mko                   # print formatted to stdout
@@ -324,7 +324,7 @@ import (
 
 ---
 
-## `mako lint`
+## `makori lint`
 
 Runs type checking plus additional lint rules. Workspace-aware.
 
@@ -409,7 +409,7 @@ fn main() {
 
 ---
 
-## `mako pkg`
+## `makori pkg`
 
 Package management commands for dependencies declared in `mako.toml`.
 
@@ -428,7 +428,7 @@ mako pkg remove helper               # remove a dependency
 mako pkg audit                       # offline advisory + license policy check
 ```
 
-### `mako pkg audit`
+### `makori pkg audit`
 
 Checks dependencies against known advisories and license policies:
 
@@ -444,9 +444,9 @@ Exits non-zero if a dependency has a known vulnerability advisory.
 
 ---
 
-## `mako lsp`
+## `makori lsp`
 
-Starts the Mako Language Server Protocol implementation. Point your editor at
+Starts the Makori Language Server Protocol implementation. Point your editor at
 the `mako` binary with `lsp` as the command.
 
 ```bash
@@ -482,7 +482,7 @@ Configure the extension:
 
 ---
 
-## `mako doctor`
+## `makori doctor`
 
 Checks your development environment and reports the status of required tools:
 
@@ -498,7 +498,7 @@ mako doctor
 
 ---
 
-## `mako init`
+## `makori init`
 
 Scaffolds a new project.
 
@@ -578,7 +578,7 @@ Reports removed functions, changed signatures, and removed struct fields.
 
 ---
 
-## `mako deploy`
+## `makori deploy`
 
 Generates deployment artifacts.
 
@@ -602,23 +602,23 @@ mako deploy plugin my-plugin --name my-plugin --kind native
 
 | Command             | Purpose                              | Key Flags                    |
 |---------------------|--------------------------------------|------------------------------|
-| `mako check`       | Typecheck without building           | `--json`, `-p`               |
-| `mako build`       | Compile to native binary             | `--release`, `-j`, `--target`|
-| `mako run`         | Compile and execute                  | `-- args...`                 |
-| `mako test`        | Discover and run tests               | `-r`, `-v`, `--coverage`, `--json` |
-| `mako fmt`         | Format source code                   | `-w`, `-l`, `-d`, `--check` |
-| `mako lint`        | Lint with additional rules           | `-p`                         |
+| `makori check`       | Typecheck without building           | `--json`, `-p`               |
+| `makori build`       | Compile to native binary             | `--release`, `-j`, `--target`|
+| `makori run`         | Compile and execute                  | `-- args...`                 |
+| `makori test`        | Discover and run tests               | `-r`, `-v`, `--coverage`, `--json` |
+| `makori fmt`         | Format source code                   | `-w`, `-l`, `-d`, `--check` |
+| `makori lint`        | Lint with additional rules           | `-p`                         |
 | `mako bench`       | Run benchmarks                       | `--json`, `-p`               |
 | `mako profile`     | Time frontend/backend/run            | `--json`, `--release`        |
 | `mako doc`         | Generate API documentation           | —                            |
-| `mako pkg`         | Package management                   | `init/list/fetch/add/remove/audit` |
-| `mako lsp`         | Language server                      | —                            |
-| `mako doctor`      | Environment health check             | —                            |
-| `mako version`     | Print version info                   | `-v`                         |
-| `mako init`        | Scaffold new project                 | `--backend`, `--workspace`   |
+| `makori pkg`         | Package management                   | `init/list/fetch/add/remove/audit` |
+| `makori lsp`         | Language server                      | —                            |
+| `makori doctor`      | Environment health check             | —                            |
+| `makori version`     | Print version info                   | `-v`                         |
+| `makori init`        | Scaffold new project                 | `--backend`, `--workspace`   |
 | `mako metadata`    | JSON symbol graph                    | —                            |
 | `mako api diff`    | Breaking change detection            | —                            |
-| `mako deploy`      | Deployment artifact generation       | `docker/serverless/wasm/plugin` |
+| `makori deploy`      | Deployment artifact generation       | `docker/serverless/wasm/plugin` |
 
 ---
 

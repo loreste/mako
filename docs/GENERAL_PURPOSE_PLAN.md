@@ -1,4 +1,4 @@
-# Mako general-purpose backend plan
+# Makori general-purpose backend plan
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
@@ -13,7 +13,7 @@ contract-family enforcement, **0.5.10** package-local malformed codec coverage,
 reporting, and normal-user CLI stability.
 See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 
-Mako's product contract is:
+Makori's product contract is:
 
 > A simple, safe, fast, and versatile language for backend software, cloud
 > infrastructure, networking systems, developer tools, databases, and

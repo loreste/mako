@@ -75,7 +75,7 @@ fn main() {
 ```
 
 Unlike Go's `go`, this is not a detached goroutine: `go` outside any `crew` is a
-compile error, because Mako never lets a task escape its scope.
+compile error, because Makori never lets a task escape its scope.
 
 ---
 
@@ -962,7 +962,7 @@ events; iterate them with `evloop_event_fd` and `evloop_event_flags`.
 
 ## Colorless I/O
 
-Mako uses **colorless** concurrency: there is no `async`/`await` distinction.
+Makori uses **colorless** concurrency: there is no `async`/`await` distinction.
 All functions have the same calling convention regardless of whether they perform
 I/O. Instead of coloring functions, you use crews to run blocking I/O operations
 concurrently:

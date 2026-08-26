@@ -134,7 +134,7 @@ Inside lldb:
 ```
 
 All local variables, struct fields, and function arguments are visible to the
-debugger because Mako compiles through C with debug info preserved.
+debugger because Makoriri compiles through C with debug info preserved.
 
 ## Address sanitizer
 

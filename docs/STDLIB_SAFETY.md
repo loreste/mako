@@ -1,12 +1,12 @@
 # Standard library memory safety gate
 
-Mako is its own language with its own syntax and ownership model. Standard
+Makori is its own language with its own syntax and ownership model. Standard
 library parity with Go or Rust means capability parity for safe application
 work, not syntax cloning and not exposing raw-memory escape hatches.
 
 The target is **100% memory-safe safe Mako**:
 
-- safe Mako code cannot corrupt memory, use freed storage, double-free, race on
+- safe Makori code cannot corrupt memory, use freed storage, double-free, race on
   ordinary mutable state, or index out of bounds;
 - stdlib APIs either preserve that contract by construction or are not part of
   the safe surface;
@@ -23,7 +23,7 @@ The target is **100% memory-safe safe Mako**:
 | `checked-native` | Backed by C/OS/crypto/compression code, but wrapped so inputs are bounded, returned storage is owned, errors clean up, and handles cannot be double-freed from safe Mako | Can be part of the default-safe claim only after package-local evidence, contract-family mapping, malformed/lifecycle tests, and sanitizer gates pass |
 | `unsafe-boundary` | Requires raw pointers, unchecked indexing, FFI ownership transfer, dynamic library calls, mmap aliasing, process/syscall control, or platform behavior the compiler cannot prove | Excluded from the default-safe claim until hardened and reclassified |
 | `blocked` | Cannot meet the safe Mako contract yet | Not part of safe stdlib parity |
-| `won't` | Conflicts with Mako identity or safety goals | Intentionally excluded |
+| `won't` | Conflicts with Makori identity or safety goals | Intentionally excluded |
 
 ## Default-Safe Claim
 
@@ -81,7 +81,7 @@ adversarial/lifecycle fixtures must stay present.
 
 ## Go and Rust parity rule
 
-Mako does not need equivalents for memory-unsafe surfaces to be on par for safe
+Makori does not need equivalents for memory-unsafe surfaces to be on par for safe
 application programming.
 
 | Ecosystem surface | Mako decision |
@@ -109,7 +109,7 @@ stdlib parity** until these are closed:
 - native-backend full-suite reporting gaps are either fixed or explicitly kept
   out of the default safe-stdlib claim until their package rows are hardened.
 
-The default product message should be: Mako is fast, Mako-shaped, and safe by
+The default product message should be: Makori is fast, Mako-shaped, and safe by
 construction; parity work expands capability only when it preserves that bar.
 
 Package-by-package status is tracked in

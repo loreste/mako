@@ -1,6 +1,6 @@
 # Memory Management
 
-Mako has no garbage collector. Active memory/resource safety mechanisms include
+Makori has no garbage collector. Active memory/resource safety mechanisms include
 ownership rules (`hold`/`share`) and region-based allocation (`arena`). This
 guide explains when to use each strategy; generated C and FFI remain outside
 the Mako type system.

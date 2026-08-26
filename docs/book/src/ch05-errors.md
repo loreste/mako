@@ -11,7 +11,7 @@ no way to accidentally ignore a fallible operation. If a function returns
 - `Ok(value)` -- the operation succeeded, carrying a value of type `T`
 - `Err(error)` -- the operation failed, carrying an error of type `E`
 
-Most Mako code uses `Result[T, string]` where the error is a human-readable
+Most Makori code uses `Result[T, string]` where the error is a human-readable
 message. Richer error types (structs, enums) are also supported.
 
 ```mko
@@ -53,7 +53,7 @@ fn validate_port(p: int) -> Result[int, string] {
 ```
 
 `error("...")` and `Err("...")` are equivalent. Use whichever reads more
-naturally at the call site. `error` is preferred in most Mako code because it
+naturally at the call site. `error` is preferred in most Makori code because it
 is concise and clearly signals failure.
 
 ## The ? operator
@@ -99,7 +99,7 @@ immediately with that error. This keeps the happy path linear and readable.
 
 ## Unused Result is a compile error
 
-One of Mako's strictest rules: you cannot ignore a `Result`. If a function
+One of Makori's strictest rules: you cannot ignore a `Result`. If a function
 returns `Result` and you call it without handling the return value, the
 compiler rejects the program.
 

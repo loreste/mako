@@ -1,11 +1,11 @@
-# Mako language
+# Makori language
 
-Mako is a systems and backend language: clear to write, strict at compile time,
+Makori is a systems and backend language: clear to write, strict at compile time,
 fast at runtime, and designed so **builds stay fast**.
 
-**Product version:** **0.4.0** (`mako version` → `mako0.4.0`).
+**Product version:** **0.4.0** (`makori version` → `mako0.4.0`).
 
-**Guided tour:** [The Mako Book](book/).  
+**Guided tour:** [The Makori Book](book/).  
 **Current syntax guide:** [GUIDE.md](GUIDE.md).
 **Low ceremony:** [ERGONOMICS.md](ERGONOMICS.md).  
 **Identity (our syntax):** [IDENTITY.md](IDENTITY.md).  
@@ -34,7 +34,7 @@ fast at runtime, and designed so **builds stay fast**.
 
 ## Syntax identity — **ours**
 
-**Mako is a unique language with unique syntax.**  
+**Makori is a unique language with unique syntax.**  
 Not a Go dialect. Not a Rust dialect. Not a hybrid costume of either.
 
 - **Simplicity** (as a *goal*): short programs, little ceremony, good stdlib.
@@ -74,7 +74,7 @@ on Point {
 | `crew` / `kick` / `join` | (no free `go`) |
 | `hold` / `share` / `arena` | — |
 
-**Rule:** docs, book, and `mako fmt` lead with the left column.  
+**Rule:** docs, book, and `makori fmt` lead with the left column.  
 Dual forms stay for familiarity and migration — they do not define the brand.
 
 Full identity checklist + %: [IDENTITY.md](IDENTITY.md) (**~86%**).  

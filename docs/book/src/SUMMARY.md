@@ -4,7 +4,7 @@
 
 ---
 
-# The Mako Book
+# The Makori Book
 
 - [1. Preface — Why Mako](ch01-preface.md)
 - [2. Getting Started](ch02-getting-started.md)

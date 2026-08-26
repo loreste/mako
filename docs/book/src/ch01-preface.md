@@ -15,18 +15,18 @@ and **fast iteration**. Most approaches force a trade-off:
 - Ownership-focused approaches give strong safety mechanisms but can feel heavy for
   everyday HTTP servers and session-oriented work.
 
-Mako's position is practical: you should not have to choose between safety and
+Makori's position is practical: you should not have to choose between safety and
 simplicity. The language is designed so that the common case gets compiler and
 runtime safety checks without excessive ceremony, with explicit annotations
 where they prevent specific classes of bugs.
 
-## The Mako bet
+## The Makori bet
 
 > Active memory/resource safety without a mandatory garbage collector. Simple structured
 > concurrency. Fast compiles. Clean error handling. Single-binary deployment.
 > A strong standard library. Great tooling from day one.
 
-These are the shipped parts of Mako 0.2.4. The status matrix separates
+These are the shipped parts of Makori 0.2.4. The status matrix separates
 implemented behavior from roadmap goals and platform-dependent paths.
 
 ## Design philosophy
@@ -36,7 +36,7 @@ implemented behavior from roadmap goals and platform-dependent paths.
 Mako favors explicit, readable code. There are no implicit conversions between
 numeric types. Assignment (`=`) and equality (`==`) are visually distinct.
 Control flow uses braces and does not rely on indentation. The formatter
-(`mako fmt`) enforces a single canonical style so teams never argue about
+(`makori fmt`) enforces a single canonical style so teams never argue about
 formatting.
 
 ```mko
@@ -80,7 +80,7 @@ fn main() {
 
 ### 3. No garbage collector
 
-Mako provides active memory/resource safety mechanisms without a tracing
+Makori provides active memory/resource safety mechanisms without a tracing
 garbage collector. These mechanisms prevent important classes of bugs, but are
 not a formal proof for generated C, FFI, or every program:
 
@@ -97,15 +97,15 @@ still depends on allocation, I/O, scheduling, and the surrounding C/FFI code.
 
 ### 4. Fast compiles
 
-Mako compiles `.mko` sources to C, then invokes clang. This pipeline is fast:
+Makori compiles `.mko` sources to C, then invokes clang. This pipeline is fast:
 incremental builds recompile only changed translation units. Parallel object
-compilation (`mako build -j 8`) scales with cores. The result is a tight
+compilation (`makori build -j 8`) scales with cores. The result is a tight
 edit-compile-run loop even for large projects.
 
 ### 5. Single binary deployment
 
-`mako build --release` can produce a statically-linked native binary on
-supported targets. In that case there is no Mako runtime to install on the
+`makori build --release` can produce a statically-linked native binary on
+supported targets. In that case there is no Makori runtime to install on the
 target machine; platform libraries and optional integrations can still impose
 their own requirements.
 
@@ -129,7 +129,7 @@ packages for basic functionality.
 
 ### 7. Structured concurrency
 
-Concurrency in Mako is structured through `crew` blocks. A crew spawns tasks
+Concurrency in Makoriri is structured through `crew` blocks. A crew spawns tasks
 that must all complete before the crew exits. Combined with typed channels
 (`chan[T]`) and actors, this makes concurrent programs easy to reason about:
 no dangling goroutines, no fire-and-forget spawns leaking resources.
@@ -153,7 +153,7 @@ fn main() {
 ### Latency-sensitive services
 
 Session-shaped servers -- long-lived connections, real-time messaging,
-deterministic response times -- benefit from Mako's lack of GC pauses and its
+deterministic response times -- benefit from Makori's lack of GC pauses and its
 arena-based memory model. Each request allocates from its own arena; cleanup is
 a single pointer bump reset.
 
@@ -186,7 +186,7 @@ As of the current release:
 
 | Claim | Meaning |
 |-------|---------|
-| Version 0.5.7 | Current product (`Cargo.toml` / `mako version`); first public was 0.1.0 |
+| Version 0.5.7 | Current product (`Cargo.toml` / `makori version`); first public was 0.1.0 |
 | Stdlib coverage | Major backend areas covered (HTTP, TLS, JSON, SQL, etc.) |
 | Test suite | 418 `examples/testing` `*_test.mko` files (2026-08-19): native 413/5, C 416/2 |
 
@@ -196,7 +196,7 @@ mutable lambdas, deeper CTFE) is tracked in STATUS.md and ROADMAP.md.
 
 ## How to use this book
 
-If you are new to Mako, read chapters 2 through 6 in order. They build on each
+If you are new to Makori, read chapters 2 through 6 in order. They build on each
 other:
 
 1. **Getting Started** -- install and run your first program
@@ -208,7 +208,7 @@ Once you have the foundations, jump to chapters 7 through 10 when building
 services. Use chapter 14 as a recipe index when you need to accomplish a
 specific task.
 
-When something looks wrong or you are unsure about syntax, run `mako check` on
+When something looks wrong or you are unsure about syntax, run `makori check` on
 your code. The compiler is always the source of truth.
 
 Next: [Getting Started](ch02-getting-started.md).

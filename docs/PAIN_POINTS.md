@@ -1,6 +1,6 @@
-# Pain points Mako is built to fix
+# Pain points Makori is built to fix
 
-**Mako is not a clone of Go or Rust.**  
+**Makori is not a clone of Go or Rust.**  
 It is a unique language. The product job is to **remove the real pain** of those
 ecosystems while keeping their strengths as *goals* (simple code, strong control)
 — never as surfaces to copy.
@@ -82,7 +82,7 @@ Everyday code stays simple (`let`). Power tools are **visible** (`hold` / `share
 | Go | Mako |
 |----|------|
 | Free `go f()`; leaks and lost cancellation are common | **`crew` scopes** — kicked work cannot outlive the crew; `join` is first-class |
-| Channels + select are powerful but easy to misuse | Same power with Mako keywords (`select` / `timeout` / `default`) + typed `chan_open[T]` |
+| Channels + select are powerful but easy to misuse | Same power with Makori keywords (`select` / `timeout` / `default`) + typed `chan_open[T]` |
 
 ### 1.6 Shared mutable state and races
 
@@ -187,7 +187,7 @@ Tracked also in [STATUS.md](STATUS.md) / [ROADMAP.md](ROADMAP.md). Closing these
 | R3 | NLL / ownership edge cases | Stronger checker without new surface ceremony |
 | R4 | Package visibility beyond seed | `export` + `visibility = "explicit"` finished |
 | R5 | Observability / diagnostics depth | Prom + span JSON seed done; OTLP, profiles, source stacks residual |
-| R6 | Identity lint | `mako lint --identity` flags dual forms as style |
+| R6 | Identity lint | `makori lint --identity` flags dual forms as style |
 | R7 | Compile-time discipline at scale | Keep frontend linear; demand-driven monomorphs done; avoid trait-solver cliffs |
 | R8 | Field defaults on `struct` def | **Done** — `field: int = 0` + update `..base` |
 | R9 | General first-class functions | **Done seed** (named + lambda + POD/string/struct captures; kick Send) |

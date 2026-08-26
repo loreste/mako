@@ -1,4 +1,4 @@
-# Mako versioning
+# Makori versioning
 
 **Product string:** `mako` + `CARGO_PKG_VERSION` (e.g. `mako0.4.7`).  
 **Git tags:** `vMAJOR.MINOR.PATCH` matching `Cargo.toml`.

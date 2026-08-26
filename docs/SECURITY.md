@@ -1,4 +1,4 @@
-# Mako security
+# Makori security
 
 **Status:** actively hardened toward the product goal of **100% memory-safe
 safe Mako**, not formally proven. The ownership model
@@ -15,7 +15,7 @@ Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make memory corruption and common backend footguns hard to ship —
 by construction where possible, by hard errors where not.
 
-Mako is its own language with its own syntax. Safety decisions are Mako-shaped:
+Makori is its own language with its own syntax. Safety decisions are Mako-shaped:
 stdlib parity with Go or Rust never requires exposing their unsafe memory
 surfaces. Safe APIs must uphold Mako ownership, bounds, cleanup, and
 concurrency rules; unsafe or unverifiable integration stays explicit and
@@ -55,7 +55,7 @@ force an explicit choice: a loud name, an unsafe boundary, or a failing return.
 - **Dangerous names are explicit:** helpers such as `*_insecure` are for demos,
   tests, and controlled local development only. They are not part of the safe
   default path and must have a verified alternative next to them.
-- **CI can enforce this:** `mako lint --security` fails on known insecure helper
+- **CI can enforce this:** `makori lint --security` fails on known insecure helper
   calls unless the exact line carries `// mako: allow-insecure`.
 - **Sanitizer-clean runtime boundaries:** HTTP client DNS/connect uses
   `getaddrinfo` rather than direct legacy hostent pointer loads, keeping the
@@ -89,7 +89,7 @@ capture-free because their workers have no checked environment. Use
 state. The adversarial fixtures are
 `examples/bad/kick_mutable_closure_capture.mko`,
 `kick_mutable_lambda_capture.mko`, and `fan_capture.mko`. TSan remains a
-runtime smoke check (`mako test --race`) for the runtime and FFI boundary.
+runtime smoke check (`makori test --race`) for the runtime and FFI boundary.
 **Uuid is Copy** — free re-read under `hold`, kick without move. The native
 backend clones string-like task arguments, including string-backed `Uuid`, at
 the `kick` boundary so the child task owns its payload without aliasing the
@@ -116,7 +116,7 @@ dev soft paths.
 
 Integer overflow leads to incorrect calculations, truncated values, and security
 vulnerabilities (e.g., buffer size calculations wrapping to small allocations).
-Mako provides two layers of protection:
+Makori provides two layers of protection:
 
 **Checked arithmetic functions** return `Result[int, string]` on overflow:
 
@@ -214,10 +214,10 @@ if const_eq(got, want) == 1 { /* ok */ }
 if secret_eq_str(secret_from_str(token), presented) == 1 { /* ok */ }
 ```
 
-### Cryptography & TLS platform (build secure systems in Mako)
+### Cryptography & TLS platform (build secure systems in Makori)
 
-Mako does **not** ship a full PKI product or “crypto framework.” It exposes
-**building blocks** so you implement protocols safely in Mako:
+Makori does **not** ship a full PKI product or “crypto framework.” It exposes
+**building blocks** so you implement protocols safely in Makori:
 
 | Layer | What exists | You build |
 |-------|-------------|-----------|
@@ -365,7 +365,7 @@ Tests: `security_test.mko`, `security_crypto_test.mko`, `password_hash_test.mko`
 
 ### Session security (Done)
 
-Mako's session management, authentication, and authorization toolkit uses
+Makori's session management, authentication, and authorization toolkit uses
 defense-in-depth to prevent common web security vulnerabilities.
 
 **Constant-time token-bearing checks.** Cookie, CSRF, bearer, basic-header, and
@@ -423,7 +423,7 @@ call can delay the join. New kicks after `cancel()` do not start threads. Tests:
 
 ### GC-free runtime (Done)
 
-Mako has no tracing garbage collector in the compiler, generated C, runtime, or
+Makori has no tracing garbage collector in the compiler, generated C, runtime, or
 standard-library API. The ownership rules are therefore not a mode that can be
 weakened by package configuration. A legacy `[package] gc = true` setting is
 rejected, and removed `gc_*` calls are compile errors.
@@ -450,7 +450,7 @@ Lexer/parser/type errors print `file:line:col`, caret, and `help:` hints.
 
 ## What this is not
 
-Mako does not claim "memory safe like a proof assistant." It claims **active
+Makori does not claim "memory safe like a proof assistant." It claims **active
 prevention** of the failures that hurt backends most: ignored errors, overruns,
 leaked tasks, use-after-move, header/SQL injection footguns — with ownership
-rules that every Mako package keeps.
+rules that every Makori package keeps.

@@ -5,7 +5,7 @@ understanding the project structure, and setting up your editor.
 
 ## System requirements
 
-To build and run Mako programs you need:
+To build and run Makori programs you need:
 
 - **macOS**: nothing — the release binary is fully self-contained (bundled linker)
 - **Linux**: `gcc` or `clang` for linking (`apt install gcc` or `apt install clang`)
@@ -105,7 +105,7 @@ export MAKO_RUNTIME=/opt/mako/runtime
 
 ## The mako doctor command
 
-After installation, run `mako doctor` to verify your environment is correctly
+After installation, run `makori doctor` to verify your environment is correctly
 configured:
 
 ```bash
@@ -120,7 +120,7 @@ This checks:
 - Optional dependencies (OpenSSL, SQLite, etc.) are detected
 - The standard library path resolves correctly
 
-If anything is misconfigured, `mako doctor` prints actionable guidance on how
+If anything is misconfigured, `makori doctor` prints actionable guidance on how
 to fix it.
 
 ## Your first program
@@ -140,12 +140,12 @@ mako run hello.mko
 # hello from mako
 ```
 
-That is the entire workflow. `mako run` compiles the source to a native binary
+That is the entire workflow. `makori run` compiles the source to a native binary
 and executes it in one step.
 
 ## Creating a project with mako init
 
-For anything beyond a single file, use `mako init` to scaffold a project:
+For anything beyond a single file, use `makori init` to scaffold a project:
 
 ```bash
 mako init myapp --name myapp
@@ -211,20 +211,20 @@ utils = { path = "../utils" }
 jobs = 8
 ```
 
-When you run `mako build main.mko` in a directory with a `mako.toml`, the
+When you run `makori build main.mko` in a directory with a `mako.toml`, the
 binary name is derived from the package name.
 
 ## The build and run cycle
 
 | Command | What it does |
 |---------|--------------|
-| `mako run file.mko` | Compile and execute in one step |
-| `mako check file.mko` | Type-check without producing a binary (fast) |
-| `mako build file.mko` | Compile to a native binary |
-| `mako build --release file.mko` | Optimized build (`-O3 -flto`) |
-| `mako build -j 8 file.mko` | Parallel object compilation |
-| `mako test examples/testing` | Run the test suite |
-| `mako fmt file.mko` | Format source to canonical style |
+| `makori run file.mko` | Compile and execute in one step |
+| `makori check file.mko` | Type-check without producing a binary (fast) |
+| `makori build file.mko` | Compile to a native binary |
+| `makori build --release file.mko` | Optimized build (`-O3 -flto`) |
+| `makori build -j 8 file.mko` | Parallel object compilation |
+| `makori test examples/testing` | Run the test suite |
+| `makori fmt file.mko` | Format source to canonical style |
 
 ### Incremental compilation
 
@@ -280,9 +280,9 @@ mako run fib.mko
 
 ## Working with multiple files
 
-Most projects need more than one file. Mako uses **packs** and **pulls**:
+Most projects need more than one file. Makori uses **packs** and **pulls**:
 name a unit with `pack`, bring it in with `pull`, and always call through the
-pack name. When you `mako run main.mko`, the compiler pulls everything in.
+pack name. When you `makori run main.mko`, the compiler pulls everything in.
 
 ### Basic file pull
 
@@ -337,7 +337,7 @@ Also available: blank `pull _ "fmt"` (load only) and dot `pull . "./h.mko"`
 
 ### Growing into a multi-file project
 
-Say you're building a small service. Start with `mako init`, then add files
+Say you're building a small service. Start with `makori init`, then add files
 as you go:
 
 ```bash
@@ -400,7 +400,7 @@ pull (
 )
 ```
 
-The formatter (`mako fmt`) rewrites multiple `pull` lines into this grouped form.
+The formatter (`makori fmt`) rewrites multiple `pull` lines into this grouped form.
 
 ### Standard library
 
@@ -433,11 +433,11 @@ units, reach for packages and workspaces -- covered in
 
 ### VS Code
 
-A Mako extension is available that provides:
+A Makori extension is available that provides:
 
 - Syntax highlighting for `.mko` files
-- Integration with `mako check` for inline diagnostics
-- Format-on-save via `mako fmt`
+- Integration with `makori check` for inline diagnostics
+- Format-on-save via `makori fmt`
 
 Install it from the extensions marketplace or point your editor at the `.mko`
 grammar file in the repository under `editors/vscode/`.
@@ -450,14 +450,14 @@ Add `.mko` filetype detection to your configuration:
 autocmd BufRead,BufNewFile *.mko set filetype=mako
 ```
 
-For LSP integration, configure the Mako language server in your LSP client
+For LSP integration, configure the Makori language server in your LSP client
 settings.
 
 ### General editor tips
 
-- Set your editor to run `mako fmt` on save. This keeps all code in canonical
+- Set your editor to run `makori fmt` on save. This keeps all code in canonical
   style and avoids formatting debates.
-- Map a keybinding to `mako check` for rapid feedback without a full build.
+- Map a keybinding to `makori check` for rapid feedback without a full build.
 - The compiler emits standard error diagnostics with file, line, and column,
   so editors that can parse the `file:line:col: message` format will show
   inline errors.

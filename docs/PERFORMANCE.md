@@ -1,4 +1,4 @@
-# Mako performance
+# Makori performance
 
 The mature path compiles through C. LLVM release emits objects directly and
 links with embedded lld/runtime inputs, using LLVM’s `default<O3>` pipeline.
@@ -10,7 +10,7 @@ vs 148.9 ms (Mako C), 147.8 ms (hand C), 148.0 ms (Rust). Correctness gate:
 `scripts/llvm-backend-test.sh`. Those numbers are for that workload, not a
 ranking of languages.
 
-Performance is something we design for; it isn’t a finished claim. Mako 0.5.13
+Performance is something we design for; it isn’t a finished claim. Makori 0.5.13
 locks workload-specific budgets in
 [`benchmarks/performance-contract.json`](../benchmarks/performance-contract.json)
 and CI enforces the reproducible subset with
@@ -87,12 +87,12 @@ The direct-native gate builds one output-validated workload with the Cranelift
 backend, the existing C backend, hand-written C, and Rust. It performs warmups,
 rotates execution order across seven samples, reports medians and binary sizes,
 and fails when native exceeds the requested ratio. On the 2026-07-20 Apple
-arm64 development run, native took 350.654 ms versus 170.098 ms for Mako C,
+arm64 development run, native took 350.654 ms versus 170.098 ms for Makori C,
 167.629 ms for hand C, and 168.959 ms for Rust: roughly 2.08× slower. This is a
 failed speed gate, not a publishable “faster than C/Rust” result.
 
 After conservative recursive-addition elimination, a seven-sample follow-up
-measured direct native at 203.168 ms versus 170.599 ms for Mako C, 167.923 ms
+measured direct native at 203.168 ms versus 170.599 ms for Makori C, 167.923 ms
 for hand C, and 169.065 ms for Rust (1.19–1.21×). Component fixtures isolated
 the remaining gaps in recursive Fibonacci and slice construction/reduction.
 
@@ -148,7 +148,7 @@ Compile latency was 68.120 ms for the native backend against 331.082 ms for the
 C backend, at 0.687× the compiler RSS.
 
 The baselines are the programs in `examples/bench/*.c` and `*.rs`. They are
-small, single-purpose, and written to do the same work as the Mako version;
+small, single-purpose, and written to do the same work as the Makori version;
 they are not tuned implementations and should not be read as a statement about
 those languages. The numbers are here to catch regressions between Mako
 releases.
@@ -186,7 +186,7 @@ minimum, include:
 
 - Hardware: CPU model, core count, RAM, OS, and whether the client and server
   ran on the same machine.
-- Build: Mako commit, `mako build` flags, C compiler, optimization flags, and
+- Build: Mako commit, `makori build` flags, C compiler, optimization flags, and
   linked optional libraries.
 - Server workload: source file, route, response body size, keep-alive setting,
   TLS on/off, logging on/off, and concurrency model.

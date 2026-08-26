@@ -1,6 +1,6 @@
-# Mako Built-in Functions Reference
+# Makori Built-in Functions Reference
 
-Current documented reference for Mako built-ins. Platform-specific and
+Current documented reference for Makori built-ins. Platform-specific and
 optional-library boundaries are marked in the tables; symbol-for-symbol stdlib
 parity is not claimed.
 Signatures use the form `function_name(param: type, ...) -> return_type`.
@@ -1398,7 +1398,7 @@ or a dedicated reply socket — do not share one `GameUDP` handle across workers
 | `leak_detected` | `leak_detected(mark: int) -> int` | Check if any leak detected since mark |
 | `leak_assert_clear` | `leak_assert_clear(mark: int) -> int` | Assert no leaks since mark |
 | `leak_report_json` | `leak_report_json(mark: int) -> string` | Leak report as JSON |
-Mako has no tracing-GC builtins. Use `let`/`hold`/`share`/`arena` for
+Makori has no tracing-GC builtins. Use `let`/`hold`/`share`/`arena` for
 deterministic ownership; calls to the removed `gc_*` names are compile errors.
 
 ### Map take (no string-key clone)
@@ -2573,7 +2573,7 @@ Packages: `std/unicode`, `std/unicode/utf8`, `std/collections`, `std/plugin`.
 
 ## 52b. GPU compute seed — AI building blocks (OpenCL + host)
 
-**North star: AI work** (inference / training primitives you compose in Mako),
+**North star: AI work** (inference / training primitives you compose in Makori),
 not graphics. f32 buffers + kernels: matmul, activations, bias, residual, softmax.
 
 **Backends (prefer first that works):**
@@ -2631,7 +2631,7 @@ Tests: `gpu_seed_test.mko`, `ai_depth_test.mko`. Runtime: `runtime/mako_gpu.h`.
 
 ## 52c. Local models (weights + your own nets)
 
-Two ways to “use AI models” in Mako:
+Two ways to “use AI models” in Makori:
 
 | Path | When | Surface |
 |------|------|---------|
@@ -3095,7 +3095,7 @@ Example: `examples/llm_chat.mko` · tests: `examples/testing/llm_test.mko` · pa
 
 ## 71. Checked arithmetic & overflow
 
-CLI: `mako build --overflow trap|wrap|ignore` (also on `mako run`).  
+CLI: `makori build --overflow trap|wrap|ignore` (also on `makori run`).  
 Trap mode rewrites integer `+ - *` to `mako_add_i64` / `sub` / `mul` (abort on overflow).
 
 | Function | Signature | Description |
@@ -3183,13 +3183,13 @@ Test: `examples/testing/trace_log_test.mko`.
 |----------------|---------|
 | `--overflow trap\|wrap\|ignore` | Integer overflow codegen (build/run) |
 | `--bounds always` | Legacy-compatible spelling; safe bounds checks are always retained |
-| `mako test --race` | ThreadSanitizer (also `mako build --sanitize thread`) |
-| `mako dev [file]` | Watch mtime → rebuild + rerun (hot reload seed) |
+| `makori test --race` | ThreadSanitizer (also `makori build --sanitize thread`) |
+| `makori dev [file]` | Watch mtime → rebuild + rerun (hot reload seed) |
 | `./scripts/performance-contract.sh` | Runtime/parser performance contract (CI hard gate on ubuntu) |
 | `./scripts/bench-gate.sh [2.0\|1.5]` | Runtime microbench vs Rust (`fib`, `struct`, `slice`, `map`, `string`, `chan`) |
 
 Tests: `examples/testing/overflow_shutdown_test.mko`. Multi-error recovery:
-`examples/bad/multi_error.mko` (`mako check` reports all top-level parse errors).
+`examples/bad/multi_error.mko` (`makori check` reports all top-level parse errors).
 
 **CI** (`.github/workflows/ci.yml`): native matrix · cross-smoke · **performance-contract** · **TSan** concurrency smoke, including fixed-seed channel/select stress. Replay locally with `MAKO_RT_STRESS_SEED=7 MAKO_RT_STRESS_ROUNDS=8 mako test --race examples/testing/chan_select_stress_test.mko`.
 

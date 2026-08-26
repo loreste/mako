@@ -1,4 +1,4 @@
-# Mako status (adversarial / verified)
+# Makori status (adversarial / verified)
 
 Last inventory: **2026-08-26** · product **mako0.5.15** (tip; last tag **v0.5.15**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
@@ -7,9 +7,9 @@ Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-dire
 const-fn depth (match/while/for/strings · `s[i]`) · **423** `examples/testing`
 `*_test.mko` files · **2026-08-26:** C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) · `cargo test` **156 passed, 0 failed** ·
 tooling, stdlib, memory-safety, and performance gates passed locally ·
-CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard failures/quarantines · [The Mako Book](book/).
+CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard failures/quarantines · [The Makori Book](book/).
 
-**Book:** [The Mako Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
+**Book:** [The Makori Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
 
 ---
 
@@ -60,7 +60,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 
 | Piece | Status |
 |-------|--------|
-| **The Mako Book** (`docs/book/` · mdBook `book.toml` + chapters) | Done |
+| **The Makori Book** (`docs/book/` · mdBook `book.toml` + chapters) | Done |
 | Accuracy pass: README / GUIDE / STATUS / ROADMAP / howto index | Done |
 | Collections surface docs (ERGONOMICS · LANGUAGE · BUILTINS · book ch03/ch14/ch15 · howto/10 · llms*) | Done — full map/slice/bag surface + demand-driven monomorphs |
 
@@ -68,7 +68,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 
 | Piece | Status |
 |-------|--------|
-| `mako version` / `--version` with OS/arch | Done |
+| `makori version` / `--version` with OS/arch | Done |
 | Grouped `import (` / `{` + fmt | Done |
 | Packs & pulls (`pack`/`pull` flair, always qualify, `import`/`package` dual, internal rewrite) | Done |
 | Low-ceremony ergonomics doc + tests (`print` poly, `==` strings, match routes, maps/slices) | Done — [ERGONOMICS.md](ERGONOMICS.md) |
@@ -77,9 +77,9 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | `fan` + Mako `fn` lambdas (block body codegen + types) · crew/fan tests | Done |
 | CLI help polish (`build`/`run`/`check`/`test` flag docs; `version` near top) | Done |
 | VS Code `mako-native` launch configs through LLDB/cpptools | Done |
-| `mako pkg audit` offline advisory and license policy checks | Done |
+| `makori pkg audit` offline advisory and license policy checks | Done |
 | `mako doc` API markdown, runnable examples, and search index | Done |
-| `mako test --coverage` plus fuzz/property/snapshot/mock/fixture categories | Done |
+| `makori test --coverage` plus fuzz/property/snapshot/mock/fixture categories | Done |
 | `mako profile` wall-clock compile/run profile reports with JSON output | Done |
 | Release archives include the full internal docs tree and top-level release notes | Done |
 
@@ -171,7 +171,7 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | Product version 0.1.7 | Done — freeze codecs/combinators/packages wave |
 | Product version 0.1.8 | Done — speed wave (wyhash, f-string stack, select condvar, HTTP 1024) |
 | Product version 0.1.9 | Done — generic structs/enums, interface bounds, iterator/closure seeds |
-| Product version 0.2.0 | Done — stdlib in Mako (io, collections, context, json, http, sql pool) |
+| Product version 0.2.0 | Done — stdlib in Makori (io, collections, context, json, http, sql pool) |
 | Product version 0.2.1 | Done — match exhaustiveness, guards, safety verification |
 | Product version 0.2.3 | Done — JWT/HTTPS input hardening on top of 0.2.2 SNI/HTTPS/JWT/lock integrity |
 | Product version 0.4.0 | Done — soundness wave (SAFE/RT), string_view, scheduler pool, stack lits, lock verify |
@@ -203,10 +203,10 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | SIP zero-copy header/method views | Done — `sip_header_view` / `sip_method_eq` / `sip_header_eq` |
 | ShareInt capture (shared mut via RC handle) | Done seed — `share_capture_test` |
 | Packaging seeds (deb/rpm/winget/matrix/homebrew) | Done seed — scripts + packaging/ |
-| Book samples `mako check` / `run` | PASS — `docs/book/examples/book_*.mko` |
-| `mako test examples/testing` (inventory) | **423** `*_test.mko` files; native/default suite **423 passed, 0 failed** locally with `MAKO_RUNTIME=runtime` (2026-08-26) |
-| `mako test examples/testing --backend c` | **423 passed, 0 failed** locally with `MAKO_RUNTIME=runtime MAKO_TEST_TIMEOUT_SECS=120` (2026-08-26) |
-| `mako test examples/testing --backend native` | **423 passed, 0 failed** locally per-file with `MAKO_RUNTIME=runtime MAKO_TEST_TIMEOUT_SECS=45` (2026-08-26) |
+| Book samples `makori check` / `run` | PASS — `docs/book/examples/book_*.mko` |
+| `makori test examples/testing` (inventory) | **423** `*_test.mko` files; native/default suite **423 passed, 0 failed** locally with `MAKO_RUNTIME=runtime` (2026-08-26) |
+| `makori test examples/testing --backend c` | **423 passed, 0 failed** locally with `MAKO_RUNTIME=runtime MAKO_TEST_TIMEOUT_SECS=120` (2026-08-26) |
+| `makori test examples/testing --backend native` | **423 passed, 0 failed** locally per-file with `MAKO_RUNTIME=runtime MAKO_TEST_TIMEOUT_SECS=45` (2026-08-26) |
 | CI honesty / quarantine | **0.5.12** hard gate: no workflow `continue-on-error`; Windows full-suite failures must match the 18-entry deterministic `ci/windows-quarantine.txt` plus the 3-entry explicit flaky `ci/windows-flaky-quarantine.txt`; unknown failures and recovered deterministic quarantines fail CI |
 | Memory-safety gate | **Passed** (2026-08-24): no GC path, ASan contract fixture, slice RSS soak, long-run ownership/RSS soak |
 | Claims/speed gate | **Passed** (2026-08-24): strict Rust gate fib `0.10x`, slice `0.51x`, map `0.14x` Mako/Rust |
@@ -252,7 +252,7 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | LLM stream transport + embeddings + error/retry helpers | Done — `llm_chat_stream` / `llm_embed*` / `llm_is_error` / `llm_chat_retry` |
 | SQL string params + last_insert_id / rows_affected (SQLite + Postgres) | Done — `examples/testing/sql_programming_test.mko` |
 | SQL multi-row cursor + bulk first-column (`sql_query_rows*`, `sql_query_col_*`) | Done — `examples/testing/sql_rows_test.mko` |
-| SIP/SDP/RTP platform (parse/build; build stacks in Mako — not a softswitch) | Done — `examples/testing/sip_test.mko` · `examples/sip_ua.mko` · `std/sip` |
+| SIP/SDP/RTP platform (parse/build; build stacks in Makori — not a softswitch) | Done — `examples/testing/sip_test.mko` · `examples/sip_ua.mko` · `std/sip` |
 | SRTP crypto building blocks (`aes_ctr`, `hmac_sha1` / `hmac_sha1_raw`) | Done — `examples/testing/crypto_srtp_blocks_test.mko` (HMAC RFC 2202) |
 | TLS client socket API (`tls_client_new` / `tls_connect` + SNI/VERIFY_PEER) | Done — `examples/testing/security_crypto_test.mko` |
 | Secrets helpers (`secret_len` / `secret_eq_str`) + HKDF-SHA256 | Done — RFC 5869 A.1 vector; `security_crypto_test.mko` |
@@ -282,7 +282,7 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | Graceful shutdown builtins | Done — `signal_on_term` / `server_drain` / `register_listener` |
 | Leak scopes | Done — `leak_scope_enter` / `exit` / `leak_check` |
 | Trace id / spans | Done — `trace_id` / `begin` / `end` / `log` |
-| `mako dev` hot reload seed | Done — mtime poll rebuild+rerun |
+| `makori dev` hot reload seed | Done — mtime poll rebuild+rerun |
 | `Result[int, Enum]` typed errors + match | Done — `result_enum_test.mko` |
 | `const fn` compile-time fold | Done — `const_fn_test.mko` |
 | `crew.drain` + `evloop_shutdown` | Done — `crew_drain_test.mko` |
@@ -298,8 +298,8 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | File-system watch (`watch_new`/`add`/`poll`/`close`, kqueue+inotify) | Done — change detection verified; `examples/testing/watch_test.mko` |
 | Contextual `pack`/`pull`/`switch`/`go` (usable as identifiers) | Fixed — no longer reserved words |
 | C keyword / stdlib-name identifiers (`switch`, `read`, `time`, …) emit valid C | Fixed — codegen mangles reserved & libc names |
-| `mako fmt` doubled `export` on structs | Fixed |
-| The Mako Book + docs accuracy | Done |
+| `makori fmt` doubled `export` on structs | Fixed |
+| The Makori Book + docs accuracy | Done |
 | Pack-qualified types (`eng.Table` annot / lit / pattern) + multi-return of structs | Done — `pack_types_test` · `tuple_struct_test` |
 | Struct eq/hash with slice/map fields (engine tables as packs) | Done — `struct_slice_fields_test` |
 | Struct eq/hash with Option/Result/enum fields | Done — `struct_slice_fields_test` · `lang_residuals_test` |
@@ -391,7 +391,7 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | `scripts/performance-contract.sh` vs Rust (fib/struct/slice/map/string strict, channel regression-only) | Done |
 | `chan_open[string]` + kick with chan handle | Done |
 | `error_context` (wrap_err alias) | Done |
-| `mako lint --identity` (dual spellings as style) | Done |
+| `makori lint --identity` (dual spellings as style) | Done |
 | Atomic `share` RC + `share_set` | Done |
 | `fan` on `[]string` (`mako_par_map_str`) | Done |
 | `error_join` combine Results | Done |

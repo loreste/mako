@@ -1,7 +1,7 @@
 # Standard library safety matrix
 
 This matrix classifies every checked-in `std/**/*.mko` file against the
-[stdlib memory-safety gate](STDLIB_SAFETY.md). It is intentionally about Mako's
+[stdlib memory-safety gate](STDLIB_SAFETY.md). It is intentionally about Makoriri's
 safe surface, not Go or Rust syntax parity.
 
 Status values:
@@ -188,7 +188,7 @@ Status values:
 | Go `unsafe` | `won't` | raw memory conflicts with safe Mako |
 | Go `go/*` | `blocked` | compiler/toolchain data only; reconsider bounded parsers case by case |
 | Go `debug/*` | `blocked` | binary parsers need sandbox, bounds, and fuzzing first |
-| Rust raw pointer APIs | `won't` | safe Mako does not expose raw pointer arithmetic |
+| Rust raw pointer APIs | `won't` | safe Makori does not expose raw pointer arithmetic |
 | Rust unchecked indexing and uninitialized memory | `won't` | conflicts with checked indexing and definite initialization |
 | Rust allocator internals / low-level FFI | `unsafe-boundary` | only narrow checked wrappers may enter the safe surface |
 

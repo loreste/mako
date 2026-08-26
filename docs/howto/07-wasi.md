@@ -1,7 +1,7 @@
 # Compiling to WebAssembly (WASI)
 
 Mako can compile programs to WebAssembly using WASI preview1. This lets you
-run Mako programs in sandboxed environments, edge runtimes, and browsers.
+run Makori programs in sandboxed environments, edge runtimes, and browsers.
 
 ## Prerequisites
 

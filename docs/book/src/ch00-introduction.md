@@ -1,11 +1,11 @@
 # Introduction
 
-Welcome to **The Mako Book** -- the official guide to learning and using the Mako
+Welcome to **The Makori Book** -- the official guide to learning and using the Mako
 programming language.
 
 ## What is Mako?
 
-Mako is a systems and backend language built for **speed first**, with
+Makori is a systems and backend language built for **speed first**, with
 **first-class concurrency and parallelism**, plus clarity and safety.
 **Syntax is Mako’s own**. Safety comes from ownership and arenas — **not a GC**.
 Native performance is a design goal (compiled to C with `-O3 -flto`).
@@ -17,7 +17,7 @@ needed — the compiler ships with a bundled linker. Memory safety uses `hold` /
 `crew` / `kick` / `join`, `fan` across cores, channels, actors — no free-fire
 leaks, no async coloring.
 
-Mako is currently at version **0.5.7**. This book teaches idiomatic Mako as it
+Makori is currently at version **0.5.7**. This book teaches idiomatic Mako as it
 ships today. Identity checklist: [IDENTITY.md](../../IDENTITY.md).
 
 | Area | Where |
@@ -68,7 +68,7 @@ mako run hello.mko
 # 55
 ```
 
-Methods use Mako’s `on` form; multi-return uses tuples:
+Methods use Makori’s `on` form; multi-return uses tuples:
 
 ```mko
 struct Point {
@@ -139,7 +139,7 @@ fn process(s: string) {
 
 ## How this book is organized
 
-The book is split into chapters that build on each other. If you are new to Mako,
+The book is split into chapters that build on each other. If you are new to Makori,
 read chapters 1 through 6 in order. They cover installation, syntax, ownership,
 and error handling -- the foundation you need for everything else.
 
@@ -163,10 +163,10 @@ and error handling -- the foundation you need for everything else.
 
 ## How to read this book
 
-**If you are new to Mako:** Start at Chapter 2 and read sequentially through
+**If you are new to Makori:** Start at Chapter 2 and read sequentially through
 Chapter 6. These chapters introduce the language foundations step by step, with
 each concept building on the previous one. Do not skip the ownership chapter --
-it is central to how Mako programs are structured.
+it is central to how Makori programs are structured.
 
 **If you are building a service:** After the foundations, jump to Chapters 7
 through 10 for standard library coverage, networking, data handling, and package
@@ -176,12 +176,12 @@ management.
 `howto/` directory with focused, task-oriented guides.
 
 **If something looks wrong:** The compiler is the source of truth. Run
-`mako check` on your code and consult [GUIDE.md](../../GUIDE.md) for the
+`makori check` on your code and consult [GUIDE.md](../../GUIDE.md) for the
 exhaustive syntax reference.
 
 ## Conventions used in this book
 
-Code examples use the `.mko` extension and are formatted with `mako fmt`:
+Code examples use the `.mko` extension and are formatted with `makori fmt`:
 
 ```mko
 fn example() -> int {
@@ -228,7 +228,7 @@ mako test examples/testing
 ## Getting help
 
 - Run `mako --help` for command-line usage
-- Run `mako doctor` to diagnose your installation
+- Run `makori doctor` to diagnose your installation
 - Check [STATUS.md](../../STATUS.md) for what is implemented
 - Check [GUIDE.md](../../GUIDE.md) for the current syntax reference
 

@@ -1,10 +1,10 @@
-# Mako for VS Code
+# Makoriri for VS Code
 
 VS Code support for `.mko` files.
 
 ## Features
 
-- Syntax highlighting for Mako.
+- Syntax highlighting for Makori.
 - Language configuration for comments, brackets, and auto-closing pairs.
 - Snippets for `main`, tests, `crew`, `arena`, and HTTP route helpers.
 - Commands:

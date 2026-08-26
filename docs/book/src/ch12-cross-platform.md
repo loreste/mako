@@ -8,7 +8,7 @@ target matrix, WebAssembly output, and static linking.
 
 ## The `--target` Flag
 
-By default, `mako build` produces a binary for the host machine. To
+By default, `makori build` produces a binary for the host machine. To
 cross-compile, pass a target triple:
 
 ```bash
@@ -35,7 +35,7 @@ The target triple follows the `<arch>-<vendor>-<os>[-<abi>]` convention.
 | `x86_64-pc-windows-msvc`        | Windows | x86-64       | MSVC ABI (needs clang on PATH)|
 | `wasm32-wasip1`                 | WASI    | WebAssembly  | Preview 1 (see below)         |
 
-The host target is detected automatically. `mako version` prints it:
+The host target is detected automatically. `makori version` prints it:
 
 ```text
 mako version mako0.4.0 darwin/arm64
@@ -287,9 +287,9 @@ MAKO_CC="zig cc" mako build main.mko --target x86_64-pc-windows-msvc -o bin/app.
 
 ---
 
-## `mako version` Output
+## `makori version` Output
 
-The `version` command reports the Mako version, OS, and architecture:
+The `version` command reports the Makori version, OS, and architecture:
 
 ```bash
 mako version
@@ -353,7 +353,7 @@ This uses `debian:bookworm-slim` as the runtime base instead of `scratch`.
 
 ## Putting It All Together
 
-A typical CI matrix for a Mako service:
+A typical CI matrix for a Makori service:
 
 ```bash
 # macOS ARM64 (native)

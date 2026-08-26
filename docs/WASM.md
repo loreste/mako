@@ -6,7 +6,7 @@ Book: [§12 Cross-platform & WASI](book/src/ch12-cross-platform.md) · How-to: [
 
 ## Status
 
-`mako build --target wasm32-wasi` (alias of **`wasm32-wasip1`**) uses **wasi-sdk**
+`makori build --target wasm32-wasi` (alias of **`wasm32-wasip1`**) uses **wasi-sdk**
 clang + sysroot when `WASI_SDK_PATH` (or `/opt/wasi-sdk`, `/usr/local/wasi-sdk`) is set.
 
 | Piece | Status |
@@ -19,10 +19,10 @@ clang + sysroot when `WASI_SDK_PATH` (or `/opt/wasi-sdk`, `/usr/local/wasi-sdk`)
 | Clear skip when SDK / wasmtime missing | Done (`scripts/wasi-verify.sh`) |
 | Sockets / HTTP / TLS / DB on WASI | VISION Later |
 | WASI preview2 / full browser DOM | Target / later |
-| Browser/edge starter (`mako deploy wasm`) | Done for preview1 loader path |
+| Browser/edge starter (`makori deploy wasm`) | Done for preview1 loader path |
 | Browser loader polyfill (`wasm/mako-wasi-loader.js`) | Seed |
 
-STATUS counts preview1 beachhead as **Done**. `mako deploy wasm` makes that
+STATUS counts preview1 beachhead as **Done**. `makori deploy wasm` makes that
 path usable in browser/edge-style static hosting through a preview1 polyfill.
 Sockets, preview2 components, Workers request adapters, and full browser DOM
 bindings remain target work.
@@ -75,7 +75,7 @@ docker build -f docker/wasi-build.Dockerfile -t mako-wasi .
 ```
 
 `docker/wasi-build.Dockerfile` installs wasi-sdk, builds mako, then runs
-`mako build examples/hello.mko --target wasm32-wasi` and checks the `.wasm` is non-empty.
+`makori build examples/hello.mko --target wasm32-wasi` and checks the `.wasm` is non-empty.
 
 ## Browser glue (fd_write + empty environ/args)
 
@@ -115,7 +115,7 @@ python3 -m http.server -d wasm 8080
 
 ## Preview2 / edge boundary
 
-`mako deploy wasm` is the browser/edge story for current Mako: build a WASI
+`makori deploy wasm` is the browser/edge story for current Mako: build a WASI
 preview1 module and run it behind a JS polyfill. It is useful for CLIs,
 deterministic compute, demos, and static-hosted edge experiments.
 

@@ -1,6 +1,6 @@
 # Testing
 
-Mako has a built-in test framework. Tests are functions named `TestXxx` in
+Makori has a built-in test framework. Tests are functions named `TestXxx` in
 files ending with `_test.mko`. No external test library needed.
 
 ## Writing your first test
@@ -169,7 +169,7 @@ same harness:
 | `MockXxx` | Test with mocked dependencies |
 | `FixtureXxx` | Test using fixture data |
 
-All are zero-argument functions discovered and run by `mako test`.
+All are zero-argument functions discovered and run by `makori test`.
 
 ## Testing with environment flags
 

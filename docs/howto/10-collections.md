@@ -1,6 +1,6 @@
 # Collections: maps, slices, and bag values
 
-Everyday data structures in Mako use one monomorphized surface — no special
+Everyday data structures in Makori use one monomorphized surface — no special
 collection package, no iterator types, no hand-rolled hashes for common keys.
 
 This guide covers:
@@ -31,7 +31,7 @@ emits C helpers for `map[K]V` shapes that appear in the compilation unit
 | Use what you need | `make(map[A]B)` emits helpers for that pair only |
 | Annotate API maps | Helps collection and call sites stay clear |
 | Prefer shallow nests | Depth ≤3 nested maps; deep bag nests only where useful |
-| Measure big packs | `mako build --emit-c path.mko` then check `.c` size |
+| Measure big packs | `makori build --emit-c path.mko` then check `.c` size |
 
 This is what keeps multi-hundred-type packs (e.g. large libraries) compile-time
 friendly while still offering rich bag and channel map values.

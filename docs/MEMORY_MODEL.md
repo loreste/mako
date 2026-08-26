@@ -1,4 +1,4 @@
-# Mako concurrency memory model
+# Makori concurrency memory model
 
 **SAFE-010 · RT-001 · RT-004** · Product tip **0.4.0**
 
@@ -8,7 +8,7 @@ with an explicit **Sync** escape hatch. There is no GC. Speed comes from
 structured concurrency and Send checks at kick boundaries — not from optional
 sanitizers (those remain opt-in for FFI and runtime smoke).
 
-Mako is its own language with its own syntax and ownership rules. Compatibility
+Makori is its own language with its own syntax and ownership rules. Compatibility
 with Go or Rust libraries never overrides the safe Mako contract: raw memory,
 unchecked indexing, or unverifiable FFI behavior must stay outside safe Mako or
 behind an explicit unsafe boundary.
@@ -161,7 +161,7 @@ fires. Timeout arm receives nothing.
 |-------|-----------|
 | Two tasks write `let mut x` without Sync | **Compile error** (race model / capture rules) |
 | Two tasks use `CMap` / Mutex correctly | Allowed; runtime serializes |
-| FFI / `unsafe` raw memory | Outside the model — use TSan (`mako test --race`) |
+| FFI / `unsafe` raw memory | Outside the model — use TSan (`makori test --race`) |
 
 ---
 

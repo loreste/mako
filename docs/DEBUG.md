@@ -62,7 +62,7 @@ The adapter locates `lldb-dap` in this order:
 
 ### VS Code
 
-The Mako VS Code extension (`editors/vscode`) spawns `mako dap` directly via a
+The Makori VS Code extension (`editors/vscode`) spawns `mako dap` directly via a
 `DebugAdapterDescriptorFactory` — no CodeLLDB or Microsoft C/C++ extension
 needed, and no `preLaunchTask` (the adapter builds on launch). Launch config:
 
@@ -147,8 +147,8 @@ the script at `$PREFIX/share/mako/mako_formatters.py`.
 
 ## Debug vs release builds
 
-Debug is the default. With the C backend (`mako build --backend c`), every
-`mako build`, `mako run`, and `mako test` invocation compiles with **clang
+Debug is the default. With the C backend (`makori build --backend c`), every
+`makori build`, `makori run`, and `makori test` invocation compiles with **clang
 `-O0 -g`**, which means:
 
 - Full debug symbols are embedded in the binary.
@@ -225,7 +225,7 @@ builds and launches lldb for you. To drive lldb manually, read on.
 
 **Backend caveat:** source-level debugging requires the **C backend**. The
 default `native` (Cranelift) backend emits no DWARF line info, so a binary
-from plain `mako build` cannot resolve `.mko` breakpoints. Build manually
+from plain `makori build` cannot resolve `.mko` breakpoints. Build manually
 with:
 
 ```bash
@@ -291,7 +291,7 @@ Process launched ...
 
 ### Debugging crashes
 
-When a Mako program aborts at runtime (out-of-bounds, integer overflow, failed
+When a Makori program aborts at runtime (out-of-bounds, integer overflow, failed
 assert), it prints an `error: ...` message. To catch the exact point:
 
 ```bash
@@ -400,7 +400,7 @@ Fix: protect the shared state with a `mutex_new()` / `mutex_lock()` /
 
 ## Compiler error messages
 
-Mako's type checker (`mako check`) produces structured error messages with
+Makori's type checker (`makori check`) produces structured error messages with
 three parts: location, message, and optional help.
 
 ### Location format
@@ -549,7 +549,7 @@ fn check(n: int) {
 
 ## Inspecting generated code with --emit-c
 
-Mako compiles `.mko` to C, then invokes clang. You can inspect the intermediate
+Makori compiles `.mko` to C, then invokes clang. You can inspect the intermediate
 C to understand what the compiler generates:
 
 ```bash
@@ -558,7 +558,7 @@ mako build --emit-c main.mko
 
 This writes the generated C file alongside the output. Use it to:
 
-- **Map debugger lines** back to your Mako source when lldb shows C line numbers.
+- **Map debugger lines** back to your Makori source when lldb shows C line numbers.
 - **Understand performance** by seeing how structs are laid out and how
   closures are lowered.
 - **Diagnose codegen bugs** if the compiler produces incorrect C.
@@ -577,7 +577,7 @@ cat /tmp/myapp.c
 
 ## Tooling integration with mako check --json
 
-For editor integrations, CI pipelines, and custom tooling, `mako check` can
+For editor integrations, CI pipelines, and custom tooling, `makori check` can
 emit a stable, versioned JSON report:
 
 ```bash
@@ -736,7 +736,7 @@ fn sum_positive(nums: []int) -> int {
 }
 ```
 
-Run: `mako run buggy.mko`
+Run: `makori run buggy.mko`
 
 stderr output reveals negative numbers being added:
 
@@ -800,16 +800,16 @@ Both pass cleanly. The bug is fixed and guarded by a test.
 
 | Task | Command |
 |------|---------|
-| Debug build (default) | `mako build main.mko` |
-| Release build | `mako build --release main.mko` |
+| Debug build (default) | `makori build main.mko` |
+| Release build | `makori build --release main.mko` |
 | Debug in an editor (DAP adapter) | `mako dap` |
 | Debug in a terminal (lldb + formatters) | `mako debug main.mko` |
 | Inline debug print | `dbg(value)` / `dbg_str(value)` |
-| Type check only | `mako check main.mko` |
-| Type check as JSON | `mako check --json=v1 main.mko` |
-| Inspect generated C | `mako build --emit-c main.mko` |
-| Run in lldb manually | `mako build --backend c main.mko && lldb ./main` |
-| Address sanitizer | `mako build --sanitize address main.mko` |
-| Thread sanitizer | `mako test --race` |
-| Verbose tests | `mako test dir/ -v` |
-| Run one test | `mako test dir/ -run TestName` |
+| Type check only | `makori check main.mko` |
+| Type check as JSON | `makori check --json=v1 main.mko` |
+| Inspect generated C | `makori build --emit-c main.mko` |
+| Run in lldb manually | `makori build --backend c main.mko && lldb ./main` |
+| Address sanitizer | `makori build --sanitize address main.mko` |
+| Thread sanitizer | `makori test --race` |
+| Verbose tests | `makori test dir/ -v` |
+| Run one test | `makori test dir/ -run TestName` |

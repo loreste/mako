@@ -1,4 +1,4 @@
-# Mako vision
+# Makori vision
 
 **North star**
 
@@ -12,7 +12,7 @@ library abstractions.
 
 **Why Mako exists:** we wanted a language that compiles to native code,
 handles memory deterministically, has structured concurrency built in, and
-doesn’t require heavy ceremony for everyday backend work. Mako is our
+doesn’t require heavy ceremony for everyday backend work. Makori is our
 answer — still experimental, still evolving.
 
 | Principle | What it means |
@@ -27,11 +27,11 @@ answer — still experimental, still evolving.
 | Easy deploy | Static binaries where the target/toolchain supports them |
 | Practical stdlib | Batteries for common backend tasks (HTTP, TLS, JSON, SQL, networking) |
 
-Mako is for **backend software, networking systems, developer tools, and
+Makori is for **backend software, networking systems, developer tools, and
 services** — without a mandatory garbage collector. Product surfaces that must
 work over time:
 
-- **Backend applications** and **API services** (HTTP/JSON, `mako init --backend`)
+- **Backend applications** and **API services** (HTTP/JSON, `makori init --backend`)
 - **CLI and developer tools** (flags, env, files, subprocesses, static binary deploy)
 - **Cloud and infrastructure tools** (agents, operators, sidecars, proxies, gateways)
 - **Systems programming** (arenas, hold/share, bytes/files, append logs)
@@ -42,14 +42,14 @@ work over time:
 **Core promise:** Ship fast binaries, run concurrent and parallel work as a
 first-class part of the language, stay safe without a GC, keep everyday code short.
 
-**Syntax promise:** Mako has its **own syntax**. It may accept dual spellings
-for familiarity, but preferred docs, examples, and `mako fmt` always lead
-with Mako forms: `fn`, `let`, `on`, `pack` / `pull`, `hold` / `share` /
+**Syntax promise:** Makori has its **own syntax**. It may accept dual spellings
+for familiarity, but preferred docs, examples, and `makori fmt` always lead
+with Makori forms: `fn`, `let`, `on`, `pack` / `pull`, `hold` / `share` /
 `arena`, `crew` / `kick` / `join`, `match`, `export`, `.mko`.
 See [IDENTITY.md](IDENTITY.md).
 
 Honest status lives in [STATUS.md](STATUS.md). **How to write Mako today:**
-[The Mako Book](book/) (guided tour) and [GUIDE.md](GUIDE.md) (verified syntax).
+[The Makori Book](book/) (guided tour) and [GUIDE.md](GUIDE.md) (verified syntax).
 This file is the product map (includes Target ideas).
 
 ---
@@ -125,7 +125,7 @@ language's entire identity:
 | Deploy | Static binaries, fast cross-compile, Linux/macOS/Windows/ARM/WASM |
 
 The rule of thumb: a SIP proxy, signaling server, session controller, WebSocket
-gateway, or job worker should all feel like obvious Mako programs.
+gateway, or job worker should all feel like obvious Makori programs.
 
 ---
 
@@ -235,7 +235,7 @@ No trait maze; embedding/generic bounds remain Later.
 | Version pinning / content hashes | Now (local lock foundation; registry and reproducibility depth remain) |
 | Private modules / path deps | Next |
 | Reproducible builds | Next |
-| Supply-chain / vuln scan (`mako pkg audit`) | Now (offline advisory + license policy) |
+| Supply-chain / vuln scan (`makori pkg audit`) | Now (offline advisory + license policy) |
 | Minimal transitive deps (culture + tooling) | Ongoing |
 
 ---
@@ -268,7 +268,7 @@ without pulling in a large framework.
 ## Testing (built-in)
 
 Unit · integration · fuzz · bench · race · property · snapshot · mocks —
-**Now** (`mako test` / `mako bench` are implemented; coverage and diagnostics
+**Now** (`makori test` / `mako bench` are implemented; coverage and diagnostics
 depth continue to improve).
 
 Coverage, fixtures, parallel tests, leak/race detection, and end-to-end test
@@ -287,9 +287,9 @@ API stability annotations — Later. Module isolation — Later.
 
 | Tool | Status |
 |------|--------|
-| `mako check` / `build` / `run` | Now |
-| `mako fmt` / `lint` / `test` / `bench` | Implemented — deeper IDE/debug workflows remain |
-| `mako pkg init` / `lock` / `audit` | Now |
+| `makori check` / `build` / `run` | Now |
+| `makori fmt` / `lint` / `test` / `bench` | Implemented — deeper IDE/debug workflows remain |
+| `makori pkg init` / `lock` / `audit` | Now |
 | Docs generator | Later |
 | LSP: rename / extract / debug / profile | Later (day-one intent) |
 | Cross-compile | Later |
@@ -311,7 +311,7 @@ working together out of the box.
 |-------|--------|
 | Systems audience (drivers, engines, protocols) | Vision Now |
 | SIMD vector types | Later |
-| GPU AI seed (matmul/activations; OpenCL multi-vendor + host) | Seed done — build inference blocks in Mako |
+| GPU AI seed (matmul/activations; OpenCL multi-vendor + host) | Seed done — build inference blocks in Makori |
 | Local models (safetensors + author nets + .makomodel) | Seed done |
 | AI depth (attention, layernorm, GGUF/LLM runtime, tokenizer) | Later |
 | `gpu fn` / Metal-native / CUDA / Vulkan | Later (same buffer/dispatch surface) |
@@ -335,7 +335,7 @@ serverless functions, edge apps, desktop utilities, and embedded agents.
 
 1. ~~Channels + cancel~~ · ~~actor mailbox seed~~ · ~~tcp_listen~~ · ~~pkg lock foundation~~  
 2. Full `actor` / `receive` syntax · portable timeouts · real `http.Request` + TLS  
-3. `hold` / `share` · interfaces · `mako test` for real  
+3. `hold` / `share` · interfaces · `makori test` for real  
 4. JSON derive · Postgres · race detector  
 5. Async I/O · QUIC/WS · incremental compile · LSP  
 6. SIMD/GPU · comptime · WASM

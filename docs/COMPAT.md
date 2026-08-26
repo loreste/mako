@@ -1,4 +1,4 @@
-# Mako compatibility policy (0.x)
+# Makori compatibility policy (0.x)
 
 Mako aims for **simple everyday code**, **native performance** (a design goal,
 not yet broadly benchmarked), and active memory/resource safety mechanisms
@@ -8,9 +8,9 @@ without a GC — with a **syntax surface that is Mako’s own**.
 
 ## Guarantees (0.x)
 
-1. **Source compatibility:** A program that `mako check`s on 0.1.0 keeps checking
+1. **Source compatibility:** A program that `makori check`s on 0.1.0 keeps checking
    on later 0.x releases (including **0.4.0**), unless the package opts into a stricter flag.
-2. **Dual syntax stays:** Compat spellings remain accepted. Docs and `mako fmt`
+2. **Dual syntax stays:** Compat spellings remain accepted. Docs and `makori fmt`
    prefer Mako-native forms.
 3. **Additive APIs only:** New builtins and syntax never retype existing ones.
 4. **Opt-in strictness:** Package flags tighten rules without changing defaults.
@@ -40,8 +40,8 @@ without a GC — with a **syntax surface that is Mako’s own**.
 | Concurrency | `crew` / `kick` / `join` | (no free `go`) |
 | Memory | scopes + `hold` / `share` / `arena` | — |
 
-Mako is not a Go dialect and not a Rust dialect. Dual spellings help migration;
-docs and `mako fmt` always lead with the Mako column.
+Makori is not a Go dialect and not a Rust dialect. Dual spellings help migration;
+docs and `makori fmt` always lead with the Mako column.
 
 ## Performance & safety
 

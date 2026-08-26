@@ -4,7 +4,7 @@
 > Mako’s preferred syntax is defined in **[IDENTITY.md](IDENTITY.md)**.  
 > This file only tracks optional **dual spellings** inspired by Go for familiarity
 > and migration. They must not displace `fn` / `let` / `on` / `crew` / `hold` in
-> docs or `mako fmt`.
+> docs or `makori fmt`.
 
 Living inventory of dual forms the compiler accepts.  
 **How to use:** check items when verified; recompute %.
@@ -42,12 +42,12 @@ Overall ≈ Σ (weight × track%).
 
 | | Item | Status | Notes |
 |---|------|--------|-------|
-| [x] | `package main` file clause | Done | Dual of Mako `pack`; entry is still `fn main` |
+| [x] | `package main` file clause | Done | Dual of Makori `pack`; entry is still `fn main` |
 | [x] | `type Name struct { … }` | Done | Also `struct Name { … }` |
 | [x] | `type Name enum { … }` | Done | Via `type` + `enum` |
 | [x] | Capitalized export (Go) | Done | `Add` exported; `add` private seed |
 | [x] | `export` keyword | Done | Dual with capitalization |
-| [x] | Grouped `import ( … )` | Done | Dual of Mako `pull ( … )` |
+| [x] | Grouped `import ( … )` | Done | Dual of Makori `pull ( … )` |
 | [x] | Always-qualified imports + `_` / `.` | Done | dual of `pull`; preferred flair is `pack`/`pull` (see IDENTITY) |
 | [x] | Directory = package, one package per dir | Done | All non-test `.mko` in a dir merge as one pack; same `pack` name enforced; path deps + pull |
 

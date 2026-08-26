@@ -29,7 +29,7 @@ so `strings.split` works immediately.
 
 ## Strings
 
-The `strings` package provides operations on string values. Strings in Mako are
+The `strings` package provides operations on string values. Strings in Makori are
 owned, heap-allocated, null-terminated byte sequences with a length field.
 
 ### Builtins (no import needed)
@@ -854,7 +854,7 @@ fn main() {
 }
 ```
 
-The formatter (`mako fmt`) automatically rewrites two or more single imports into
+The formatter (`makori fmt`) automatically rewrites two or more single imports into
 a grouped block.
 
 ---
@@ -892,7 +892,7 @@ a grouped block.
    `Result` types. Match them explicitly.
 
 5. **Method name aliases**: where a standard method name collides with a keyword,
-   Mako uses an alias. For example `concat` instead of reserved words,
+   Makori uses an alias. For example `concat` instead of reserved words,
    `matches` instead of `match`.
 
 ---
@@ -922,7 +922,7 @@ fn process_config(raw: string) -> string {
 }
 
 fn main() {
-    let config = "# Mako config\nport = 8080\n  host = 0.0.0.0\n# end\n"
+    let config = "# Makori config\nport = 8080\n  host = 0.0.0.0\n# end\n"
     let cleaned = process_config(config)
     print(cleaned)
 
@@ -943,7 +943,7 @@ fn main() {
 ## Direct I/O (dio)
 
 For performance-critical file access -- storage engines, databases, log-structured
-merge trees -- Mako provides unbuffered (direct) I/O through the `dio` subsystem.
+merge trees -- Makori provides unbuffered (direct) I/O through the `dio` subsystem.
 These functions bypass the standard buffered layer and operate directly on file
 descriptors.
 

@@ -1,6 +1,6 @@
-# Mako documentation
+# Makori documentation
 
-Start with [The Mako Book](book/) for a guided introduction, or jump to what
+Start with [The Makori Book](book/) for a guided introduction, or jump to what
 you need below.
 
 ## Learn the language
@@ -44,7 +44,7 @@ you need below.
 
 | Doc | What's in it |
 |-----|-------------|
-| [Performance](PERFORMANCE.md) | Benchmarks, including where Mako is slower |
+| [Performance](PERFORMANCE.md) | Benchmarks, including where Makori is slower |
 | [Speed](SPEED.md) | How the compiler and runtime are structured for speed |
 
 ## Debugging and testing
@@ -78,7 +78,7 @@ you need below.
 
 | Doc | What's in it |
 |-----|-------------|
-| [Vision](VISION.md) | Where Mako is headed long-term |
+| [Vision](VISION.md) | Where Makori is headed long-term |
 | [Async](ASYNC.md) | Why there's no async/await (and what we do instead) |
 | [Compat](COMPAT.md) | Dual-form syntax and what won't break |
 | [Go Syntax Checklist](GO_SYNTAX_CHECKLIST.md) | Go-compatible forms (accepted but not preferred) |

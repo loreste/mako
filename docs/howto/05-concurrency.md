@@ -1,6 +1,6 @@
 # Concurrency
 
-Mako uses structured concurrency: ordinary kicked work lives inside `crew`
+Makori uses structured concurrency: ordinary kicked work lives inside `crew`
 blocks and is joined before the block exits. Cancellation is cooperative, so a
 blocked C/FFI call can delay the join; explicit `detach` is a separate,
 process-scoped escape.

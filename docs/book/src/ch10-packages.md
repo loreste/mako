@@ -1,6 +1,6 @@
 # 10. Packages, Workspaces, and Tooling
 
-Mako uses a file-based package system. The preferred module primitives are
+Makori uses a file-based package system. The preferred module primitives are
 `pack`, `pull`, and `export`:
 
 - **`pack mylib`** — declares the current file's package identity.
@@ -8,7 +8,7 @@ Mako uses a file-based package system. The preferred module primitives are
 - **`export fn` / `export struct`** — marks items as public to consumers.
 
 A `mako.toml` manifest coordinates multi-file projects and external
-dependencies. The `mako pkg` command manages the full lifecycle: initializing,
+dependencies. The `makori pkg` command manages the full lifecycle: initializing,
 adding, fetching, locking, and auditing packages.
 
 ---
@@ -194,7 +194,7 @@ The pulled file's exported functions become available through the pack name as a
 qualifier. If the file declares `pack helpers`, that name is used; otherwise the
 filename basename is the default qualifier.
 
-When you run `mako run main.mko`, the compiler automatically finds and compiles
+When you run `makori run main.mko`, the compiler automatically finds and compiles
 all imported files -- you don't need to list them on the command line.
 
 ### Aliased imports
@@ -257,14 +257,14 @@ fn main() {
 }
 ```
 
-The formatter (`mako fmt`) automatically rewrites two or more single `import`
+The formatter (`makori fmt`) automatically rewrites two or more single `import`
 statements into a grouped block.
 
 ---
 
 ## mako pkg Commands
 
-The `mako pkg` subcommand manages the dependency lifecycle:
+The `makori pkg` subcommand manages the dependency lifecycle:
 
 ### mako pkg init
 
@@ -361,10 +361,10 @@ content_hash = "sha256:2a78b67c8f640e71c4ef635bdf6f28c59ad31977f4041e1d7b5c3a01d
 ```
 
 Commit `mako.lock` to version control for reproducible builds across
-environments. `mako pkg install`, `mako build`, `mako run`, and `mako check`
+environments. `makori pkg install`, `makori build`, `makori run`, and `makori check`
 verify locked dependency content and fail on a mismatch, an unreadable
 transitive manifest, or malformed lock metadata. Inspect intentional changes
-before accepting them with `mako pkg update`; that command also migrates legacy
+before accepting them with `makori pkg update`; that command also migrates legacy
 version 1 lockfiles.
 
 ### mako pkg update
@@ -410,7 +410,7 @@ Auditing checks:
 - **Integrity**: verifies git checksums match lockfile
 
 ```bash
-$ mako pkg audit
+$ makori pkg audit
 [ok] helper 0.1.0 — no advisories
 [ok] logger 0.2.0 — license: MIT (allowed)
 audit: 2 packages checked, 0 issues
@@ -588,7 +588,7 @@ import "path"
 import "sync"
 ```
 
-After `mako fmt`:
+After `makori fmt`:
 ```mko
 import (
     "strings"
@@ -695,7 +695,7 @@ SemVer resolution follows standard rules:
 - `"~0.1.2"` — approximately 0.1.2 (patch-level changes)
 
 The registry format stores package metadata and source tarballs locally after
-`mako pkg fetch`.
+`makori pkg fetch`.
 
 ---
 
@@ -842,18 +842,18 @@ fn db_add_item(name: string) -> int {
 
 | Command | Purpose |
 |---------|---------|
-| `mako pkg init <name>` | Create new package |
-| `mako pkg add <name> <source>` | Add dependency |
-| `mako pkg remove <name>` | Remove dependency |
-| `mako pkg fetch` | Download git dependencies |
-| `mako pkg lock` | Generate/update lockfile |
-| `mako pkg update` | Update to latest compatible versions |
-| `mako pkg list` | List all dependencies |
-| `mako pkg audit` | Security and license audit |
-| `mako fmt -w .` | Format all files |
-| `mako test <dir>` | Run tests |
-| `mako build <file> -o <out>` | Compile to binary |
-| `mako run <file>` | Build and run |
-| `mako check <file>` | Type-check only |
+| `makori pkg init <name>` | Create new package |
+| `makori pkg add <name> <source>` | Add dependency |
+| `makori pkg remove <name>` | Remove dependency |
+| `makori pkg fetch` | Download git dependencies |
+| `makori pkg lock` | Generate/update lockfile |
+| `makori pkg update` | Update to latest compatible versions |
+| `makori pkg list` | List all dependencies |
+| `makori pkg audit` | Security and license audit |
+| `makori fmt -w .` | Format all files |
+| `makori test <dir>` | Run tests |
+| `makori build <file> -o <out>` | Compile to binary |
+| `makori run <file>` | Build and run |
+| `makori check <file>` | Type-check only |
 
 Next: [Speed & memory safety](ch11-speed-safety.md).

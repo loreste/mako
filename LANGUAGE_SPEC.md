@@ -1,4 +1,4 @@
-# Mako Language Specification
+# Makori Language Specification
 
 **Version:** 0.4.0
 **Date:** 2026-07-13
@@ -38,14 +38,14 @@ Dual spellings (`func`, `:=`, bare `a int`) remain valid as compat sugar only.
 
 ### 1.1 Character Set
 
-Mako source files are encoded in **UTF-8**. All keywords, operators, and
+Makori source files are encoded in **UTF-8**. All keywords, operators, and
 punctuation are within the ASCII subset. String literals and comments may contain
 any valid UTF-8 sequence. A byte-order mark (BOM) at the start of a file is
 rejected.
 
 ### 1.2 Line Structure
 
-Mako is a free-form language. Statements are terminated by newlines or
+Makori is a free-form language. Statements are terminated by newlines or
 semicolons. Semicolons are optional at end-of-line but permitted for
 multi-statement lines.
 
@@ -81,7 +81,7 @@ Identifiers are case-sensitive. The identifier `_` (a single underscore) is the
 
 ### 1.5 Keywords
 
-Mako has **46 reserved words** (including duals `func`, `var`, `package`,
+Makori has **46 reserved words** (including duals `func`, `var`, `package`,
 `import`, `type`). Preferred flair: `fn`, `pack`, `pull`, `on`, `hold`, `crew`,
 …. Every matching identifier is always a keyword token, never an `Ident`.
 There are no contextual keywords.
@@ -445,11 +445,11 @@ Sum types with variants. See Section 3.5.
 
 ### 2.3 Generic Types
 
-Mako provides built-in generic types using square-bracket parameterization:
+Makori provides built-in generic types using square-bracket parameterization:
 
 #### `Option[T]`
 
-Represents an optional value. No null pointers exist in Mako.
+Represents an optional value. No null pointers exist in Makori.
 
 ```mko
 Option[int]       // optional integer
@@ -1227,7 +1227,7 @@ Executes the body as long as the condition evaluates to `true`.
 
 ### 5.4 For Loops
 
-Mako supports several `for` loop forms:
+Makori supports several `for` loop forms:
 
 #### Range over Collection
 
@@ -1445,7 +1445,7 @@ fn example() {
 
 ## 6. Ownership and Memory
 
-Mako provides deterministic resource management without a garbage collector.
+Makori provides deterministic resource management without a garbage collector.
 Memory is managed through a combination of scope-based cleanup, move semantics,
 shared references, and arena allocation.
 
@@ -1644,13 +1644,13 @@ The ownership checker uses a **Control Flow Graph (CFG)** with NLL analysis:
 
 `[package] systems = true` is accepted as a legacy manifest marker. It does not
 change the safety model: all Mako packages use the same ownership rules, and
-Mako has no garbage collector to enable or disable.
+Makori has no garbage collector to enable or disable.
 
 ---
 
 ## 7. Concurrency
 
-Mako provides structured concurrency with crew blocks, channels, actors, and
+Makori provides structured concurrency with crew blocks, channels, actors, and
 data-parallel fan operations. There are no `async`/`await` keywords; the
 runtime handles I/O multiplexing underneath.
 
@@ -1815,7 +1815,7 @@ print_int(cmap_len(m))
 
 ## 8. Error Handling
 
-Mako uses `Result[T, E]` for recoverable errors and runtime aborts for
+Makori uses `Result[T, E]` for recoverable errors and runtime aborts for
 unrecoverable errors. There are no exceptions, no panics, and no null.
 
 ### 8.1 Result Type
@@ -1989,7 +1989,7 @@ pull (
 pull { "fmt"; "strings" }
 ```
 
-`mako fmt` normalizes into a single `pull ( ... )` block when there are two or
+`makori fmt` normalizes into a single `pull ( ... )` block when there are two or
 more, and emits `"path" as name` for aliases.
 
 ### 9.6 Package Manifest (`mako.toml`)
@@ -2015,7 +2015,7 @@ version = "0.1.0"
 | Registry | `"name" = { version = "^1.0.0" }`                   |
 
 Path dependencies are the primary surface. Git dependencies require
-`mako pkg fetch` to clone into `.mako/deps/`. Registry deps resolve from
+`makori pkg fetch` to clone into `.mako/deps/`. Registry deps resolve from
 `.mako/registry/<name>/<ver>/`.
 
 Version strings support SemVer: `^` (compatible), `~` (patch-compatible), and
@@ -2065,7 +2065,7 @@ mako pkg audit                # offline advisory + license check
 
 ## 10. Standard Library Summary
 
-The Mako standard library provides built-in functions organized by category.
+The Makori standard library provides built-in functions organized by category.
 All are available without explicit import unless noted.
 
 ### 10.1 I/O and Printing
@@ -2389,7 +2389,7 @@ reassembly, auto-pong, and close codes via `ws_*` builtins (see
 
 ### 11.1 Overview
 
-The Mako compiler translates `.mko` source files through the following stages:
+The Makori compiler translates `.mko` source files through the following stages:
 
 ```
 Source (.mko)
@@ -2461,7 +2461,7 @@ The type checker (`src/types/mod.rs`) performs:
 
 ### 11.6 Code Generator
 
-The code generator emits C source code targeting the Mako runtime. The C output
+The code generator emits C source code targeting the Makori runtime. The C output
 uses `int64_t` for integer types, the runtime's slice/map/channel
 implementations, and standard C calling conventions.
 
@@ -2519,7 +2519,7 @@ mako api diff old new                # API change detection
 
 #### Formatter
 
-`mako fmt` formats source code. Modes:
+`makori fmt` formats source code. Modes:
 
 - Default: print formatted output to stdout
 - `-w`: write changes back to file
@@ -2530,7 +2530,7 @@ Imports are sorted and consolidated into a single `import ( ... )` block.
 
 #### Linter
 
-`mako lint` runs the type checker plus additional lint rules. Workspace-aware
+`makori lint` runs the type checker plus additional lint rules. Workspace-aware
 with `-p` for single-member focus.
 
 #### Test Runner
@@ -2575,7 +2575,7 @@ VS Code extension (`editors/vscode/`):
 - Task integration
 - Command palette actions
 - Debug launch configurations (CodeLLDB / cppdbg)
-- LSP client for `mako lsp` providing:
+- LSP client for `makori lsp` providing:
   - Diagnostics
   - Hover information
   - Completion
@@ -2649,7 +2649,7 @@ README describing the preview2/component boundary.
 
 ### 12.5 Runtime
 
-The Mako runtime is a set of C headers and source files under `runtime/`:
+The Makori runtime is a set of C headers and source files under `runtime/`:
 
 - `mako_runtime.h` — core slice, map, channel, print, memory
 - `mako_http.h` — HTTP/1.1 server and client
@@ -2752,8 +2752,8 @@ LambdaExpr   = "|" [ ParamList ] "|" ( Expr | Block ) .
 mako version mako0.4.0 <os>/<arch>
 ```
 
-The `mako version` command (also `mako --version` or `mako -V`) prints the
-version string. Use `mako version -v` for an optional commit hash line.
+The `makori version` command (also `mako --version` or `mako -V`) prints the
+version string. Use `makori version -v` for an optional commit hash line.
 
 ---
 
@@ -2772,4 +2772,4 @@ The following features are planned but not yet part of the specification:
 
 ---
 
-*End of Mako Language Specification*
+*End of Makoriri Language Specification*

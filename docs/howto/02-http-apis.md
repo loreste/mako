@@ -5,7 +5,7 @@ response handling. You will also make client requests to test it.
 
 ## Minimal server
 
-A Mako HTTP server uses four steps: bind, accept, respond, close.
+A Makori HTTP server uses four steps: bind, accept, respond, close.
 
 ```mko
 fn main() {
@@ -208,4 +208,4 @@ curl -s http://127.0.0.1:18100/unknown
 
 - [Handle errors in your API](03-errors-debugging.md)
 - [HTTPS and HTTP/2](../GUIDE.md) (see Networking section)
-- Scaffold a full service: `mako init mysvc --backend`
+- Scaffold a full service: `makori init mysvc --backend`

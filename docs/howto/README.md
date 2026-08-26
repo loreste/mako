@@ -1,6 +1,6 @@
 # How-To Guides
 
-Practical, hands-on tutorials for building with Mako. Each guide includes
+Practical, hands-on tutorials for building with Makori. Each guide includes
 working code you can run immediately.
 
 ## Guides
@@ -20,12 +20,12 @@ working code you can run immediately.
 
 ## Prerequisites
 
-All guides assume you have Mako installed (`mako version` → **mako0.4.0** …).
+All guides assume you have Mako installed (`makori version` → **mako0.4.0** …).
 Guide 01 covers installation from scratch.
 
 ## Related documentation
 
-- [The Mako Book](../book/) — guided language tour
+- [The Makori Book](../book/) — guided language tour
 - [GUIDE.md](../GUIDE.md) — syntax reference (Mako-native; §6 generics, §9 channels)
 - [LANGUAGE.md](../LANGUAGE.md) — language overview + 0.2.2 generics table
 - [ERGONOMICS.md](../ERGONOMICS.md) — low-ceremony maps/slices/channels

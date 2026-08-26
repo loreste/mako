@@ -1,6 +1,6 @@
 # Anneal — adaptive optimization
 
-**Anneal** is Mako's adaptive-optimization loop: ship a fully compiled binary,
+**Anneal** is Makori's adaptive-optimization loop: ship a fully compiled binary,
 take a cheap reading of what runs hot in real traffic, and fold that reading
 back into the *next* build — repeated over a service's long life. The name is
 metallurgical: annealing settles a material into a stronger, more stable
@@ -30,7 +30,7 @@ and [SPEED_SAFE.md](SPEED_SAFE.md).
 
 ## The loop
 
-1. **Ship a release build.** `mako build --release` gives you `-O3 -flto` (and
+1. **Ship a release build.** `makori build --release` gives you `-O3 -flto` (and
    the optimizing LLVM backend where enabled). This is the default and needs no
    extra setup.
 2. **Observe, cheaply.** If traffic shape matters, turn on a handful of hot-site
@@ -109,7 +109,7 @@ blue/green. No node in the fleet recompiles itself.
 
 Live in-process specialization can win on tight kernels once it's warm. It also
 tends to bring cold-start cost, de-opt stories, code growth inside the process,
-and often a collector paired with the embedded optimizer. Mako's default trades
+and often a collector paired with the embedded optimizer. Makori's default trades
 that peak for predictability: a fixed binary you deploy, ownership-based frees,
 steady RSS over months, and no compiler in the process. That's the right default
 for services that need to stay boring for a long time. When a specific kernel

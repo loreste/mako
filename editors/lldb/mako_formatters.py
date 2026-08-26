@@ -1,11 +1,11 @@
-# Mako lldb data formatters.
+# Makori lldb data formatters.
 #
 # Loaded automatically by `mako dap` / `mako debug`, or manually:
 #   (lldb) command script import /path/to/mako_formatters.py
 #
 # Provides:
-#   - summary for MakoString      -> "hello"
-#   - synthetic children for Mako*Array / MakoArr_* ({T *data; size_t len; cap})
+#   - summary for MakoriString      -> "hello"
+#   - synthetic children for Makori*Array / MakoArr_* ({T *data; size_t len; cap})
 #     so slices display as indexed elements instead of a raw pointer.
 
 import lldb
@@ -31,7 +31,7 @@ def mako_string_summary(valobj, internal_dict, options):
 
 
 def mako_array_summary(valobj, internal_dict, options):
-    """Summary for Mako slice structs: [e0, e1, ...] (first 16 elements)."""
+    """Summary for Makori slice structs: [e0, e1, ...] (first 16 elements)."""
     # Bypass our own synthetic children to reach the real data/len members.
     raw = valobj.GetNonSyntheticValue()
     data = raw.GetChildMemberWithName("data")
@@ -59,7 +59,7 @@ def mako_array_summary(valobj, internal_dict, options):
 
 
 class MakoArrayProvider:
-    """Synthetic children for Mako slice structs: {T *data; size_t len; size_t cap}."""
+    """Synthetic children for Makori slice structs: {T *data; size_t len; size_t cap}."""
 
     def __init__(self, valobj, internal_dict):
         self.valobj = valobj

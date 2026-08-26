@@ -1,6 +1,6 @@
 # Speed · concurrency · parallelism · security
 
-Mako compiles to native code via C with `-O3 -flto` in release. No garbage
+Makori compiles to native code via C with `-O3 -flto` in release. No garbage
 collector, no interpreter, no VM. Concurrency and parallelism are in the
 language, not bolted on later as libraries.
 
@@ -76,7 +76,7 @@ fresh lit every iteration when a single buffer can be reused.
 **Ownership-based drops on the free path:** scope exit, reassign, break /
 continue, return (transfer + materialize), and `?` early-return all free live
 owns. Views (`cap==0`) and the empty-string singleton never free backing
-storage. The full suite passes under AddressSanitizer (within safe Mako code;
+storage. The full suite passes under AddressSanitizer (within safe Makori code;
 `unsafe` blocks and FFI remain outside this guarantee). Free is cold
 (`MAKO_UNLIKELY`); stack lits and zero-copy string compares never malloc.
 
@@ -133,7 +133,7 @@ crew t {
 Kicked tasks are always joined at `crew` exit — no orphaned work.
 Concurrency is synchronous by default — no function coloring.
 
-Race smoke: `mako test --race` · CI TSan job on concurrency tests.
+Race smoke: `makori test --race` · CI TSan job on concurrency tests.
 
 ---
 

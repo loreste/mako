@@ -1,6 +1,6 @@
 # 11. Speed and Safety
 
-Mako compiles to C, then to native machine code via clang. There is no garbage
+Makori compiles to C, then to native machine code via clang. There is no garbage
 collector. Memory is managed through ownership (`hold`/`share`) and arena
 allocation. Own free is **once** per allocation: live owns **move** (no extra
 alloc); aliases and field borrows **clone** only when required. This chapter
@@ -11,7 +11,7 @@ have when you need to push further in either direction.
 
 ## Release Builds
 
-By default, `mako build` produces a debug binary with `-O0 -g` -- fast compile
+By default, `makori build` produces a debug binary with `-O0 -g` -- fast compile
 times, full debug symbols, and all runtime safety checks enabled. When you are
 ready to ship:
 
@@ -39,7 +39,7 @@ A typical release binary for a small service is under 200 KB on arm64.
 
 ## Incremental and Parallel Builds
 
-Mako uses an incremental compilation cache by default. Object files are stored
+Makori uses an incremental compilation cache by default. Object files are stored
 in `.mako/cache/` and reused when source has not changed.
 
 | Flag / Environment Variable | Meaning |
@@ -106,7 +106,7 @@ bounds check is the bottleneck. In most code, the checked path is free.
 ## The Hold/Share Move Checker
 
 Mako enforces ownership at compile time through `hold` and `share` bindings. The
-checker runs during `mako check` and prevents use-after-move, double-free, and
+checker runs during `makori check` and prevents use-after-move, double-free, and
 aliasing violations without any runtime cost.
 
 ### Hold: Unique Ownership
@@ -339,7 +339,7 @@ fn main() {
 ```
 
 Unsafe blocks are syntactically visible and greppable. Code review tools and
-`mako lint` flag them. The goal is that 99.9% of code never needs `unsafe`.
+`makori lint` flag them. The goal is that 99.9% of code never needs `unsafe`.
 
 ### Guidelines for Unsafe
 
@@ -357,7 +357,7 @@ Unsafe blocks are syntactically visible and greppable. Code review tools and
 
 ## Secret Handling
 
-Mako provides primitives for handling sensitive data (API keys, passwords,
+Makori provides primitives for handling sensitive data (API keys, passwords,
 tokens) that should not linger in memory:
 
 ```mko
@@ -385,7 +385,7 @@ exposed by a crash dump, memory inspector, or allocation reuse.
 ## Constant-Time Compare
 
 When comparing secrets (tokens, HMACs, password hashes), a naive `==` leaks
-information through timing differences. Mako provides `const_eq`:
+information through timing differences. Makori provides `const_eq`:
 
 ```mko
 fn verify_token(got: string, want: string) -> bool {
@@ -420,7 +420,7 @@ This prevents HTTP response splitting attacks at the API level.
 
 ## Thread-Safe Data Structures
 
-For concurrent workloads that need shared mutable state, Mako provides `CMap` --
+For concurrent workloads that need shared mutable state, Makori provides `CMap` --
 a concurrent hashmap with shared-reader and exclusive-writer synchronization. It can
 be shared across crew tasks without channels, mutexes, or ownership annotations:
 
@@ -451,7 +451,7 @@ application-managed channel coordination.
 
 ## Rate Limiting and Circuit Breaking
 
-For distributed services, Mako provides two safety primitives that protect
+For distributed services, Makori provides two safety primitives that protect
 systems from overload and cascading failures (`runtime/mako_cloud.h`).
 
 ### Rate Limiter
@@ -532,7 +532,7 @@ safety for networked services.
 
 ## Session and Authentication Security
 
-Mako's session management and authentication toolkit (`runtime/mako_security.h`)
+Makori's session management and authentication toolkit (`runtime/mako_security.h`)
 extends the safety-by-default philosophy to web security:
 
 - **Constant-time comparisons everywhere.** All token, password, session, and
@@ -648,7 +648,7 @@ name = "mykernel"
 systems = true
 ```
 
-The marker is retained for manifest compatibility only. Mako has no tracing GC
+The marker is retained for manifest compatibility only. Makori has no tracing GC
 mode, and the `hold`/`share` ownership rules are enforced for every package.
 
 ---
@@ -656,7 +656,7 @@ mode, and the `hold`/`share` ownership rules are enforced for every package.
 ## Checked Integer Arithmetic
 
 Integer overflow is a common source of security vulnerabilities and silent
-corruption. Mako provides checked arithmetic functions that return
+corruption. Makori provides checked arithmetic functions that return
 `Result[int, string]` on overflow instead of wrapping or aborting:
 
 ```mko
@@ -689,7 +689,7 @@ The checked functions:
 | `would_overflow_sub(a, b)` | Returns 1 if sub would overflow |
 | `would_overflow_mul(a, b)` | Returns 1 if mul would overflow |
 
-For blanket protection, use `mako build --overflow trap` which rewrites all
+For blanket protection, use `makori build --overflow trap` which rewrites all
 integer `+`, `-`, `*` to abort on overflow. The checked functions give you
 finer-grained control where you want to handle overflow as a normal error path.
 
@@ -697,7 +697,7 @@ finer-grained control where you want to handle overflow as a normal error path.
 
 ## Leak Detection
 
-Mako provides a built-in leak detector for finding memory leaks during
+Makori provides a built-in leak detector for finding memory leaks during
 development and testing. It tracks allocations at scope boundaries:
 
 ```mko

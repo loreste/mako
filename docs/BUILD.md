@@ -1,8 +1,8 @@
-# Mako builds (v0.5.15)
+# Makori builds (v0.5.15)
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — ship small patches often.
 
-Mako compiles to native binaries via three backends: **native** (Cranelift, default),
+Makori compiles to native binaries via three backends: **native** (Cranelift, default),
 **c** (clang/gcc), and **llvm** (optimizing). The native backend on macOS ships with a
 bundled linker — no external toolchain required. The C backend uses incremental
 **cached objects** under `.mako/cache/` (or `$MAKO_CACHE`).
@@ -29,7 +29,7 @@ Fingerprints include: compiler cache version, **full source + transitive deps**,
 | `MAKO_CACHE` | Override cache root |
 | `MAKO_CACHE_LOG=1` | Print HIT/MISS lines |
 
-Wired into `mako build`, `mako check`, and `mako run`. When `mako.lock` exists,
+Wired into `makori build`, `makori check`, and `makori run`. When `mako.lock` exists,
 locked dependencies are rehashed before dependency loading or cache reuse, and
 compilation uses the verified source snapshot rather than reopening those files.
 
@@ -48,7 +48,7 @@ Independent object units compile in parallel (owned jobs + channels — no share
 
 ## Backend policy
 
-Mako has three codegen backends. **There is no silent fallback** between them:
+Makori has three codegen backends. **There is no silent fallback** between them:
 unsupported constructs hard-error on native/LLVM rather than dropping to C.
 
 | Backend | CLI | Role | When to use |
@@ -78,8 +78,8 @@ mako test examples/testing --backend c --sanitize address
 | `MAKO_TEST_BACKEND` | Test-only override (checked before `MAKO_BACKEND`) |
 | Explicit `--backend …` | Always wins over env |
 
-**CI (primary hosts):** both `mako test examples/testing` (C) and
-`mako test examples/testing --backend native` are required. **LLVM** runs as a
+**CI (primary hosts):** both `makori test examples/testing` (C) and
+`makori test examples/testing --backend native` are required. **LLVM** runs as a
 dedicated **macOS** job (`llvm-backend`) that bootstraps static lld and executes
 `scripts/llvm-backend-test.sh`. Non-Darwin hosts skip LLVM today (bundled
 `lldMachO` only); set `MAKO_LLVM_SKIP_IF_UNAVAILABLE=1` for a soft skip in
@@ -115,7 +115,7 @@ a pointer at the C backend (**no silent fallback**).
 | `--overflow wrap` | yes | yes | yes |
 | `--overflow trap` | yes | yes (shared IR) | yes (shared IR) |
 | `--overflow ignore` | yes (≡ wrap) | yes (≡ wrap) | yes (≡ wrap) |
-| Debug (`mako build`) | yes | yes | **hard-error** (use native) |
+| Debug (`makori build`) | yes | yes | **hard-error** (use native) |
 | Release (`--release`) | yes | yes | yes (needs `llvm-backend` feature) |
 
 Example:
@@ -141,7 +141,7 @@ LLVM-emitted machine code, which carries no redzones or shadow memory. For that,
 use `--backend c`. Sanitizer runs must happen on Linux: the runtime deadlocks at
 startup on macOS.
 
-`mako doctor` prints this matrix for the installed binary (including whether
+`makori doctor` prints this matrix for the installed binary (including whether
 llvm-backend was compiled in).
 
 ## Memory safety of the cache

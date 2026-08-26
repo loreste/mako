@@ -1,11 +1,11 @@
 # 3. Language Tour
 
-This chapter is a comprehensive tour of Mako's syntax and semantics. Sources use
+This chapter is a comprehensive tour of Makori's syntax and semantics. Sources use
 the `.mko` extension. Every program begins with `fn main()`.
 
 ## Program structure
 
-Top-level items in a Mako file: `pack`, `pull`, `export`, `fn`, `struct`,
+Top-level items in a Makori file: `pack`, `pull`, `export`, `fn`, `struct`,
 `enum`, `actor`, `interface`, `const`, and `extern "C"`.
 
 ```mko
@@ -641,7 +641,7 @@ fn main() {
 
 ### Tuples and multiple return values
 
-Mako has tuple types for grouping values. A function can return a tuple and the
+Makori has tuple types for grouping values. A function can return a tuple and the
 caller can destructure it with `let a, b = f()`:
 
 ```mko
@@ -859,7 +859,7 @@ fn main() {
 
 ### for loops
 
-Mako's `for` has four forms, matching Go:
+Makori's `for` has four forms, matching Go:
 
 ```mko
 fn main() {
@@ -1212,7 +1212,7 @@ fn main() {
 
 ## Packs & pulls
 
-Mako's module system uses three keywords: `pack`, `pull`, and `export`.
+Makori's module system uses three keywords: `pack`, `pull`, and `export`.
 
 **`pack`** declares the current file's package identity. Files that share the
 same `pack` name form one logical unit:
@@ -1280,7 +1280,7 @@ Items without `export` are private to their pack. See
 Bare path names like `"strings"` resolve under `std/`.
 `MAKO_STD` overrides the standard library root.
 
-`mako fmt` groups two or more pulls and emits `pull` + `"path" as name`.
+`makori fmt` groups two or more pulls and emits `pull` + `"path" as name`.
 
 ## Constants
 
@@ -1296,7 +1296,7 @@ fn main() {
 
 ## Option and Result
 
-These are built-in generic types central to Mako's approach to nullability and
+These are built-in generic types central to Makori's approach to nullability and
 error handling.
 
 ```mko

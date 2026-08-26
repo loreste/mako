@@ -1,15 +1,15 @@
-# Mako syntax identity
+# Makori syntax identity
 
 **Product tip:** **0.4.0**. Preferred surface: [LANGUAGE.md](LANGUAGE.md) · [GUIDE.md](GUIDE.md).
 
-**Mako is its own unique language with its own unique syntax.**
+**Makori is its own unique language with its own unique syntax.**
 
 Not a Go clone. Not a Rust clone. Not “Go with ownership” or “Rust with simpler
 keywords.” It may take *ideas* from other languages; the **surface is Mako**.
 
 Judging a syntax choice:
 
-1. Does it look and feel like **Mako**? (If it looks like Go or Rust first, reject it as preferred.)
+1. Does it look and feel like **Makori**? (If it looks like Go or Rust first, reject it as preferred.)
 2. Does it help people **build real work without a lot of typing**? ([ERGONOMICS.md](ERGONOMICS.md))
 3. Is safety visible where it matters — without taxing the common path?
 4. Does it stay **fast** — native compilation, no GC overhead? ([PERFORMANCE.md](PERFORMANCE.md), [SPEED.md](SPEED.md))
@@ -19,7 +19,7 @@ If (1), (2), (4), or (5) fails, the form is wrong even if it is familiar.
 
 ---
 
-## Mako flair
+## Makori flair
 
 Short, punchy English. Verbs for action. One clear metaphor per domain.
 Not a Go dialect. Not a Rust dialect.
@@ -36,11 +36,11 @@ Not a Go dialect. Not a Rust dialect.
 | Files | `.mko` | Ours |
 
 Dual spellings (`func`, `:=`, `import`, `package`, …) exist for migration.
-They are **compat sugar**, not the brand. Docs and `mako fmt` always lead with the flair column.
+They are **compat sugar**, not the brand. Docs and `makori fmt` always lead with the flair column.
 
 ---
 
-## Canonical Mako surface (preferred in docs & `mako fmt`)
+## Canonical Mako surface (preferred in docs & `makori fmt`)
 
 | Area | Mako form |
 |------|-----------|
@@ -141,9 +141,9 @@ our spelling is `pack` / `pull`.
 | 1. Core declaration forms (`fn`, `struct`, `let`) | 20% | 5/5 | **100%** |
 | 2. Distinct keywords (`hold`/`share`/`arena`/`crew`/`on`/`pack`/`pull`) | 25% | 10/10 | **100%** |
 | 3. Errors & match | 15% | 5/5 | **100%** |
-| 4. Docs lead with Mako forms (not clones) | 20% | 5/5 | **100%** |
+| 4. Docs lead with Makori forms (not clones) | 20% | 5/5 | **100%** |
 | 5. Dual sugar stays dual (not preferred) | 10% | 3/3 | **100%** |
-| 6. `mako fmt` emits Mako-native spellings | 10% | 2/2 | **100%** |
+| 6. `makori fmt` emits Mako-native spellings | 10% | 2/2 | **100%** |
 | **Weighted** | **100%** | — | **~100%** |
 
 ### Detail
@@ -167,7 +167,7 @@ our spelling is `pack` / `pull`.
 - [x] `match` / `Result` / `?`
 - [x] `unsafe`
 - [x] `.mko` extension
-- [x] Stable “Mako-only” lint pass (`mako lint --identity`) that flags dual forms as style, not errors
+- [x] Stable “Mako-only” lint pass (`makori lint --identity`) that flags dual forms as style, not errors
 
 #### 3. Errors & match — 100%
 
@@ -177,7 +177,7 @@ our spelling is `pack` / `pull`.
 - [x] exhaustive `match`
 - [x] Richer errors seed — `Result[T, Enum]` · wrap chain · `error_unwrap` / `error_root` / `error_as_tag` / `error_has_tag` · `std/errors`
 
-#### 4. Docs lead with Mako — 100%
+#### 4. Docs lead with Makori — 100%
 
 - [x] This identity doc + flair table
 - [x] LANGUAGE / GUIDE / COMPAT re-centered
@@ -193,7 +193,7 @@ our spelling is `pack` / `pull`.
 
 #### 6. Formatter — 100%
 
-- [x] Prefer `fn` / Mako spellings in `mako fmt`
+- [x] Prefer `fn` / Mako spellings in `makori fmt`
 - [x] Prefer `pack` / `pull "path" as name`
 
 ---

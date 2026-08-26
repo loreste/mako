@@ -15,9 +15,9 @@
 
 ### Tooling
 
-- Added `mako fmt --check` as a failing formatter gate for CI and editors.
-- Made `mako lint` fail clearly when a target contains no `.mko` sources.
-- Hardened `mako doctor` to validate native runtime support sources and parse
+- Added `makori fmt --check` as a failing formatter gate for CI and editors.
+- Made `makori lint` fail clearly when a target contains no `.mko` sources.
+- Hardened `makori doctor` to validate native runtime support sources and parse
   install manifests as structured JSON with version, binary, runtime, and stdlib
   fields.
 - Fixed semantic type errors, including equality mismatch diagnostics from
@@ -197,7 +197,7 @@
 
 ### Tooling
 
-- Added `mako lint --security`, which fails on known insecure helper calls
+- Added `makori lint --security`, which fails on known insecure helper calls
   unless the exact line explicitly opts in with `// mako: allow-insecure`.
 - Hardened HTTP client DNS/connect against sanitizer-visible unaligned
   `gethostbyname` address loads by using `getaddrinfo`.
@@ -214,7 +214,7 @@
 ### Documentation
 
 - Added the stdlib memory-safety gate: Mako parity means safe capability
-  coverage in Mako's own syntax, not cloning Go/Rust unsafe surfaces.
+  coverage in Makori's own syntax, not cloning Go/Rust unsafe surfaces.
 - Added a package-by-package stdlib safety matrix covering every checked-in
   `std/**/*.mko` file.
 - Documented the secure-default footgun prevention policy: insecure helpers
@@ -222,7 +222,7 @@
 
 ### Bug fixes
 
-- Made `mako test` run graphics tests headless by default and fixed native
+- Made `makori test` run graphics tests headless by default and fixed native
   task-return lowering for string-backed `Uuid` values.
 - Fixed native backend mutable slice argument lowering by passing borrowed
   non-owning headers for named mutable slice locals, preventing caller/callee
@@ -282,7 +282,7 @@ Compress/hash hot paths are C (zlib/flate/LZW/SHA3/MD5). No `unsafe`,
   `testing/iotest`, `encoding/asn1` (DER integers), `log/syslog` (PRI lines).
 - **Tests:** `stdlib_parity_gap_test`, `stdlib_parity_adversarial_test` (C + native).
 - **Adversarial fixes:** CRC-64 moved to C (Mako `uint64` `>>` is arithmetic on
-  the sign bit, so a bit-by-bit CRC in Mako cannot match Go). Cookie jar
+  the sign bit, so a bit-by-bit CRC in Makori cannot match Go). Cookie jar
   refuses single-label hosts (`com` no longer matches `ex.com`). JSON-RPC
   escapes `"` / `\` in method/message. `rsa.can_sign()` is 0 (verify only).
   `unique` documents content-set, not pointer identity. ASN.1 uses `[]byte`
@@ -449,7 +449,7 @@ panic-on-OOB, `Result` instead of nil. Not a syntax clone.
 - **Backend caveat**: source-level debugging requires the C backend — the
   default `native` (Cranelift) backend emits no DWARF line info. `mako dap`
   and `mako debug` force the C backend automatically; manual lldb users must
-  build with `mako build --backend c`.
+  build with `makori build --backend c`.
 - **Breaking**: the old canned-response seed flags are gone — `mako dap
   --request`, `--stdio`, and `--max-messages` no longer exist; `mako dap`
   takes no flags.
@@ -523,7 +523,7 @@ need.
   (`client_key|client_salt|server_key|server_salt`) for the negotiated
   profile; `dtls.srtp_profile` reports it; `dtls.export_srtp_secret` wraps the
   bytes as a wipe-on-drop `Secret`.
-- **Interop**: `scripts/dtls-smoke.sh` verifies a Mako echo server against
+- **Interop**: `scripts/dtls-smoke.sh` verifies a Makori echo server against
   `openssl s_client -dtls1_2`; loopback test at
   `examples/testing/dtls_test.mko` (C + native backends).
 - **v1 limits**: DTLS 1.2 only, PEM-path certs, one peer per UDP socket,
@@ -546,8 +546,8 @@ Also fixed along the way:
 
 ### Native-first default
 
-The default compilation backend is now **native** (Cranelift). `mako build`,
-`mako run`, and `mako test` produce native object code directly — no C
+The default compilation backend is now **native** (Cranelift). `makori build`,
+`makori run`, and `makori test` produce native object code directly — no C
 intermediate step.
 
 The C backend remains available via `--backend c` and is used **automatically**
@@ -563,7 +563,7 @@ Both backends pass 394/394 tests.
 ### Public package registry + wildcard version fix
 
 The default public registry (`https://loreste.github.io/mako-packages`) is
-now built in — `mako pkg get <name>` works out of the box with no
+now built in — `makori pkg get <name>` works out of the box with no
 configuration. Override with `MAKO_REGISTRY_URL` or `[registry] url` in
 mako.toml.
 
@@ -594,15 +594,15 @@ defer, crew, arena, unsafe, select, closures, and block expressions.
 
 ### Remote package registry + signed packages
 
-`mako pkg get <name> [version]` fetches packages from an HTTPS registry,
+`makori pkg get <name> [version]` fetches packages from an HTTPS registry,
 verifies SHA-256 tarball integrity, and adds the dependency to `mako.toml`.
 The resolver falls back to the remote registry automatically when local
 and git sources miss.
 
 - **Remote registry**: `MAKO_REGISTRY_URL` or `[registry] url` in mako.toml
 - **Index format**: `<url>/<name>/index.json` with versions, SHA-256 digests, and tarball URLs
-- **Package signing**: `mako pkg sign` signs with ed25519 (`MAKO_SIGN_KEY`);
-  `mako pkg verify` checks against `MAKO_VERIFY_KEY`. Signatures are
+- **Package signing**: `makori pkg sign` signs with ed25519 (`MAKO_SIGN_KEY`);
+  `makori pkg verify` checks against `MAKO_VERIFY_KEY`. Signatures are
   verified automatically on remote fetch when the verify key is configured.
 - **Tarball integrity**: SHA-256 verified before extraction; extraction into
   staging directory with atomic rename.
@@ -760,12 +760,12 @@ pattern the remaining opaque leaks need.
 
 ### Modules
 
-`mako pkg imports` lists every `pull` in a module, classified as relative,
+`makori pkg imports` lists every `pull` in a module, classified as relative,
 stdlib, internal or external, and reports where the manifest disagrees. It
 parses rather than matching text, so aliases and blank imports are handled by
 the grammar.
 
-`mako pkg tidy` reconciles `[dependencies]` with what the source imports.
+`makori pkg tidy` reconciles `[dependencies]` with what the source imports.
 Additions are automatic; removal is behind `--prune`, because the scan skips
 files that fail to parse and a needed dependency can be invisible to it.
 `--check` reports without writing, for CI.
@@ -775,7 +775,7 @@ Dependencies are keyed by the **full import path**, matching
 
 ### Packages
 
-`mako pkg publish` now refuses a breaking API change under a version that
+`makori pkg publish` now refuses a breaking API change under a version that
 claims compatibility. `mako api diff` and `publish` both existed and nothing
 connected them, so a module could ship a changed signature as a patch and
 consumers resolving by SemVer range would take it. A break needs a major bump,
@@ -784,7 +784,7 @@ or a minor bump while major is 0. Additions are not breaking.
 ### Networking
 
 `wss_client_connect_headers` exposes the extra-header handshake that existed in
-the runtime but was never wired to a builtin, so Mako code could not send
+the runtime but was never wired to a builtin, so Makori code could not send
 Origin, User-Agent or Cookie on an upgrade. The header block is validated
 against request splitting.
 
@@ -1079,9 +1079,9 @@ service registry, OpenAPI builders — backend API surface, no GC.
 
 - `examples/testing/adapters_api_test.mko`
 - [docs/MESSAGING_GRAPHQL.md](docs/MESSAGING_GRAPHQL.md) rewritten for all surfaces.
-- `mako test --json` emits a versioned report with per-file results, captured
+- `makori test --json` emits a versioned report with per-file results, captured
   output, structured failures, repeat runs, and optional coverage data.
-- `mako check --json=v1` adds a stable diagnostics envelope while bare
+- `makori check --json=v1` adds a stable diagnostics envelope while bare
   `--json` retains the original array for existing integrations.
 
 ## 0.4.14 — 2026-07-22
@@ -1183,7 +1183,7 @@ service registry, OpenAPI builders — backend API surface, no GC.
 
 ### Install smoke
 
-- **`scripts/install-smoke.sh`**: version + `mako doctor` + init/run.
+- **`scripts/install-smoke.sh`**: version + `makori doctor` + init/run.
 - Wired into the main CI matrix on Linux/macOS/Windows after release build.
 
 ## 0.4.8 — 2026-07-22
@@ -1220,7 +1220,7 @@ service registry, OpenAPI builders — backend API surface, no GC.
   `--sanitize`, `--static-link`, `--target` / wasm, `--emit-c`; llvm requires
   `--release` and `--features llvm-backend`.
 - Errors always point at `--backend c` (no silent hybrid).
-- `mako doctor` prints the backend / modes matrix.
+- `makori doctor` prints the backend / modes matrix.
 - Docs: [BUILD.md § Modes matrix](docs/BUILD.md).
 - Test harness uses release opt level for `--backend llvm`.
 
@@ -1295,8 +1295,8 @@ map: [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/VERSIONING.md](docs/VERSIONING.
 ### Packaging
 
 - `scripts/package-release.sh --slim` produces host tarball + `.sha256`.
-- Install smoke: `install-release.sh` from `file://dist` → `mako doctor` ok.
-- CI: add `mako test examples/testing --backend native` on Linux/macOS.
+- Install smoke: `install-release.sh` from `file://dist` → `makori doctor` ok.
+- CI: add `makori test examples/testing --backend native` on Linux/macOS.
 
 ### Residuals (0.5.0+)
 
@@ -1353,12 +1353,12 @@ map: [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/VERSIONING.md](docs/VERSIONING.
 - **Literal len folding** — `len("hello")` → `5`
 - **Demand-driven includes** — opt-in `MAKO_LEAN_INCLUDES=1`
 
-### Lint (`mako lint`)
+### Lint (`makori lint`)
 
 - **Unused imports** — warn when pull/import contributes no reachable functions
 - **Unreachable code** — warn on statements after return/break/continue
 - **Unused variables** — warn on unused `let` bindings (skip `_` prefix)
-- **Shadowed variables** — `mako lint --shadow` or `MAKO_LINT_SHADOW=1`
+- **Shadowed variables** — `makori lint --shadow` or `MAKO_LINT_SHADOW=1`
 
 ### Concurrency
 
@@ -1445,7 +1445,7 @@ cross-compile, bench gates, claims gate).
 - Digest verified on resolution — tampered packages block dependency resolution
 - Fail closed on missing digest (deleted = rejected)
 - Staged manifest revalidation before publication
-- `mako pkg seal` for legacy package migration (TOFU)
+- `makori pkg seal` for legacy package migration (TOFU)
 - Lockfile content_hash as independent trust anchor
 - Scoped package names, symlink rejection, input validation
 
@@ -1631,11 +1631,11 @@ See sections below for generics, stdlib-in-Mako, and match safety.
 - **Compile-time race detection** — mutation of locals while kicked tasks may
   use them is flagged as a compiler error.
 
-### v0.2.0 — Stdlib in Mako
+### v0.2.0 — Stdlib in Makori
 
 - **io package** (`std/io`) — `StringReader` with `read(mut self)` advancing
   position, `ByteWriter` with `write(mut self)` appending bytes, `drain()`
-  reads to completion. Written in Mako, not C wrappers.
+  reads to completion. Written in Makori, not C wrappers.
 - **collections** (`std/collections/stack.mko`) — `IntStack`, `StrStack`,
   `IntQueue` with `push`/`pop`/`enqueue`/`dequeue` using `mut self`. Returns
   `Option` for empty cases. Queue auto-compacts on dequeue.
@@ -1666,7 +1666,7 @@ See sections below for generics, stdlib-in-Mako, and match safety.
 **mako0.1.9** (`CARGO_PKG_VERSION`).
 
 Patch after 0.1.8: **generic types**, **interface bounds**, and seed **iterator /
-mutable-closure** infrastructure — the foundation for writing the stdlib in Mako.
+mutable-closure** infrastructure — the foundation for writing the stdlib in Makori.
 
 ### Generics
 
@@ -2515,7 +2515,7 @@ storage/domain seeds (no SIPREC/WebRTC), packaging polish, and docs.
 
 ## 0.1.1 — 2026-07-13 (HTTP/2 production + free safety + CI)
 
-Patch release for production edge stability and CI green. `mako version` reports
+Patch release for production edge stability and CI green. `makori version` reports
 **mako0.1.1** (`CARGO_PKG_VERSION`).
 
 ### Fixes — HTTP/2 frame size (mako-lang.com)
@@ -2585,7 +2585,7 @@ Patch release for production edge stability and CI green. `mako version` reports
 
 ### Performance
 
-- **Release bounds default fixed** — `mako build --release` no longer forces
+- **Release bounds default fixed** — `makori build --release` no longer forces
   `MAKO_BOUNDS_ALWAYS` (was silently taxing every index). Opt in with
   `--bounds always` or `[profile.release] bounds_checks = "on"`.
 - **Empty string singleton** — `""` / zero-len clone avoids `malloc`; `mako_str_free`
@@ -2672,7 +2672,7 @@ Patch release for production edge stability and CI green. `mako version` reports
 
 ## 0.1.0 — 2026-07-13 (Email / SMTP package)
 
-### Code email from Mako
+### Code email from Makori
 
 - **Message builder** — `mail_msg_*`: From/To/Cc/Bcc, subject, text+HTML
   multipart/alternative, attachments (base64), custom headers, Date/Message-ID
@@ -2702,7 +2702,7 @@ Patch release for production edge stability and CI green. `mako version` reports
   `gpu_transpose_f32`, `gpu_attention_f32` (scaled dot-product, 1 head)
 - **Tokenizer seed** — `tok_new` / `tok_load_json` / `tok_load_lines` /
   longest-match `tok_encode` / `tok_decode`
-- Still not a full LLaMA runtime — compose layers + load weights in Mako
+- Still not a full LLaMA runtime — compose layers + load weights in Makori
 - Tests: `examples/testing/ai_depth_test.mko` · fixtures `tiny.gguf`,
   `tiny_vocab.json`
 
@@ -2719,7 +2719,7 @@ Patch release for production edge stability and CI green. `mako version` reports
 - **`model_load_safetensors`** — Hugging Face safetensors (F32 + F16→f32)
 - **`model_save` / `model_load`** — native `.makomodel` for models you author
 - **`model_linear_f32`** — dense + bias; `hf=1` for PyTorch `[out, in]` weights
-- Compose real nets in Mako (MLP demo); not a full transformer/GGUF runtime yet
+- Compose real nets in Makori (MLP demo); not a full transformer/GGUF runtime yet
 - Tests: `model_weights_test.mko` · fixture `tiny_linear.safetensors` ·
   `examples/model_mlp.mko`
 
@@ -2727,7 +2727,7 @@ Patch release for production edge stability and CI green. `mako version` reports
 
 ### GPU seed oriented for AI (not graphics)
 
-North star: **compose inference/training ops in Mako** on multi-vendor GPUs.
+North star: **compose inference/training ops in Makori** on multi-vendor GPUs.
 
 - **OpenCL** — NVIDIA / AMD / Intel ICDs + macOS Apple GPU; **host** fallback
 - **AI kernels (f32, row-major)** — `gpu_matmul_f32`, `gpu_relu_f32`,
@@ -2820,7 +2820,7 @@ Production logging surface:
 
 ### Cryptography & TLS
 
-Platform surface so you **build** secure systems in Mako (not a soft PKI product):
+Platform surface so you **build** secure systems in Makori (not a soft PKI product):
 
 - **TLS client (socket-style)** — `tls_client_new` / `tls_client_new_insecure`,
   `tls_connect` / `tls_connect_start` (SNI + VERIFY_PEER), same `TlsConn` I/O as
@@ -2830,12 +2830,12 @@ Platform surface so you **build** secure systems in Mako (not a soft PKI product
 - Docs: [SECURITY.md](docs/SECURITY.md) capability map; BUILTINS TLS client section
 - Tests: `examples/testing/security_crypto_test.mko` (HKDF A.1 vector, secrets, client surface)
 
-## 0.1.0 — 2026-07-13 (SIP platform: build stacks in Mako)
+## 0.1.0 — 2026-07-13 (SIP platform: build stacks in Makori)
 
 ### Position
 
 Mako ships **primitives** so you can implement transaction engines, dialogs,
-SIPS, SRTP, proxies, and UAs **in Mako** — not a prebuilt softswitch/WebRTC stack.
+SIPS, SRTP, proxies, and UAs **in Makori** — not a prebuilt softswitch/WebRTC stack.
 
 ### SIP / SDP / RTP (`runtime/mako_sip.h`, `std/sip`)
 
@@ -2846,7 +2846,7 @@ SIPS, SRTP, proxies, and UAs **in Mako** — not a prebuilt softswitch/WebRTC st
 ### Crypto building blocks for SRTP-in-Mako
 
 - **`aes_ctr(key, iv, data)`** — AES-128/256-CTR (classic SRTP AES-CM keystream)
-- **`hmac_sha1` / `hmac_sha1_raw`** — SRTP auth tag source (truncate in Mako)
+- **`hmac_sha1` / `hmac_sha1_raw`** — SRTP auth tag source (truncate in Makori)
 - Tests: fixed AES-CTR ciphertext vector (OpenSSL-matched) + Digest response hex
   (`10bc49bc…`) + HMAC-SHA1 RFC 2202
 
@@ -3280,7 +3280,7 @@ First-class **OpenAI-compatible** LLM client focused on market gaps:
   `checked_mul`, `would_overflow_*`. CLI `--overflow trap|wrap|ignore` (build/run).
   Trap mode emits `mako_add_i64` etc. for `+ - *` on ints.
 - **Parser multi-error recovery** — `parse_with_errors` + `recover_to_next_decl`;
-  `mako check` reports all top-level parse errors (`examples/bad/multi_error.mko`).
+  `makori check` reports all top-level parse errors (`examples/bad/multi_error.mko`).
 - **Graceful shutdown** — `signal_on_term`, `register_listener` / `close_listeners`,
   `server_shutdown_begin`, `server_drain`, `shutdown_requested`,
   `install_graceful_shutdown` (`runtime/mako_shutdown.h`).
@@ -3288,7 +3288,7 @@ First-class **OpenAI-compatible** LLM client focused on market gaps:
   alloc tracking (`runtime/mako_leak.h`).
 - **Tracing seed** — `trace_id` / `trace_set` / `trace_begin` / `trace_end` /
   `trace_log` (`runtime/mako_trace.h`).
-- **`mako dev`** — watch source mtime and rebuild+rerun (hot-reload seed).
+- **`makori dev`** — watch source mtime and rebuild+rerun (hot-reload seed).
 - **`--bounds always`** on build/run keeps bounds checks under release.
 
 Tests: `examples/testing/overflow_shutdown_test.mko`.
@@ -3491,7 +3491,7 @@ Tests: `examples/testing/overflow_shutdown_test.mko`.
   now emit valid C — codegen mangles reserved words consistently
 - `pack` / `pull` / `switch` / `go` are contextual keywords — usable as names
 - Labeled `break` / `continue` only bind a label on the same source line
-- `mako fmt` no longer doubles `export` on structs
+- `makori fmt` no longer doubles `export` on structs
 
 - Tests: `if_init_test`, `switch_test`, `for_forms_test`, `compound_assign_test`,
   `struct_positional_test`, `go_stmt_test`, `parallel_assign_test`
@@ -3548,7 +3548,7 @@ Tests: `examples/testing/overflow_shutdown_test.mko`.
 - Dual: `package` / `import` (all previous forms still parse)
 - Always pack-qualify normal pulls: `pkg.fn(...)` (internal `pkg__fn`)
 - Default name from `pack` clause (≠ `main`), else path basename
-- `mako fmt` emits `pack` / `pull` / `"path" as name`
+- `makori fmt` emits `pack` / `pull` / `"path" as name`
 - Prefix rewrite splits value vs type names (`fmt.int` safe)
 - Identity: `docs/IDENTITY.md` flair table · **~90%**
 
@@ -3556,13 +3556,13 @@ Tests: `examples/testing/overflow_shutdown_test.mko`.
 
 ## 0.1.0 — 2026-07-11 (docs + syntax identity)
 
-### Mako-owned syntax (Done)
+### Makori-owned syntax (Done)
 
 - **Preferred** forms are Mako-native: `fn`, `let`, `struct`, `on Type`, `hold`/`share`/`arena`, `crew`/`kick`, `export`, `match`
 - Dual Go-like spellings (`func`, `:=`, `var`, bare `a int`, receivers) remain **compat sugar only**
 - Identity doc + checklist: `docs/IDENTITY.md` (**~86%** identity strength)
 - Dual-form inventory: `docs/GO_SYNTAX_CHECKLIST.md` (optional; not preferred)
-- Canonical sample: `examples/mako_style.mko` · `mako fmt` emits Mako-native spellings
+- Canonical sample: `examples/mako_style.mko` · `makori fmt` emits Mako-native spellings
 - Docs re-centered: GUIDE, LANGUAGE, COMPAT, STATUS, book, README, llms.txt
 
 ### Language wave 10 (Done)
@@ -3576,7 +3576,7 @@ Tests: `examples/testing/overflow_shutdown_test.mko`.
 
 STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blocker).
 
-### The Mako Book + docs accuracy pass (Done)
+### The Makori Book + docs accuracy pass (Done)
 
 - New guided book under `docs/book/` (15 chapters + `SUMMARY.md` + optional mdBook `book.toml`)
 - Checkable samples: `docs/book/examples/book_{hello,ops,errors,imports}.mko`
@@ -3594,7 +3594,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 
 ### General-purpose package offline/private registry increment (Done)
 
-- `mako pkg install`, `lock`, and `update` now support `--offline`.
+- `makori pkg install`, `lock`, and `update` now support `--offline`.
 - Offline package resolution uses local path deps, cached git deps in `.mako/deps`, and `.mako/registry` / `$MAKO_REGISTRY`, then fails fast instead of fetching.
 - Tests: `offline_git_requires_cached_dep`
 - Product intention: Toolchain/IDE track **100%**.
@@ -3621,7 +3621,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 
 ### General-purpose Toolchain/IDE dependency audit increment (Done)
 
-- `mako pkg audit` now reads `mako.lock` and checks local `mako-cve.toml`
+- `makori pkg audit` now reads `mako.lock` and checks local `mako-cve.toml`
   advisory ranges plus `mako-license.toml` allow/deny license policy.
 - Audits are fully offline and fit private registry / vendored policy workflows.
 - The package-manager example now includes clean advisory and license policy
@@ -3632,14 +3632,14 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 
 - `mako doc` now writes API markdown plus `examples.md` runnable commands and a
   `search-index.json` symbol index.
-- Generated docs include `mako check`, `mako run`, and `mako test` commands for
+- Generated docs include `makori check`, `makori run`, and `makori test` commands for
   files that contain runnable mains or test functions.
 - Tests: `doc_generates_runnable_examples_and_search_index`
 - Product intention advanced through the documentation generator milestone.
 
 ### General-purpose Toolchain/IDE testing-tools increment (Done)
 
-- `mako test --coverage` now prints package source/test file coverage and
+- `makori test --coverage` now prints package source/test file coverage and
   category counts.
 - Test discovery now includes `Fuzz*`, `Property*`, `Snapshot*`, `Mock*`, and
   `Fixture*` zero-arg functions alongside `Test*` / `test_*`.
@@ -3739,16 +3739,16 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - Suite: **90 passed**, 0 failed
 - Honest stdlib coverage: **~95%** of major standard library *areas* (not full symbol parity)
 
-### `mako version` — Done
+### `makori version` — Done
 
-- `mako version` → `mako version mako0.1.0 darwin/arm64` (Cargo.toml + os/arch)
-- `mako --version` / `-V` aligned; `mako version -v` optional commit (`MAKO_GIT_HASH` / git)
+- `makori version` → `makori version mako0.1.0 darwin/arm64` (Cargo.toml + os/arch)
+- `mako --version` / `-V` aligned; `makori version -v` optional commit (`MAKO_GIT_HASH` / git)
 - Docs: README · GUIDE · howto/01
 
 ### Grouped imports — Done
 
 - `import ( "a" \n "b" )` · brace `import { "a"; "b" }` · `alias "path"` · `"path" as x`
-- `mako fmt` emits `import ( … )` for 2+ imports
+- `makori fmt` emits `import ( … )` for 2+ imports
 - Tests: `import_group_test.mko` · `import_brace_test.mko`
 
 ### Stdlib Wave 6 (Done)
@@ -3855,7 +3855,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - Builtins wired in `src/types/mod.rs` + `src/codegen/mod.rs`; `-lm` on Unix
 - Tests: `examples/testing/stdlib_strings_test.mko`, `stdlib_path_math_test.mko`
 - Demo: `examples/stdlib/demo.mko`
-- `mako test --race` / `--sanitize` plumbed through `cmd_test` → clang
+- `makori test --race` / `--sanitize` plumbed through `cmd_test` → clang
 
 ### Security / safety language (Done)
 
@@ -3902,11 +3902,11 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 
 - `http_respond_json`, `append_file`
 - `examples/api_backend/`, `systems_log/`, `db_engine/` + tests
-- `mako init --backend`; GUIDE: Building APIs / Systems / DB engines
+- `makori init --backend`; GUIDE: Building APIs / Systems / DB engines
 
 ### Package manager (Done)
 
-- `mako pkg install` / `update` / `lock` / `publish` — SemVer resolve, `mako.lock`, local registry
+- `makori pkg install` / `update` / `lock` / `publish` — SemVer resolve, `mako.lock`, local registry
 - Module `src/pkg.rs`; example `examples/pkg_manager/`
 
 ### Errors & debugging (Done)
@@ -3929,7 +3929,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 ### Packaging
 
 - SemVer (`^` / `~` / exact) for path deps; local registry `.mako/registry/<name>/<ver>/`
-- `mako pkg list` resolves registry-only deps; example `examples/pkg_registry/`
+- `makori pkg list` resolves registry-only deps; example `examples/pkg_registry/`
 
 ### Servers (beachhead Done)
 
@@ -3940,25 +3940,25 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 
 
 - `mako --version` from Cargo.toml; polished `--help`
-- `mako init [path] [--name]` → `mako.toml` + `main.mko`
-- `mako pkg list` — path + git deps; git shows `[fetched]` / `MISSING — run pkg fetch`
-- `mako pkg fetch` — clone git deps into `.mako/deps/` (needs git + network; not default CI)
+- `makori init [path] [--name]` → `mako.toml` + `main.mko`
+- `makori pkg list` — path + git deps; git shows `[fetched]` / `MISSING — run pkg fetch`
+- `makori pkg fetch` — clone git deps into `.mako/deps/` (needs git + network; not default CI)
 - Build/check merge fetched git trees like path deps; clear MISSING if not fetched
-- `mako init [path] --workspace` → root `[workspace] members` + `lib/` + `app/` (path dep); default init unchanged
+- `makori init [path] --workspace` → root `[workspace] members` + `lib/` + `app/` (path dep); default init unchanged
 - Local workspace sketch: check/build/test/run/fmt/lint/bench + `-p`
 - Example: `examples/pkg_path_dep/`
 - Help honesty: `doc` / `deploy docker` described as stubs
 - GUIDE + STDLIB: package / workspace / git-fetch workflow
 - Homebrew formula sketch `Formula/mako.rb`
 - Release checklist `docs/RELEASE.md`
-- CI: cargo build + `mako test examples/testing` (no live network deps)
+- CI: cargo build + `makori test examples/testing` (no live network deps)
 
 ### Language / runtime (already in tree)
 
 - Compiler pipeline `.mko` → C → native; `crew` / actors / arenas / Result
-- `mako test`; tooling: fmt / lint / bench / doc / lsp / pkg
+- `makori test`; tooling: fmt / lint / bench / doc / lsp / pkg
 - OpenSSL / nghttp2 / quiche client seeds (opt-in)
-- **WASI preview1:** `mako build --target wasm32-wasi` uses wasi-sdk clang
+- **WASI preview1:** `makori build --target wasm32-wasi` uses wasi-sdk clang
   (`wasm32-wasip1`), `-DMAKO_WASI` minimal runtime; `examples/wasi_hello.mko`,
   `wasi_args_env.mko`, `wasi_fs.mko`; `scripts/wasi-verify.sh`
 - **HTTP/1.1 / HTTPS / H2 servers** + smokes (skip without OpenSSL)
@@ -3973,7 +3973,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 - WASI sockets / preview2 / browser DOM
 ### Application C source linking (0.4.18)
 
-`mako build`, `mako run`, and `mako test` accept repeatable
+`makori build`, `makori run`, and `makori test` accept repeatable
 `--native-source <FILE>` arguments for explicitly compiling and linking
 regular `.c` files. Paths are validated, passed without a shell, included in
 incremental and direct native link paths, and rejected for WebAssembly.

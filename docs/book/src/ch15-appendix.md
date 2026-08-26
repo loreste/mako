@@ -7,7 +7,7 @@ compiler flags, and environment variables.
 
 ## A. Keyword Reference
 
-Mako has **38 reserved words**. These are always keywords and can never be used
+Makori has **38 reserved words**. These are always keywords and can never be used
 as identifiers. Source of truth: `src/lexer/mod.rs`.
 
 ### Declarations
@@ -706,7 +706,7 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 
 ## E. Compiler Flags
 
-### `mako build` Flags
+### `makori build` Flags
 
 | Flag                  | Default    | Purpose                              |
 |-----------------------|------------|--------------------------------------|
@@ -722,7 +722,7 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 | `--no-static-link`    | varies     | Force dynamic linking                |
 | `-p NAME`             | —          | Target workspace member              |
 
-### `mako check` Flags
+### `makori check` Flags
 
 | Flag         | Purpose                                |
 |--------------|----------------------------------------|
@@ -730,7 +730,7 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 | `--json=v1`  | Emit the versioned diagnostics report   |
 | `-p NAME`    | Check one workspace member             |
 
-### `mako test` Flags
+### `makori test` Flags
 
 | Flag            | Purpose                                  |
 |-----------------|------------------------------------------|
@@ -742,7 +742,7 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 | `--json`        | Emit one versioned JSON test report       |
 | `-p NAME`       | Test one workspace member                |
 
-### `mako fmt` Flags
+### `makori fmt` Flags
 
 | Flag    | Purpose                              |
 |---------|--------------------------------------|
@@ -769,7 +769,7 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 | `MAKO_CC`         | C compiler override (e.g., `zig cc`, `clang-17`)     | System `clang`         |
 | `MAKO_JOBS`       | Parallel compilation jobs (same as `-j`)             | CPU count              |
 | `MAKO_CACHE`      | Object cache directory                               | `.mako/cache/`         |
-| `MAKO_GIT_HASH`   | Git hash for `mako version -v` output               | From build.rs          |
+| `MAKO_GIT_HASH`   | Git hash for `makori version -v` output               | From build.rs          |
 | `MAKO_HAS_OPENSSL`| Enable OpenSSL-linked TLS features                   | Auto-detected          |
 | `MAKO_LIVE_TLS`   | Enable live TLS integration tests                    | Off (set to `1`)       |
 | `MAKO_WASI_GREET` | Example env var for WASI programs                    | —                      |
@@ -781,8 +781,8 @@ Supported patterns: literals, `.`, `*`, `+`, `?`, `|`, `[abc]`, `[a-z]`,
 
 | Extension    | Purpose                            |
 |--------------|------------------------------------|
-| `.mko`       | Mako source file                   |
-| `_test.mko`  | Test file (discovered by `mako test`) |
+| `.mko`       | Makori source file                   |
+| `_test.mko`  | Test file (discovered by `makori test`) |
 | `bench_*.mko`| Benchmark file (discovered by `mako bench`) |
 | `lib.mko`    | Package library entry point        |
 | `main.mko`   | Application entry point            |
@@ -836,7 +836,7 @@ Version constraints: `^1.0` (compatible), `~1.0` (patch only), `1.0.0` (exact).
 
 | Document                        | Purpose                              |
 |---------------------------------|--------------------------------------|
-| This Book                       | Guided tour of Mako                  |
+| This Book                       | Guided tour of Makori                  |
 | `docs/GUIDE.md`                 | Exhaustive verified syntax reference |
 | `docs/LANGUAGE.md`              | Language design overview             |
 | `docs/STDLIB.md`                | Standard library surface             |
@@ -854,7 +854,7 @@ Version constraints: `^1.0` (compatible), `~1.0` (patch only), `1.0.0` (exact).
 
 ## K. Checkable Book Examples
 
-All code examples in this book are valid Mako that passes `mako check`:
+All code examples in this book are valid Mako that passes `makori check`:
 
 ```bash
 mako check docs/book/examples/*.mko

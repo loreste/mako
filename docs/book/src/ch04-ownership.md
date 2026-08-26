@@ -1,6 +1,6 @@
 # 4. Ownership: hold, share, and arenas
 
-Mako has **no garbage collector**. Active memory/resource safety mechanisms
+Makori has **no garbage collector**. Active memory/resource safety mechanisms
 include compile-time ownership checks and runtime scope/region cleanup. They
 prevent important classes of bugs; generated C and FFI remain outside the Mako
 type system:
@@ -14,7 +14,7 @@ This chapter covers each in detail.
 
 ## Scope-based cleanup: the default
 
-Most values in Mako live on the stack or are heap-allocated and freed when their
+Most values in Makori live on the stack or are heap-allocated and freed when their
 enclosing scope exits. This is the default -- no annotation needed. Owning
 strings, slices, maps, and struct Own fields free at scope exit, reassign,
 break/continue, return transfer, `?` early-return, and **match** arm exit

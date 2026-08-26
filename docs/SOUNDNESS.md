@@ -1,4 +1,4 @@
-# Mako soundness and runtime program
+# Makori soundness and runtime program
 
 **Product tip:** 0.4.0 · **Last sync:** 2026-07-19
 
