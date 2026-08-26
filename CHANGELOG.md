@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added parser/type/codegen plumbing for `prove` function contracts. Contract
+  clauses must type-check as `bool`; C output emits entry assertions for them.
+- Added pipe-forward expression sugar: `value |> f(args)` parses as
+  `f(value, args)`.
+- Added `live fn` parsing/AST propagation for future hot-reload lowering. This
+  is accepted syntax, but runtime hot-swap semantics are not complete yet.
+
 ## 0.5.15 - 2026-08-26 (tooling polish)
 
 ### Tooling

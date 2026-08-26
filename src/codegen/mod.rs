@@ -13066,6 +13066,11 @@ impl Codegen {
     }
 
     fn emit_fn(&mut self, f: &FnDef) {
+        // `live fn` — emit indirect-call trampoline for hot reload.
+        if f.is_live {
+            self.emit_live_fn(f);
+            return;
+        }
         self.locals.clear();
         self.fn_ptr_casts.clear();
         self.defer_stack.clear();
@@ -13169,6 +13174,15 @@ impl Codegen {
             }
         }
 
+        // Emit prove contract assertions at function entry.
+        for contract in &f.contracts {
+            let (_, cond) = self.emit_expr(contract);
+            self.emit_line(format_args!(
+                "if (!({cond})) {{ fprintf(stderr, \"prove contract violated in `{}`\\n\"); exit(1); }}",
+                f.name
+            ));
+        }
+
         let ret_void =
             f.ret.is_none() || matches!(f.ret.as_ref(), Some(TypeExpr::Named(n)) if n == "void");
         let stmts = &f.body.stmts;
@@ -13223,6 +13237,45 @@ impl Codegen {
 
     /// Emit `for` / `for … in range …` loops.
     ///
+    /// `live fn` codegen: emit the real implementation, a global function pointer,
+    /// and a trampoline that calls through the pointer. At runtime, `mako_live_reload`
+    /// can dlopen a new .so and swap the pointer — zero downtime, zero dropped connections.
+    fn emit_live_fn(&mut self, f: &FnDef) {
+        let name = mangle(&f.name);
+        let impl_name = format!("{name}__impl");
+        let ret = self.c_ret_type_resolved(f);
+        let params_str = self.c_params_resolved(f);
+
+        // 1) Emit the real implementation as `name__impl`
+        let mut impl_fn = f.clone();
+        impl_fn.name = format!("{}__impl", f.name);
+        impl_fn.is_live = false;
+        self.emit_fn(&impl_fn);
+
+        // 2) Emit the global function pointer
+        let param_types: Vec<String> = f.params.iter().map(|p| self.type_expr_c(&p.ty)).collect();
+        let ptr_params = if param_types.is_empty() {
+            "void".to_string()
+        } else {
+            param_types.join(", ")
+        };
+        let _ = writeln!(
+            self.out,
+            "static {ret} (*__live_{name})({ptr_params}) = &{impl_name};"
+        );
+
+        // 3) Emit the trampoline
+        let arg_names: Vec<String> = f.params.iter().map(|p| mangle(&p.name)).collect();
+        let call_args = arg_names.join(", ");
+        let _ = writeln!(self.out, "{ret} {name}({params_str}) {{");
+        if ret == "void" {
+            let _ = writeln!(self.out, "    __live_{name}({call_args});");
+        } else {
+            let _ = writeln!(self.out, "    return __live_{name}({call_args});");
+        }
+        let _ = writeln!(self.out, "}}\n");
+    }
+
     /// Modes:
     /// - int count (`for i in n` / `for i in range n`): `0 .. n-1`
     /// - array legacy (`for v in arr`): values

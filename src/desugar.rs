@@ -98,7 +98,9 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
         },
         exported: s.exported,
         is_const: false,
+        is_live: false,
         stability: crate::ast::ApiStability::Unspecified,
+        contracts: vec![],
         source_file: None,
     }));
 
@@ -127,7 +129,9 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
             },
             exported: s.exported,
             is_const: false,
+            is_live: false,
             stability: crate::ast::ApiStability::Unspecified,
+            contracts: vec![],
             source_file: None,
         }));
     }
@@ -308,7 +312,9 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             },
             exported: false,
             is_const: false,
+            is_live: false,
             stability: crate::ast::ApiStability::Unspecified,
+            contracts: vec![],
             source_file: None,
         }));
     }
@@ -332,7 +338,9 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
         exported: false,
         is_const: false,
+        is_live: false,
         stability: crate::ast::ApiStability::Unspecified,
+        contracts: vec![],
         source_file: None,
     }));
 
@@ -359,7 +367,9 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
         exported: false,
         is_const: false,
+        is_live: false,
         stability: crate::ast::ApiStability::Unspecified,
+        contracts: vec![],
         source_file: None,
     }));
 
@@ -390,7 +400,9 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
         exported: false,
         is_const: false,
+        is_live: false,
         stability: crate::ast::ApiStability::Unspecified,
+        contracts: vec![],
         source_file: None,
     }));
 
@@ -556,7 +568,9 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
         exported: false,
         is_const: false,
+        is_live: false,
         stability: crate::ast::ApiStability::Unspecified,
+        contracts: vec![],
         source_file: None,
     }));
 

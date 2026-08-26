@@ -2580,7 +2580,9 @@ fn monomorphize_generics(
             body: subst_block(&tmpl.body, &map),
             exported: tmpl.exported,
             is_const: tmpl.is_const,
+            is_live: tmpl.is_live,
             stability: tmpl.stability.clone(),
+            contracts: tmpl.contracts.clone(),
             source_file: tmpl.source_file.clone(),
         });
     }
@@ -2700,7 +2702,9 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
             },
             exported: false,
             is_const: false,
+            is_live: false,
             stability: crate::ast::ApiStability::Unspecified,
+            contracts: vec![],
             source_file: None,
         };
         signatures.insert("main".into(), (vec![], Some(Type::I64)));
@@ -5526,7 +5530,9 @@ impl<'a> FunctionLowerer<'a> {
             body: body_block,
             exported: false,
             is_const: false,
+            is_live: false,
             stability: crate::ast::ApiStability::Unspecified,
+            contracts: vec![],
             source_file: None,
         });
         // Code address of stub.

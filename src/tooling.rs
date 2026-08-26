@@ -4407,7 +4407,10 @@ mod metadata_tests {
 
     #[test]
     fn check_json_reports_equality_type_error_location() {
-        let path = temp_mko("json-eq-err", "fn main() {\n    let bad = true == \"no\"\n}\n");
+        let path = temp_mko(
+            "json-eq-err",
+            "fn main() {\n    let bad = true == \"no\"\n}\n",
+        );
         let (ok, report) = check_file_json_report(&path);
         let _ = fs::remove_file(&path);
         assert!(!ok);

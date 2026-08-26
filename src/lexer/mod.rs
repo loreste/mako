@@ -96,6 +96,8 @@ pub enum TokenKind {
     Assign,
     Question,
     Pipe,
+    /// Pipe-forward operator: `expr |> fn(args)` → `fn(expr, args)`
+    PipeGt,
     PipePipe,
     Amp,
     AmpAmp,
@@ -427,6 +429,9 @@ impl<'a> Lexer<'a> {
                 if self.peek() == Some(b'|') {
                     self.bump();
                     TokenKind::PipePipe
+                } else if self.peek() == Some(b'>') {
+                    self.bump();
+                    TokenKind::PipeGt
                 } else {
                     TokenKind::Pipe
                 }

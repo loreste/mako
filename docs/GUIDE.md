@@ -499,6 +499,28 @@ fn area(w: int, h: int) -> int {
 `void` / omitted return: procedure. Missing return on a non-void function is a
 type error (`examples/bad/missing_return.mko`).
 
+`prove` clauses before a function body declare checked entry contracts. They
+must be `bool` expressions; accepted contracts are emitted as C backend entry
+assertions.
+
+```mko
+fn positive(n: int) -> int
+prove n > 0
+{
+    return n
+}
+```
+
+`live fn` is accepted syntax for hot-reloadable functions and is preserved by the
+compiler pipeline. Full runtime hot-swap behavior is not yet a stable contract.
+
+Pipe-forward expressions are zero-cost call sugar:
+
+```mko
+name |> greet      // greet(name)
+name |> wrap("hi") // wrap(name, "hi")
+```
+
 ---
 
 ## 4. Control flow — `while`, `for`, `range`, `break`, `continue`, `defer`

@@ -138,8 +138,13 @@ pub struct FnDef {
     pub exported: bool,
     /// `const fn` — body must be comptime-foldable; calls with const args fold at compile time.
     pub is_const: bool,
+    /// `live fn` — hot-reloadable: compiled as indirect call through a function pointer
+    /// that can be swapped at runtime via `dlopen`/`dlsym` without restarting.
+    pub is_live: bool,
     /// Compiler-checked API stability (`#[stable]` / `#[deprecated(...)]`).
     pub stability: ApiStability,
+    /// `prove` contracts: conditions the compiler verifies or emits as runtime assertions.
+    pub contracts: Vec<Expr>,
     /// Origin file path for pulled modules (diagnostics).
     pub source_file: Option<String>,
 }

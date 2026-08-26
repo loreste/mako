@@ -13907,7 +13907,11 @@ impl TypeChecker {
                         .map(|(n, t, _)| Ok((n.clone(), self.resolve_type(t)?)))
                         .collect();
                     let fields = fields.map_err(|e: TypeError| {
-                        if let Some(ref sf) = s.source_file { e.in_file(sf.clone()) } else { e }
+                        if let Some(ref sf) = s.source_file {
+                            e.in_file(sf.clone())
+                        } else {
+                            e
+                        }
                     })?;
                     // Register field defaults for struct-lit fill.
                     for (n, _, def) in &s.fields {
@@ -13937,7 +13941,11 @@ impl TypeChecker {
                         let fields: Result<Vec<_>, _> =
                             v.fields.iter().map(|t| self.resolve_type(t)).collect();
                         let fields = fields.map_err(|e2| {
-                            if let Some(ref sf) = e.source_file { e2.in_file(sf.clone()) } else { e2 }
+                            if let Some(ref sf) = e.source_file {
+                                e2.in_file(sf.clone())
+                            } else {
+                                e2
+                            }
                         })?;
                         self.variants.insert(
                             v.name.clone(),
@@ -13970,7 +13978,13 @@ impl TypeChecker {
                             .insert(f.name.clone(), f.params.iter().map(|p| p.mutable).collect());
                     } else {
                         let sf = f.source_file.clone();
-                        let wrap = |e: TypeError| if let Some(ref s) = sf { e.in_file(s.clone()) } else { e };
+                        let wrap = |e: TypeError| {
+                            if let Some(ref s) = sf {
+                                e.in_file(s.clone())
+                            } else {
+                                e
+                            }
+                        };
                         let params: Result<Vec<_>, _> =
                             f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
                         let ret = f
@@ -13982,8 +13996,10 @@ impl TypeChecker {
                             .unwrap_or(Type::Void);
                         self.fn_mut_params
                             .insert(f.name.clone(), f.params.iter().map(|p| p.mutable).collect());
-                        self.fns
-                            .insert(f.name.clone(), Type::Fn(params.map_err(wrap)?, Box::new(ret)));
+                        self.fns.insert(
+                            f.name.clone(),
+                            Type::Fn(params.map_err(wrap)?, Box::new(ret)),
+                        );
                     }
                 }
                 Item::Actor(_) | Item::On(_) | Item::Package { .. } => {
@@ -14040,7 +14056,11 @@ impl TypeChecker {
                         .hint(
                             "use integer ops / const fn, or string literals / `+` concat / const string names",
                         );
-                        return Err(if let Some(ref sf) = c.source_file { err.in_file(sf.clone()) } else { err });
+                        return Err(if let Some(ref sf) = c.source_file {
+                            err.in_file(sf.clone())
+                        } else {
+                            err
+                        });
                     }
                 }
             }
@@ -14071,7 +14091,11 @@ impl TypeChecker {
             if let Item::Fn(f) = item {
                 if f.type_params.is_empty() {
                     self.check_fn(f).map_err(|e| {
-                        if let Some(ref sf) = f.source_file { e.in_file(sf.clone()) } else { e }
+                        if let Some(ref sf) = f.source_file {
+                            e.in_file(sf.clone())
+                        } else {
+                            e
+                        }
                     })?;
                     if f.is_const {
                         // Ensure body is const-evaluable with dummy zeros / empty strings.
@@ -15458,6 +15482,16 @@ impl TypeChecker {
         self.push_scope();
         for (p, ty) in f.params.iter().zip(params) {
             self.define(&p.name, ty, p.mutable);
+        }
+        // Verify prove contracts are bool expressions.
+        for contract in &f.contracts {
+            let ct = self.check_expr(contract)?;
+            if ct != Type::Bool {
+                return Err(TypeError::new(format!(
+                    "prove contract must be bool, got {}",
+                    ct.display()
+                )));
+            }
         }
         let stmts = &f.body.stmts;
         let ret_void = self.current_ret == Type::Void;
@@ -17115,7 +17149,10 @@ impl TypeChecker {
                     BinOp::Eq | BinOp::Ne => {
                         // Bool ↔ Int coercion for equality only: `str_eq(a,b) == 1`.
                         let eq_compatible = self.compatible(&lt, &rt)
-                            || matches!((&lt, &rt), (Type::Bool, Type::Int) | (Type::Int, Type::Bool));
+                            || matches!(
+                                (&lt, &rt),
+                                (Type::Bool, Type::Int) | (Type::Int, Type::Bool)
+                            );
                         if eq_compatible {
                             Ok(Type::Bool)
                         } else {
@@ -22503,7 +22540,9 @@ pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, 
         body: subst_block(&template.body, subst),
         exported: template.exported,
         is_const: template.is_const,
+        is_live: template.is_live,
         stability: template.stability.clone(),
+        contracts: template.contracts.clone(),
         source_file: template.source_file.clone(),
     }
 }

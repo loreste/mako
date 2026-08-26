@@ -640,6 +640,23 @@ fn add(a: int, b: int) -> int {
 }
 ```
 
+`live fn` is accepted as a contextual function modifier and is preserved in the
+compiler AST for hot-reload work. Full runtime hot-swap behavior is not part of
+the current stable contract.
+
+Functions may include one or more `prove` clauses before the body:
+
+```mko
+fn checked(n: int) -> int
+prove n > 0
+{
+    return n
+}
+```
+
+Each `prove` expression must type-check as `bool`. The C backend currently emits
+an entry assertion for accepted contracts.
+
 #### Type parameters and bounds (0.1.9)
 
 User generics use square brackets (angle brackets are dual sugar). The compiler
@@ -1020,7 +1037,16 @@ Operators are listed from highest to lowest precedence:
 | 10         | `==` `!=` `<` `>` `<=` `>=`  | left          | Comparison        |
 | 11         | `&&` `and`                   | left          | Logical AND       |
 | 12         | `\|\|` `or`                  | left          | Logical OR        |
-| 13         | `=` `+=` `-=` `*=` `/=` `%=` `&=` `\|=` `^=` `<<=` `>>=` | right | Assignment |
+| 13         | `\|>`                        | left          | Pipe-forward call |
+| 14         | `=` `+=` `-=` `*=` `/=` `%=` `&=` `\|=` `^=` `<<=` `>>=` | right | Assignment |
+
+Pipe-forward is syntactic sugar for a call with the left expression inserted as
+the first argument:
+
+```mko
+value |> f        // f(value)
+value |> f(a, b) // f(value, a, b)
+```
 
 ### 4.2 Arithmetic Operators
 

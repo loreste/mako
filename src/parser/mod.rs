@@ -218,12 +218,22 @@ impl Parser {
         if is_const_fn {
             self.bump(); // const
         }
+        // `live fn` — hot-reloadable function (indirect call, dlopen swap)
+        let is_live_fn = matches!(self.peek_kind(), TokenKind::Ident(ref s) if s == "live")
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokenKind::Fn | TokenKind::Func)
+            );
+        if is_live_fn {
+            self.bump(); // live
+        }
         match self.peek_kind() {
             TokenKind::Fn | TokenKind::Func => {
                 let mut f = self.parse_fn()?;
                 // Go-style: Capitalized names are exported; `export` forces it.
                 f.exported = exported || is_exported_name(&f.name);
                 f.is_const = is_const_fn;
+                f.is_live = is_live_fn;
                 f.stability = stability;
                 Ok(Item::Fn(f))
             }
@@ -548,7 +558,11 @@ impl Parser {
         if matches!(self.peek_kind(), TokenKind::Semicolon) {
             self.bump();
         }
-        Ok(ConstDef { name, value, source_file: None })
+        Ok(ConstDef {
+            name,
+            value,
+            source_file: None,
+        })
     }
 
     fn parse_actor(&mut self) -> Result<ActorDef, ParseError> {
@@ -938,6 +952,12 @@ impl Parser {
         } else {
             None
         };
+        // Parse `prove` contract clauses before the body.
+        let mut contracts = Vec::new();
+        while matches!(self.peek_kind(), TokenKind::Ident(ref s) if s == "prove") {
+            self.bump();
+            contracts.push(self.parse_expr()?);
+        }
         let body = self.parse_block()?;
         // Go receiver → `Type_method` so `p.distance()` resolves like free methods
         let name = if let Some(recv) = &go_receiver {
@@ -958,7 +978,9 @@ impl Parser {
             body,
             exported: false,
             is_const: false,
+            is_live: false,
             stability: crate::ast::ApiStability::Unspecified,
+            contracts,
             source_file: None,
         })
     }
@@ -1672,7 +1694,35 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_or()
+        self.parse_pipe()
+    }
+
+    /// Pipe-forward: `expr |> fn(args)` → `fn(expr, args)`, `expr |> fn` → `fn(expr)`.
+    /// Lowest precedence, left-associative. Zero-cost: pure desugar to nested calls.
+    fn parse_pipe(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_or()?;
+        while matches!(self.peek_kind(), TokenKind::PipeGt) {
+            self.bump();
+            let right = self.parse_or()?;
+            left = match right {
+                // `expr |> f(a, b)` → `f(expr, a, b)`
+                Expr::Call { callee, mut args } => {
+                    args.insert(0, left);
+                    Expr::Call { callee, args }
+                }
+                // `expr |> f` → `f(expr)`
+                Expr::Ident(name) => Expr::Call {
+                    callee: Box::new(Expr::Ident(name)),
+                    args: vec![left],
+                },
+                // `expr |> |x| body` → (|x| body)(expr)
+                other => Expr::Call {
+                    callee: Box::new(other),
+                    args: vec![left],
+                },
+            };
+        }
+        Ok(left)
     }
 
     fn parse_or(&mut self) -> Result<Expr, ParseError> {

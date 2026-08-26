@@ -5590,7 +5590,9 @@ mod tests {
             body,
             exported: false,
             is_const: false,
+            is_live: false,
             stability: ApiStability::Unspecified,
+            contracts: vec![],
             source_file: None,
         })
     }
@@ -5644,7 +5646,9 @@ mod tests {
             },
             exported: false,
             is_const: false,
+            is_live: false,
             stability: ApiStability::Unspecified,
+            contracts: vec![],
             source_file: None,
         }
     }
