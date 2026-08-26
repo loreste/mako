@@ -25,7 +25,13 @@ echo "tooling-smoke: doctor"
 MAKO_RUNTIME="$ROOT/runtime" MAKO_STD="$ROOT/std" "$MAKO" doctor
 
 echo "tooling-smoke: fmt"
-"$MAKO" fmt --check examples/testing/tooling_quality_test.mko
+cat >"$TMP/formatted.mko" <<'MKO'
+fn main() {
+    let x = 1
+    assert_eq(x, 1)
+}
+MKO
+"$MAKO" fmt --check "$TMP/formatted.mko"
 cat >"$TMP/unformatted.mko" <<'MKO'
 fn main() {
 let x = 1
