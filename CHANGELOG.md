@@ -11,6 +11,10 @@
 - Fixed `std/grpc` wrappers to match the checked builtin signatures for message
   limit checks and unary request construction.
 
+- Fixed C backend forward declarations for generated struct/enum slice helpers
+  so imported routes, nested struct slices, and map fields compile under clang,
+  GCC, ASan, and UBSan.
+
 ## 0.5.15 - 2026-08-26 (tooling polish)
 
 ### Tooling
