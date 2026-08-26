@@ -519,8 +519,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
-name = "mako"
-version = "0.5.15"
+name = "makori"
+version = "0.6.0"
 dependencies = [
  "cc",
  "clap",
