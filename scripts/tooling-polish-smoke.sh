@@ -18,8 +18,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/mako-tooling-smoke.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "tooling-smoke: version"
-"$MAKO" version | grep -E '^mako version mako[0-9]+\.[0-9]+\.[0-9]+ [^/]+/[^/]+$' >/dev/null
-"$MAKO" --version | grep -E '^mako version mako[0-9]+\.[0-9]+\.[0-9]+ [^/]+/[^/]+$' >/dev/null
+"$MAKO" version | grep -E '^makori version makori[0-9]+\.[0-9]+\.[0-9]+ [^/]+/[^/]+$' >/dev/null
+"$MAKO" --version | grep -E '^makori version makori[0-9]+\.[0-9]+\.[0-9]+ [^/]+/[^/]+$' >/dev/null
 
 echo "tooling-smoke: doctor"
 MAKO_RUNTIME="$ROOT/runtime" MAKO_STD="$ROOT/std" "$MAKO" doctor

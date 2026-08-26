@@ -14,6 +14,8 @@
 - Fixed C backend forward declarations for generated struct/enum slice helpers
   so imported routes, nested struct slices, and map fields compile under clang,
   GCC, ASan, and UBSan.
+- Fixed tooling smoke checks to match the `makori version makoriX.Y.Z` release
+  line.
 
 ## 0.5.15 - 2026-08-26 (tooling polish)
 
