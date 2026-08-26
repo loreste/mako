@@ -42,14 +42,14 @@ use parser::Parser;
 
 #[derive(ClapParser)]
 #[command(
-    name = "mako",
+    name = "makori",
     version,
-    about = "Mako — memory safety, simple concurrency, fast builds, no GC.",
-    long_about = "Mako compiles .mko sources to native binaries via C.\n\
+    about = "Makori — memory safety, simple concurrency, fast builds, no GC.",
+    long_about = "Makori compiles .mko sources to native binaries via C.\n\
                   Beachhead: network servers and session-oriented backends.\n\
                   Docs: docs/GUIDE.md · Status: docs/STATUS.md · Release: docs/RELEASE.md\n\n\
-                  Common: mako version · mako init · mako run main.mko · mako test · mako fmt -w",
-    after_help = "See also: mako help <command> · mako version -v"
+                  Common: makori version · makori init · makori run main.mko · makori test · makori fmt -w",
+    after_help = "See also: makori help <command> · makori version -v"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -840,10 +840,10 @@ fn main() {
     }
 }
 
-/// Clap prints `{name} {version}` → with this string: `mako version mako0.2.2 darwin/arm64`.
+/// Clap prints `{name} {version}` → with this string: `makori version makori0.6.0 darwin/arm64`.
 fn clap_version_string() -> String {
     format!(
-        "version mako{} {}/{}",
+        "version makori{} {}/{}",
         env!("CARGO_PKG_VERSION"),
         mako_goos(),
         mako_goarch()
@@ -852,7 +852,7 @@ fn clap_version_string() -> String {
 
 fn version_line() -> String {
     format!(
-        "mako version mako{} {}/{}",
+        "makori version makori{} {}/{}",
         env!("CARGO_PKG_VERSION"),
         mako_goos(),
         mako_goarch()
@@ -5533,7 +5533,7 @@ mod check_json_cli_tests {
 
     #[test]
     fn bare_json_keeps_the_legacy_format() {
-        let (file, json) = parse_check(&["mako", "check", "--json", "main.mko"]);
+        let (file, json) = parse_check(&["makori", "check", "--json", "main.mko"]);
 
         assert_eq!(file, PathBuf::from("main.mko"));
         assert_eq!(json, Some(CheckJsonCli::Legacy));
@@ -5541,17 +5541,17 @@ mod check_json_cli_tests {
 
     #[test]
     fn versioned_json_requires_an_explicit_value() {
-        let (file, json) = parse_check(&["mako", "check", "--json=v1", "main.mko"]);
+        let (file, json) = parse_check(&["makori", "check", "--json=v1", "main.mko"]);
 
         assert_eq!(file, PathBuf::from("main.mko"));
         assert_eq!(json, Some(CheckJsonCli::V1));
-        assert!(Cli::try_parse_from(["mako", "check", "--json=v2", "main.mko"]).is_err());
+        assert!(Cli::try_parse_from(["makori", "check", "--json=v2", "main.mko"]).is_err());
     }
 
     #[test]
     fn native_source_is_repeatable_for_test_commands() {
         let cli = Cli::try_parse_from([
-            "mako",
+            "makori",
             "test",
             "suite.mko",
             "--native-source",
@@ -5578,7 +5578,7 @@ mod lint_cli_tests {
 
     #[test]
     fn fmt_check_flag_is_parsed() {
-        let cli = Cli::try_parse_from(["mako", "fmt", "--check", "app/main.mko"]).unwrap();
+        let cli = Cli::try_parse_from(["makori", "fmt", "--check", "app/main.mko"]).unwrap();
         match cli.command {
             Commands::Fmt {
                 paths,
@@ -5600,7 +5600,7 @@ mod lint_cli_tests {
 
     #[test]
     fn lint_security_flag_is_parsed() {
-        let cli = Cli::try_parse_from(["mako", "lint", "--security", "app/main.mko"]).unwrap();
+        let cli = Cli::try_parse_from(["makori", "lint", "--security", "app/main.mko"]).unwrap();
         match cli.command {
             Commands::Lint {
                 path,

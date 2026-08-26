@@ -1,10 +1,15 @@
 [package]
-name = "mako"
-version = "0.5.15"
+name = "makori"
+version = "0.6.0"
 edition = "2021"
-description = "Mako — compiled language for backend development (no GC, native binaries, structured concurrency)"
+description = "Makori — compiled language for backend development (no GC, native binaries, structured concurrency)"
 license = "MIT"
 
+[[bin]]
+name = "makori"
+path = "src/main.rs"
+
+# Backward compatibility: `mako` still works as an alias.
 [[bin]]
 name = "mako"
 path = "src/main.rs"
