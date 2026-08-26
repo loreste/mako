@@ -3761,6 +3761,25 @@ pub fn merge_package_dir_siblings(entry: &Path, mut program: Program) -> Result<
         extra
             .items
             .retain(|i| !matches!(i, Item::Package { .. } | Item::Import { .. }));
+        // Skip items already present (e.g. a sibling was also pulled explicitly).
+        let existing: std::collections::HashSet<String> = program
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Fn(f) => Some(f.name.clone()),
+                Item::Struct(s) => Some(s.name.clone()),
+                Item::Enum(e) => Some(e.name.clone()),
+                Item::Const(c) => Some(c.name.clone()),
+                _ => None,
+            })
+            .collect();
+        extra.items.retain(|i| match i {
+            Item::Fn(f) => !existing.contains(&f.name),
+            Item::Struct(s) => !existing.contains(&s.name),
+            Item::Enum(e) => !existing.contains(&e.name),
+            Item::Const(c) => !existing.contains(&c.name),
+            _ => true,
+        });
         program.items.extend(extra.items);
     }
     Ok(program)
