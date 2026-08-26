@@ -815,7 +815,11 @@ fn main() {
     // 16 MB is enough in release but overflows on Windows in debug, whose
     // default thread stack is 1 MB against 8 MB on Linux — deep_expr_stack_test
     // is exactly that case.
-    let default_stack_mb = if cfg!(debug_assertions) { 64 } else { 16 };
+    let default_stack_mb = if cfg!(debug_assertions) || cfg!(windows) {
+        64
+    } else {
+        16
+    };
     let stack_mb = std::env::var("MAKO_COMPILER_STACK_MB")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())

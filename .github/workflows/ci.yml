@@ -156,6 +156,7 @@ jobs:
         shell: bash
         run: cargo run --quiet --release -- test examples/testing/deep_expr_stack_test.mko --backend c
         env:
+          MAKO_COMPILER_STACK_MB: "64"
           RUST_MIN_STACK: "8388608"
 
       - name: Default test suite (Linux/macOS)
