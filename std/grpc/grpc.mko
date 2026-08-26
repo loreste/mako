@@ -1,5 +1,20 @@
-// std/grpc — unary frame helpers + service method registry (no GC).
+// std/grpc — gRPC unary frame helpers + service method registry (no GC).
+//
+// Usage:
+//   pull "grpc"
+//
+//   // Server-side: register a service and dispatch requests
+//   let svc = grpc.service_new("greeter.Greeter")
+//   grpc.add_method(svc, "SayHello", default_response)
+//   let response = grpc.handle(svc, method, request)
+//
+//   // Frame encoding: length-prefixed gRPC wire format
+//   let framed = grpc.encode(payload)
+//   let data = grpc.payload(framed)
 
+pack grpc
+
+// ── Frame encoding (length-prefixed gRPC wire format) ──────────
 export fn encode(payload: string) -> string {
     return grpc_encode_message(payload)
 }
@@ -8,6 +23,20 @@ export fn payload(framed: string) -> string {
     return grpc_message_payload(framed)
 }
 
+// ── Message size validation ────────────────────────────────────
+export fn message_len(msg: string) -> int {
+    return grpc_message_len(msg)
+}
+
+export fn message_within_limit(msg: string) -> int {
+    return grpc_message_within_limit(msg)
+}
+
+export fn default_max_message() -> int {
+    return grpc_default_max_message()
+}
+
+// ── HTTP/2 headers and trailers ────────────────────────────────
 export fn content_type() -> string {
     return grpc_content_type()
 }
@@ -16,6 +45,11 @@ export fn status_trailer(code: int) -> string {
     return grpc_status_trailer(code)
 }
 
+export fn status_code(trailer: string) -> int {
+    return grpc_status_code(trailer)
+}
+
+// ── Service registry ───────────────────────────────────────────
 export fn service_new(name: string) -> int {
     return grpc_service_new(name)
 }
@@ -43,3 +77,35 @@ export fn methods(id: int) -> string {
 export fn service_name(id: int) -> string {
     return grpc_service_name(id)
 }
+
+// ── Unary request parsing ──────────────────────────────────────
+export fn unary_request(data: string) -> string {
+    return grpc_unary_request(data)
+}
+
+export fn unary_name(data: string) -> string {
+    return grpc_unary_name(data)
+}
+
+export fn unary_id(data: string) -> int {
+    return grpc_unary_id(data)
+}
+
+// ── Status codes (mirrors grpc-status header values) ───────────
+const STATUS_OK = 0
+const STATUS_CANCELLED = 1
+const STATUS_UNKNOWN = 2
+const STATUS_INVALID_ARGUMENT = 3
+const STATUS_DEADLINE_EXCEEDED = 4
+const STATUS_NOT_FOUND = 5
+const STATUS_ALREADY_EXISTS = 6
+const STATUS_PERMISSION_DENIED = 7
+const STATUS_RESOURCE_EXHAUSTED = 8
+const STATUS_FAILED_PRECONDITION = 9
+const STATUS_ABORTED = 10
+const STATUS_OUT_OF_RANGE = 11
+const STATUS_UNIMPLEMENTED = 12
+const STATUS_INTERNAL = 13
+const STATUS_UNAVAILABLE = 14
+const STATUS_DATA_LOSS = 15
+const STATUS_UNAUTHENTICATED = 16

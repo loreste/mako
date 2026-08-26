@@ -4569,6 +4569,278 @@ mod metadata_tests {
         let _ = fs::remove_file(&new);
         assert_ne!(old_surface.get("add"), new_surface.get("add"));
     }
+
+    // ── Pipe operator (|>) tests ──────────────────────────────────
+
+    #[test]
+    fn pipe_simple_identity() {
+        let path = temp_mko(
+            "pipe-id",
+            "fn id(x: int) -> int { return x }\nfn main() { let r = 42 |> id; print_int(r) }\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn pipe_chain_multiple() {
+        let path = temp_mko(
+            "pipe-chain",
+            "\
+fn double(x: int) -> int { return x * 2 }\n\
+fn add(x: int, y: int) -> int { return x + y }\n\
+fn main() {\n\
+    let r = 5 |> double |> add(10) |> double\n\
+    print_int(r)\n\
+}\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn pipe_with_string_builtins() {
+        let path = temp_mko(
+            "pipe-str",
+            "\
+fn main() {\n\
+    let r = \"hello world\" |> str_len\n\
+    print_int(r)\n\
+}\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn pipe_type_error_propagates() {
+        let path = temp_mko(
+            "pipe-err",
+            "\
+fn takes_str(s: string) -> int { return str_len(s) }\n\
+fn main() { let _ = 42 |> takes_str }\n",
+        );
+        let (ok, _report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(!ok);
+    }
+
+    // ── Prove contract tests ──────────────────────────────────────
+
+    #[test]
+    fn prove_valid_bool_contract() {
+        let path = temp_mko(
+            "prove-ok",
+            "\
+fn safe_div(a: int, b: int) -> int\n\
+    prove b != 0\n\
+{\n\
+    return a / b\n\
+}\n\
+fn main() { print_int(safe_div(10, 2)) }\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn prove_multiple_contracts() {
+        let path = temp_mko(
+            "prove-multi",
+            "\
+fn bounded(x: int, lo: int, hi: int) -> int\n\
+    prove lo <= x\n\
+    prove x <= hi\n\
+    prove lo < hi\n\
+{\n\
+    return x\n\
+}\n\
+fn main() { print_int(bounded(5, 0, 10)) }\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn prove_rejects_non_bool() {
+        let path = temp_mko(
+            "prove-bad",
+            "\
+fn bad(x: int) -> int\n\
+    prove x + 1\n\
+{\n\
+    return x\n\
+}\n\
+fn main() { let _ = bad(1) }\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(!ok);
+        assert!(report.contains("prove contract must be bool"), "{report}");
+    }
+
+    #[test]
+    fn prove_uses_param_names() {
+        let path = temp_mko(
+            "prove-param",
+            "\
+fn check(name: string) -> int\n\
+    prove str_len(name) > 0\n\
+{\n\
+    return str_len(name)\n\
+}\n\
+fn main() { print_int(check(\"hi\")) }\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    // ── Live fn tests ─────────────────────────────────────────────
+
+    #[test]
+    fn live_fn_parses_and_typechecks() {
+        let path = temp_mko(
+            "live-ok",
+            "\
+live fn handler(x: int) -> int {\n\
+    return x * 2\n\
+}\n\
+fn main() { print_int(handler(21)) }\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn live_fn_with_multiple_params() {
+        let path = temp_mko(
+            "live-multi",
+            "\
+live fn process(a: int, b: int, msg: string) -> int {\n\
+    return a + b + str_len(msg)\n\
+}\n\
+fn main() { print_int(process(1, 2, \"hi\")) }\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn live_fn_void_return() {
+        let path = temp_mko(
+            "live-void",
+            "\
+live fn greet(name: string) {\n\
+    print(name)\n\
+}\n\
+fn main() { greet(\"world\") }\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn live_fn_type_error_still_caught() {
+        let path = temp_mko(
+            "live-err",
+            "\
+live fn bad(x: int) -> string {\n\
+    return x\n\
+}\n\
+fn main() { let _ = bad(1) }\n",
+        );
+        let (ok, _report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(!ok);
+    }
+
+    // ── Bool/Int equality coercion tests ──────────────────────────
+
+    #[test]
+    fn bool_int_eq_coercion_works() {
+        let path = temp_mko(
+            "bool-eq",
+            "\
+fn main() {\n\
+    let a = str_eq(\"x\", \"x\") == 1\n\
+    let b = 0 == str_eq(\"x\", \"y\")\n\
+    let c = str_contains(\"hello\", \"ell\") != 0\n\
+    if a { print(\"ok\") }\n\
+}\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn bool_int_assignment_rejected() {
+        let path = temp_mko("bool-assign", "fn main() { let x: int = true }\n");
+        let (ok, _) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(!ok);
+    }
+
+    #[test]
+    fn bool_int_return_rejected() {
+        let path = temp_mko(
+            "bool-ret",
+            "fn f() -> int { return true }\nfn main() { let _ = f() }\n",
+        );
+        let (ok, _) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(!ok);
+    }
+
+    // ── Combined feature tests ────────────────────────────────────
+
+    #[test]
+    fn pipe_with_prove() {
+        let path = temp_mko(
+            "pipe-prove",
+            "\
+fn safe_add(x: int, y: int) -> int\n\
+    prove x >= 0\n\
+    prove y >= 0\n\
+{\n\
+    return x + y\n\
+}\n\
+fn double(x: int) -> int { return x * 2 }\n\
+fn main() {\n\
+    let r = 5 |> double |> safe_add(10)\n\
+    print_int(r)\n\
+}\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn live_fn_with_prove() {
+        let path = temp_mko(
+            "live-prove",
+            "\
+live fn handle(x: int) -> int\n\
+    prove x > 0\n\
+{\n\
+    return x * 2\n\
+}\n\
+fn main() { print_int(handle(21)) }\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
+    }
 }
 
 /// Stable failure classes exposed by `mako test --json`.
