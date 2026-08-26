@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Smoke-test the normal-user tooling surface for a release candidate.
+# Smoke-test the normal-user tooling surface for release candidates.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 MAKO="${MAKO:-$ROOT/target/release/mako}"
+if [[ ! -x "$MAKO" && -x "$MAKO.exe" ]]; then
+  MAKO="$MAKO.exe"
+fi
 if [[ ! -x "$MAKO" ]]; then
   echo "tooling-smoke: missing $MAKO; run cargo build --release first" >&2
   exit 1
@@ -23,7 +26,7 @@ MAKO_RUNTIME="$ROOT/runtime" MAKO_STD="$ROOT/std" "$MAKO" doctor
 
 echo "tooling-smoke: fmt"
 "$MAKO" fmt --check examples/testing/tooling_quality_test.mko
-cat > "$TMP/unformatted.mko" <<'MKO'
+cat >"$TMP/unformatted.mko" <<'MKO'
 fn main() {
 let x = 1
 assert_eq(x, 1)
@@ -41,7 +44,7 @@ echo "tooling-smoke: lint"
 "$MAKO" lint --security examples/testing/tooling_quality_test.mko
 mkdir -p "$TMP/empty"
 if "$MAKO" lint "$TMP/empty" >/dev/null 2>&1; then
-  echo "tooling-smoke: lint unexpectedly accepted an empty source set" >&2
+  echo "tooling-smoke: lint unexpectedly accepted an empty source tree" >&2
   exit 1
 fi
 
