@@ -16,8 +16,9 @@
   GCC, ASan, and UBSan.
 - Fixed tooling smoke checks to match the `makori version makoriX.Y.Z` release
   line.
-- Fixed Windows native direct-link runtime support for mkdir, remove-file, and
-  environment-set builtins used by tooling-quality smoke tests.
+- Fixed Windows native direct-link runtime support for generated libc imports
+  plus mkdir, remove-file, and environment-set builtins used by tooling-quality
+  smoke tests.
 
 ## 0.5.15 - 2026-08-26 (tooling polish)
 

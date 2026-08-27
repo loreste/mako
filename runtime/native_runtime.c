@@ -16,6 +16,21 @@
 #include <unistd.h>
 #endif
 
+#if defined(_WIN32)
+intptr_t write(int fd, const void *buf, uintptr_t count) {
+    if (count > UINT_MAX) count = UINT_MAX;
+    return (intptr_t)_write(fd, buf, (unsigned int)count);
+}
+
+char *gcvt(double value, int digits, char *buffer) {
+    if (!buffer) return NULL;
+    if (_gcvt_s(buffer, 64, value, digits) != 0) {
+        buffer[0] = '\0';
+    }
+    return buffer;
+}
+#endif
+
 void mako_native_print_i64(int64_t value) {
     printf("%lld\n", (long long)value);
     fflush(stdout); /* see mako_native_string_print_ptr */
