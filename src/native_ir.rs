@@ -5908,7 +5908,6 @@ impl<'a> FunctionLowerer<'a> {
                 .ok_or_else(|| IrError::new("native IR: kick id missing"))?;
             let name = format!("__mako_kick_{kid}");
             *kid += 1;
-            eprintln!("[native-ir] kick stub {name} -> target={fname} params={}", params.len());
             stubs.push(Self::build_kick_stub(&name, fname, &params, ret)?);
             name
         };

@@ -38270,7 +38270,9 @@ impl Codegen {
             };
             // NOT static: prevent the C compiler from merging kick stubs via ICF.
             // Each stub MUST have a unique address for crew.kick dispatch.
-            let helper_src = format!("__attribute__((noinline)) void *{helper}(void *arg) {{ (void)arg;\n{body}}}\n");
+            let helper_src = format!(
+                "__attribute__((noinline)) void *{helper}(void *arg) {{ (void)arg;\n{body}}}\n"
+            );
             self.insert_helper(&helper_src);
             return;
         }
@@ -38376,7 +38378,8 @@ impl Codegen {
             )
         };
         // NOT static + noinline: prevent ICF from merging kick stubs.
-        let helper_src = format!("__attribute__((noinline)) void *{helper}(void *arg) {{\n{body}}}\n");
+        let helper_src =
+            format!("__attribute__((noinline)) void *{helper}(void *arg) {{\n{body}}}\n");
         self.insert_helper(&helper_src);
     }
 

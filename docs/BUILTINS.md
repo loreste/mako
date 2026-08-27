@@ -3053,6 +3053,11 @@ endpoints via `MAKO_LLM_BASE_URL` / `OPENAI_API_KEY`.
 | `llm_estimate_tokens` | `(text) -> int` | ~chars/4 heuristic |
 | `llm_retry_delay_ms` | `(attempt, base, max) -> int` | Exponential backoff |
 
+Native backend: these builtins lower through checked native bridge shims,
+including `llm_ask`, `llm_chat`, `llm_chat_stream`, `llm_embeddings`, and
+`llm_https_post`. Live network calls remain external-service dependent; offline
+builders/parsers are covered by `examples/testing/llm_test.mko`.
+
 Example: `examples/llm_chat.mko` · tests: `examples/testing/llm_test.mko` · pack: `std/llm`.
 | `rpc_frame` | `rpc_frame(method: string, payload: string) -> string` | Build an RPC frame |
 | `rpc_method` | `rpc_method(frame: string) -> string` | Extract method from RPC frame |

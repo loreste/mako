@@ -1136,6 +1136,11 @@ fn main() {
 Parallel tool handlers after parse: kick/fan over `llm_tool_call_name` indices
 (no async color). Tests: `examples/testing/llm_test.mko`.
 
+Native backend: offline builders/parsers/retry helpers and transport entry
+points are wired through checked bridge shims. Live HTTPS calls still depend on
+OpenSSL availability and environment keys, so default safety claims cover the
+bridge ownership/bounds path, not the external service.
+
 ---
 
 ## `time`

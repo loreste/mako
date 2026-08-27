@@ -248,8 +248,8 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | Low-level networking (peer/local addr, UDP sender, write_all/read_n, shutdown, CLOEXEC) | Done — `examples/testing/net_lowlevel_test.mko` |
 | IPv6 dual-stack listen/connect + Happy Eyeballs `tcp_connect` | Done — `examples/testing/net_ipv6_he_test.mko` |
 | Low-latency clocks (`mono_*` / deadlines / sleep_ns / spin_until) | Done — `examples/testing/time_latency_test.mko` |
-| LLM programming (chat/tools/SSE/JSON extract, OpenAI-compatible HTTPS) | Done — `examples/testing/llm_test.mko` · `examples/llm_chat.mko` |
-| LLM stream transport + embeddings + error/retry helpers | Done — `llm_chat_stream` / `llm_embed*` / `llm_is_error` / `llm_chat_retry` |
+| LLM programming (chat/tools/SSE/JSON extract, OpenAI-compatible HTTPS) | Done — C and native bridge coverage; `examples/testing/llm_test.mko` · `examples/llm_chat.mko` |
+| LLM stream transport + embeddings + error/retry helpers | Done — native bridge shims for `llm_chat_stream`, `llm_embeddings`, `llm_https_post`, `llm_embed*`, `llm_is_error`, `llm_chat_retry` |
 | SQL string params + last_insert_id / rows_affected (SQLite + Postgres) | Done — `examples/testing/sql_programming_test.mko` |
 | SQL multi-row cursor + bulk first-column (`sql_query_rows*`, `sql_query_col_*`) | Done — `examples/testing/sql_rows_test.mko` |
 | SIP/SDP/RTP platform (parse/build; build stacks in Makori — not a softswitch) | Done — `examples/testing/sip_test.mko` · `examples/sip_ua.mko` · `std/sip` |

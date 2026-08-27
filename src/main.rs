@@ -844,7 +844,8 @@ fn main() {
     }
 }
 
-/// Clap prints `{name} {version}` → with this string: `makori version makori0.6.0 darwin/arm64`.
+/// Clap prints `{name} {version}` with this string:
+/// `makori version makoriX.Y.Z darwin/arm64`.
 fn clap_version_string() -> String {
     format!(
         "version makori{} {}/{}",

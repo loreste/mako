@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.1 - 2026-08-27 (native LLM bridge hardening)
+
 - Added parser/type/codegen plumbing for `prove` function contracts. Contract
   clauses must type-check as `bool`; C output emits entry assertions for them.
 - Added pipe-forward expression sugar: `value |> f(args)` parses as
@@ -23,6 +25,18 @@
   link failures expose the unresolved symbol instead of only the warning stream.
 - Fixed Windows native links for fixed-point helpers by avoiding compiler-rt
   `__int128` division helper imports on that target.
+- Wired the missing hosted LLM builtins into the native backend bridge so
+  `llm_ask`, `llm_chat`, `llm_chat_stream`, `llm_embeddings`, and
+  `llm_https_post` are no longer C-backend-only surfaces.
+- Hardened the native/C LLM string bridge ownership boundary so returned strings
+  are transferred through the same checked `MakoNativeString` path as the rest
+  of the native builtin surface.
+- Removed the recovered Windows quarantine for
+  `examples/testing/deterministic_sim_test.mko`; Windows CI now fails if that
+  fixture regresses again.
+- Kept release gates strict: performance contract, sanitizer sweep,
+  memory-safety gate, native platform suites, product claims, and CI honesty are
+  hard CI checks before the release tag moves.
 
 ## 0.5.15 - 2026-08-26 (tooling polish)
 
