@@ -4,7 +4,6 @@
 # The Windows quarantine gate fails on any unlisted failure and also fails when
 # a listed fixture starts passing, so the list cannot quietly grow or go stale.
 
-examples/testing/deterministic_sim_test.mko
 examples/testing/domain_tracks_test.mko
 examples/testing/fs_storage_test.mko
 examples/testing/issue36_builtins_test.mko
