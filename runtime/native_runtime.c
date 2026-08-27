@@ -17,9 +17,8 @@
 #endif
 
 #if defined(_WIN32)
-intptr_t write(int fd, const void *buf, uintptr_t count) {
-    if (count > UINT_MAX) count = UINT_MAX;
-    return (intptr_t)_write(fd, buf, (unsigned int)count);
+int write(int fd, const void *buf, unsigned int count) {
+    return _write(fd, buf, count);
 }
 
 char *gcvt(double value, int digits, char *buffer) {
