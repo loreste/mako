@@ -38268,10 +38268,13 @@ impl Codegen {
             } else {
                 format!("return (void*)(intptr_t)(int64_t){call};\n")
             };
-            // NOT static: prevent the C compiler from merging kick stubs via ICF.
-            // Each stub MUST have a unique address for crew.kick dispatch.
+            // Anti-ICF: each stub writes a unique constant to a volatile global.
+            // This makes the function body provably unique to any optimizer.
+            let stub_id = self.tmp;
             let helper_src = format!(
-                "__attribute__((noinline)) void *{helper}(void *arg) {{ (void)arg;\n{body}}}\n"
+                "extern volatile int64_t __mako_kick_id;\n\
+                 __attribute__((noinline,optnone)) void *{helper}(void *arg) {{ (void)arg;\n\
+                 __mako_kick_id = {stub_id};\n{body}}}\n"
             );
             self.insert_helper(&helper_src);
             return;
@@ -38377,9 +38380,13 @@ impl Codegen {
                 "{unpack}int64_t __r = (int64_t){call};\n{cleanup}return (void*)(intptr_t)__r;\n"
             )
         };
-        // NOT static + noinline: prevent ICF from merging kick stubs.
-        let helper_src =
-            format!("__attribute__((noinline)) void *{helper}(void *arg) {{\n{body}}}\n");
+        // Anti-ICF: unique volatile write + optnone prevents any function merging.
+        let stub_id = self.tmp;
+        let helper_src = format!(
+            "extern volatile int64_t __mako_kick_id;\n\
+             __attribute__((noinline,optnone)) void *{helper}(void *arg) {{\n\
+             __mako_kick_id = {stub_id};\n{body}}}\n"
+        );
         self.insert_helper(&helper_src);
     }
 

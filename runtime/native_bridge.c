@@ -483,6 +483,10 @@ void *mako_native_pack_new(int64_t n) {
 /* Anti-ICF: called by kick stubs with a unique constant to prevent linker
  * Identical Code Folding from merging stubs that target different functions.
  * The volatile write ensures the call is not optimized away. */
+/* Anti-ICF global: kick stubs write a unique ID here so the compiler
+ * cannot merge them. The `volatile` + `optnone` on stubs guarantees
+ * each stub has a distinct address at runtime. */
+volatile int64_t __mako_kick_id = 0;
 static volatile int64_t mako_anti_icf_sink = 0;
 void mako_native_anti_icf(int64_t id) {
     mako_anti_icf_sink = id;
