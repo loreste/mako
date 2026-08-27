@@ -21,6 +21,8 @@
   smoke tests.
 - Fixed native linker diagnostics to include both stdout and stderr so Windows
   link failures expose the unresolved symbol instead of only the warning stream.
+- Fixed Windows native links for fixed-point helpers by avoiding compiler-rt
+  `__int128` division helper imports on that target.
 
 ## 0.5.15 - 2026-08-26 (tooling polish)
 

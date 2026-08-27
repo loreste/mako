@@ -149,9 +149,20 @@ static inline int64_t mako_fx_to_int(int64_t value, int64_t scale) {
     return value / scale;
 }
 
+#if defined(_WIN32)
+static inline int64_t mako_fx_from_long_double(long double value) {
+    if (value > (long double)INT64_MAX) return INT64_MAX;
+    if (value < (long double)INT64_MIN) return INT64_MIN;
+    return (int64_t)value;
+}
+#endif
+
 static inline int64_t mako_fx_mul(int64_t a, int64_t b, int64_t scale) {
     if (scale <= 0) return 0;
-#if defined(__SIZEOF_INT128__)
+#if defined(_WIN32)
+    long double value = ((long double)a * (long double)b) / (long double)scale;
+    return mako_fx_from_long_double(value);
+#elif defined(__SIZEOF_INT128__)
     return (int64_t)(((__int128)a * (__int128)b) / (__int128)scale);
 #else
     return (a * b) / scale;
@@ -160,7 +171,10 @@ static inline int64_t mako_fx_mul(int64_t a, int64_t b, int64_t scale) {
 
 static inline int64_t mako_fx_div(int64_t a, int64_t b, int64_t scale) {
     if (scale <= 0 || b == 0) return 0;
-#if defined(__SIZEOF_INT128__)
+#if defined(_WIN32)
+    long double value = ((long double)a * (long double)scale) / (long double)b;
+    return mako_fx_from_long_double(value);
+#elif defined(__SIZEOF_INT128__)
     return (int64_t)(((__int128)a * (__int128)scale) / (__int128)b);
 #else
     return (a * scale) / b;
