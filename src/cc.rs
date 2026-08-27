@@ -270,13 +270,13 @@ pub fn base_link_args(opts: &BuildOpts) -> Vec<String> {
             args.push("-lm".into());
         }
     }
-    // Disable ICF (Identical Code Folding) — crew kick stubs must have distinct
-    // addresses so the runtime dispatches to the correct function per task.
+    // Disable ICF (Identical Code Folding) where the platform linker accepts
+    // it. Linux GNU ld rejects --no-icf; native kick stubs also carry an
+    // anti-ICF runtime marker so Linux stays correct without a linker flag.
     if os == OsKind::Macos {
         args.push("-Wl,-no_deduplicate".into());
     }
     if os == OsKind::Linux {
-        args.push("-Wl,--no-icf".into());
         args.push("-ldl".into());
     }
     if opts.static_link && os != OsKind::Macos && os != OsKind::Wasm {

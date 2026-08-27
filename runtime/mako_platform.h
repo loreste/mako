@@ -178,6 +178,19 @@ typedef void *pthread_attr_t;
 typedef void *pthread_mutexattr_t;
 typedef void *pthread_condattr_t;
 
+static inline int pthread_attr_init(pthread_attr_t *a) {
+    if (a) *a = NULL;
+    return 0;
+}
+static inline int pthread_attr_setstacksize(pthread_attr_t *a, size_t size) {
+    (void)a;
+    (void)size;
+    return 0;
+}
+static inline int pthread_attr_destroy(pthread_attr_t *a) {
+    (void)a;
+    return 0;
+}
 static inline int pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a) {
     (void)a;
     InitializeSRWLock(m);

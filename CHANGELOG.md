@@ -34,6 +34,9 @@
 - Removed the recovered Windows quarantine for
   `examples/testing/deterministic_sim_test.mko`; Windows CI now fails if that
   fixture regresses again.
+- Fixed Linux native linking by dropping the GNU-ld-incompatible `--no-icf`
+  flag while keeping per-kick anti-ICF markers in generated native stubs.
+- Added Windows pthread-attribute shims used by strict cross/native builds.
 - Kept release gates strict: performance contract, sanitizer sweep,
   memory-safety gate, native platform suites, product claims, and CI honesty are
   hard CI checks before the release tag moves.
