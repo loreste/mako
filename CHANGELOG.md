@@ -19,6 +19,8 @@
 - Fixed Windows native direct-link runtime support for generated libc imports
   plus mkdir, remove-file, and environment-set builtins used by tooling-quality
   smoke tests.
+- Fixed native linker diagnostics to include both stdout and stderr so Windows
+  link failures expose the unresolved symbol instead of only the warning stream.
 
 ## 0.5.15 - 2026-08-26 (tooling polish)
 

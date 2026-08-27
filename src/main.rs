@@ -4780,13 +4780,21 @@ fn build_native_object(
     })?;
     let _ = fs::remove_file(&object_path);
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let hint = match (stderr.is_empty(), stdout.is_empty()) {
+            (false, false) => format!("{stderr}\n{stdout}"),
+            (false, true) => stderr,
+            (true, false) => stdout,
+            (true, true) => "native linker produced no output".to_string(),
+        };
         Diagnostic::error(
             &src_file.display().to_string(),
             "",
             Span::unknown(),
             "direct native object link failed",
         )
-        .with_hint(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        .with_hint(hint)
         .emit();
         return Err(());
     }
