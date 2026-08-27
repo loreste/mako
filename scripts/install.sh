@@ -105,7 +105,7 @@ fi
 
 # Install manifest for doctor / support.
 VER_LINE="$("$BIN_DIR/mako" version 2>/dev/null || "$BIN_DIR/mako" --version 2>/dev/null || echo unknown)"
-VERSION="$(printf '%s' "$VER_LINE" | awk '{print $3}' | sed 's/^mako//')"
+VERSION="$(printf '%s' "$VER_LINE" | awk '{print $3}' | sed -e 's/^makori//' -e 's/^mako//')"
 if [[ -z "$VERSION" ]]; then
   VERSION="unknown"
 fi
