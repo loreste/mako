@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #if defined(_WIN32)
+#include <direct.h>
 #include <io.h>
 #else
 #include <unistd.h>
@@ -763,7 +764,11 @@ int64_t mako_native_file_exists_ptr(const MakoNativeString *path) {
 
 int64_t mako_native_remove_file_ptr(const MakoNativeString *path) {
     if (!path || !path->data) return -1;
+#if defined(_WIN32)
+    return _unlink(path->data) == 0 ? 0 : -1;
+#else
     return unlink(path->data) == 0 ? 0 : -1;
+#endif
 }
 
 // Value-ABI aliases for LLVM.
@@ -3527,6 +3532,8 @@ int64_t mako_native_env_set_ptr(const MakoNativeString *key, const MakoNativeStr
     (void)k;
     (void)v;
     return -1;
+#elif defined(_WIN32)
+    return _putenv_s(k, v) == 0 ? 0 : -1;
 #else
     return setenv(k, v, 1) == 0 ? 0 : -1;
 #endif
