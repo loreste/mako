@@ -6773,7 +6773,11 @@ static inline void mako_nursery_clear_errs(MakoNursery *n) {
 static void *mako_task_trampoline(void *arg) {
     MakoTask *t = (MakoTask *)arg;
     void *r = NULL;
+    fprintf(stderr, "[mako-rt] task %p fn=%p arg=%p starting (stack ~%p)\n", (void*)t, (void*)t->fn, t->arg, (void*)&r);
+    fflush(stderr);
     if (t->fn) r = t->fn(t->arg);
+    fprintf(stderr, "[mako-rt] task %p completed r=%p\n", (void*)t, r);
+    fflush(stderr);
     t->result = r;
     atomic_store_explicit(&t->done, 1, memory_order_release);
     return r;
@@ -6823,10 +6827,17 @@ static inline MakoTask *mako_spawn_ex(MakoNursery *n, MakoTaskFn fn, void *arg, 
      * This avoids crashes and deadlocks while keeping programs correct. */
     mako_task_trampoline(t);
 #else
-    if (pthread_create(&t->thread, NULL, mako_task_trampoline, t) != 0) {
-        n->len--;
-        free(t);
-        mako_abort("task: unable to create worker thread");
+    {
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, 8 * 1024 * 1024); /* 8 MB stack for large codebases */
+        if (pthread_create(&t->thread, &attr, mako_task_trampoline, t) != 0) {
+            pthread_attr_destroy(&attr);
+            n->len--;
+            free(t);
+            mako_abort("task: unable to create worker thread");
+        }
+        pthread_attr_destroy(&attr);
     }
 #endif
     mako_task_reg_add(t);

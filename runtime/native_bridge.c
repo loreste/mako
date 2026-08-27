@@ -480,6 +480,14 @@ void *mako_native_pack_new(int64_t n) {
     return p;
 }
 
+/* Anti-ICF: called by kick stubs with a unique constant to prevent linker
+ * Identical Code Folding from merging stubs that target different functions.
+ * The volatile write ensures the call is not optimized away. */
+static volatile int64_t mako_anti_icf_sink = 0;
+void mako_native_anti_icf(int64_t id) {
+    mako_anti_icf_sink = id;
+}
+
 /* Sequential mut capture cells: shared int64 heap cell for outer+closure. */
 int64_t mako_native_i64_cell_new(int64_t v) {
     int64_t *p = (int64_t *)malloc(sizeof(int64_t));
@@ -11336,4 +11344,36 @@ int64_t mako_native_peer_table_capacity(int64_t a0) {
 
 int64_t mako_native_peer_table_alive(int64_t a0, int64_t a1) {
     return mako_peer_table_alive(a0, a1);
+}
+
+/* ---- LLM bridge additions ---- */
+MakoNativeString *mako_native_llm_ask_ptr(MakoNativeString *prompt, MakoNativeString *key,
+                                          int64_t timeout_ms) {
+    return bridge_take_str(mako_llm_ask(
+        bridge_borrow_str(prompt), bridge_borrow_str(key), timeout_ms));
+}
+MakoNativeString *mako_native_llm_chat_ptr(MakoNativeString *base, MakoNativeString *key,
+                                           MakoNativeString *body, int64_t timeout_ms) {
+    return bridge_take_str(mako_llm_chat(
+        bridge_borrow_str(base), bridge_borrow_str(key),
+        bridge_borrow_str(body), timeout_ms));
+}
+MakoNativeString *mako_native_llm_chat_stream_ptr(MakoNativeString *base, MakoNativeString *key,
+                                                  MakoNativeString *body, int64_t timeout_ms) {
+    return bridge_take_str(mako_llm_chat_stream(
+        bridge_borrow_str(base), bridge_borrow_str(key),
+        bridge_borrow_str(body), timeout_ms));
+}
+MakoNativeString *mako_native_llm_embeddings_ptr(MakoNativeString *base, MakoNativeString *key,
+                                                 MakoNativeString *body, int64_t timeout_ms) {
+    return bridge_take_str(mako_llm_embeddings(
+        bridge_borrow_str(base), bridge_borrow_str(key),
+        bridge_borrow_str(body), timeout_ms));
+}
+MakoNativeString *mako_native_llm_https_post_ptr(MakoNativeString *url, MakoNativeString *auth,
+                                                 MakoNativeString *body, int64_t timeout_ms,
+                                                 int64_t max_resp) {
+    return bridge_take_str(mako_llm_https_post(
+        bridge_borrow_str(url), bridge_borrow_str(auth),
+        bridge_borrow_str(body), timeout_ms, max_resp));
 }

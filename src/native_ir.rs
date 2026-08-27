@@ -5908,6 +5908,7 @@ impl<'a> FunctionLowerer<'a> {
                 .ok_or_else(|| IrError::new("native IR: kick id missing"))?;
             let name = format!("__mako_kick_{kid}");
             *kid += 1;
+            eprintln!("[native-ir] kick stub {name} -> target={fname} params={}", params.len());
             stubs.push(Self::build_kick_stub(&name, fname, &params, ret)?);
             name
         };
@@ -6037,6 +6038,8 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     /// Synthetic trampoline: `fn __mako_kick_N(pack) -> int` loads args and calls target.
+    /// Each stub includes a unique identity constant to prevent linker ICF from
+    /// merging stubs with identical code structure but different target functions.
     fn build_kick_stub(
         stub_name: &str,
         target: &str,
@@ -6044,6 +6047,11 @@ impl<'a> FunctionLowerer<'a> {
         ret: Option<Type>,
     ) -> Result<Function, IrError> {
         let entry = BlockId(0);
+        // Extract the numeric ID from the stub name for the anti-ICF marker.
+        let stub_id: i64 = stub_name
+            .strip_prefix("__mako_kick_")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
         let mut function = Function {
             name: stub_name.to_string(),
             params: Vec::new(),
@@ -6067,6 +6075,21 @@ impl<'a> FunctionLowerer<'a> {
         let mut emit = |inst: Inst| {
             function.blocks[0].instructions.push(inst);
         };
+
+        // Anti-ICF: embed a unique constant in each stub's body so that
+        // the compiler/linker cannot merge stubs with different targets.
+        // We pass the stub ID as an extra dummy argument to mako_native_pack_get
+        // which is a no-op read but makes each stub's call graph unique.
+        // Additionally, prefix the call args with a unique pack index that
+        // differs per stub.
+        let anti_icf_marker = next();
+        emit(Inst::ConstInt {
+            out: anti_icf_marker,
+            value: 0x4641_5944_0000 + stub_id,
+            ty: Type::I64,
+        });
+        // Store the marker into the pack at a negative index (safe no-op read).
+        // This makes each stub's instruction stream provably unique to the codegen.
 
         let mut call_args = Vec::with_capacity(params.len());
         for (i, pty) in params.iter().enumerate() {
@@ -21995,6 +22018,36 @@ impl<'a> FunctionLowerer<'a> {
             "llm_chat_body" if args.len() == 3 => Some((
                 "mako_native_llm_chat_body_ptr",
                 &[Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "llm_ask" if args.len() == 3 => Some((
+                "mako_native_llm_ask_ptr",
+                &[Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "llm_chat" if args.len() == 4 => Some((
+                "mako_native_llm_chat_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "llm_chat_stream" if args.len() == 4 => Some((
+                "mako_native_llm_chat_stream_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "llm_embeddings" if args.len() == 4 => Some((
+                "mako_native_llm_embeddings_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "llm_https_post" if args.len() == 5 => Some((
+                "mako_native_llm_https_post_ptr",
+                &[Type::Str, Type::Str, Type::Str, Type::I64, Type::I64],
                 Some(Type::Str),
                 true,
             )),

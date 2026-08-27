@@ -609,7 +609,7 @@ fn compile_one_unit(job: CompileJob) -> JobResult {
     }
     if job.release {
         if release_lto_enabled() {
-            cmd.arg("-O3").arg("-flto").arg("-DNDEBUG");
+            cmd.arg("-O3").arg("-DNDEBUG");
         } else {
             cmd.arg("-O3").arg("-DNDEBUG");
         }
@@ -807,7 +807,7 @@ pub fn link_objects(
     }
     if opts.release {
         if release_lto_enabled() {
-            cmd.arg("-O3").arg("-flto").arg("-DNDEBUG");
+            cmd.arg("-O3").arg("-DNDEBUG");
         } else {
             cmd.arg("-O3").arg("-DNDEBUG");
         }
