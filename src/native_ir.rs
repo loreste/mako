@@ -3146,7 +3146,7 @@ impl<'a> FunctionLowerer<'a> {
                             self.emit_drop(view, ty);
                             owned = true;
                         } else {
-                            owned = self.take_bare_string_local(expr, owned);
+                            owned = self.take_return_heap_local(expr, owned);
                         }
                         if !owned {
                             value = self.emit_clone(value, ty);
@@ -10928,19 +10928,11 @@ impl<'a> FunctionLowerer<'a> {
                             lowered.push(value);
                             continue;
                         }
-                        // By-value semantics: the callee owns its parameter
-                        // and may consume it via a consuming API
-                        // (strings_copy, append, etc.). Clone a borrowed
-                        // value so the caller's original stays valid; pass
-                        // an owned value directly (ownership transfers to
-                        // the callee). No post-call drop — the callee is
-                        // responsible for the parameter's lifetime.
-                        if !owned {
-                            value = self.emit_clone(value, actual);
-                        } else if let Expr::Ident(name) = arg_expr {
-                            // Transfer: caller relinquishes ownership.
-                            self.heap_owned.insert(name.clone(), false);
-                        }
+                        // By-value semantics: the callee owns its parameter.
+                        // Always clone so the caller's original stays valid
+                        // (the caller may read the variable after the call).
+                        // With refcounted slices, clone is O(1).
+                        value = self.emit_clone(value, actual);
                         lowered.push(value);
                         continue;
                     }
@@ -16225,6 +16217,34 @@ impl<'a> FunctionLowerer<'a> {
     /// owned temporaries (`None`, `Ok(1)`, `share_int(…)`, call results)
     /// are not mistaken for borrows — cloning those would leak the original.
     fn take_bare_string_local(&mut self, expr: &Expr, already_owned: bool) -> bool {
+        let Expr::Ident(name) = expr else {
+            return already_owned;
+        };
+        // Slice locals alias their backing storage. Ordinary assignments must
+        // clone so later appends preserve value semantics.
+        if matches!(
+            self.locals.get(name).map(|(_, ty)| *ty),
+            Some(
+                Type::IntSlice
+                    | Type::FloatSlice
+                    | Type::ByteSlice
+                    | Type::BoolSlice
+                    | Type::StrSlice
+                    | Type::StructSlice(_)
+                    | Type::PtrSlice(_)
+            )
+        ) {
+            return false;
+        }
+        if self.heap_owned.get(name) == Some(&true) {
+            self.heap_owned.insert(name.clone(), false);
+            true
+        } else {
+            already_owned
+        }
+    }
+
+    fn take_return_heap_local(&mut self, expr: &Expr, already_owned: bool) -> bool {
         let Expr::Ident(name) = expr else {
             return already_owned;
         };
@@ -31200,7 +31220,7 @@ impl<'a> FunctionLowerer<'a> {
                 )));
             }
             lowered.push(v);
-            if owned {
+            if owned && !matches!(arg, Expr::Ident(_)) {
                 temps.push((v, actual));
             }
         }
@@ -31228,7 +31248,6 @@ impl<'a> FunctionLowerer<'a> {
                 | "slices_reverse"
                 | "slices_unique"
                 | "queue_pop_str"
-                | "strings_copy"
         );
         // Take-send moves the string (arg 1) into the channel or frees it on
         // failure — never drop it after the call, and clear local ownership.
