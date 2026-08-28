@@ -3529,6 +3529,12 @@ impl Codegen {
             Expr::StructLit { name, .. } | Expr::StructLitPos { name, .. } => {
                 return Some(TypeExpr::Named(name.clone()));
             }
+            Expr::Array(values) => {
+                let inner = values
+                    .first()
+                    .and_then(|value| self.payload_type_for_discard(value))?;
+                return Some(TypeExpr::Array(Box::new(inner)));
+            }
             Expr::Call { callee, .. }
                 if matches!(callee.as_ref(), Expr::Ident(name)
                     if name == "Some" || name == "None" || name == "Ok" || name == "Err") =>
@@ -40482,9 +40488,16 @@ mod ownership_tests {
                 defaults: HashMap::new(),
             },
         );
-        let payload = TypeExpr::Array(Box::new(TypeExpr::Named("Point".into())));
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Ident("Some".into())),
+            args: vec![Expr::Array(vec![Expr::StructLit {
+                name: "Point".into(),
+                fields: vec![],
+                update: None,
+            }])],
+        };
 
-        codegen.emit_bag_payload_drop("bag", &payload, true);
+        assert!(codegen.emit_discarded_bag(&expr, None, "MakoOptionInt", "make_option()"));
 
         assert!(codegen.out.contains("mako_arr_Point_free(*bagp_"));
         assert!(codegen.out.contains("free(bagp_"));
