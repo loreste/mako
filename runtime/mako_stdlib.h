@@ -803,7 +803,7 @@ static inline MakoStrArray mako_slices_unique_strs(MakoStrArray a) {
         }
     }
     out.len = j;
-    free(sorted.data); /* headers only: kept strings were moved into out */
+    mako_rc_release(sorted.data); /* headers only: kept strings were moved into out */
     return out;
 }
 static inline MakoStrArray mako_slices_reverse_strs(MakoStrArray a) {

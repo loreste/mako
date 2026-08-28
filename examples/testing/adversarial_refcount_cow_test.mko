@@ -1,0 +1,382 @@
+// Adversarial refcount + COW tests.
+// Every pattern here targets the new mako_rc_* infrastructure.
+// Must stay ASan-clean: no use-after-free, no double-free, no leaks.
+
+// ---- Pattern 1: Clone-then-mutate (COW trigger) ----
+fn TestIntSliceCloneThenAppend() {
+    let mut a = make([]int, 0, 4)
+    a = append(a, 10)
+    a = append(a, 20)
+    a = append(a, 30)
+    let b = a  // refcount bump, shared backing
+    // Append to a must COW — must not corrupt b
+    a = append(a, 40)
+    assert_eq(len(a), 4)
+    assert_eq(len(b), 3)
+    assert_eq(a[3], 40)
+    assert_eq(b[0], 10)
+    assert_eq(b[2], 30)
+}
+
+// ---- Pattern 2: Clone chain — 3 aliases, mutate middle ----
+fn TestIntSliceTripleClone() {
+    let mut x = make([]int, 0, 8)
+    x = append(x, 1)
+    x = append(x, 2)
+    let y = x
+    let z = x
+    // x, y, z all share backing. Mutate x — must COW.
+    x = append(x, 3)
+    assert_eq(len(x), 3)
+    assert_eq(len(y), 2)
+    assert_eq(len(z), 2)
+    assert_eq(x[2], 3)
+    assert_eq(y[0], 1)
+    assert_eq(z[1], 2)
+}
+
+// ---- Pattern 3: String slice clone + append (COW with owned elements) ----
+fn TestStringSliceCloneThenAppend() {
+    let mut ss = make([]string, 0, 4)
+    ss = append(ss, "alpha")
+    ss = append(ss, "beta")
+    let copy = ss  // shared
+    ss = append(ss, "gamma")
+    assert_eq(len(ss), 3)
+    assert_eq(len(copy), 2)
+    assert_eq_str(ss[2], "gamma")
+    assert_eq_str(copy[0], "alpha")
+    assert_eq_str(copy[1], "beta")
+}
+
+// ---- Pattern 4: Float slice clone + mutate ----
+fn TestFloatSliceCloneThenAppend() {
+    let mut fs = make([]float, 0, 4)
+    fs = append(fs, 1.5)
+    fs = append(fs, 2.5)
+    let snap = fs
+    fs = append(fs, 3.5)
+    assert_eq(len(fs), 3)
+    assert_eq(len(snap), 2)
+}
+
+// ---- Pattern 5: Bool slice clone + mutate ----
+fn TestBoolSliceCloneThenAppend() {
+    let mut bs = make([]bool, 0, 4)
+    bs = append(bs, true)
+    bs = append(bs, false)
+    let snap = bs
+    bs = append(bs, true)
+    assert_eq(len(bs), 3)
+    assert_eq(len(snap), 2)
+    assert(snap[0] == true)
+    assert(snap[1] == false)
+}
+
+// ---- Pattern 6: Clone an empty slice, then grow both independently ----
+fn TestCloneEmptyThenGrow() {
+    let mut a: []int = []
+    let mut b = a
+    a = append(a, 100)
+    b = append(b, 200)
+    assert_eq(len(a), 1)
+    assert_eq(len(b), 1)
+    assert_eq(a[0], 100)
+    assert_eq(b[0], 200)
+}
+
+// ---- Pattern 7: Deep reassignment storm — sequential appends on shared ----
+fn TestReassignStorm() {
+    let mut xs = make([]int, 0, 2)
+    xs = append(xs, 1)
+    let snap1 = xs
+    xs = append(xs, 2)
+    let snap2 = xs
+    xs = append(xs, 3)  // triggers realloc + COW
+    let snap3 = xs
+    xs = append(xs, 4)
+    assert_eq(len(snap1), 1)
+    assert_eq(len(snap2), 2)
+    assert_eq(len(snap3), 3)
+    assert_eq(len(xs), 4)
+    assert_eq(snap1[0], 1)
+    assert_eq(snap2[1], 2)
+    assert_eq(snap3[2], 3)
+    assert_eq(xs[3], 4)
+}
+
+// ---- Pattern 8: Pass clone to function, original survives ----
+fn sum_slice(xs: []int) -> int {
+    let mut total = 0
+    let mut i = 0
+    while i < len(xs) {
+        total = total + xs[i]
+        i = i + 1
+    }
+    return total
+}
+
+fn TestPassCloneToFunction() {
+    let mut a = make([]int, 0, 4)
+    a = append(a, 5)
+    a = append(a, 10)
+    a = append(a, 15)
+    let b = a
+    let s = sum_slice(b)
+    assert_eq(s, 30)
+    // a must survive callee drop of b
+    assert_eq(len(a), 3)
+    assert_eq(a[0], 5)
+}
+
+// ---- Pattern 9: Append inside function on shared slice (COW across call) ----
+fn grow(xs: []int) -> []int {
+    return append(xs, 999)
+}
+
+fn TestAppendInsideFnOnShared() {
+    let mut a = make([]int, 0, 8)
+    a = append(a, 1)
+    a = append(a, 2)
+    let frozen = a
+    let grown = grow(a)
+    assert_eq(len(frozen), 2)
+    assert_eq(len(grown), 3)
+    assert_eq(grown[2], 999)
+    assert_eq(frozen[0], 1)
+    assert_eq(frozen[1], 2)
+}
+
+// ---- Pattern 10: String clone + reassign (no double-free) ----
+fn TestStringCloneReassign() {
+    let a = str_repeat("X", 100)
+    let b = a
+    let c = b
+    assert_eq_str(a, str_repeat("X", 100))
+    assert_eq_str(b, str_repeat("X", 100))
+    assert_eq_str(c, str_repeat("X", 100))
+}
+
+// ---- Pattern 11: Loop clone storm — many snapshots of growing slice ----
+fn TestLoopCloneStorm() {
+    let mut xs = make([]int, 0, 1)
+    let mut snaps = make([]int, 0, 10)  // just track lengths
+    let mut i = 0
+    while i < 10 {
+        xs = append(xs, i * i)
+        let snap = xs
+        snaps = append(snaps, len(snap))
+        i = i + 1
+    }
+    assert_eq(len(xs), 10)
+    assert_eq(len(snaps), 10)
+    assert_eq(snaps[0], 1)
+    assert_eq(snaps[9], 10)
+}
+
+// ---- Pattern 12: Byte slice COW ----
+fn TestByteSliceCOW() {
+    let mut b = make([]byte, 0, 4)
+    b = append(b, 65)
+    b = append(b, 66)
+    let snap = b
+    b = append(b, 67)
+    assert_eq(len(b), 3)
+    assert_eq(len(snap), 2)
+}
+
+// ---- Pattern 13: String slice — free shared then free elements ----
+fn TestStringSliceSharedFree() {
+    let mut ss = make([]string, 0, 4)
+    ss = append(ss, str_repeat("a", 50))
+    ss = append(ss, str_repeat("b", 50))
+    ss = append(ss, str_repeat("c", 50))
+    let copy1 = ss
+    let copy2 = ss
+    // All three (ss, copy1, copy2) share backing.
+    // At scope end all three drop — must not double-free the backing or elements.
+    assert_eq(len(ss), 3)
+    assert_eq(len(copy1), 3)
+    assert_eq(len(copy2), 3)
+    assert_eq_str(copy1[0], str_repeat("a", 50))
+    assert_eq_str(copy2[2], str_repeat("c", 50))
+}
+
+// ---- Pattern 14: Struct with slice field — clone struct, mutate slice ----
+struct Bag {
+    items: []int
+    label: string
+}
+
+fn TestStructWithSliceClone() {
+    let mut b = Bag {
+        items: [1, 2, 3],
+        label: "original",
+    }
+    let snap = b
+    b.items = append(b.items, 4)
+    assert_eq(len(b.items), 4)
+    assert_eq(len(snap.items), 3)
+    assert_eq_str(snap.label, "original")
+    assert_eq(b.items[3], 4)
+}
+
+// ---- Pattern 15: Large allocation — ensure rc header doesn't corrupt data ----
+fn TestLargeAllocation() {
+    let mut xs = make([]int, 0, 1)
+    let mut i = 0
+    while i < 1000 {
+        xs = append(xs, i)
+        i = i + 1
+    }
+    assert_eq(len(xs), 1000)
+    assert_eq(xs[0], 0)
+    assert_eq(xs[999], 999)
+    // Clone and verify integrity
+    let copy = xs
+    assert_eq(len(copy), 1000)
+    assert_eq(copy[500], 500)
+}
+
+// ---- Pattern 16: Interleaved append on two clones ----
+fn TestInterleavedAppendOnClones() {
+    let base = [10, 20, 30]
+    let mut a = base
+    let mut b = base
+    a = append(a, 40)
+    b = append(b, 50)
+    a = append(a, 60)
+    b = append(b, 70)
+    assert_eq(len(a), 5)
+    assert_eq(len(b), 5)
+    assert_eq(a[3], 40)
+    assert_eq(a[4], 60)
+    assert_eq(b[3], 50)
+    assert_eq(b[4], 70)
+    // base must be untouched
+    assert_eq(len(base), 3)
+}
+
+// ---- Pattern 17: to_owned on shared must deep-copy ----
+fn take_owned(xs: []int) -> []int {
+    let mut owned = xs
+    owned = append(owned, 42)
+    return owned
+}
+
+fn TestToOwnedOnShared() {
+    let a = [1, 2, 3]
+    let b = take_owned(a)
+    assert_eq(len(a), 3)
+    assert_eq(len(b), 4)
+    assert_eq(b[3], 42)
+    assert_eq(a[0], 1)
+}
+
+// ---- Pattern 18: Zero-length make then clone then append ----
+fn TestZeroLenMakeCloneAppend() {
+    let mut a = make([]int, 0, 0)
+    let b = a
+    a = append(a, 1)
+    assert_eq(len(a), 1)
+    assert_eq(len(b), 0)
+}
+
+// ---- Pattern 19: String concat after clone (distinct heap) ----
+fn TestStringConcatAfterClone() {
+    let mut s = "hello"
+    let t = s
+    s = s + " world"
+    assert_eq_str(s, "hello world")
+    assert_eq_str(t, "hello")
+}
+
+// ---- Pattern 20: Rapid clone-drop cycle (refcount underflow probe) ----
+fn TestRapidCloneDropCycle() {
+    let mut i = 0
+    while i < 50 {
+        let mut xs = make([]int, 0, 4)
+        xs = append(xs, i)
+        let _snap1 = xs
+        let _snap2 = xs
+        let _snap3 = xs
+        // all four (xs, snap1, snap2, snap3) drop at end of iteration
+        i = i + 1
+    }
+    // If refcount underflows, ASan catches the double-free
+}
+
+// ---- Pattern 21: String slice append after clone — element ownership ----
+fn TestStringSliceAppendAfterClone() {
+    let mut ss = make([]string, 0, 4)
+    ss = append(ss, "first")
+    ss = append(ss, "second")
+    let frozen = ss
+    // Append to ss must COW the backing, and the new element is independently owned
+    ss = append(ss, str_repeat("Z", 200))
+    assert_eq(len(ss), 3)
+    assert_eq(len(frozen), 2)
+    assert_eq_str(frozen[0], "first")
+    assert_eq_str(frozen[1], "second")
+    assert_eq_str(ss[2], str_repeat("Z", 200))
+}
+
+// ---- Pattern 22: Nested slice-of-ints clone independence ----
+fn TestNestedSliceCloneIndependence() {
+    let mut outer = make([]int, 0, 4)
+    outer = append(outer, 1)
+    outer = append(outer, 2)
+    let inner = outer
+    outer = append(outer, 3)
+    let inner2 = outer
+    outer = append(outer, 4)
+    assert_eq(len(inner), 2)
+    assert_eq(len(inner2), 3)
+    assert_eq(len(outer), 4)
+}
+
+// ---- Pattern 23: Return cloned slice from function ----
+fn snapshot(xs: []int) -> []int {
+    return xs  // should bump refcount
+}
+
+fn TestReturnClonedSlice() {
+    let mut a = make([]int, 0, 4)
+    a = append(a, 100)
+    a = append(a, 200)
+    let snap = snapshot(a)
+    a = append(a, 300)
+    assert_eq(len(snap), 2)
+    assert_eq(len(a), 3)
+    assert_eq(snap[0], 100)
+    assert_eq(a[2], 300)
+}
+
+// ---- Pattern 24: Stress — many small allocs and frees ----
+fn TestManySmallAllocFree() {
+    let mut i = 0
+    while i < 200 {
+        let mut xs = make([]int, 0, 1)
+        xs = append(xs, i)
+        xs = append(xs, i + 1)
+        assert_eq(len(xs), 2)
+        assert_eq(xs[0], i)
+        i = i + 1
+    }
+}
+
+// ---- Pattern 25: Byte array from string bytes, clone, verify ----
+fn TestByteArrayCloneIntegrity() {
+    let mut b = make([]byte, 0, 8)
+    b = append(b, 72)   // H
+    b = append(b, 101)  // e
+    b = append(b, 108)  // l
+    b = append(b, 108)  // l
+    b = append(b, 111)  // o
+    let snap = b
+    b = append(b, 33)   // !
+    assert_eq(len(snap), 5)
+    assert_eq(len(b), 6)
+    assert_eq(snap[0], 72)
+    assert_eq(b[5], 33)
+}

@@ -486,7 +486,6 @@ void *mako_native_pack_new(int64_t n) {
 /* Anti-ICF global: kick stubs write a unique ID here so the compiler
  * cannot merge them. The `volatile` + `optnone` on stubs guarantees
  * each stub has a distinct address at runtime. */
-volatile int64_t __mako_kick_id = 0;
 static volatile int64_t mako_anti_icf_sink = 0;
 void mako_native_anti_icf(int64_t id) {
     mako_anti_icf_sink = id;
@@ -1930,7 +1929,7 @@ static MakoNativeStrSliceHdr *mako_native_str_array_to_slice(MakoStrArray a) {
         MakoNativeString *p = bridge_take_str(a.data[i]);
         h->data[i] = p ? p : mako_native_string_literal_ptr("", 0);
     }
-    free(a.data);
+    if (a.cap > 0 && a.data) mako_rc_release(a.data);
     return h;
 }
 
@@ -1952,8 +1951,7 @@ MakoNativeStrSliceHdr *mako_native_str_cut_ptr(MakoNativeString *s, MakoNativeSt
 MakoNativeString *mako_native_str_join_ptr(MakoNativeStrSliceHdr *parts, MakoNativeString *sep) {
     if (!parts || parts->len == 0) return mako_native_string_literal_ptr("", 0);
     MakoStrArray a;
-    a.data = (MakoString *)calloc(parts->len, sizeof(MakoString));
-    if (!a.data) abort();
+    a.data = (MakoString *)mako_rc_calloc(parts->len * sizeof(MakoString));
     a.len = parts->len;
     a.cap = parts->len;
     for (size_t i = 0; i < parts->len; ++i) {
@@ -1963,7 +1961,7 @@ MakoNativeString *mako_native_str_join_ptr(MakoNativeStrSliceHdr *parts, MakoNat
         a.data[i] = bridge_borrow_str(el);
     }
     MakoString out = mako_str_join(a, bridge_borrow_str(sep));
-    free(a.data);
+    mako_rc_release(a.data);
     return bridge_take_str(out);
 }
 
@@ -2261,7 +2259,7 @@ void *mako_native_gpu_download_f32(int64_t buf) {
     if (vals.data && vals.len && out && out->data) {
         memcpy(out->data, vals.data, vals.len * sizeof(double));
     }
-    free(vals.data);
+    if (vals.cap > 0 && vals.data) mako_rc_release(vals.data);
     return out;
 }
 int64_t mako_native_gpu_relu_f32(int64_t a, int64_t b) {
@@ -3534,7 +3532,7 @@ MakoNativeStringSlicePtr *mako_native_read_dir_ptr(MakoNativeString *path) {
             h->data[i] = mako_native_string_literal_ptr("", 0);
         }
     }
-    free(a.data);
+    mako_rc_release(a.data);
     return h;
 }
 
@@ -3563,7 +3561,7 @@ MakoNativeStringSlicePtr *mako_native_env_keys_ptr(void) {
             h->data[i] = mako_native_string_literal_ptr("", 0);
         }
     }
-    free(a.data);
+    mako_rc_release(a.data);
     return h;
 }
 
@@ -4536,12 +4534,9 @@ MakoNativeIntSlice *mako_native_list_remove_int_ptr(MakoNativeIntSlice *a, int64
     return out;
 }
 
-/* strings_copy → str slice clone. The IR marks this as consuming its first
- * argument (see `consumes_first` in native_ir), so free the input here. */
+/* strings_copy → str slice clone. Non-consuming: caller still owns input. */
 MakoNativeStringSlice *mako_native_strings_copy_ptr(MakoNativeStringSlice *a) {
-    MakoNativeStringSlice *out = mako_native_string_slice_clone_ptr(a);
-    mako_native_string_slice_drop_ptr(a);
-    return out;
+    return mako_native_string_slice_clone_ptr(a);
 }
 
 /* ---- hmac / csrf / rwmutex ---- */
@@ -4770,7 +4765,7 @@ MakoNativeIntSlice *mako_native_slices_unique_ints_ptr(MakoNativeIntSlice *a) {
     size_t j = uniq.len;
     MakoNativeIntSlice *out = mako_native_int_slice_make_ptr(j, j ? j : 1);
     for (size_t i = 0; i < j; i++) out->data[i] = uniq.data[i];
-    free(uniq.data);
+    mako_rc_release(uniq.data);
     out->len = j;
     mako_native_int_slice_drop_ptr(a);
     return out;
@@ -4955,7 +4950,7 @@ MakoNativeStringSlice *mako_native_csv_split_line_ptr(MakoNativeString *a0) {
     MakoNativeStringSlice *out = mako_native_string_slice_make_ptr(a.len, a.len ? a.len : 1);
     for (size_t i = 0; i < a.len; i++) out->data[i] = bridge_take_str(a.data[i]);
     out->len = a.len;
-    free(a.data);
+    mako_rc_release(a.data);
     return out;
 }
 
@@ -4980,7 +4975,7 @@ MakoNativeStringSlice *mako_native_filepath_walk_ptr(MakoNativeString *a0) {
     MakoNativeStringSlice *out = mako_native_string_slice_make_ptr(a.len, a.len ? a.len : 1);
     for (size_t i = 0; i < a.len; i++) out->data[i] = bridge_take_str(a.data[i]);
     out->len = a.len;
-    free(a.data);
+    mako_rc_release(a.data);
     return out;
 }
 
@@ -5358,7 +5353,7 @@ MakoNativeStringSlice *mako_native_filepath_walk_n_ptr(MakoNativeString *a0, int
     MakoNativeStringSlice *out=mako_native_string_slice_make_ptr(a.len,a.len?a.len:1);
     for(size_t i=0;i<a.len;i++) out->data[i]=bridge_take_str(a.data[i]);
     out->len=a.len;
-    free(a.data);
+    mako_rc_release(a.data);
     return out;
 }
 
@@ -5491,7 +5486,7 @@ MakoNativeIntSlice *mako_native_list_fill_int_ptr(int64_t a0, int64_t a1) {
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
     if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t));
     out->len=arr.len;
-    if(arr.cap) free(arr.data);
+    if(arr.cap&&arr.data) mako_rc_release(arr.data);
     return out;
 }
 
@@ -5777,7 +5772,7 @@ MakoNativeIntSlice *mako_native_list_range_int_ptr(int64_t a0, int64_t a1) {
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
     if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t));
     out->len=arr.len;
-    if(arr.cap) free(arr.data);
+    if(arr.cap&&arr.data) mako_rc_release(arr.data);
     return out;
 }
 
@@ -6003,7 +5998,7 @@ int64_t mako_native_lfq_new(int64_t a0) {
 }
 
 int64_t mako_native_list_binary_search_int(MakoNativeIntSlice *a0, int64_t a1) {
-    return (int64_t)mako_list_binary_search_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    return (int64_t)mako_list_binary_search_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
 }
 
 int64_t mako_native_llm_usage_total_tokens_ptr(MakoNativeString *a0) {
@@ -6063,11 +6058,11 @@ int64_t mako_native_reflect_type_count(void) {
 }
 
 MakoNativeIntSlice *mako_native_set_union_int_ptr(MakoNativeIntSlice *a0, MakoNativeIntSlice *a1) {
-    MakoIntArray arr=mako_set_union_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), ((MakoIntArray){.data=a1?a1->data:NULL,.len=a1?a1->len:0,.cap=a1?a1->cap:0}));
+    MakoIntArray arr=mako_set_union_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), ((MakoIntArray){.data=a1?a1->data:NULL,.len=a1?a1->len:0,.cap=0}));
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
     if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t));
     out->len=arr.len;
-    if(arr.cap) free(arr.data);
+    if(arr.cap&&arr.data) mako_rc_release(arr.data);
     return out;
 }
 
@@ -6213,11 +6208,11 @@ int64_t mako_native_lfq_try_push(int64_t a0, int64_t a1) {
 }
 
 MakoNativeIntSlice *mako_native_list_take_int_ptr(MakoNativeIntSlice *a0, int64_t a1) {
-    MakoIntArray arr=mako_list_take_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    MakoIntArray arr=mako_list_take_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
     if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t));
     out->len=arr.len;
-    if(arr.cap) free(arr.data);
+    if(arr.cap&&arr.data) mako_rc_release(arr.data);
     return out;
 }
 
@@ -6290,7 +6285,7 @@ MakoNativeString *mako_native_scram_gs2_header_ptr(MakoNativeString *a0) {
 }
 
 int64_t mako_native_set_has_int(MakoNativeIntSlice *a0, int64_t a1) {
-    return (int64_t)mako_set_has_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    return (int64_t)mako_set_has_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
 }
 
 int64_t mako_native_sip_header_count_ptr(MakoNativeString *a0, MakoNativeString *a1) {
@@ -6350,7 +6345,7 @@ MakoNativeStringSlice *mako_native_yaml_keys_ptr(MakoNativeString *a0) {
     MakoNativeStringSlice *out=mako_native_string_slice_make_ptr(a.len,a.len?a.len:1);
     for(size_t i=0;i<a.len;i++) out->data[i]=bridge_take_str(a.data[i]);
     out->len=a.len;
-    free(a.data);
+    mako_rc_release(a.data);
     return out;
 }
 int64_t mako_native_alloc_track_free(int64_t a0) {
@@ -6364,7 +6359,7 @@ MakoNativeString *mako_native_auth_token_sign_ptr(MakoNativeString *a0, MakoNati
 }
 
 MakoNativeString *mako_native_avro_encode_array_long_ptr(MakoNativeIntSlice *a0) {
-    MakoNativeString *ret = bridge_take_str(mako_avro_encode_array_long(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0})));
+    MakoNativeString *ret = bridge_take_str(mako_avro_encode_array_long(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0})));
     return ret;
 }
 
@@ -6450,11 +6445,11 @@ int64_t mako_native_lfq_len(int64_t a0) {
 }
 
 MakoNativeIntSlice *mako_native_list_drop_int_ptr(MakoNativeIntSlice *a0, int64_t a1) {
-    MakoIntArray arr=mako_list_drop_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    MakoIntArray arr=mako_list_drop_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
     if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t));
     out->len=arr.len;
-    if(arr.cap) free(arr.data);
+    if(arr.cap&&arr.data) mako_rc_release(arr.data);
     return out;
 }
 
@@ -6519,11 +6514,11 @@ MakoNativeString *mako_native_scram_cbind_b64_ptr(MakoNativeString *a0, MakoNati
 }
 
 MakoNativeIntSlice *mako_native_set_intersect_int_ptr(MakoNativeIntSlice *a0, MakoNativeIntSlice *a1) {
-    MakoIntArray arr=mako_set_intersect_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), ((MakoIntArray){.data=a1?a1->data:NULL,.len=a1?a1->len:0,.cap=a1?a1->cap:0}));
+    MakoIntArray arr=mako_set_intersect_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), ((MakoIntArray){.data=a1?a1->data:NULL,.len=a1?a1->len:0,.cap=0}));
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
     if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t));
     out->len=arr.len;
-    if(arr.cap) free(arr.data);
+    if(arr.cap&&arr.data) mako_rc_release(arr.data);
     return out;
 }
 
@@ -6587,7 +6582,7 @@ MakoNativeStringSlice *mako_native_yaml_get_list_ptr(MakoNativeString *a0, MakoN
     MakoNativeStringSlice *out=mako_native_string_slice_make_ptr(a.len,a.len?a.len:1);
     for(size_t i=0;i<a.len;i++) out->data[i]=bridge_take_str(a.data[i]);
     out->len=a.len;
-    free(a.data);
+    mako_rc_release(a.data);
     return out;
 }
 MakoNativeString *mako_native_auth_token_subject_ptr(MakoNativeString *a0) {
@@ -6598,7 +6593,7 @@ MakoNativeString *mako_native_auth_token_subject_ptr(MakoNativeString *a0) {
 MakoNativeIntSlice *mako_native_avro_decode_array_long_ptr(MakoNativeString *a0) {
     MakoIntArray arr=mako_avro_decode_array_long(bridge_borrow_str(a0));
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
-    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 MakoNativeString *mako_native_dns_lookup_all_ptr(MakoNativeString *a0) {
@@ -6629,7 +6624,7 @@ int64_t mako_native_gfx_poll(int64_t a0) {
 MakoNativeStringSlice *mako_native_gob_decode_strs_ptr(MakoNativeString *a0) {
     MakoStrArray a=mako_gob_decode_strs(bridge_borrow_str(a0));
     MakoNativeStringSlice *out=mako_native_string_slice_make_ptr(a.len,a.len?a.len:1);
-    for(size_t i=0;i<a.len;i++) out->data[i]=bridge_take_str(a.data[i]); out->len=a.len; free(a.data); return out;
+    for(size_t i=0;i<a.len;i++) out->data[i]=bridge_take_str(a.data[i]); out->len=a.len; mako_rc_release(a.data); return out;
 }
 
 MakoNativeString *mako_native_gob_encode_string_ptr(MakoNativeString *a0) {
@@ -6687,9 +6682,9 @@ int64_t mako_native_lfq_try_pop(int64_t a0) {
 }
 
 MakoNativeIntSlice *mako_native_list_zip_int_ptr(MakoNativeIntSlice *a0, MakoNativeIntSlice *a1) {
-    MakoIntArray arr=mako_list_zip_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), ((MakoIntArray){.data=a1?a1->data:NULL,.len=a1?a1->len:0,.cap=a1?a1->cap:0}));
+    MakoIntArray arr=mako_list_zip_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), ((MakoIntArray){.data=a1?a1->data:NULL,.len=a1?a1->len:0,.cap=0}));
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
-    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 MakoNativeString *mako_native_llm_tool_call_args_ptr(MakoNativeString *a0, int64_t a1) {
@@ -6698,7 +6693,7 @@ MakoNativeString *mako_native_llm_tool_call_args_ptr(MakoNativeString *a0, int64
 }
 
 MakoNativeString *mako_native_msgpack_encode_array_int_ptr(MakoNativeIntSlice *a0) {
-    MakoNativeString *ret = bridge_take_str(mako_msgpack_encode_array_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0})));
+    MakoNativeString *ret = bridge_take_str(mako_msgpack_encode_array_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0})));
     return ret;
 }
 
@@ -6748,9 +6743,9 @@ MakoNativeString *mako_native_scram_client_final_without_proof_ptr(MakoNativeStr
 }
 
 MakoNativeIntSlice *mako_native_set_diff_int_ptr(MakoNativeIntSlice *a0, MakoNativeIntSlice *a1) {
-    MakoIntArray arr=mako_set_diff_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), ((MakoIntArray){.data=a1?a1->data:NULL,.len=a1?a1->len:0,.cap=a1?a1->cap:0}));
+    MakoIntArray arr=mako_set_diff_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), ((MakoIntArray){.data=a1?a1->data:NULL,.len=a1?a1->len:0,.cap=0}));
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
-    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 int64_t mako_native_shutdown_requested(void) {
@@ -6853,9 +6848,9 @@ MakoNativeString *mako_native_grpc_http2_unary_response_status_ptr(int64_t a0, M
 }
 
 MakoNativeIntSlice *mako_native_heap_push_int_ptr(MakoNativeIntSlice *a0, int64_t a1) {
-    MakoIntArray arr=mako_heap_push_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    MakoIntArray arr=mako_heap_push_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
-    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 int64_t mako_native_hpack_dyn_insert_ptr(MakoNativeString *a0, MakoNativeString *a1) {
@@ -6889,7 +6884,7 @@ int64_t mako_native_http2_window_update_increment_ptr(MakoNativeString *a0) {
 }
 
 int64_t mako_native_list_find_int(MakoNativeIntSlice *a0, int64_t a1) {
-    int64_t ret=(int64_t)mako_list_find_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    int64_t ret=(int64_t)mako_list_find_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     return ret;
 }
 
@@ -6911,7 +6906,7 @@ MakoNativeString *mako_native_metrics_export_otlp_json_ptr(void) {
 MakoNativeIntSlice *mako_native_msgpack_decode_array_int_ptr(MakoNativeString *a0) {
     MakoIntArray arr=mako_msgpack_decode_array_int(bridge_borrow_str(a0));
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
-    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 MakoNativeString *mako_native_plugin_call_ptr(int64_t a0, MakoNativeString *a1, MakoNativeString *a2) {
@@ -7244,7 +7239,7 @@ MakoNativeString *mako_native_grpc_http2_stream_data_ptr(int64_t a0, MakoNativeS
 }
 
 int64_t mako_native_heap_peek_int(MakoNativeIntSlice *a0) {
-    int64_t ret=(int64_t)mako_heap_peek_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}));
+    int64_t ret=(int64_t)mako_heap_peek_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}));
     return ret;
 }
 
@@ -7269,7 +7264,7 @@ MakoNativeString *mako_native_http2_rst_stream_frame_ptr(int64_t a0, int64_t a1)
 }
 
 int64_t mako_native_list_count_int(MakoNativeIntSlice *a0, int64_t a1) {
-    int64_t ret=(int64_t)mako_list_count_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    int64_t ret=(int64_t)mako_list_count_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     return ret;
 }
 
@@ -7361,7 +7356,7 @@ MakoNativeString *mako_native_tls_record_appdata_seal_seq_ptr(MakoNativeString *
 MakoNativeIntSlice *mako_native_tok_encode_ptr(int64_t a0, MakoNativeString *a1) {
     MakoIntArray arr=mako_tok_encode(a0, bridge_borrow_str(a1));
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
-    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 int64_t mako_native_utf8_rune_start(int64_t a0) {
@@ -7414,9 +7409,9 @@ int64_t mako_native_grpc_http2_stream_data_count_ptr(MakoNativeString *a0, int64
 }
 
 MakoNativeIntSlice *mako_native_heap_pop_int_ptr(MakoNativeIntSlice *a0) {
-    MakoIntArray arr=mako_heap_pop_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}));
+    MakoIntArray arr=mako_heap_pop_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}));
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
-    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 MakoNativeString *mako_native_hex_to_bytes_ptr(MakoNativeString *a0) {
@@ -7450,7 +7445,7 @@ MakoNativeString *mako_native_http2_stream_body_ptr(int64_t a0) {
 }
 
 int64_t mako_native_list_any_eq_int(MakoNativeIntSlice *a0, int64_t a1) {
-    int64_t ret=(int64_t)mako_list_any_eq_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    int64_t ret=(int64_t)mako_list_any_eq_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     return ret;
 }
 
@@ -7530,7 +7525,7 @@ MakoNativeString *mako_native_tls_record_appdata_open_seq_ptr(MakoNativeString *
 }
 
 MakoNativeString *mako_native_tok_decode_ptr(int64_t a0, MakoNativeIntSlice *a1) {
-    MakoNativeString *ret = bridge_take_str(mako_tok_decode(a0, ((MakoIntArray){.data=a1?a1->data:NULL,.len=a1?a1->len:0,.cap=a1?a1->cap:0})));
+    MakoNativeString *ret = bridge_take_str(mako_tok_decode(a0, ((MakoIntArray){.data=a1?a1->data:NULL,.len=a1?a1->len:0,.cap=0})));
     return ret;
 }
 
@@ -7604,7 +7599,7 @@ MakoNativeString *mako_native_httptest_get_ptr(MakoNativeString *a0) {
 }
 
 int64_t mako_native_list_all_eq_int(MakoNativeIntSlice *a0, int64_t a1) {
-    int64_t ret=(int64_t)mako_list_all_eq_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    int64_t ret=(int64_t)mako_list_all_eq_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     return ret;
 }
 
@@ -7761,9 +7756,9 @@ MakoNativeStringSlice *mako_native_list_concat_str_ptr(MakoNativeStringSlice *a0
 }
 
 MakoNativeIntSlice *mako_native_list_take_while_lt_int_ptr(MakoNativeIntSlice *a0, int64_t a1) {
-    MakoIntArray arr=mako_list_take_while_lt_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    MakoIntArray arr=mako_list_take_while_lt_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
-    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 int64_t mako_native_llm_estimate_tokens_ptr(MakoNativeString *a0) {
@@ -7885,9 +7880,9 @@ MakoNativeString *mako_native_httptest_header_ptr(MakoNativeString *a0) {
 }
 
 MakoNativeIntSlice *mako_native_list_map_add_int_ptr(MakoNativeIntSlice *a0, int64_t a1) {
-    MakoIntArray arr=mako_list_map_add_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    MakoIntArray arr=mako_list_map_add_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
-    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 int64_t mako_native_llm_retry_delay_ms(int64_t a0, int64_t a1, int64_t a2) {
@@ -7980,9 +7975,9 @@ int64_t mako_native_fsync(int64_t a0) {
 }
 
 MakoNativeIntSlice *mako_native_list_map_mul_int_ptr(MakoNativeIntSlice *a0, int64_t a1) {
-    MakoIntArray arr=mako_list_map_mul_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    MakoIntArray arr=mako_list_map_mul_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
-    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+    if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 int64_t mako_native_llm_should_retry_ptr(MakoNativeString *a0) {
@@ -8008,7 +8003,7 @@ int64_t mako_native_quic_scid_len_ptr(MakoNativeString *a0) {
 MakoNativeStringSlice *mako_native_regex_find_all_ptr(MakoNativeString *a0, MakoNativeString *a1, int64_t a2) {
     MakoStrArray a=mako_regex_find_all(bridge_borrow_str(a0), bridge_borrow_str(a1), a2);
     MakoNativeStringSlice *out=mako_native_string_slice_make_ptr(a.len,a.len?a.len:1);
-    for(size_t i=0;i<a.len;i++) out->data[i]=bridge_take_str(a.data[i]); out->len=a.len; free(a.data); return out;
+    for(size_t i=0;i<a.len;i++) out->data[i]=bridge_take_str(a.data[i]); out->len=a.len; mako_rc_release(a.data); return out;
 }
 
 MakoNativeString *mako_native_sdp_media_type_ptr(MakoNativeString *a0, int64_t a1) {
@@ -8162,7 +8157,7 @@ void mako_native_zip_close(int64_t a0) {
 MakoNativeStringSlice *mako_native_zip_list_ptr(MakoNativeString *a0) {
     MakoStrArray a=mako_zip_list(bridge_borrow_str(a0));
  MakoNativeStringSlice *out=mako_native_string_slice_make_ptr(a.len,a.len?a.len:1);
- for(size_t i=0;i<a.len;i++) out->data[i]=bridge_take_str(a.data[i]); out->len=a.len; free(a.data); return out;
+ for(size_t i=0;i<a.len;i++) out->data[i]=bridge_take_str(a.data[i]); out->len=a.len; mako_rc_release(a.data); return out;
 }
 
 int64_t mako_native_limits_mem_used(int64_t a0) {
@@ -8427,9 +8422,9 @@ int64_t mako_native_http2_priority_weight_ptr(MakoNativeString *a0) {
 }
 
 MakoNativeIntSlice *mako_native_list_filter_lt_int_ptr(MakoNativeIntSlice *a0, int64_t a1) {
-    MakoIntArray arr=mako_list_filter_lt_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    MakoIntArray arr=mako_list_filter_lt_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
  MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
- if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+ if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 MakoNativeString *mako_native_llm_body_force_stream_ptr(MakoNativeString *a0) {
@@ -8527,9 +8522,9 @@ int64_t mako_native_http2_priority_exclusive_ptr(MakoNativeString *a0) {
 }
 
 MakoNativeIntSlice *mako_native_list_filter_gt_int_ptr(MakoNativeIntSlice *a0, int64_t a1) {
-    MakoIntArray arr=mako_list_filter_gt_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    MakoIntArray arr=mako_list_filter_gt_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
  MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
- if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+ if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 MakoNativeString *mako_native_llm_embed_body_ptr(MakoNativeString *a0, MakoNativeString *a1) {
@@ -8618,7 +8613,7 @@ int64_t mako_native_http2_priority_apply_ptr(MakoNativeString *a0) {
 }
 
 int64_t mako_native_list_fold_add_int(MakoNativeIntSlice *a0, int64_t a1) {
-    int64_t ret=(int64_t)mako_list_fold_add_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    int64_t ret=(int64_t)mako_list_fold_add_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     return ret;
 }
 
@@ -8697,7 +8692,7 @@ int64_t mako_native_http2_stream_priority_dep(int64_t a0) {
 }
 
 int64_t mako_native_list_fold_mul_int(MakoNativeIntSlice *a0, int64_t a1) {
-    int64_t ret=(int64_t)mako_list_fold_mul_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=a0?a0->cap:0}), a1);
+    int64_t ret=(int64_t)mako_list_fold_mul_int(((MakoIntArray){.data=a0?a0->data:NULL,.len=a0?a0->len:0,.cap=0}), a1);
     return ret;
 }
 
@@ -8734,7 +8729,7 @@ MakoNativeString *mako_native_tls_client_application_traffic_secret_hex_ptr(Mako
 MakoNativeIntSlice *mako_native_tok_encode_bpe_ptr(int64_t a0, MakoNativeString *a1) {
     MakoIntArray arr=mako_tok_encode_bpe(a0, bridge_borrow_str(a1));
  MakoNativeIntSlice *out=mako_native_int_slice_make_ptr(arr.len,arr.len?arr.len:1);
- if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap) free(arr.data); return out;
+ if(arr.data&&arr.len) memcpy(out->data,arr.data,arr.len*sizeof(int64_t)); out->len=arr.len; if(arr.cap&&arr.data) mako_rc_release(arr.data); return out;
 }
 
 MakoNativeString *mako_native_trace_export_json_ptr(void) {
@@ -10154,7 +10149,7 @@ MakoNativeIntSlice *mako_native_sql_query_col_int_ptr(int64_t db, MakoNativeStri
     size_t n = a.len;
     MakoNativeIntSlice *out = mako_native_int_slice_make_ptr(n, n ? n : 1);
     for (size_t i = 0; i < n; i++) out->data[i] = a.data[i];
-    free(a.data);
+    mako_rc_release(a.data);
     return out;
 }
 int64_t mako_native_uuid_cmp_ptr(MakoNativeString *a, MakoNativeString *b) {
@@ -10179,7 +10174,7 @@ MakoNativeStringSlice *mako_native_sql_query_col_str_ptr(int64_t db, MakoNativeS
     for (size_t i = 0; i < n; i++) {
         out->data[i] = bridge_take_str(a.data[i]);
     }
-    free(a.data);
+    mako_rc_release(a.data);
     return out;
 }
 
@@ -10314,7 +10309,7 @@ MakoNativeStringSlice *mako_native_toml_keys_ptr(MakoNativeString *doc) {
     MakoNativeStringSlice *out = mako_native_string_slice_make_ptr(a.len, a.len ? a.len : 1);
     for (size_t i = 0; i < a.len; i++) out->data[i] = bridge_take_str(a.data[i]);
     out->len = a.len;
-    free(a.data);
+    mako_rc_release(a.data);
     return out;
 }
 MakoNativeString *mako_native_toml_pair_ptr(MakoNativeString *k, MakoNativeString *v) {

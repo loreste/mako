@@ -62,6 +62,54 @@
 extern "C" {
 #endif
 
+/* ---- Refcounted allocation infrastructure ----
+ * Heap-backed slice types use a refcount header before the
+ * data pointer: [4-byte atomic refcount][4-byte pad]. Clone bumps refcount (O(1)),
+ * free decrements and only deallocates at 0. Append/set do COW when shared.
+ * This eliminates O(n) deep copies that caused OOM in database engine loops. */
+#define MAKO_RC_HEADER 8
+#define MAKO_POOL_CAP_FLAG ((size_t)1 << (sizeof(size_t) * 8 - 1))
+static inline _Atomic uint32_t *mako_rc_of(void *data) {
+    return (_Atomic uint32_t *)((char *)data - MAKO_RC_HEADER);
+}
+#define MAKO_RC_MAGIC 0x4D414B4FU  /* "MAKO" */
+static inline void *mako_rc_alloc(size_t data_bytes) {
+    char *block = (char *)malloc(MAKO_RC_HEADER + data_bytes);
+    if (!block) { fprintf(stderr, "mako: OOM in rc_alloc\n"); abort(); }
+    _Atomic uint32_t *rc = (_Atomic uint32_t *)block;
+    atomic_init(rc, 1);
+    *(uint32_t *)(block + 4) = MAKO_RC_MAGIC;  /* tag for detection */
+    return block + MAKO_RC_HEADER;
+}
+static inline int mako_rc_is_rc(void *data) {
+    if (!data) return 0;
+    return *(uint32_t *)((char *)data - 4) == MAKO_RC_MAGIC;
+}
+static inline void *mako_rc_calloc(size_t data_bytes) {
+    void *p = mako_rc_alloc(data_bytes);
+    memset(p, 0, data_bytes);
+    return p;
+}
+static inline void mako_rc_retain(void *data) {
+    if (data && mako_rc_is_rc(data))
+        atomic_fetch_add_explicit(mako_rc_of(data), 1, memory_order_relaxed);
+}
+static inline int mako_rc_release(void *data) {
+    if (!data) return 0;
+    if (!mako_rc_is_rc(data)) return 0;  /* non-RC pointer (view/literal) — no-op */
+    uint32_t prev = atomic_fetch_sub_explicit(mako_rc_of(data), 1, memory_order_acq_rel);
+    if (prev <= 1) { free((char *)data - MAKO_RC_HEADER); return 1; }
+    return 0;
+}
+static inline int mako_rc_shared(void *data) {
+    if (!data) return 0;
+    if (!mako_rc_is_rc(data)) return 0;
+    return atomic_load_explicit(mako_rc_of(data), memory_order_acquire) > 1;
+}
+
+/* Per-translation-unit anti-ICF marker for generated kick stubs. */
+static volatile int64_t __mako_kick_id = 0;
+
 /* Branch hints for hot paths (no-ops on unknown compilers). */
 #if defined(__GNUC__) || defined(__clang__)
 #define MAKO_LIKELY(x) __builtin_expect(!!(x), 1)
@@ -196,7 +244,8 @@ static inline int mako_str_is_empty_singleton(MakoString s) {
 
 /* Free an owned string; no-op for the empty singleton. */
 static inline void mako_str_free(MakoString s) {
-    if (s.data && s.data != &mako_str_empty_byte) free(s.data);
+    if (!s.data || s.data == &mako_str_empty_byte) return;
+    free(s.data);
 }
 
 /* Create an owned MakoString by copying a C string. NULL/empty → shared empty. */
@@ -350,9 +399,7 @@ static inline void mako_print_bool(bool b) {
 }
 
 /* ---- Dynamic int arrays ----
- * Growable int64 slice. `len` is the number of live elements, `cap` is the
- * allocated capacity. Append grows with 2x strategy. Thread-unsafe — protect
- * with hold/share at the Mako level.
+ * Growable int64 slice with refcounted backing store.
  */
 typedef struct {
     int64_t *data;
@@ -360,28 +407,20 @@ typedef struct {
     size_t cap;
 } MakoIntArray;
 
-/* Empty POD slice — no heap. cap==0 ⇒ free is a no-op (SAFE-003 view). */
 static inline MakoIntArray mako_int_array_empty(void) {
-    MakoIntArray a;
-    a.data = NULL;
-    a.len = 0;
-    a.cap = 0;
+    MakoIntArray a = {NULL, 0, 0};
     return a;
 }
 
-/* Non-owning view of existing storage (stack lit / sub-slice). No malloc. */
 static inline MakoIntArray mako_int_array_view(int64_t *data, size_t n) {
-    MakoIntArray a;
-    a.data = data;
-    a.len = n;
-    a.cap = 0;
+    MakoIntArray a = {data, n, 0};
     return a;
 }
 
 static inline MakoIntArray mako_int_array_new(size_t n) {
     if (n == 0) return mako_int_array_empty();
     MakoIntArray a;
-    a.data = (int64_t *)calloc(n, sizeof(int64_t));
+    a.data = (int64_t *)mako_rc_calloc(n * sizeof(int64_t));
     a.len = n;
     a.cap = n;
     return a;
@@ -394,46 +433,32 @@ static inline MakoIntArray mako_int_array_of(const int64_t *vals, size_t n) {
     return a;
 }
 
-/* Value-copy an owning or borrowed slice into independent heap storage. */
 static inline MakoIntArray mako_int_array_clone(MakoIntArray a) {
     if (a.len == 0) return mako_int_array_empty();
-    return mako_int_array_of(a.data, a.len);
+    if (a.cap > 0 && a.data) mako_rc_retain(a.data);
+    return a;  /* O(1) — shared backing, same cap */
 }
 
-/* Escape / return: identity if already heap-owned (cap>0); else copy to heap. */
 static inline MakoIntArray mako_int_array_to_owned(MakoIntArray a) {
-    if (MAKO_LIKELY(a.cap > 0)) return a;
+    if (a.cap > 0 && !mako_rc_shared(a.data)) return a;
     if (a.len == 0) return mako_int_array_empty();
     return mako_int_array_of(a.data, a.len);
 }
 
-/* Go-like make([]int, len) / make([]int, len, cap).
- * Allocates `cap` slots, zeroes the first `len`. Aborts on OOM.
- * make(0, 0) is empty (no heap) — append allocates on first growth. */
 static inline MakoIntArray mako_int_array_make(int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
     if (len == 0 && cap == 0) return mako_int_array_empty();
     size_t c = (size_t)(cap ? cap : 1);
     size_t l = (size_t)len;
-    /* malloc + zero only the live prefix — avoid zeroing unused capacity (CPU+RSS). */
-    int64_t *data = (int64_t *)malloc(c * sizeof(int64_t));
-    if (!data) {
-        fprintf(stderr, "mako: OOM in int_array_make\n");
-        abort();
-    }
+    int64_t *data = (int64_t *)mako_rc_alloc(c * sizeof(int64_t));
     if (l) memset(data, 0, l * sizeof(int64_t));
-    MakoIntArray a;
-    a.data = data;
-    a.len = l;
-    a.cap = c;
+    MakoIntArray a = {data, l, c};
     return a;
 }
 
-/* SAFE-003: free owning slice headers. Views use cap==0 and must not free .data
- * (sub-slices share backing; free is only valid for the original malloc base). */
 static inline void mako_int_array_free(MakoIntArray a) {
-    if (MAKO_UNLIKELY(a.cap > 0 && a.data)) free(a.data);
+    if (a.cap > 0 && a.data) mako_rc_release(a.data);
 }
 
 static inline void mako_abort(const char *msg); /* defined below */
@@ -468,7 +493,7 @@ static inline MakoByteArray mako_byte_array_view(uint8_t *data, size_t n) {
 static inline MakoByteArray mako_byte_array_new(size_t n) {
     if (n == 0) return mako_byte_array_empty();
     MakoByteArray a;
-    a.data = (uint8_t *)calloc(n, 1);
+    a.data = (uint8_t *)mako_rc_calloc(n);
     a.len = n;
     a.cap = n;
     return a;
@@ -495,11 +520,13 @@ static inline MakoByteArray mako_byte_array_of_u8(const uint8_t *vals, size_t n)
 
 static inline MakoByteArray mako_byte_array_clone(MakoByteArray a) {
     if (a.len == 0) return mako_byte_array_empty();
-    return mako_byte_array_of_u8(a.data, a.len);
+    if (a.cap & MAKO_POOL_CAP_FLAG) return mako_byte_array_of_u8(a.data, a.len);
+    if (a.cap > 0 && a.data) mako_rc_retain(a.data);
+    return a;
 }
 
 static inline MakoByteArray mako_byte_array_to_owned(MakoByteArray a) {
-    if (MAKO_LIKELY(a.cap > 0)) return a;
+    if (MAKO_LIKELY(a.cap > 0 && !(a.cap & MAKO_POOL_CAP_FLAG))) return a;
     if (a.len == 0) return mako_byte_array_empty();
     return mako_byte_array_of_u8(a.data, a.len);
 }
@@ -510,21 +537,16 @@ static inline MakoByteArray mako_byte_array_make(int64_t len, int64_t cap) {
     if (len == 0 && cap == 0) return mako_byte_array_empty();
     size_t c = (size_t)(cap ? cap : 1);
     size_t l = (size_t)len;
-    uint8_t *data = (uint8_t *)malloc(c);
-    if (!data) {
-        fprintf(stderr, "mako: OOM in byte_array_make\n");
-        abort();
-    }
+    uint8_t *data = (uint8_t *)mako_rc_alloc(c);
     if (l) memset(data, 0, l);
-    MakoByteArray a;
-    a.data = data;
-    a.len = l;
-    a.cap = c;
+    MakoByteArray a = {data, l, c};
     return a;
 }
 
 static inline int64_t mako_byte_array_len(MakoByteArray a) { return (int64_t)a.len; }
-static inline int64_t mako_byte_array_cap(MakoByteArray a) { return (int64_t)a.cap; }
+static inline int64_t mako_byte_array_cap(MakoByteArray a) {
+    return (int64_t)(a.cap & ~MAKO_POOL_CAP_FLAG);
+}
 
 static inline int64_t mako_byte_get(MakoByteArray a, int64_t i) {
     if (i < 0 || (size_t)i >= a.len) mako_abort("byte index out of bounds");
@@ -539,25 +561,26 @@ static inline void mako_byte_set(MakoByteArray a, int64_t i, int64_t v) {
 
 static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
     if (v < 0 || v > 255) mako_abort("byte value out of range 0..255");
-    if (MAKO_LIKELY(s.len < s.cap)) {
+    int is_pool = (s.cap & MAKO_POOL_CAP_FLAG) != 0;
+    size_t actual_cap = is_pool ? (s.cap & ~MAKO_POOL_CAP_FLAG) : s.cap;
+    if (MAKO_LIKELY(s.len < actual_cap && (is_pool || !mako_rc_shared(s.data)))) {
         s.data[s.len++] = (uint8_t)v;
         return s;
     }
-    size_t ncap = s.cap ? s.cap * 2 : 1;
+    size_t ncap = actual_cap ? actual_cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
-    uint8_t *nd = (uint8_t *)malloc(ncap);
-    if (MAKO_UNLIKELY(!nd)) mako_abort("append: out of memory");
+    uint8_t *nd = (uint8_t *)mako_rc_alloc(ncap);
     if (s.len) memcpy(nd, s.data, s.len);
-    if (s.cap > 0 && s.data) free(s.data);
+    /* Do NOT release old s.data here — caller owns that pointer and will
+     * release it via replace_*_owned (reassignment) or scope-exit free. */
     s.data = nd;
     s.cap = ncap;
     s.data[s.len++] = (uint8_t)v;
     return s;
 }
 
-/* Free owning []byte (cap>0). cap==0 is a borrowed view — no free. */
 static inline void mako_byte_array_free(MakoByteArray a) {
-    if (MAKO_UNLIKELY(a.cap > 0 && a.data)) free(a.data);
+    if (a.cap > 0 && a.data && !(a.cap & MAKO_POOL_CAP_FLAG)) mako_rc_release(a.data);
 }
 
 static inline MakoByteArray mako_byte_slice_expr(
@@ -649,7 +672,7 @@ static inline MakoByteArray mako_buf_pool_get(MakoBufPool *p, int64_t need) {
                 MakoByteArray a;
                 a.data = p->slots[i];
                 a.len = 0;
-                a.cap = (size_t)MAKO_BUF_POOL_SIZE;
+                a.cap = MAKO_POOL_CAP_FLAG | MAKO_BUF_POOL_SIZE;
                 return a;
             }
         }
@@ -667,7 +690,7 @@ static inline void mako_buf_pool_put(MakoBufPool *p, MakoByteArray a) {
         }
     }
     /* heap-owned (cap>0 and not a pool slot) */
-    if (a.cap > 0) free(a.data);
+    if (a.cap > 0 && a.data) mako_rc_release(a.data);
 }
 
 static MakoBufPool mako_global_buf_pool;
@@ -703,14 +726,16 @@ typedef struct {
 } MakoStrArray;
 
 static inline MakoStrArray mako_str_array_new(size_t n) {
+    if (n == 0) { MakoStrArray e = {0}; return e; }
     MakoStrArray a;
-    a.data = (MakoString *)calloc(n ? n : 1, sizeof(MakoString));
+    a.data = (MakoString *)mako_rc_calloc((n ? n : 1) * sizeof(MakoString));
     a.len = n;
     a.cap = n ? n : 1;
     return a;
 }
 
 static inline MakoStrArray mako_str_array_of(const MakoString *vals, size_t n) {
+    if (n == 0) { MakoStrArray e = {0}; return e; }
     MakoStrArray a = mako_str_array_new(n);
     for (size_t i = 0; i < n; i++) {
         a.data[i] = mako_str_clone(vals[i]);
@@ -721,16 +746,19 @@ static inline MakoStrArray mako_str_array_of(const MakoString *vals, size_t n) {
 static inline MakoStrArray mako_str_array_make(int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
+    if (len == 0 && cap == 0) { MakoStrArray e = {0}; return e; }
+    size_t c = (size_t)(cap ? cap : 1);
     MakoStrArray a;
-    a.data = (MakoString *)calloc((size_t)(cap ? cap : 1), sizeof(MakoString));
+    a.data = (MakoString *)mako_rc_calloc(c * sizeof(MakoString));
     a.len = (size_t)len;
-    a.cap = (size_t)(cap ? cap : 1);
+    a.cap = c;
     return a;
 }
 
 static inline MakoStrArray mako_str_array_clone(MakoStrArray a) {
     if (a.len == 0) { MakoStrArray e = {0}; return e; }
-    return mako_str_array_of(a.data, a.len);
+    if (a.cap > 0 && a.data) mako_rc_retain(a.data);
+    return a;  /* O(1) refcount bump — no malloc, no memcpy */
 }
 
 static inline int64_t mako_str_array_len(MakoStrArray a) { return (int64_t)a.len; }
@@ -747,13 +775,13 @@ static inline void mako_str_array_set(MakoStrArray a, int64_t i, MakoString v) {
 }
 
 static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
-    if (MAKO_UNLIKELY(s.len + 1 > s.cap)) {
+    /* COW: if shared or at capacity, allocate new refcounted backing. */
+    if (MAKO_UNLIKELY(s.len + 1 > s.cap || mako_rc_shared(s.data))) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        MakoString *nd = (MakoString *)malloc(ncap * sizeof(MakoString));
-        if (!nd) mako_abort("append: out of memory");
+        MakoString *nd = (MakoString *)mako_rc_alloc(ncap * sizeof(MakoString));
         if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoString));
-        if (s.cap > 0 && s.data) free(s.data);
+        /* Caller releases old s.data via reassignment or scope-exit. */
         s.data = nd;
         s.cap = ncap;
     }
@@ -762,9 +790,15 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
 }
 
 static inline void mako_str_array_free(MakoStrArray a) {
-    if (MAKO_LIKELY(!(a.cap > 0 && a.data))) return;
+    if (!(a.cap > 0 && a.data)) return;
+    /* Check if we're the last owner. If shared, just release our ref. */
+    if (mako_rc_shared(a.data)) {
+        mako_rc_release(a.data);
+        return;
+    }
+    /* Last owner: free contained strings, then release the array block. */
     for (size_t i = 0; i < a.len; i++) mako_str_free(a.data[i]);
-    free(a.data);
+    mako_rc_release(a.data);
 }
 
 static inline MakoStrArray mako_str_array_slice_expr(
@@ -819,7 +853,7 @@ static inline MakoFloatArray mako_float_array_view(double *data, size_t n) {
 static inline MakoFloatArray mako_float_array_new(size_t n) {
     if (n == 0) return mako_float_array_empty();
     MakoFloatArray a;
-    a.data = (double *)calloc(n, sizeof(double));
+    a.data = (double *)mako_rc_calloc(n * sizeof(double));
     a.len = n;
     a.cap = n;
     return a;
@@ -834,11 +868,12 @@ static inline MakoFloatArray mako_float_array_of(const double *vals, size_t n) {
 
 static inline MakoFloatArray mako_float_array_clone(MakoFloatArray a) {
     if (a.len == 0) return mako_float_array_empty();
-    return mako_float_array_of(a.data, a.len);
+    if (a.cap > 0 && a.data) mako_rc_retain(a.data);
+    return a;
 }
 
 static inline MakoFloatArray mako_float_array_to_owned(MakoFloatArray a) {
-    if (MAKO_LIKELY(a.cap > 0)) return a;
+    if (a.cap > 0 && !mako_rc_shared(a.data)) return a;
     if (a.len == 0) return mako_float_array_empty();
     return mako_float_array_of(a.data, a.len);
 }
@@ -847,10 +882,11 @@ static inline MakoFloatArray mako_float_array_make(int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
     if (len == 0 && cap == 0) return mako_float_array_empty();
+    size_t c = (size_t)(cap ? cap : 1);
     MakoFloatArray a;
-    a.data = (double *)calloc((size_t)(cap ? cap : 1), sizeof(double));
+    a.data = (double *)mako_rc_calloc(c * sizeof(double));
     a.len = (size_t)len;
-    a.cap = (size_t)(cap ? cap : 1);
+    a.cap = c;
     return a;
 }
 
@@ -868,13 +904,12 @@ static inline void mako_float_array_set(MakoFloatArray a, int64_t i, double v) {
 }
 
 static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v) {
-    if (MAKO_UNLIKELY(s.len + 1 > s.cap)) {
+    if (MAKO_UNLIKELY(s.len + 1 > s.cap || mako_rc_shared(s.data))) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        double *nd = (double *)malloc(ncap * sizeof(double));
-        if (!nd) mako_abort("append: out of memory");
+        double *nd = (double *)mako_rc_alloc(ncap * sizeof(double));
         if (s.len) memcpy(nd, s.data, s.len * sizeof(double));
-        if (s.cap > 0 && s.data) free(s.data);
+        /* Caller releases old s.data via reassignment or scope-exit. */
         s.data = nd;
         s.cap = ncap;
     }
@@ -883,7 +918,7 @@ static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v)
 }
 
 static inline void mako_float_array_free(MakoFloatArray a) {
-    if (MAKO_UNLIKELY(a.cap > 0 && a.data)) free(a.data);
+    if (a.cap > 0 && a.data) mako_rc_release(a.data);
 }
 
 static inline MakoFloatArray mako_float_array_slice_expr(
@@ -937,7 +972,7 @@ static inline MakoBoolArray mako_bool_array_view(bool *data, size_t n) {
 static inline MakoBoolArray mako_bool_array_new(size_t n) {
     if (n == 0) return mako_bool_array_empty();
     MakoBoolArray a;
-    a.data = (bool *)calloc(n, sizeof(bool));
+    a.data = (bool *)mako_rc_calloc(n * sizeof(bool));
     a.len = n;
     a.cap = n;
     return a;
@@ -952,11 +987,12 @@ static inline MakoBoolArray mako_bool_array_of(const bool *vals, size_t n) {
 
 static inline MakoBoolArray mako_bool_array_clone(MakoBoolArray a) {
     if (a.len == 0) return mako_bool_array_empty();
-    return mako_bool_array_of(a.data, a.len);
+    if (a.cap > 0 && a.data) mako_rc_retain(a.data);
+    return a;
 }
 
 static inline MakoBoolArray mako_bool_array_to_owned(MakoBoolArray a) {
-    if (MAKO_LIKELY(a.cap > 0)) return a;
+    if (a.cap > 0 && !mako_rc_shared(a.data)) return a;
     if (a.len == 0) return mako_bool_array_empty();
     return mako_bool_array_of(a.data, a.len);
 }
@@ -965,10 +1001,11 @@ static inline MakoBoolArray mako_bool_array_make(int64_t len, int64_t cap) {
     if (len < 0) len = 0;
     if (cap < len) cap = len;
     if (len == 0 && cap == 0) return mako_bool_array_empty();
+    size_t c = (size_t)(cap ? cap : 1);
     MakoBoolArray a;
-    a.data = (bool *)calloc((size_t)(cap ? cap : 1), sizeof(bool));
+    a.data = (bool *)mako_rc_calloc(c * sizeof(bool));
     a.len = (size_t)len;
-    a.cap = (size_t)(cap ? cap : 1);
+    a.cap = c;
     return a;
 }
 
@@ -986,13 +1023,12 @@ static inline void mako_bool_array_set(MakoBoolArray a, int64_t i, bool v) {
 }
 
 static inline MakoBoolArray mako_bool_array_append(MakoBoolArray s, bool v) {
-    if (MAKO_UNLIKELY(s.len + 1 > s.cap)) {
+    if (MAKO_UNLIKELY(s.len + 1 > s.cap || mako_rc_shared(s.data))) {
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        bool *nd = (bool *)malloc(ncap * sizeof(bool));
-        if (!nd) mako_abort("append: out of memory");
+        bool *nd = (bool *)mako_rc_alloc(ncap * sizeof(bool));
         if (s.len) memcpy(nd, s.data, s.len * sizeof(bool));
-        if (s.cap > 0 && s.data) free(s.data);
+        /* Caller releases old s.data via reassignment or scope-exit. */
         s.data = nd;
         s.cap = ncap;
     }
@@ -1001,7 +1037,7 @@ static inline MakoBoolArray mako_bool_array_append(MakoBoolArray s, bool v) {
 }
 
 static inline void mako_bool_array_free(MakoBoolArray a) {
-    if (MAKO_UNLIKELY(a.cap > 0 && a.data)) free(a.data);
+    if (a.cap > 0 && a.data) mako_rc_release(a.data);
 }
 
 static inline MakoBoolArray mako_bool_array_slice_expr(
@@ -1095,7 +1131,7 @@ static inline void mako_arr_arr_int_release_replaced(MakoArr_arr_int old, MakoAr
         }
         if (!shared) mako_int_array_free(old.data[i]);
     }
-    if (old.data != neu.data) free(old.data);
+    if (old.data != neu.data && old.cap > 0) free(old.data);
 }
 static inline MakoArr_arr_int mako_arr_arr_int_slice_expr(MakoArr_arr_int s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
@@ -1181,7 +1217,7 @@ static inline void mako_arr_arr_string_release_replaced(MakoArr_arr_string old, 
         }
         if (!shared) mako_str_array_free(old.data[i]);
     }
-    if (old.data != neu.data) free(old.data);
+    if (old.data != neu.data && old.cap > 0) free(old.data);
 }
 static inline MakoArr_arr_string mako_arr_arr_string_slice_expr(MakoArr_arr_string s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
@@ -1266,7 +1302,7 @@ static inline void mako_arr_arr_float_release_replaced(MakoArr_arr_float old, Ma
         }
         if (!shared) mako_float_array_free(old.data[i]);
     }
-    if (old.data != neu.data) free(old.data);
+    if (old.data != neu.data && old.cap > 0) free(old.data);
 }
 static inline MakoArr_arr_float mako_arr_arr_float_slice_expr(MakoArr_arr_float s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
@@ -1351,7 +1387,7 @@ static inline void mako_arr_arr_bool_release_replaced(MakoArr_arr_bool old, Mako
         }
         if (!shared) mako_bool_array_free(old.data[i]);
     }
-    if (old.data != neu.data) free(old.data);
+    if (old.data != neu.data && old.cap > 0) free(old.data);
 }
 static inline MakoArr_arr_bool mako_arr_arr_bool_slice_expr(MakoArr_arr_bool s, int64_t low, int64_t high, int64_t max, int has_max) {
     int64_t len = (int64_t)s.len;
@@ -2020,11 +2056,11 @@ static inline void mako_sbstack_grow(MakoSBStack *b, size_t need) {
     while (ncap < need) ncap *= 2;
     if (b->data == b->stack) {
         char *nd = (char *)malloc(ncap);
-        if (MAKO_UNLIKELY(!nd)) mako_abort("sbstack: OOM");
         memcpy(nd, b->stack, b->len); b->data = nd;
     } else {
-        char *nd = (char *)realloc(b->data, ncap);
-        if (MAKO_UNLIKELY(!nd)) mako_abort("sbstack: OOM");
+        char *nd = (char *)malloc(ncap);
+        if (b->len) memcpy(nd, b->data, b->len);
+        free(b->data);
         b->data = nd;
     }
     b->cap = ncap;
@@ -2079,8 +2115,10 @@ static inline void mako_str_builder_grow(MakoStrBuilder *b, size_t need) {
     if (need <= b->cap) return;
     size_t ncap = b->cap ? b->cap * 2 : 64;
     while (ncap < need) ncap *= 2;
-    char *nd = (char *)realloc(b->data, ncap);
+    char *nd = (char *)malloc(ncap);
     if (!nd) mako_abort("str_builder: out of memory");
+    if (b->len && b->data) memcpy(nd, b->data, b->len);
+    if (b->data) free(b->data);
     b->data = nd;
     b->cap = ncap;
 }
@@ -2775,9 +2813,8 @@ static inline uint64_t mako_hash_result_float(MakoResultFloat k) {
 }
 
 static inline MakoString mako_str_clone(MakoString s) {
-    if (MAKO_UNLIKELY(s.len == 0)) {
-        return mako_str_empty;
-    }
+    if (MAKO_UNLIKELY(s.len == 0)) return mako_str_empty;
+    if (!s.data || s.data == &mako_str_empty_byte) return mako_str_empty;
     char *d = (char *)malloc(s.len + 1);
     if (MAKO_UNLIKELY(!d)) {
         fprintf(stderr, "mako: OOM in str_clone\n");
@@ -2785,8 +2822,7 @@ static inline MakoString mako_str_clone(MakoString s) {
     }
     memcpy(d, s.data, s.len);
     d[s.len] = 0;
-    MakoString out = {d, s.len};
-    return out;
+    return (MakoString){d, s.len};
 }
 
 static inline MakoMapSI mako_map_si_new(size_t hint) {
@@ -4874,18 +4910,16 @@ static inline int64_t mako_array_cap(MakoIntArray a) {
  * Growing consumes owned storage (cap>0). Borrowed views have cap==0, so their
  * backing storage is never freed; appending a view creates an independent owner. */
 static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
-    if (MAKO_LIKELY(s.len < s.cap)) {
+    /* COW: if shared (refcount > 1) or at capacity, allocate a new backing. */
+    if (MAKO_LIKELY(s.len < s.cap && !mako_rc_shared(s.data))) {
         s.data[s.len++] = v;
         return s;
     }
     size_t ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
-    /* malloc+copy (not realloc): sub-slices may alias interior pointers
-     * into the old backing array. realloc on those is undefined behavior. */
-    int64_t *nd = (int64_t *)malloc(ncap * sizeof(int64_t));
-    if (MAKO_UNLIKELY(!nd)) mako_abort("append: out of memory");
+    int64_t *nd = (int64_t *)mako_rc_alloc(ncap * sizeof(int64_t));
     if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));
-    if (s.cap > 0 && s.data) free(s.data);
+    /* Caller releases old s.data via reassignment or scope-exit. */
     s.data = nd;
     s.cap = ncap;
     s.data[s.len++] = v;

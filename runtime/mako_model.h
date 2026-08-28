@@ -528,7 +528,7 @@ static inline int64_t mako_model_load_safetensors(int64_t h, MakoString path) {
         int64_t d3 = e->ndim > 3 ? e->dims[3] : 0;
         if (mako_model_set_f32(h, nm, vals, d0, d1, d2, d3) == 1) loaded++;
         mako_str_free(nm);
-        free(vals.data);
+        mako_float_array_free(vals);
     }
     fclose(f);
     return loaded > 0 ? 1 : 0;
@@ -807,7 +807,7 @@ static inline int64_t mako_model_load_gguf(int64_t h, MakoString path) {
             }
         } else if (!mako_gguf_dequant(t->typ, raw, nbytes, &vals, nelem)) {
             free(raw);
-            free(vals.data);
+            mako_float_array_free(vals);
             continue;
         }
         free(raw);
@@ -815,7 +815,7 @@ static inline int64_t mako_model_load_gguf(int64_t h, MakoString path) {
         if (mako_model_set_f32(h, nm, vals, dims4[0], dims4[1], dims4[2], dims4[3]) == 1)
             loaded++;
         mako_str_free(nm);
-        free(vals.data);
+        mako_float_array_free(vals);
     }
     free(infos);
     fclose(f);
@@ -858,7 +858,7 @@ static inline int64_t mako_model_save(int64_t h, MakoString path) {
             float fv = (float)(j < (int64_t)vals.len ? vals.data[j] : 0.0);
             fwrite(&fv, 4, 1, f);
         }
-        free(vals.data);
+        mako_float_array_free(vals);
     }
     fclose(f);
     return 1;
@@ -907,7 +907,7 @@ static inline int64_t mako_model_load(int64_t h, MakoString path) {
         for (int64_t j = 0; j < ne; j++) {
             float fv = 0;
             if (fread(&fv, 4, 1, f) != 1) {
-                free(vals.data);
+                mako_float_array_free(vals);
                 fclose(f);
                 return loaded > 0 ? 1 : 0;
             }
@@ -920,7 +920,7 @@ static inline int64_t mako_model_load(int64_t h, MakoString path) {
         int64_t d3 = ndim > 3 ? dims[3] : 0;
         if (mako_model_set_f32(h, nm, vals, d0, d1, d2, d3) == 1) loaded++;
         mako_str_free(nm);
-        free(vals.data);
+        mako_float_array_free(vals);
     }
     fclose(f);
     return loaded > 0 ? 1 : 0;
@@ -963,7 +963,7 @@ static inline int64_t mako_model_linear_f32(
         /* Transpose W[out,in] → Wt[in,out] into a temp buffer on device. */
         MakoFloatArray wvals = mako_gpu_download_f32(wb);
         if ((int64_t)wvals.len < out_f * in_f) {
-            free(wvals.data);
+            mako_float_array_free(wvals);
             return -1;
         }
         MakoFloatArray wt = mako_float_array_make(in_f * out_f, in_f * out_f);
@@ -973,18 +973,18 @@ static inline int64_t mako_model_linear_f32(
                 wt.data[i * out_f + o] = wvals.data[o * in_f + i];
             }
         }
-        free(wvals.data);
+        mako_float_array_free(wvals);
         tmp = mako_gpu_buf_new(m->dev, in_f * out_f * 4);
         if (tmp < 0) {
-            free(wt.data);
+            mako_float_array_free(wt);
             return -1;
         }
         if (mako_gpu_upload_f32(tmp, wt) != in_f * out_f) {
-            free(wt.data);
+            mako_float_array_free(wt);
             mako_gpu_buf_free(tmp);
             return -1;
         }
-        free(wt.data);
+        mako_float_array_free(wt);
         w_use = tmp;
     }
     int64_t rc = mako_gpu_matmul_f32(out_buf, x_buf, w_use, batch, out_f, in_f);

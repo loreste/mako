@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.6.2 - 2026-08-28 (copy-on-write slice ownership)
+
+- Changed heap-backed int, byte, string, float, bool, and generated slices to
+  atomic refcounted backing storage so clones are O(1).
+- Added copy-on-write append behavior for shared slices, preserving value
+  semantics without repeated deep copies in collection-heavy loops.
+- Updated C and native ownership lowering to retain and release shared slice
+  storage consistently across calls, returns, struct fields, and generated
+  array helpers.
+- Added adversarial refcount and copy-on-write coverage for aliasing,
+  reassignment, function boundaries, struct fields, and clone storms.
+
 ## 0.6.1 - 2026-08-27 (native LLM bridge hardening)
 
 - Added parser/type/codegen plumbing for `prove` function contracts. Contract

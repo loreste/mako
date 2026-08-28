@@ -101,6 +101,9 @@ pub struct Codegen {
     mut_capture_cells: HashMap<String, String>,
     /// Functions with `mut self` as first param — callers pass &receiver, function takes pointer.
     mut_self_fns: std::collections::HashSet<String>,
+    /// Functions with `mut` struct params that have owned fields — pass by pointer
+    /// instead of deep-cloning at entry. Key: fn name, Value: set of param indices.
+    mut_ptr_params: HashMap<String, std::collections::HashSet<usize>>,
     /// Nesting of `unsafe { }` — skip debug bounds checks when > 0.
     unsafe_depth: usize,
     /// Generic templates (not emitted; specialized as `name__tag`).
@@ -240,6 +243,7 @@ impl Codegen {
             loop_drop_bases: Vec::new(),
             mut_capture_cells: HashMap::new(),
             mut_self_fns: std::collections::HashSet::new(),
+            mut_ptr_params: HashMap::new(),
             unsafe_depth: 0,
             generic_templates: HashMap::new(),
             bounds_checks_always: false,
@@ -2313,10 +2317,9 @@ impl Codegen {
             "MakoMapBS*" => Some("mako_map_bs_free".into()),
             "MakoMapBF*" => Some("mako_map_bf_free".into()),
             "MakoMapBB*" => Some("mako_map_bb_free".into()),
-            other if other.starts_with("MakoArr_") => {
-                let tag = &other["MakoArr_".len()..];
-                Some(format!("mako_arr_{tag}_free"))
-            }
+            // Struct arrays: no auto-free. Shared via shallow copy (see own_clone_fn).
+            // Explicit free through replace_*_owned / dedicated cleanup paths.
+            other if other.starts_with("MakoArr_") => None,
             other if other.starts_with("MakoEnum_") => {
                 let name = &other["MakoEnum_".len()..];
                 Some(format!("mako_enum_{name}_free"))
@@ -2372,10 +2375,15 @@ impl Codegen {
             "MakoMapBS*" => Some("mako_map_bs_clone".into()),
             "MakoMapBF*" => Some("mako_map_bf_clone".into()),
             "MakoMapBB*" => Some("mako_map_bb_clone".into()),
-            // Struct arrays: MakoArr_Route → mako_arr_Route_clone
+            // Struct arrays: shallow clone only (copy header, share data).
+            // Deep-copying struct arrays is catastrophically expensive for large
+            // databases. Mako's value semantics + append-on-write ensure the
+            // original array is never mutated through the shared pointer.
             other if other.starts_with("MakoArr_") => {
-                let tag = &other["MakoArr_".len()..];
-                Some(format!("mako_arr_{tag}_clone"))
+                // Return None: no clone needed. The C struct copy already
+                // copies the slice header (data ptr + len + cap). Mutations
+                // go through replace/append which allocate new storage.
+                None
             }
             // Pointer maps: MakoMapS_Point* → mako_map_s_Point_clone
             other if other.starts_with("MakoMap") && other.ends_with('*') => {
@@ -3800,6 +3808,11 @@ impl Codegen {
         };
         let mut out = Vec::new();
         for (fname, fty) in &info.fields {
+            // Channels are shared resources — never auto-free on struct drop.
+            // Only the creator (chan_new) should free. Struct fields are borrows.
+            if matches!(fty.as_str(), "MakoChan*" | "MakoChanStr*" | "MakoChanPtr*") {
+                continue;
+            }
             if let Some(ff) = Self::own_free_fn(fty) {
                 out.push((fname.clone(), ff));
             }
@@ -3886,21 +3899,18 @@ impl Codegen {
                 ));
             }
             other if other.starts_with("MakoArr_arr_") => {
-                // Monomorph nested: free outer only when pointer moved (inners shared).
                 self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data && {old}.data) free({old}.data);"
+                    "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
                 ));
             }
-            // String arrays after append share string pointers — only free outer buffer.
             "MakoStrArray" => {
                 self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data && {old}.data) free({old}.data);"
+                    "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
                 ));
             }
-            // Struct arrays after append share element data — only free outer buffer.
             other if other.starts_with("MakoArr_") => {
                 self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data && {old}.data) free({old}.data);"
+                    "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
                 ));
             }
             _ => {
@@ -4290,7 +4300,6 @@ impl Codegen {
                     || fname.starts_with("queue_pop")
                     || fname.starts_with("slices_reverse")
                     || fname.starts_with("slices_unique")
-                    || fname.starts_with("strings_copy")
                     || fname == "buf_put"
                     || fname == "mako_byte_append";
                 if is_consuming {
@@ -4338,7 +4347,7 @@ impl Codegen {
                     "{tmp}.len = {val}.len; {tmp}.cap = {val}.len;"
                 ));
                 self.emit_line(format_args!(
-                    "{tmp}.data = (MakoString*)malloc(sizeof(MakoString) * ({val}.len ? {val}.len : 1));"
+                    "{tmp}.data = (MakoString*)mako_rc_alloc(sizeof(MakoString) * ({val}.len ? {val}.len : 1));"
                 ));
                 self.emit_line(format_args!(
                     "for (int64_t _i = 0; _i < {val}.len; _i++) {{ {tmp}.data[_i] = mako_str_clone({val}.data[_i]); }}"
@@ -4856,6 +4865,28 @@ impl Codegen {
                             self.mut_self_fns.insert(f.name.clone());
                         }
                     }
+                    // Track mut struct params with owned fields — pass by pointer
+                    // to avoid deep-cloning entire databases on every call.
+                    {
+                        let mut ptr_indices = std::collections::HashSet::new();
+                        for (pi, p) in f.params.iter().enumerate() {
+                            if !p.mutable {
+                                continue;
+                            }
+                            if p.name == "self" {
+                                continue;
+                            }
+                            let pty = self.type_expr_c(&p.ty);
+                            let frees = self.struct_own_field_frees(&pty);
+                            if frees.len() >= 4 {
+                                // Large struct with many owned fields — pass by pointer
+                                ptr_indices.insert(pi);
+                            }
+                        }
+                        if !ptr_indices.is_empty() {
+                            self.mut_ptr_params.insert(f.name.clone(), ptr_indices);
+                        }
+                    }
                     self.fn_param_typeexprs.insert(
                         f.name.clone(),
                         f.params.iter().map(|p| p.ty.clone()).collect(),
@@ -5271,7 +5302,7 @@ impl Codegen {
         let _ = writeln!(self.out, "    {arr} a;");
         let _ = writeln!(
             self.out,
-            "    a.data = ({c_ty} *)calloc((size_t)(cap ? cap : 1), sizeof({c_ty}));"
+            "    a.data = ({c_ty} *)mako_rc_calloc((size_t)(cap ? cap : 1) * sizeof({c_ty}));"
         );
         let _ = writeln!(self.out, "    a.len = (size_t)len;");
         let _ = writeln!(self.out, "    a.cap = (size_t)(cap ? cap : 1);");
@@ -5279,7 +5310,7 @@ impl Codegen {
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
-            "static inline void mako_arr_{short}_free({arr} a) {{ if (a.cap > 0 && a.data) free(a.data); }}"
+            "static inline void mako_arr_{short}_free({arr} a) {{ if (a.cap > 0 && a.data) mako_rc_release(a.data); }}"
         );
         let _ = writeln!(
             self.out,
@@ -5313,16 +5344,19 @@ impl Codegen {
             self.out,
             "static inline {arr} mako_arr_{short}_append({arr} s, {c_ty} v) {{"
         );
-        let _ = writeln!(self.out, "    if (s.len + 1 > s.cap) {{");
+        let _ = writeln!(
+            self.out,
+            "    if (s.len + 1 > s.cap || mako_rc_shared(s.data)) {{"
+        );
         let _ = writeln!(self.out, "        size_t ncap = s.cap ? s.cap * 2 : 1;");
         let _ = writeln!(self.out, "        if (ncap < s.len + 1) ncap = s.len + 1;");
         let _ = writeln!(
             self.out,
-            "        {c_ty} *nd = ({c_ty} *)realloc(s.data, ncap * sizeof({c_ty}));"
+            "        {c_ty} *nd = ({c_ty} *)mako_rc_alloc(ncap * sizeof({c_ty}));"
         );
         let _ = writeln!(
             self.out,
-            "        if (!nd) mako_abort(\"append: out of memory\");"
+            "        if (s.len) memcpy(nd, s.data, s.len * sizeof({c_ty}));"
         );
         let _ = writeln!(self.out, "        s.data = nd; s.cap = ncap;");
         let _ = writeln!(self.out, "    }}");
@@ -6146,7 +6180,7 @@ impl Codegen {
         let _ = writeln!(self.out, "    {arr} a;");
         let _ = writeln!(
             self.out,
-            "    a.data = ({c_name} *)calloc((size_t)(cap ? cap : 1), sizeof({c_name}));"
+            "    a.data = ({c_name} *)mako_rc_calloc((size_t)(cap ? cap : 1) * sizeof({c_name}));"
         );
         let _ = writeln!(self.out, "    a.len = (size_t)len;");
         let _ = writeln!(self.out, "    a.cap = (size_t)(cap ? cap : 1);");
@@ -6154,7 +6188,7 @@ impl Codegen {
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
-            "static inline void mako_arr_{c_name}_free({arr} a) {{ if (a.cap > 0 && a.data) free(a.data); }}"
+            "static inline void mako_arr_{c_name}_free({arr} a) {{ if (a.cap > 0 && a.data) mako_rc_release(a.data); }}"
         );
         let _ = writeln!(
             self.out,
@@ -6216,16 +6250,19 @@ impl Codegen {
             self.out,
             "static inline {arr} mako_arr_{c_name}_append({arr} s, {c_name} v) {{"
         );
-        let _ = writeln!(self.out, "    if (s.len + 1 > s.cap) {{");
+        let _ = writeln!(
+            self.out,
+            "    if (s.len + 1 > s.cap || mako_rc_shared(s.data)) {{"
+        );
         let _ = writeln!(self.out, "        size_t ncap = s.cap ? s.cap * 2 : 1;");
         let _ = writeln!(self.out, "        if (ncap < s.len + 1) ncap = s.len + 1;");
         let _ = writeln!(
             self.out,
-            "        {c_name} *nd = ({c_name} *)realloc(s.data, ncap * sizeof({c_name}));"
+            "        {c_name} *nd = ({c_name} *)mako_rc_alloc(ncap * sizeof({c_name}));"
         );
         let _ = writeln!(
             self.out,
-            "        if (!nd) mako_abort(\"append: out of memory\");"
+            "        if (s.len) memcpy(nd, s.data, s.len * sizeof({c_name}));"
         );
         let _ = writeln!(self.out, "        s.data = nd;");
         let _ = writeln!(self.out, "        s.cap = ncap;");
@@ -6315,7 +6352,7 @@ impl Codegen {
         let _ = writeln!(self.out, "    {mt} a;");
         let _ = writeln!(
             self.out,
-            "    a.data = ({elem_c} *)calloc((size_t)(cap ? cap : 1), sizeof({elem_c}));"
+            "    a.data = ({elem_c} *)mako_rc_calloc((size_t)(cap ? cap : 1) * sizeof({elem_c}));"
         );
         let _ = writeln!(self.out, "    a.len = (size_t)len;");
         let _ = writeln!(self.out, "    a.cap = (size_t)(cap ? cap : 1);");
@@ -6340,7 +6377,7 @@ impl Codegen {
                 "    for (size_t i = 0; i < a.len; i++) {ef}(a.data[i]);"
             );
         }
-        let _ = writeln!(self.out, "    free(a.data);");
+        let _ = writeln!(self.out, "    mako_rc_release(a.data);");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -6374,16 +6411,19 @@ impl Codegen {
             self.out,
             "static inline {mt} {pref}_append({mt} s, {elem_c} v) {{"
         );
-        let _ = writeln!(self.out, "    if (s.len + 1 > s.cap) {{");
+        let _ = writeln!(
+            self.out,
+            "    if (s.len + 1 > s.cap || mako_rc_shared(s.data)) {{"
+        );
         let _ = writeln!(self.out, "        size_t ncap = s.cap ? s.cap * 2 : 1;");
         let _ = writeln!(self.out, "        if (ncap < s.len + 1) ncap = s.len + 1;");
         let _ = writeln!(
             self.out,
-            "        {elem_c} *nd = ({elem_c} *)realloc(s.data, ncap * sizeof({elem_c}));"
+            "        {elem_c} *nd = ({elem_c} *)mako_rc_alloc(ncap * sizeof({elem_c}));"
         );
         let _ = writeln!(
             self.out,
-            "        if (!nd) mako_abort(\"append: out of memory\");"
+            "        if (s.len) memcpy(nd, s.data, s.len * sizeof({elem_c}));"
         );
         let _ = writeln!(self.out, "        s.data = nd; s.cap = ncap;");
         let _ = writeln!(self.out, "    }}");

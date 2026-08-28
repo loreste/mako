@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.1).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.2).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -95,7 +95,7 @@ hot-reload foundation.
 
 **Memory.** Ownership tracking with compile-time move checks. Arenas for
 bulk allocation. Bounds checks in debug and release. Escape analysis.
-Deterministic cleanup — no GC, no reference counting on the hot path.
+Deterministic cleanup with refcounted copy-on-write slice backing — no GC.
 The ownership and runtime safety model was introduced in 0.2.4 and
 continues to be hardened through adversarial tests, sanitizers, and
 regression gates. It is not proven complete. `unsafe` and FFI are
@@ -150,6 +150,17 @@ and inlay hints. VS Code extension.
 - Package security model is not independently audited
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
+
+## New in 0.6.2
+
+**Copy-on-write slices** — heap-backed slices use atomic reference counts so
+clones are O(1), while append preserves value semantics by copying shared
+backing storage before mutation. This removes repeated deep copies from
+database and collection-heavy loops without introducing a garbage collector.
+
+**Ownership hardening** — C and native lowering now retain and release shared
+slice storage consistently across calls, returns, struct fields, and generated
+array helpers. Adversarial tests cover aliasing, reassignment, and clone storms.
 
 ## New in 0.6.1
 
