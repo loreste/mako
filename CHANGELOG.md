@@ -13,6 +13,13 @@
   array helpers.
 - Added adversarial refcount and copy-on-write coverage for aliasing,
   reassignment, function boundaries, struct fields, and clone storms.
+- Fixed allocator and ownership mismatches between refcounted and plain or
+  pool-backed slice storage, including generated struct helpers.
+- Fixed native call and return ownership for nested slice temporaries and
+  cleanup of discarded struct values containing slices.
+- Kept atomic refcount operations distinct under native code folding and
+  validated the release with ASan/LSan, TSan, UBSan, native differential
+  tests, memory-safety gates, and long-running RSS soaks.
 
 ## 0.6.1 - 2026-08-27 (native LLM bridge hardening)
 

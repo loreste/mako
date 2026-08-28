@@ -1,12 +1,12 @@
 # Makori roadmap
 
-**Product version:** **0.5.15** (tip) · last tagged **v0.5.15** · Last sync: **2026-08-26**.
+**Product version:** **0.6.2** (tip) · last tagged **v0.6.2** · Last sync: **2026-08-28**.
 **Suite:** **423** `examples/testing` `*_test.mko` files · **2026-08-26:**
 C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) ·
 `cargo test` **156 passed, 0 failed** · tooling, stdlib, memory-safety, and performance gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.5.15`**; tip train **0.5.15**.
+**Release:** tag **`v0.6.2`**; tip train **0.6.2**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Makori Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -46,9 +46,12 @@ C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) �
 | **0.5.12** | Flake and CI honesty: hard gates plus explicit quarantine | **Shipped** |
 | **0.5.13** | Performance contract: workload-specific Rust budgets and parser hot-path gates | **Shipped** |
 | **0.5.14** | Stdlib safety completion: package-local evidence and explicit unsafe-boundary exclusions | **Shipped** |
-| **0.5.15** | Tooling polish: doctor, installers, release metadata, version reporting, fmt/lint/doc stability | **Tip** |
-| **0.5.x** | Further patches on 0.5 | **Planned** as needed |
-| **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after 0.5 series |
+| **0.5.15** | Tooling polish: doctor, installers, release metadata, version reporting, fmt/lint/doc stability | **Shipped** |
+| **0.6.0** | Pipe operator, prove contracts, and live function syntax foundation | **Shipped** |
+| **0.6.1** | Native LLM bridge and release-platform hardening | **Shipped** |
+| **0.6.2** | Copy-on-write slice ownership and memory-safety hardening | **Tip** |
+| **0.6.x** | Further patches on 0.6 | **Planned** as needed |
+| **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after the 0.x series |
 
 **Principle:** ship **measurable** gates each **patch or minor**; do not reopen identity (no free `go`, no lifetime params, no silent native→C fallback). Prefer **0.4.N** patches over waiting for **0.5.0**.
 
@@ -77,7 +80,10 @@ C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) �
 0.5.13      performance contract and workload-specific budgets
 0.5.14      stdlib safety completion and package-local evidence
 0.5.15      tooling polish: doctor/install/release metadata + fmt/lint/doc gates
-0.5.x       patches
+0.6.0       pipe operator + prove contracts + live fn foundation
+0.6.1       native LLM bridge + release-platform hardening
+0.6.2       copy-on-write slice ownership + memory-safety hardening
+0.6.x       patches
 1.0         stability freeze
 ```
 

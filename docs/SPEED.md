@@ -59,7 +59,8 @@ contract.
 | Demand-driven map monomorphs | Emit only used `(K,V)` shapes — O(used), not N²; joined key lookup in codegen |
 | Timed chan / join | `send_timeout` / `recv_timeout` / `join_timeout` / `join_deadline` — **2ms sleep slices**, no busy-spin |
 | `select` | Shared **condvar** wake on send/close (not 2 ms nanosleep poll); 50 ms max wait slice for races |
-| Slice append | `malloc + memcpy` on grow preserves sub-slice aliasing safety — no undefined behavior |
+| Slice clone (C backend) | Atomic retain of owned heap backing — O(1), no element copy |
+| Slice append / mutation | Reuse unique backing; detach with `malloc + memcpy` when shared, preserving value semantics and sub-slice safety |
 | Codegen emit | Hot paths use `emit_line` / `format_args!` — no intermediate `String` per C line |
 | POD array lits `[a,b,c]` | **Stack buffer + `cap==0` view** — zero malloc/free in hot loops (`int`/`float`/`bool`/`byte`) |
 | Empty `[]` / `make([],0,0)` | **No heap** — `{NULL,0,0}` until first grow |
@@ -69,7 +70,8 @@ contract.
 | `sched_set_workers(n)` | Opt-in pool reuses worker threads for kicks (default n=0 = one pthread each) |
 
 **Ownership without a speed tax:** keep short-lived POD slices as stack views in
-tight loops; only pay for a heap copy when the value escapes. Prefer
+tight loops; only pay for a heap copy when the value escapes or shared backing
+must detach before mutation. Prefer
 `make([]T, 0, n)` when you know capacity and will grow. Avoid reallocating a
 fresh lit every iteration when a single buffer can be reused.
 

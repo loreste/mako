@@ -1,6 +1,6 @@
 # Makori soundness and runtime program
 
-**Product tip:** 0.4.0 · **Last sync:** 2026-07-19
+**Product tip:** 0.6.2 · **Last sync:** 2026-08-28
 
 This is the program of record for memory soundness and structured concurrency.
 Each ID has a status, contract, and acceptance bar. Work stays **fast by

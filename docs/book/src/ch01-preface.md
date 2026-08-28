@@ -186,7 +186,7 @@ As of the current release:
 
 | Claim | Meaning |
 |-------|---------|
-| Version 0.5.7 | Current product (`Cargo.toml` / `makori version`); first public was 0.1.0 |
+| Version 0.6.2 | Current product (`Cargo.toml` / `makori version`); first public was 0.1.0 |
 | Stdlib coverage | Major backend areas covered (HTTP, TLS, JSON, SQL, etc.) |
 | Test suite | 418 `examples/testing` `*_test.mko` files (2026-08-19): native 413/5, C 416/2 |
 

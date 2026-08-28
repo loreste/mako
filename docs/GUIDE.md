@@ -112,7 +112,7 @@ mako check .
 mako run -p app
 ```
 
-`makori version` (also `mako --version` / `-V`) prints `makori version mako0.4.0 darwin/arm64`. Use `makori version -v` for an optional commit line.
+`makori version` (also `mako --version` / `-V`) prints `makori version mako0.6.2 darwin/arm64`. Use `makori version -v` for an optional commit line.
 Override headers if needed: `export MAKO_RUNTIME=/path/to/runtime`.
 
 Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `makori build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): optimized on microbenches).

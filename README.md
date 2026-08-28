@@ -95,11 +95,14 @@ hot-reload foundation.
 
 **Memory.** Ownership tracking with compile-time move checks. Arenas for
 bulk allocation. Bounds checks in debug and release. Escape analysis.
-Deterministic cleanup with refcounted copy-on-write slice backing — no GC.
-The ownership and runtime safety model was introduced in 0.2.4 and
-continues to be hardened through adversarial tests, sanitizers, and
-regression gates. It is not proven complete. `unsafe` and FFI are
-outside the model.
+Deterministic cleanup with copy-on-write slices — no GC. The C backend shares
+owned heap backing through atomic reference counts and detaches before
+mutation; borrowed views and pool-backed buffers never enter that release
+path. The native backend tracks owned and borrowed values explicitly across
+calls and returns. The ownership and runtime safety model was introduced in
+0.2.4 and continues to be hardened through adversarial tests, sanitizers, leak
+checks, and regression gates. It is not formally proven complete. `unsafe` and
+FFI are outside the model.
 
 **Concurrency.** `crew` / `kick` / `join` — structured concurrency where
 ordinary crew jobs cannot outlive their scope. Explicit `detach` tasks are
@@ -137,6 +140,15 @@ on fetch.
 LSP server with completions, go-to-def, references, rename, diagnostics,
 and inlay hints. VS Code extension.
 
+## Built with Makori
+
+**Zaman** — live SIP/HEP operations with capture health, active-call state,
+message inspection, site history, reports, alerts, and traffic metrics.
+
+![Zaman SIP and HEP operations overview](docs/images/zaman-overview.png)
+
+![Zaman live traffic and call activity](docs/images/zaman-traffic.png)
+
 ## What does not work yet
 
 - Linux native backend requires `gcc` or `clang` for linking (installer handles this)
@@ -153,14 +165,19 @@ and inlay hints. VS Code extension.
 
 ## New in 0.6.2
 
-**Copy-on-write slices** — heap-backed slices use atomic reference counts so
-clones are O(1), while append preserves value semantics by copying shared
-backing storage before mutation. This removes repeated deep copies from
-database and collection-heavy loops without introducing a garbage collector.
+**Copy-on-write slices** — on the C backend, heap-backed slice clones are O(1)
+atomic retains. Append and other mutations preserve value semantics by
+detaching shared backing storage before writing. Borrowed views remain
+non-owning, and the native backend keeps call, return, and nested temporary
+ownership explicit. This removes repeated deep copies from database and
+collection-heavy loops without introducing a garbage collector.
 
-**Ownership hardening** — C and native lowering now retain and release shared
-slice storage consistently across calls, returns, struct fields, and generated
-array helpers. Adversarial tests cover aliasing, reassignment, and clone storms.
+**Ownership hardening** — C and native lowering now retain, clone, transfer,
+and release slice storage consistently across calls, returns, struct fields,
+discarded values, and generated helpers. Adversarial tests cover aliasing,
+reassignment, clone storms, allocator pairing, and nested native temporaries.
+Release CI passed ASan/LSan, TSan, UBSan, native differential tests, the
+memory-safety gate, and long-running RSS soaks.
 
 ## New in 0.6.1
 

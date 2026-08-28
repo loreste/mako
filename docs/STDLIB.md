@@ -6,7 +6,7 @@ not importing their unsafe surfaces.
 
 Batteries for **web and backends**, with naming conventions adapted to Makori.
 
-**Product tip:** **0.5.15**. Application packs have Go-equivalent surfaces
+**Product tip:** **0.6.2**. Application packs have Go-equivalent surfaces
 (2026-08-18 wave) — snake_case, no panic-on-OOB, `Result` / `(value, err)`
 instead of nil. Not a syntax clone and not every Go toolchain package.
 Lower-level hot path remains builtins over C runtime headers.

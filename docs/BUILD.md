@@ -1,4 +1,4 @@
-# Makori builds (v0.5.15)
+# Makori builds (v0.6.2)
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — ship small patches often.
 

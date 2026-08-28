@@ -32,6 +32,21 @@ language-level. If it isn’t in a script with a method, it isn’t a claim.
 Aimed at backend and systems work: request arenas, tight slice/map layouts,
 native binaries.
 
+### Copy-on-write slice cost model
+
+On the C backend, cloning an owned heap-backed slice performs an atomic retain
+and is O(1). Reads continue to share backing storage. The first mutation of a
+shared slice allocates and copies its live elements, so that detach is O(n);
+subsequent unique mutations reuse the detached allocation. Borrowed views and
+pool-backed buffers do not participate in refcounting.
+
+This removes unconditional deep copies from collection-heavy read and
+pass-through paths without adding a collector. It is not a promise that every
+slice operation is allocation-free: mutation of shared storage deliberately
+pays the copy required to preserve value semantics. The native backend uses
+explicit owned/borrowed tracking across calls and returns; benchmark each
+backend rather than assuming the C refcount cost model applies to both.
+
 Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how-to: [howto/09-release-builds.md](howto/09-release-builds.md).
 
 Don’t invent numbers. Re-run locally:

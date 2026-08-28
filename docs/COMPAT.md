@@ -4,7 +4,7 @@ Mako aims for **simple everyday code**, **native performance** (a design goal,
 not yet broadly benchmarked), and active memory/resource safety mechanisms
 without a GC — with a **syntax surface that is Mako’s own**.
 
-**Current product:** **0.4.0**. See [IDENTITY.md](IDENTITY.md) for preferred forms.
+**Current product:** **0.6.2**. See [IDENTITY.md](IDENTITY.md) for preferred forms.
 
 ## Guarantees (0.x)
 

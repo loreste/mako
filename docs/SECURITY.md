@@ -9,7 +9,7 @@ and buffer overflows — but not general leak freedom. Edge cases are still
 being found and fixed. This is not yet equivalent to a formally verified
 memory model.
 
-**Product version:** **0.4.1**.
+**Product version:** **0.6.2**.
 
 Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make memory corruption and common backend footguns hard to ship —
@@ -31,6 +31,17 @@ outside the safe claim.
 Soundness program: [SOUNDNESS.md](SOUNDNESS.md) · Memory model:
 [MEMORY_MODEL.md](MEMORY_MODEL.md) · Stdlib gate:
 [STDLIB_SAFETY.md](STDLIB_SAFETY.md).
+
+## Slice backing ownership (0.6.2)
+
+Safe slice values preserve value semantics without a tracing garbage collector:
+
+- The C backend stores owned heap slices in atomic refcounted backing allocations. Cloning one is an O(1) retain; mutation and append detach first when backing storage is shared.
+- Borrowed views, stack literals, and pool-backed buffers are non-refcounted and never enter the refcount release path. Generated cleanup matches the allocator that produced the backing storage.
+- The native backend records owned versus borrowed values across calls and returns, transfers returned ownership to the caller, and cleans nested or discarded temporaries at their last use.
+- Struct fields and generated collection helpers follow the same retain, replace, and release rules as local slices.
+
+This contract is covered by adversarial aliasing and clone-storm tests, native differential tests, leak checks, ASan/LSan, TSan, UBSan, and long-running RSS soaks. It is evidence of continued hardening, not formal verification. `unsafe` blocks and unverifiable FFI remain outside the safe-language guarantee.
 
 ## Principles
 

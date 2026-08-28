@@ -1,6 +1,6 @@
 # Makori concurrency memory model
 
-**SAFE-010 · RT-001 · RT-004** · Product tip **0.4.0**
+**SAFE-010 · RT-001 · RT-004** · Product tip **0.6.2**
 
 Safe Mako targets **memory safety by construction** and data-race freedom for
 ordinary locals,
@@ -16,6 +16,20 @@ behind an explicit unsafe boundary.
 Related: [SOUNDNESS.md](SOUNDNESS.md) · [SECURITY.md](SECURITY.md) ·
 [ASYNC.md](ASYNC.md) · [SPEED.md](SPEED.md) ·
 [STDLIB_SAFETY.md](STDLIB_SAFETY.md).
+
+## Slice values and backing storage
+
+An owned slice may share backing storage, but mutation must still observe value
+semantics. On the C backend, copying an owned heap slice atomically retains its
+backing allocation. A write or append detaches first when the allocation is
+shared. Borrowed views, stack literals, and pool-backed buffers are non-owning
+and cannot enter the refcount release path.
+
+The native backend represents the same language contract through explicit
+owned/borrowed tracking: arguments are cloned or borrowed according to their
+boundary, return values transfer ownership, and nested or discarded temporaries
+are released at last use. Generated struct and collection cleanup follows the
+same rules. These guarantees do not extend through `unsafe` or unverifiable FFI.
 
 ---
 
