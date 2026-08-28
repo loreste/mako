@@ -3146,7 +3146,7 @@ impl<'a> FunctionLowerer<'a> {
                             self.emit_drop(view, ty);
                             owned = true;
                         } else {
-                            owned = self.take_return_heap_local(expr, owned);
+                            owned = self.take_bare_string_local(expr, owned);
                         }
                         if !owned {
                             value = self.emit_clone(value, ty);
@@ -4319,7 +4319,7 @@ impl<'a> FunctionLowerer<'a> {
                                 self.emit_drop(view, ty);
                                 owned = true;
                             } else {
-                                owned = self.take_bare_string_local(expr, owned);
+                                owned = self.take_return_heap_local(expr, owned);
                             }
                             if !owned {
                                 value = self.emit_clone(value, ty);
@@ -10908,6 +10908,7 @@ impl<'a> FunctionLowerer<'a> {
                         continue;
                     }
                     if actual.is_consumable_header() {
+                        let original = value;
                         let is_mut_param = mut_flags
                             .and_then(|flags| flags.get(arg_index))
                             .copied()
@@ -10925,6 +10926,11 @@ impl<'a> FunctionLowerer<'a> {
                             } else {
                                 value = self.emit_clone(value, actual);
                             }
+                            if !matches!(arg_expr, Expr::Ident(_))
+                                && (owned || matches!(arg_expr, Expr::Call { .. }))
+                            {
+                                temporary_owned.push((original, actual));
+                            }
                             lowered.push(value);
                             continue;
                         }
@@ -10932,7 +10938,13 @@ impl<'a> FunctionLowerer<'a> {
                         // Always clone so the caller's original stays valid
                         // (the caller may read the variable after the call).
                         // With refcounted slices, clone is O(1).
+                        let original = value;
                         value = self.emit_clone(value, actual);
+                        if !matches!(arg_expr, Expr::Ident(_))
+                            && (owned || matches!(arg_expr, Expr::Call { .. }))
+                        {
+                            temporary_owned.push((original, actual));
+                        }
                         lowered.push(value);
                         continue;
                     }
@@ -16248,12 +16260,16 @@ impl<'a> FunctionLowerer<'a> {
         let Expr::Ident(name) = expr else {
             return already_owned;
         };
-        if self.heap_owned.get(name) == Some(&true) {
-            self.heap_owned.insert(name.clone(), false);
-            true
-        } else {
-            already_owned
+        let is_param = self
+            .function
+            .params
+            .iter()
+            .any(|(param, _, _)| param == name);
+        if is_param {
+            return false;
         }
+        self.heap_owned.insert(name.clone(), false);
+        true
     }
 
     /// Move a fat-fn local into a call/kick: clear the binding so later
@@ -33513,6 +33529,37 @@ mod tests {
         assert!(
             drops >= clones + 2,
             "owned []bool locals and views must be dropped (clones={clones}, drops={drops})"
+        );
+    }
+
+    #[test]
+    fn returned_slice_is_owned_and_dropped_by_caller() {
+        let source = r#"
+            fn make_values() -> []int {
+                let mut xs = make([]int, 0)
+                xs = append(xs, 1)
+                return xs
+            }
+            fn size(xs: []int) -> int { return len(xs) }
+            fn main() {
+                let xs = make_values()
+                print_int(size(xs))
+                print_int(size(make_values()))
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let main = module.functions.iter().find(|f| f.name == "main").unwrap();
+        let drops = main
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|inst| matches!(inst, Inst::DropSlice { .. }))
+            .count();
+        assert!(
+            drops >= 2,
+            "stored and temporary returned slices must be dropped by caller (drops={drops})"
         );
     }
 
