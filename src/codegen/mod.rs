@@ -3686,6 +3686,19 @@ impl Codegen {
                 self.indent -= 1;
                 self.line("}");
             }
+            TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if self.structs.contains_key(name) || self.enums.contains_key(name)) =>
+            {
+                let c_ty = self.type_expr_c(payload);
+                let tag = c_ty.strip_prefix("MakoArr_").unwrap_or(&c_ty);
+                let p = self.fresh("bagp");
+                self.emit_line(format_args!("{c_ty} *{p} = ({c_ty}*){ptr}({bag});"));
+                self.emit_line(format_args!("if ({p}) {{"));
+                self.indent += 1;
+                self.emit_line(format_args!("mako_arr_{tag}_free(*{p});"));
+                self.emit_line(format_args!("free({p});"));
+                self.indent -= 1;
+                self.line("}");
+            }
             TypeExpr::Named(name) if self.structs.contains_key(name) => {
                 let c_ty = self.type_expr_c(payload);
                 let p = self.fresh("bagp");
@@ -40455,6 +40468,26 @@ mod ownership_tests {
         assert!(codegen.out.contains("MakoResultFloat discard_"));
         assert!(codegen.out.contains(".err);"));
         assert!(!codegen.out.contains("err_kind"));
+    }
+
+    #[test]
+    fn discarded_struct_slice_bag_frees_backing_and_box() {
+        let mut codegen = Codegen::new();
+        codegen.structs.insert(
+            "Point".into(),
+            StructInfo {
+                c_name: "Point".into(),
+                fields: vec![],
+                field_types: vec![],
+                defaults: HashMap::new(),
+            },
+        );
+        let payload = TypeExpr::Array(Box::new(TypeExpr::Named("Point".into())));
+
+        codegen.emit_bag_payload_drop("bag", &payload, true);
+
+        assert!(codegen.out.contains("mako_arr_Point_free(*bagp_"));
+        assert!(codegen.out.contains("free(bagp_"));
     }
 
     #[test]
