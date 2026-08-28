@@ -108,7 +108,7 @@ static inline int mako_rc_shared(void *data) {
 }
 
 /* Per-translation-unit anti-ICF marker for generated kick stubs. */
-static volatile int64_t __mako_kick_id = 0;
+static _Atomic int64_t __mako_kick_id = 0;
 
 /* Branch hints for hot paths (no-ops on unknown compilers). */
 #if defined(__GNUC__) || defined(__clang__)

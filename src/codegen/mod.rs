@@ -38312,9 +38312,9 @@ impl Codegen {
             // This makes the function body provably unique to any optimizer.
             let stub_id = self.tmp;
             let helper_src = format!(
-                "extern volatile int64_t __mako_kick_id;\n\
+                "extern _Atomic int64_t __mako_kick_id;\n\
                  __attribute__((noinline,optnone)) void *{helper}(void *arg) {{ (void)arg;\n\
-                 __mako_kick_id = {stub_id};\n{body}}}\n"
+                 atomic_store_explicit(&__mako_kick_id, {stub_id}, memory_order_relaxed);\n{body}}}\n"
             );
             self.insert_helper(&helper_src);
             return;
@@ -38423,9 +38423,9 @@ impl Codegen {
         // Anti-ICF: unique volatile write + optnone prevents any function merging.
         let stub_id = self.tmp;
         let helper_src = format!(
-            "extern volatile int64_t __mako_kick_id;\n\
+            "extern _Atomic int64_t __mako_kick_id;\n\
              __attribute__((noinline,optnone)) void *{helper}(void *arg) {{\n\
-             __mako_kick_id = {stub_id};\n{body}}}\n"
+             atomic_store_explicit(&__mako_kick_id, {stub_id}, memory_order_relaxed);\n{body}}}\n"
         );
         self.insert_helper(&helper_src);
     }

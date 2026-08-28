@@ -10928,11 +10928,19 @@ impl<'a> FunctionLowerer<'a> {
                             lowered.push(value);
                             continue;
                         }
-                        // By-value semantics: the callee owns its parameter.
-                        // Always clone so the caller's original stays valid
-                        // (the caller may read the variable after the call).
-                        // With refcounted slices, clone is O(1).
-                        value = self.emit_clone(value, actual);
+                        // By-value semantics: the callee owns its parameter
+                        // and may consume it via a consuming API
+                        // (strings_copy, append, etc.). Clone a borrowed
+                        // value so the caller's original stays valid; pass
+                        // an owned value directly (ownership transfers to
+                        // the callee). No post-call drop — the callee is
+                        // responsible for the parameter's lifetime.
+                        if !owned {
+                            value = self.emit_clone(value, actual);
+                        } else if let Expr::Ident(name) = arg_expr {
+                            // Transfer: caller relinquishes ownership.
+                            self.heap_owned.insert(name.clone(), false);
+                        }
                         lowered.push(value);
                         continue;
                     }
@@ -16221,24 +16229,6 @@ impl<'a> FunctionLowerer<'a> {
             return already_owned;
         };
         if self.heap_owned.get(name) == Some(&true) {
-            // Slice headers can represent borrowed views (owned=0 in the
-            // runtime header). Without a separate backing-ownership bit in
-            // this map, conservatively clone on ordinary transfers. Builtins
-            // such as append handle their explicit consuming move separately.
-            if matches!(
-                self.locals.get(name).map(|(_, ty)| *ty),
-                Some(
-                    Type::IntSlice
-                        | Type::FloatSlice
-                        | Type::ByteSlice
-                        | Type::BoolSlice
-                        | Type::StrSlice
-                        | Type::StructSlice(_)
-                        | Type::PtrSlice(_)
-                )
-            ) {
-                return false;
-            }
             self.heap_owned.insert(name.clone(), false);
             true
         } else {
@@ -31210,7 +31200,7 @@ impl<'a> FunctionLowerer<'a> {
                 )));
             }
             lowered.push(v);
-            if owned && !matches!(arg, Expr::Ident(_)) {
+            if owned {
                 temps.push((v, actual));
             }
         }
@@ -31238,6 +31228,7 @@ impl<'a> FunctionLowerer<'a> {
                 | "slices_reverse"
                 | "slices_unique"
                 | "queue_pop_str"
+                | "strings_copy"
         );
         // Take-send moves the string (arg 1) into the channel or frees it on
         // failure — never drop it after the call, and clear local ownership.
@@ -33451,7 +33442,7 @@ mod tests {
     }
 
     #[test]
-    fn drops_bool_slice_views_and_returned_clones() {
+    fn drops_bool_slice_views_and_transfers_owned_return() {
         let source = r#"
             fn flip_first(mut xs: []bool) -> []bool {
                 xs[0] = false
@@ -33500,10 +33491,9 @@ mod tests {
                 )
             })
             .count();
-        assert!(clones >= 1, "returning borrowed []bool must clone");
         assert!(
             drops >= clones + 2,
-            "owned []bool locals and cloned returns must be dropped (clones={clones}, drops={drops})"
+            "owned []bool locals and views must be dropped (clones={clones}, drops={drops})"
         );
     }
 
