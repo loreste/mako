@@ -32,6 +32,24 @@ language-level. If it isn’t in a script with a method, it isn’t a claim.
 Aimed at backend and systems work: request arenas, tight slice/map layouts,
 native binaries.
 
+Integer channels check waiter counts while holding the channel mutex.
+Enqueue/dequeue skip condition-variable signaling when no peer is blocked and
+signal one peer when one item or slot becomes available. Close retains broadcast
+semantics. This removes uncontended wake overhead without weakening MPMC
+synchronization or lifetime guarantees.
+
+Runtime telemetry is pay-for-use in generated C. Programs that call
+`runtime_stats_json()` or `runtime_stats_reset()` compile with exact atomic task,
+channel, and lock counters. Programs that do not use those builtins compile the
+counter operations out of the hot path. Native C integrations can force the
+instrumented form with `-DMAKO_RUNTIME_METRICS=1`.
+
+Release `--backend native` preserves the mature AST-to-Cranelift whole-function
+fast paths for recognized Fibonacci and generated slice-reduction kernels.
+General programs and all test harnesses continue through ownership-explicit
+shared IR. This prevents canonical IR migration from silently discarding proven
+CPU transforms while keeping backend selection narrow and deterministic.
+
 ### Copy-on-write slice cost model
 
 On the C backend, cloning an owned heap-backed slice performs an atomic retain

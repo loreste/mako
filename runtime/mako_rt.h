@@ -72,18 +72,13 @@ extern "C" {
 static inline _Atomic uint32_t *mako_rc_of(void *data) {
     return (_Atomic uint32_t *)((char *)data - MAKO_RC_HEADER);
 }
-#define MAKO_RC_MAGIC 0x4D414B4FU  /* "MAKO" */
 static inline void *mako_rc_alloc(size_t data_bytes) {
     char *block = (char *)malloc(MAKO_RC_HEADER + data_bytes);
     if (!block) { fprintf(stderr, "mako: OOM in rc_alloc\n"); abort(); }
     _Atomic uint32_t *rc = (_Atomic uint32_t *)block;
     atomic_init(rc, 1);
-    *(uint32_t *)(block + 4) = MAKO_RC_MAGIC;  /* tag for detection */
+    *(uint32_t *)(block + 4) = 0;
     return block + MAKO_RC_HEADER;
-}
-static inline int mako_rc_is_rc(void *data) {
-    if (!data) return 0;
-    return *(uint32_t *)((char *)data - 4) == MAKO_RC_MAGIC;
 }
 static inline void *mako_rc_calloc(size_t data_bytes) {
     void *p = mako_rc_alloc(data_bytes);
@@ -91,24 +86,19 @@ static inline void *mako_rc_calloc(size_t data_bytes) {
     return p;
 }
 static inline void mako_rc_retain(void *data) {
-    if (data && mako_rc_is_rc(data))
+    if (data)
         atomic_fetch_add_explicit(mako_rc_of(data), 1, memory_order_relaxed);
 }
 static inline int mako_rc_release(void *data) {
     if (!data) return 0;
-    if (!mako_rc_is_rc(data)) return 0;  /* non-RC pointer (view/literal) — no-op */
     uint32_t prev = atomic_fetch_sub_explicit(mako_rc_of(data), 1, memory_order_acq_rel);
     if (prev <= 1) { free((char *)data - MAKO_RC_HEADER); return 1; }
     return 0;
 }
 static inline int mako_rc_shared(void *data) {
     if (!data) return 0;
-    if (!mako_rc_is_rc(data)) return 0;
     return atomic_load_explicit(mako_rc_of(data), memory_order_acquire) > 1;
 }
-
-/* Per-translation-unit anti-ICF marker for generated kick stubs. */
-static _Atomic int64_t __mako_kick_id = 0;
 
 /* Branch hints for hot paths (no-ops on unknown compilers). */
 #if defined(__GNUC__) || defined(__clang__)
@@ -119,7 +109,43 @@ static _Atomic int64_t __mako_kick_id = 0;
 #define MAKO_UNLIKELY(x) (x)
 #endif
 
+/* Defined two's-complement wrapping for Mako integer arithmetic. C signed
+ * overflow and out-of-range shift counts are UB, so use unsigned math for the
+ * default wrap contract and convert the resulting bit pattern back to int64. */
+static inline int64_t mako_wrap_add_i64(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a + (uint64_t)b);
+}
+static inline int64_t mako_wrap_sub_i64(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a - (uint64_t)b);
+}
+static inline int64_t mako_wrap_mul_i64(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a * (uint64_t)b);
+}
+static inline int64_t mako_wrap_shl_i64(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a << ((uint64_t)b & 63U));
+}
+static inline int64_t mako_wrap_shr_i64(int64_t a, int64_t b) {
+    uint64_t shift = (uint64_t)b & 63U;
+    uint64_t bits = (uint64_t)a;
+    if (shift == 0 || a >= 0) return (int64_t)(bits >> shift);
+    return (int64_t)((bits >> shift) | (UINT64_MAX << (64U - shift)));
+}
+static inline int64_t mako_wrap_div_i64(int64_t a, int64_t b) {
+    if (MAKO_UNLIKELY(b == 0)) abort();
+    if (MAKO_UNLIKELY(a == INT64_MIN && b == -1)) return INT64_MIN;
+    return a / b;
+}
+static inline int64_t mako_wrap_mod_i64(int64_t a, int64_t b) {
+    if (MAKO_UNLIKELY(b == 0)) abort();
+    if (MAKO_UNLIKELY(a == INT64_MIN && b == -1)) return 0;
+    return a % b;
+}
+
 /* ---- Lightweight runtime observability ---- */
+#ifndef MAKO_RUNTIME_METRICS
+#define MAKO_RUNTIME_METRICS 1
+#endif
+
 static atomic_llong mako_rt_tasks_spawned = 0;
 static atomic_llong mako_rt_tasks_joined = 0;
 static atomic_llong mako_rt_channels_created = 0;
@@ -138,16 +164,25 @@ static inline int64_t mako_now_ms(void);
 static inline int64_t mako_now_ns(void);
 
 static inline void mako_rt_counter_inc(atomic_llong *counter) {
+#if MAKO_RUNTIME_METRICS
     atomic_fetch_add_explicit(counter, 1, memory_order_relaxed);
+#else
+    (void)counter;
+#endif
 }
 
 static inline void mako_rt_note_lock_wait(int64_t wait_ns) {
+#if MAKO_RUNTIME_METRICS
     if (wait_ns < 0) wait_ns = 0;
     atomic_fetch_add_explicit(&mako_rt_lock_waits, 1, memory_order_relaxed);
     atomic_fetch_add_explicit(&mako_rt_lock_wait_ns, wait_ns, memory_order_relaxed);
+#else
+    (void)wait_ns;
+#endif
 }
 
 static inline void mako_rt_observe_channel_depth(size_t depth) {
+#if MAKO_RUNTIME_METRICS
     long long d = (long long)depth;
     long long old = atomic_load_explicit(&mako_rt_channel_peak_depth, memory_order_relaxed);
     while (d > old
@@ -159,6 +194,9 @@ static inline void mako_rt_observe_channel_depth(size_t depth) {
                memory_order_relaxed
            )) {
     }
+#else
+    (void)depth;
+#endif
 }
 
 static inline void mako_runtime_stats_reset(void) {
@@ -242,7 +280,8 @@ static inline int mako_str_is_empty_singleton(MakoString s) {
     return s.data == &mako_str_empty_byte;
 }
 
-/* Free an owned string; no-op for the empty singleton. */
+/* Free an owned string. Borrowed views must never reach this ownership-only
+ * boundary; probing before an arbitrary view pointer would itself be UB. */
 static inline void mako_str_free(MakoString s) {
     if (!s.data || s.data == &mako_str_empty_byte) return;
     free(s.data);
@@ -342,7 +381,7 @@ static inline MakoString mako_str_concat_own(MakoString a, MakoString b) {
         d[b.len] = 0;
         return (MakoString){d, b.len};
     }
-    /* Realloc a's buffer to fit a + b. */
+    /* Realloc a's owned buffer to fit a + b. */
     char *d = (char *)realloc(a.data, a.len + b.len + 1);
     if (MAKO_UNLIKELY(!d)) {
         fprintf(stderr, "mako: OOM in str_concat_own\n");
@@ -777,11 +816,13 @@ static inline void mako_str_array_set(MakoStrArray a, int64_t i, MakoString v) {
 static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
     /* COW: if shared or at capacity, allocate new refcounted backing. */
     if (MAKO_UNLIKELY(s.len + 1 > s.cap || mako_rc_shared(s.data))) {
+        MakoString *old_data = s.data;
         size_t ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
         MakoString *nd = (MakoString *)mako_rc_alloc(ncap * sizeof(MakoString));
-        if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoString));
-        /* Caller releases old s.data via reassignment or scope-exit. */
+        /* The caller still owns and releases the old header. Every detached
+         * backing therefore needs independent element ownership. */
+        for (size_t i = 0; i < s.len; i++) nd[i] = mako_str_clone(old_data[i]);
         s.data = nd;
         s.cap = ncap;
     }
@@ -5029,7 +5070,7 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
         c->count = 1;
         mako_rt_counter_inc(&mako_rt_channel_sends);
         mako_chan_observe_depth(c, 1);
-        pthread_cond_broadcast(&c->can_recv);
+        if (c->waiters_recv > 0) pthread_cond_signal(&c->can_recv);
         while (c->count != 0 && !c->closed) {
             int64_t t0 = mako_now_ns();
             c->waiters_send++;
@@ -5059,7 +5100,7 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
     c->count++;
     mako_rt_counter_inc(&mako_rt_channel_sends);
     mako_chan_observe_depth(c, c->count);
-    pthread_cond_broadcast(&c->can_recv);
+    if (c->waiters_recv > 0) pthread_cond_signal(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     mako_select_notify();
     return 1;
@@ -5078,7 +5119,7 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
         c->count = 1;
         mako_rt_counter_inc(&mako_rt_channel_sends);
         mako_chan_observe_depth(c, 1);
-        pthread_cond_broadcast(&c->can_recv);
+        if (c->waiters_recv > 0) pthread_cond_signal(&c->can_recv);
         pthread_mutex_unlock(&c->mu);
         mako_select_notify();
         return 1;
@@ -5094,7 +5135,7 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
     c->count++;
     mako_rt_counter_inc(&mako_rt_channel_sends);
     mako_chan_observe_depth(c, c->count);
-    pthread_cond_broadcast(&c->can_recv);
+    if (c->waiters_recv > 0) pthread_cond_signal(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     mako_select_notify();
     return 1;
@@ -5135,7 +5176,7 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
         c->count--;
     }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
-    pthread_cond_broadcast(&c->can_send);
+    if (c->waiters_send > 0) pthread_cond_signal(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     return v;
 }
@@ -5163,7 +5204,7 @@ static inline int64_t mako_chan_recv_ok(MakoChan *c, int64_t *out) {
         c->count--;
     }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
-    pthread_cond_broadcast(&c->can_send);
+    if (c->waiters_send > 0) pthread_cond_signal(&c->can_send);
     pthread_mutex_unlock(&c->mu);
     if (out) *out = v;
     return 1;

@@ -4,6 +4,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+export MAKO_RUNTIME="$repo_dir/runtime"
 # Runtime wall-time bar vs C backend / hand C / Rust. 1.25× is the published
 # residual ship bar; tighten with MAKO_NATIVE_MAX_RATIO / $1 as the tree improves.
 max_ratio="${1:-${MAKO_NATIVE_MAX_RATIO:-1.25}}"
@@ -83,7 +84,11 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   fi
 fi
 
-cargo build --release --manifest-path "$repo_dir/Cargo.toml" "${cargo_features[@]}"
+if (( ${#cargo_features[@]} > 0 )); then
+  cargo build --release --manifest-path "$repo_dir/Cargo.toml" "${cargo_features[@]}"
+else
+  cargo build --release --manifest-path "$repo_dir/Cargo.toml"
+fi
 mkdir -p "$out_dir"
 
 # Release runtime speed uses LLVM when the feature is built in; Cranelift remains

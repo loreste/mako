@@ -1,0 +1,54 @@
+struct CowStrings {
+    values: []string
+}
+
+struct CowStringTable {
+    columns: []CowStrings
+}
+
+fn append_cow_string(mut box: CowStrings, value: string) -> CowStrings {
+    box.values = append(box.values, value)
+    return box
+}
+
+fn TestStringSliceSharedDetachOwnsElements() {
+    let mut values = make([]string, 0, 4)
+    values = append(values, str_repeat("a", 32))
+    values = append(values, str_repeat("b", 32))
+
+    let snapshot = CowStrings { values: values }
+    let mut changed = snapshot
+    changed = append_cow_string(changed, str_repeat("c", 32))
+
+    assert_eq(len(snapshot.values), 2)
+    assert_eq(len(changed.values), 3)
+    assert_eq_str(snapshot.values[0], str_repeat("a", 32))
+    assert_eq_str(changed.values[1], str_repeat("b", 32))
+    assert_eq_str(changed.values[2], str_repeat("c", 32))
+}
+
+fn TestStringSliceUniqueGrowthMovesElements() {
+    let mut values = make([]string, 0, 1)
+    values = append(values, str_repeat("x", 64))
+    values = append(values, str_repeat("y", 64))
+    assert_eq(len(values), 2)
+    assert_eq_str(values[0], str_repeat("x", 64))
+    assert_eq_str(values[1], str_repeat("y", 64))
+}
+
+fn TestNestedIndexedFieldAppendReusesCapacity() {
+    let mut values = make([]string, 0, 4)
+    values = append(values, str_repeat("p", 48))
+    let column = CowStrings { values: values }
+    let mut columns = make([]CowStrings, 0, 1)
+    columns = append(columns, column)
+    let mut table = CowStringTable { columns: columns }
+
+    table.columns[0].values = append(
+        table.columns[0].values,
+        str_repeat("q", 48)
+    )
+    assert_eq(len(table.columns[0].values), 2)
+    assert_eq_str(table.columns[0].values[0], str_repeat("p", 48))
+    assert_eq_str(table.columns[0].values[1], str_repeat("q", 48))
+}

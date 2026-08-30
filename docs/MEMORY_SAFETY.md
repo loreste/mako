@@ -1,5 +1,10 @@
 # Memory safety · no GC
 
+String-slice COW detachment deep-clones owned string elements because the caller
+retains responsibility for releasing the old header. This prevents detached
+arrays from becoming duplicate owners of the same string allocation on macOS and
+Linux.
+
 There is no garbage collector. Memory frees when ownership says so — scope
 exit, move, drop — or when you use explicit share (RC) or arenas. Not when a
 tracing collector eventually notices.
@@ -94,6 +99,15 @@ borrowed-when-owned leaks every call, owned-when-borrowed is a double-free.
 When uncertain, it stays borrowed.
 
 ---
+
+Sanitizer sweeps pin `MAKO_RUNTIME` to the current checkout and default to the
+C backend. This prevents a stale installed runtime or a backend without fully
+instrumented loads and stores from producing misleading review evidence.
+
+Owned runtime strings use plain `malloc`/`free`; refcount headers are reserved
+for slice backings whose owning `cap > 0` representation supplies explicit
+provenance. Borrowed string views never enter owned drop paths, and the runtime
+never probes bytes before an arbitrary string pointer to guess its allocator.
 
 ## Unsafe boundary
 

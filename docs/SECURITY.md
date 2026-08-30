@@ -114,7 +114,7 @@ dev soft paths.
 
 | Risk | Mako prevention |
 |------|-----------------|
-| Integer overflow | `checked_add/sub/mul` + `--overflow trap` mode |
+| Integer overflow | Defined wrapping arithmetic/shifts by default; `checked_add/sub/mul` + `--overflow trap` mode |
 | Leaks (testing) | `leak_mark/check/scope_enter/exit` + `leak_report_json` |
 | Leaks (scoped work) | Values and `arena` regions are released at scope end |
 | Orphan threads | `crew` **cancel_joins** ordinary kicked jobs on exit; cancellation is cooperative and blocked C/FFI may delay the join |

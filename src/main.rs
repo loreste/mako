@@ -4503,21 +4503,28 @@ fn build_native_object(
             // while their ownership ABI is being migrated into that IR.
             // When test_fns is non-empty, lower_with_tests synthesizes harness main.
             let native_ir_error = std::cell::RefCell::new(None);
-            let native_ir_object = match native_ir::lower_with_tests(program, test_fns) {
-                Ok(ir) => match native_codegen::compile_ir_with_overflow(
-                    &ir,
-                    matches!(level, OptLevel::Release),
-                    opts.overflow,
-                ) {
-                    Ok(object) => Some(object),
+            let prefer_ast_fast_path = matches!(level, OptLevel::Release)
+                && test_fns.is_empty()
+                && native_codegen::has_release_ast_fast_path(program);
+            let native_ir_object = if prefer_ast_fast_path {
+                None
+            } else {
+                match native_ir::lower_with_tests(program, test_fns) {
+                    Ok(ir) => match native_codegen::compile_ir_with_overflow(
+                        &ir,
+                        matches!(level, OptLevel::Release),
+                        opts.overflow,
+                    ) {
+                        Ok(object) => Some(object),
+                        Err(error) => {
+                            *native_ir_error.borrow_mut() = Some(error.to_string());
+                            None
+                        }
+                    },
                     Err(error) => {
                         *native_ir_error.borrow_mut() = Some(error.to_string());
                         None
                     }
-                },
-                Err(error) => {
-                    *native_ir_error.borrow_mut() = Some(error.to_string());
-                    None
                 }
             };
             let force_shared_ir =

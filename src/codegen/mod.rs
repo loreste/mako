@@ -4629,6 +4629,9 @@ impl Codegen {
     pub fn emit(mut self, program: &Program) -> String {
         // Native builds pull the full runtime surface. WASI preview1 builds
         // (`-DMAKO_WASI`) keep only `mako_rt.h` — sockets/TLS/DB need host POSIX.
+        self.out.push_str(
+            "#ifndef MAKO_RUNTIME_METRICS\n#define MAKO_RUNTIME_METRICS /*__MAKO_RUNTIME_METRICS__*/\n#endif\n",
+        );
         self.out.push_str("#include \"mako_rt.h\"\n");
         // Overflow mode for checked integer ops (must precede mako_overflow.h use).
         self.out.push_str(&format!(
@@ -5049,6 +5052,13 @@ impl Codegen {
         }
         // Resolve demand-driven includes: scan the generated C for function prefixes
         // and only include headers that are actually referenced.
+        let runtime_metrics = self.out.contains("mako_runtime_stats_json()")
+            || self.out.contains("mako_runtime_stats_reset()");
+        self.out = self.out.replace(
+            "/*__MAKO_RUNTIME_METRICS__*/",
+            if runtime_metrics { "1" } else { "0" },
+        );
+
         let includes = Self::resolve_includes(&self.out);
         self.out = self.out.replace("/*__MAKO_INCLUDES__*/", &includes);
         self.out
@@ -15022,8 +15032,22 @@ impl Codegen {
                         self.emit_line(format_args!("int64_t {tmp} = {idx};"));
                         let sn = sn.to_string();
                         let ptr = format!("mako_arr_{sn}_get_ptr({a}, {tmp})");
-                        if let Some(field_free) = Self::own_free_fn(&vty) {
-                            self.emit_line(format_args!("{field_free}({ptr}->{field});"));
+                        let consumes_old_field = matches!(
+                            value,
+                            Expr::Call { callee, args }
+                                if matches!(callee.as_ref(), Expr::Ident(name) if name == "append")
+                                    && matches!(
+                                        args.first(),
+                                        Some(Expr::Field {
+                                            base: source_base,
+                                            field: source_field,
+                                        }) if source_field == field && source_base.as_ref() == base
+                                    )
+                        );
+                        if !consumes_old_field {
+                            if let Some(field_free) = Self::own_free_fn(&vty) {
+                                self.emit_line(format_args!("{field_free}({ptr}->{field});"));
+                            }
                         }
                         self.emit_line(format_args!("{ptr}->{field} = {v};"));
                         return;
@@ -15726,6 +15750,21 @@ impl Codegen {
                         if let Some(fn_name) = self.overflow_mode.trap_fn(ch) {
                             return (ty.into(), format!("{fn_name}({lv}, {rv})"));
                         }
+                    }
+                }
+                if ty == "int64_t" {
+                    let wrap_fn = match op {
+                        BinOp::Add => Some("mako_wrap_add_i64"),
+                        BinOp::Sub => Some("mako_wrap_sub_i64"),
+                        BinOp::Mul => Some("mako_wrap_mul_i64"),
+                        BinOp::Div => Some("mako_wrap_div_i64"),
+                        BinOp::Mod => Some("mako_wrap_mod_i64"),
+                        BinOp::Shl => Some("mako_wrap_shl_i64"),
+                        BinOp::Shr => Some("mako_wrap_shr_i64"),
+                        _ => None,
+                    };
+                    if let Some(fn_name) = wrap_fn {
+                        return (ty.into(), format!("{fn_name}({lv}, {rv})"));
                     }
                 }
                 let cop = match op {
@@ -38331,9 +38370,9 @@ impl Codegen {
             // This makes the function body provably unique to any optimizer.
             let stub_id = self.tmp;
             let helper_src = format!(
-                "extern _Atomic int64_t __mako_kick_id;\n\
+                "static _Atomic int64_t __mako_kick_id_{stub_id} = 0;\n\
                  __attribute__((noinline,optnone)) void *{helper}(void *arg) {{ (void)arg;\n\
-                 atomic_store_explicit(&__mako_kick_id, {stub_id}, memory_order_relaxed);\n{body}}}\n"
+                 atomic_store_explicit(&__mako_kick_id_{stub_id}, {stub_id}, memory_order_relaxed);\n{body}}}\n"
             );
             self.insert_helper(&helper_src);
             return;
@@ -38442,9 +38481,9 @@ impl Codegen {
         // Anti-ICF: unique volatile write + optnone prevents any function merging.
         let stub_id = self.tmp;
         let helper_src = format!(
-            "extern _Atomic int64_t __mako_kick_id;\n\
+            "static _Atomic int64_t __mako_kick_id_{stub_id} = 0;\n\
              __attribute__((noinline,optnone)) void *{helper}(void *arg) {{\n\
-             atomic_store_explicit(&__mako_kick_id, {stub_id}, memory_order_relaxed);\n{body}}}\n"
+             atomic_store_explicit(&__mako_kick_id_{stub_id}, {stub_id}, memory_order_relaxed);\n{body}}}\n"
         );
         self.insert_helper(&helper_src);
     }

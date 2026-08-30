@@ -12,7 +12,7 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 mako_bin="${MAKO_BIN:-$repo_dir/target/release/mako}"
-export MAKO_RUNTIME="${MAKO_RUNTIME:-$repo_dir/runtime}"
+export MAKO_RUNTIME="$repo_dir/runtime"
 
 if [[ ! -x "$mako_bin" ]]; then
   echo "memory-safety-gate: building release mako" >&2

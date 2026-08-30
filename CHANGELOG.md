@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Hardened allocation provenance: owned strings consistently use plain
+  `malloc`/`free`, while only slice backings use refcount headers. Removed the
+  out-of-bounds allocation-tag probe and rejected a partial string-RC migration.
+- Pinned sanitizer sweeps to the checkout runtime and the instrumentable C
+  backend so installed runtimes cannot produce misleading audit results.
+- Made memory-safety gates ignore ambient `MAKO_RUNTIME` overrides so compiler
+  and runtime headers always come from the same checkout under review.
+- Pinned performance gates to the checkout runtime for the same compiler/header
+  consistency, preventing stale installations from invalidating benchmarks.
+- Fixed the native benchmark gate on macOS Bash 3.2 when no optional Cargo
+  feature arguments are selected under `set -u`.
+- Fixed sanitizer C-backend linkage for `kick` stubs by emitting a unique
+  translation-unit-local anti-folding marker for each generated stub.
+- Made default integer wrap semantics defined in C codegen for arithmetic,
+  division edge cases, and masked shifts instead of relying on signed C UB.
+
 ## 0.6.2 - 2026-08-28 (copy-on-write slice ownership)
 
 - Changed heap-backed int, byte, string, float, bool, and generated slices to
@@ -77,6 +93,22 @@
 - Tightened the integer channel hot path by avoiding unnecessary global select
   notifications, modulo ring advancement, and repeated global peak-depth CAS
   after the local high-water mark is known.
+
+- Integer channels now avoid condition-variable syscalls when no peer is
+  blocked and wake one peer per enqueue/dequeue; close still wakes all waiters.
+
+- Added adversarial channel wakeup regression coverage for uncontended traffic,
+  blocked senders/receivers, multi-waiter progress, rendezvous, and close.
+- Fixed native Cranelift lowering when a kicked function returns a boolean whose
+  runtime ABI value is already widened to 64 bits.
+- Made C-runtime task/channel telemetry pay-for-use: codegen retains exact atomic
+  counters for programs using runtime stats and removes their CPU cost otherwise.
+- Restored recognized release-native Fibonacci and generated slice-reduction CPU
+  fast paths that shared-IR-first selection had accidentally bypassed.
+- Fixed a platform-independent string-slice COW double-free: detached backings
+  now clone element buffers while the caller retains ownership of the old header.
+- Fixed nested indexed-field append lowering so in-capacity append results are
+  not freed before being stored back into their destination field.
 
 ### Packaging
 

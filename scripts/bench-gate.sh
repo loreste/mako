@@ -9,6 +9,7 @@
 # Checks fib30x5, struct1m, slice100k, map50k, string20k, chan50k.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export MAKO_RUNTIME="$ROOT/runtime"
 cd "$ROOT"
 if [[ -n "${1:-}" ]]; then
   MAX_RATIO="$1"

@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export MAKO_RUNTIME="$ROOT/runtime"
 cd "$ROOT"
 
 CONTRACT="${MAKO_PERF_CONTRACT:-$ROOT/benchmarks/performance-contract.json}"

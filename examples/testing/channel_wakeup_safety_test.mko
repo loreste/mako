@@ -1,0 +1,107 @@
+fn wake_recv(ch: chan[int]) -> int {
+    return ch.recv()
+}
+
+fn wake_send(ch: chan[int], value: int) -> int {
+    if ch.send(value) {
+        return 1
+    }
+    return 0
+}
+
+fn wake_send_bool(ch: chan[int], value: int) -> bool {
+    return ch.send(value)
+}
+
+fn TestChannelUncontendedWakeElision() {
+    let ch = chan_open[int](2)
+    assert(ch.send(10))
+    assert(ch.send(20))
+    assert_eq(ch.recv(), 10)
+    assert_eq(ch.recv(), 20)
+    ch.close()
+}
+
+fn TestChannelWakesBlockedReceiversOnePerItem() {
+    let ch = chan_open[int](1)
+    crew group {
+        let a = group.kick(wake_recv(ch))
+        let b = group.kick(wake_recv(ch))
+        let c = group.kick(wake_recv(ch))
+        sleep_ms(10)
+        assert(ch.send(11))
+        assert(ch.send(22))
+        assert(ch.send(33))
+        assert_eq(a.join() + b.join() + c.join(), 66)
+    }
+    ch.close()
+}
+
+fn TestChannelWakesBlockedSendersOnePerSlot() {
+    let ch = chan_open[int](1)
+    assert(ch.send(1))
+    crew group {
+        let a = group.kick(wake_send(ch, 2))
+        let b = group.kick(wake_send(ch, 4))
+        let c = group.kick(wake_send(ch, 8))
+        sleep_ms(10)
+        let mut total = ch.recv()
+        total = total + ch.recv()
+        total = total + ch.recv()
+        total = total + ch.recv()
+        assert_eq(total, 15)
+        assert_eq(a.join(), 1)
+        assert_eq(b.join(), 1)
+        assert_eq(c.join(), 1)
+    }
+    ch.close()
+}
+
+fn TestChannelCloseWakesEveryReceiver() {
+    let ch = chan_open[int](1)
+    crew group {
+        let a = group.kick(wake_recv(ch))
+        let b = group.kick(wake_recv(ch))
+        let c = group.kick(wake_recv(ch))
+        sleep_ms(10)
+        ch.close()
+        assert_eq(a.join(), 0)
+        assert_eq(b.join(), 0)
+        assert_eq(c.join(), 0)
+    }
+}
+
+fn TestChannelCloseWakesEverySender() {
+    let ch = chan_open[int](1)
+    assert(ch.send(1))
+    crew group {
+        let a = group.kick(wake_send(ch, 2))
+        let b = group.kick(wake_send(ch, 3))
+        let c = group.kick(wake_send(ch, 4))
+        sleep_ms(10)
+        ch.close()
+        assert_eq(a.join(), 0)
+        assert_eq(b.join(), 0)
+        assert_eq(c.join(), 0)
+    }
+}
+
+fn TestChannelRendezvousWakeProgress() {
+    let ch = chan_open[int](0)
+    crew group {
+        let sender = group.kick(wake_send(ch, 42))
+        assert_eq(ch.recv(), 42)
+        assert_eq(sender.join(), 1)
+    }
+    ch.close()
+}
+
+fn TestChannelKickBoolReturn() {
+    let ch = chan_open[int](1)
+    crew group {
+        let sender = group.kick(wake_send_bool(ch, 7))
+        assert(sender.join())
+    }
+    assert_eq(ch.recv(), 7)
+    ch.close()
+}

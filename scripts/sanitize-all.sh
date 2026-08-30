@@ -10,6 +10,10 @@
 set -euo pipefail
 
 MAKO="${MAKO_BIN:-./target/release/mako}"
+MAKO_SANITIZE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export MAKO_RUNTIME="$MAKO_SANITIZE_ROOT/runtime"
+export MAKO_BACKEND="${MAKO_BACKEND:-c}"
+export UBSAN_OPTIONS="${UBSAN_OPTIONS:-halt_on_error=1}"
 QUICK=false
 [ "${1:-}" = "--quick" ] && QUICK=true
 

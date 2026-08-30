@@ -124,7 +124,7 @@ Arguments after `--` are forwarded to the compiled program. Access them with
 | `--time` | Print compile timings |
 | `--no-incremental` | Disable build caching |
 | `-j, --jobs <N>` | Parallel compile jobs |
-| `--overflow <MODE>` | `wrap` / `trap` / `ignore` (integer `+ - *`) |
+| `--overflow <MODE>` | `wrap` / `trap` / `ignore` (integer arithmetic and shifts) |
 | `--bounds always` | Legacy-compatible spelling; safe checks are already retained |
 
 ---

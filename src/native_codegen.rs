@@ -286,6 +286,18 @@ fn fibonacci_pattern(f: &FnDef) -> Option<&str> {
     }
 }
 
+/// Release-only AST lowering has a small set of proven whole-function CPU
+/// transforms that shared IR does not yet preserve. Keep selection narrow so
+/// general programs continue through the canonical ownership-explicit IR.
+pub fn has_release_ast_fast_path(program: &Program) -> bool {
+    program.items.iter().any(|item| match item {
+        Item::Fn(function) => {
+            fibonacci_pattern(function).is_some() || generated_slice_sum_pattern(function).is_some()
+        }
+        _ => false,
+    })
+}
+
 fn unsigned_mod_recurrence(target: &str, value: &Expr, current_range: Option<(i64, i64)>) -> bool {
     let Expr::Binary {
         op: BinOp::Mod,
@@ -1155,13 +1167,23 @@ pub fn compile_ir_with_overflow(
                                 let z = fb.ins().iconst(types::I64, 0);
                                 fb.ins().icmp(IntCC::NotEqual, v, z)
                             }
-                            (IrType::I1, IrType::I64) => fb.ins().uextend(types::I64, v),
+                            (IrType::I1, IrType::I64) => {
+                                if fb.func.dfg.value_type(v) == types::I64 {
+                                    v
+                                } else {
+                                    fb.ins().uextend(types::I64, v)
+                                }
+                            }
                             (IrType::F64, IrType::I1) => {
                                 let z = fb.ins().f64const(0.0);
                                 fb.ins().fcmp(FloatCC::NotEqual, v, z)
                             }
                             (IrType::I1, IrType::F64) => {
-                                let w = fb.ins().uextend(types::I64, v);
+                                let w = if fb.func.dfg.value_type(v) == types::I64 {
+                                    v
+                                } else {
+                                    fb.ins().uextend(types::I64, v)
+                                };
                                 fb.ins().fcvt_from_sint(types::F64, w)
                             }
                             _ => {
@@ -1417,7 +1439,12 @@ pub fn compile_ir_with_overflow(
                     }
                     IrInst::BoolToString { out, value } => {
                         let fref = module.declare_func_in_func(bool_to_string, &mut fb.func);
-                        let widened = fb.ins().uextend(types::I64, vals[value]);
+                        let bool_value = vals[value];
+                        let widened = if fb.func.dfg.value_type(bool_value) == types::I64 {
+                            bool_value
+                        } else {
+                            fb.ins().uextend(types::I64, bool_value)
+                        };
                         let call = fb.ins().call(fref, &[widened]);
                         vals.insert(*out, fb.inst_results(call)[0]);
                     }
@@ -5697,6 +5724,7 @@ mod tests {
             _ => None,
         });
         assert!(generated_slice_sum_pattern(function.unwrap()).is_some());
+        assert!(has_release_ast_fast_path(&program));
     }
 
     #[test]
