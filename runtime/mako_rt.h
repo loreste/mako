@@ -69,12 +69,28 @@ extern "C" {
  * This eliminates O(n) deep copies that caused OOM in database engine loops. */
 #define MAKO_RC_HEADER 8
 #define MAKO_POOL_CAP_FLAG ((size_t)1 << (sizeof(size_t) * 8 - 1))
+static inline void mako_rc_alloc_backtrace(void) {
+#if defined(__GLIBC__) || defined(__APPLE__)
+    void *frames[32];
+    int count = backtrace(frames, 32);
+    if (count > 0) backtrace_symbols_fd(frames, count, 2);
+#endif
+}
 static inline _Atomic uint32_t *mako_rc_of(void *data) {
     return (_Atomic uint32_t *)((char *)data - MAKO_RC_HEADER);
 }
 static inline void *mako_rc_alloc(size_t data_bytes) {
+    if (data_bytes > SIZE_MAX - MAKO_RC_HEADER) {
+        fprintf(stderr, "mako: size overflow in rc_alloc (%zu bytes)\n", data_bytes);
+        mako_rc_alloc_backtrace();
+        abort();
+    }
     char *block = (char *)malloc(MAKO_RC_HEADER + data_bytes);
-    if (!block) { fprintf(stderr, "mako: OOM in rc_alloc\n"); abort(); }
+    if (!block) {
+        fprintf(stderr, "mako: OOM in rc_alloc (%zu bytes)\n", data_bytes);
+        mako_rc_alloc_backtrace();
+        abort();
+    }
     _Atomic uint32_t *rc = (_Atomic uint32_t *)block;
     atomic_init(rc, 1);
     *(uint32_t *)(block + 4) = 0;
@@ -606,7 +622,8 @@ static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
         s.data[s.len++] = (uint8_t)v;
         return s;
     }
-    size_t ncap = actual_cap ? actual_cap * 2 : 1;
+    size_t ncap = actual_cap;
+    if (s.len + 1 > actual_cap) ncap = actual_cap ? actual_cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
     uint8_t *nd = (uint8_t *)mako_rc_alloc(ncap);
     if (s.len) memcpy(nd, s.data, s.len);
@@ -817,7 +834,8 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
     /* COW: if shared or at capacity, allocate new refcounted backing. */
     if (MAKO_UNLIKELY(s.len + 1 > s.cap || mako_rc_shared(s.data))) {
         MakoString *old_data = s.data;
-        size_t ncap = s.cap ? s.cap * 2 : 1;
+        size_t ncap = s.cap;
+        if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
         MakoString *nd = (MakoString *)mako_rc_alloc(ncap * sizeof(MakoString));
         /* The caller still owns and releases the old header. Every detached
@@ -946,7 +964,8 @@ static inline void mako_float_array_set(MakoFloatArray a, int64_t i, double v) {
 
 static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v) {
     if (MAKO_UNLIKELY(s.len + 1 > s.cap || mako_rc_shared(s.data))) {
-        size_t ncap = s.cap ? s.cap * 2 : 1;
+        size_t ncap = s.cap;
+        if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
         double *nd = (double *)mako_rc_alloc(ncap * sizeof(double));
         if (s.len) memcpy(nd, s.data, s.len * sizeof(double));
@@ -1065,7 +1084,8 @@ static inline void mako_bool_array_set(MakoBoolArray a, int64_t i, bool v) {
 
 static inline MakoBoolArray mako_bool_array_append(MakoBoolArray s, bool v) {
     if (MAKO_UNLIKELY(s.len + 1 > s.cap || mako_rc_shared(s.data))) {
-        size_t ncap = s.cap ? s.cap * 2 : 1;
+        size_t ncap = s.cap;
+        if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
         bool *nd = (bool *)mako_rc_alloc(ncap * sizeof(bool));
         if (s.len) memcpy(nd, s.data, s.len * sizeof(bool));
@@ -4956,7 +4976,8 @@ static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
         s.data[s.len++] = v;
         return s;
     }
-    size_t ncap = s.cap ? s.cap * 2 : 1;
+    size_t ncap = s.cap;
+    if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
     int64_t *nd = (int64_t *)mako_rc_alloc(ncap * sizeof(int64_t));
     if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));

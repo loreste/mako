@@ -5377,7 +5377,11 @@ impl Codegen {
             self.out,
             "    if (s.len + 1 > s.cap || mako_rc_shared(s.data)) {{"
         );
-        let _ = writeln!(self.out, "        size_t ncap = s.cap ? s.cap * 2 : 1;");
+        let _ = writeln!(self.out, "        size_t ncap = s.cap;");
+        let _ = writeln!(
+            self.out,
+            "        if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;"
+        );
         let _ = writeln!(self.out, "        if (ncap < s.len + 1) ncap = s.len + 1;");
         let _ = writeln!(
             self.out,
@@ -6283,7 +6287,11 @@ impl Codegen {
             self.out,
             "    if (s.len + 1 > s.cap || mako_rc_shared(s.data)) {{"
         );
-        let _ = writeln!(self.out, "        size_t ncap = s.cap ? s.cap * 2 : 1;");
+        let _ = writeln!(self.out, "        size_t ncap = s.cap;");
+        let _ = writeln!(
+            self.out,
+            "        if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;"
+        );
         let _ = writeln!(self.out, "        if (ncap < s.len + 1) ncap = s.len + 1;");
         let _ = writeln!(
             self.out,
@@ -6444,7 +6452,11 @@ impl Codegen {
             self.out,
             "    if (s.len + 1 > s.cap || mako_rc_shared(s.data)) {{"
         );
-        let _ = writeln!(self.out, "        size_t ncap = s.cap ? s.cap * 2 : 1;");
+        let _ = writeln!(self.out, "        size_t ncap = s.cap;");
+        let _ = writeln!(
+            self.out,
+            "        if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;"
+        );
         let _ = writeln!(self.out, "        if (ncap < s.len + 1) ncap = s.len + 1;");
         let _ = writeln!(
             self.out,
@@ -14790,10 +14802,39 @@ impl Codegen {
                         if args.iter().any(|arg| matches!(arg, Expr::Ident(base) if base == name))
                 );
                 if self_consuming_call {
+                    // SAFE-042: append/grow functions take the slice by value and
+                    // may allocate a new backing without releasing the old one.
+                    // Save the old data pointer so we can release the previous
+                    // backing when it changes, preventing a refcount leak that
+                    // makes every subsequent append see mako_rc_shared==true and
+                    // take the (doubling) growth path on every call.
+                    let slice_cty = self.locals.get(name).cloned().unwrap_or_default();
+                    let is_slice = matches!(
+                        slice_cty.as_str(),
+                        "MakoIntArray"
+                            | "MakoByteArray"
+                            | "MakoStrArray"
+                            | "MakoFloatArray"
+                            | "MakoBoolArray"
+                    );
+                    let old_ptr = if is_slice && self.current_arena.is_none() {
+                        let op = self.fresh("old_data");
+                        let oc = self.fresh("old_cap");
+                        self.emit_line(format_args!("void *{op} = {mn}.data;"));
+                        self.emit_line(format_args!("size_t {oc} = {mn}.cap;"));
+                        Some((op, oc))
+                    } else {
+                        None
+                    };
                     if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
                         self.emit_line(format_args!("*{cell} = {val};"));
                     } else {
                         self.emit_line(format_args!("{mn} = {val};"));
+                    }
+                    if let Some((op, oc)) = old_ptr {
+                        self.emit_line(format_args!(
+                            "if ({op} != {mn}.data && {oc} > 0 && {op}) mako_rc_release({op});"
+                        ));
                     }
                     if cond_own {
                         self.emit_line(format_args!("{mn}__own = 1;"));
@@ -15130,7 +15171,31 @@ impl Codegen {
                         self.scope_drop_safe.insert(mn);
                     }
                 }
-                self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
+                // SAFE-042: when append consumes the old field value, release
+                // the old backing if the data pointer changed (same pattern as
+                // the variable self_consuming_call fix).
+                let is_field_slice = consumes_old_field
+                    && self.current_arena.is_none()
+                    && matches!(
+                        vty.as_str(),
+                        "MakoIntArray"
+                            | "MakoByteArray"
+                            | "MakoStrArray"
+                            | "MakoFloatArray"
+                            | "MakoBoolArray"
+                    );
+                if is_field_slice {
+                    let op = self.fresh("old_data");
+                    let oc = self.fresh("old_cap");
+                    self.emit_line(format_args!("void *{op} = {b}{arrow}{field}.data;"));
+                    self.emit_line(format_args!("size_t {oc} = {b}{arrow}{field}.cap;"));
+                    self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
+                    self.emit_line(format_args!(
+                        "if ({op} != {b}{arrow}{field}.data && {oc} > 0 && {op}) mako_rc_release({op});"
+                    ));
+                } else {
+                    self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
+                }
             }
             Stmt::Expr(e) => {
                 let (ty, val) = self.emit_expr(e);

@@ -1,0 +1,34 @@
+struct Index {
+    rows []int
+}
+
+struct Table {
+    indexes []Index
+}
+
+struct Database {
+    tables []Table
+}
+
+fn append_entry(mut idx: Index, row: int) -> Index {
+    idx.rows = append(idx.rows, row)
+    return idx
+}
+
+fn main() {
+    let idx = Index { rows: make([]int, 0, 4) }
+    let mut indexes = make([]Index, 0, 1)
+    indexes = append(indexes, idx)
+    let table = Table { indexes: indexes }
+    let mut tables = make([]Table, 0, 1)
+    tables = append(tables, table)
+    let mut db = Database { tables: tables }
+
+    for i in 1000 {
+        db.tables[0].indexes[0] = append_entry(db.tables[0].indexes[0], i)
+    }
+
+    assert(len(db.tables[0].indexes[0].rows) == 1000)
+    assert(cap(db.tables[0].indexes[0].rows) <= 2048)
+    print("PASS\n")
+}

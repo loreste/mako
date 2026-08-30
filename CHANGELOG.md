@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-## 0.6.3 - 2026-08-30 (C backend loop ownership)
+## 0.6.3 - 2026-08-30 (C backend ownership)
+
+- Fixed C-backend copy-on-write slice detachment to preserve existing capacity
+  when backing storage is shared, preventing exponential capacity growth and
+  `rc_alloc` OOMs when slices round-trip through returned aggregates and nested
+  struct fields (#42).
 
 - Fixed C-backend range loops to release owned body temporaries at the end of
   every iteration, preventing unbounded memory growth and `rc_alloc` OOMs in

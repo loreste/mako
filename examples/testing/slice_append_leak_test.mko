@@ -1,0 +1,54 @@
+// Regression test for issue #42 (capacity corruption):
+// C backend self_consuming_call path did not release old slice backing
+// after append/grow, so refcount stayed elevated, mako_rc_shared
+// returned true on every subsequent append, forcing the doubling growth
+// path every time: cap = 2^N after N appends instead of ~N.
+
+struct Log {
+    entries []int
+}
+
+fn TestAppendCapStaysSmall() {
+    let mut s = make([]int, 0, 4)
+    for i in 100 {
+        s = append(s, i)
+    }
+    // With the fix, cap should be ~128 (next power of 2 >= 100).
+    // Without the fix, cap would be 2^99 (overflow / OOM long before).
+    assert(len(s) == 100)
+    assert(cap(s) <= 256)
+}
+
+fn TestStructFieldAppendCapStaysSmall() {
+    let mut log = Log { entries: make([]int, 0, 4) }
+    for i in 100 {
+        log.entries = append(log.entries, i)
+    }
+    assert(len(log.entries) == 100)
+    assert(cap(log.entries) <= 256)
+}
+
+fn TestHighVolumeAppendNoOom() {
+    // 100k appends: without the fix this requests ~2^100000 bytes.
+    let mut s = make([]int, 0, 16)
+    for i in 100000 {
+        s = append(s, i)
+    }
+    assert(len(s) == 100000)
+}
+
+fn TestStructFieldHighVolumeAppend() {
+    let mut log = Log { entries: make([]int, 0, 16) }
+    for i in 50000 {
+        log.entries = append(log.entries, i)
+    }
+    assert(len(log.entries) == 50000)
+}
+
+fn main() {
+    TestAppendCapStaysSmall()
+    TestStructFieldAppendCapStaysSmall()
+    TestHighVolumeAppendNoOom()
+    TestStructFieldHighVolumeAppend()
+    print("PASS\n")
+}

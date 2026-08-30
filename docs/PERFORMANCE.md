@@ -324,6 +324,7 @@ These are built into the runtime and codegen — no user action required.
 | Map set/get `MAKO_LIKELY` paths | Better branch prediction on hits |
 | Slice/byte `make`: zero only `len`, not unused `cap` | Less CPU + cleaner pages |
 | Fast-path append when `len < cap` (+ likely) | One branch, no realloc check math |
+| Copy-on-write append preserves spare capacity | Shared slices detach at the existing capacity and grow only when `len + 1 > cap`, avoiding exponential capacity inflation across aggregate calls |
 | HTTP: `mako_arena_cstr` / `arena_text_n` | No malloc+arena double copy |
 | Empty string singleton + `mako_str_free` | No malloc for `""`; safe free of singleton |
 | `str_clone` / `str_concat` empty fast paths | Less allocator traffic |

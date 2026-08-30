@@ -1,0 +1,54 @@
+// Reproducer for issue #42 — struct array index assignment + slice append.
+// Mirrors FayDB pattern: indexes[0] = func_that_appends(indexes[0], ...)
+
+struct Idx {
+    keys []string
+    rows []int
+    n int
+}
+
+fn idx_accel(idx Idx) Idx {
+    let mut out = idx
+    return out
+}
+
+fn idx_append_entry(idx Idx, key string, row int) Idx {
+    let acc = idx_accel(idx)
+    let owned = key + ""
+    let n = acc.n
+    return Idx {
+        keys: append(acc.keys, owned),
+        rows: append(acc.rows, row),
+        n: n + 1,
+    }
+}
+
+export fn TestStructArrayIndexAppendNoOom() {
+    let mut indexes = make([]Idx, 1)
+    indexes[0] = Idx { keys: make([]string, 0, 8), rows: make([]int, 0, 8), n: 0 }
+    for i in 5000 {
+        indexes[0] = idx_append_entry(indexes[0], "k" + int_to_string(i), i)
+    }
+    assert(indexes[0].n == 5000)
+    assert(len(indexes[0].keys) == 5000)
+    assert(len(indexes[0].rows) == 5000)
+    // Cap should be reasonable (~8192), not 2^5000
+    assert(cap(indexes[0].rows) < 100000)
+}
+
+export fn TestDirectStructFieldAppend() {
+    let mut idx = Idx { keys: make([]string, 0, 4), rows: make([]int, 0, 4), n: 0 }
+    for i in 1000 {
+        idx.keys = append(idx.keys, "k" + int_to_string(i))
+        idx.rows = append(idx.rows, i)
+        idx.n = idx.n + 1
+    }
+    assert(idx.n == 1000)
+    assert(cap(idx.rows) < 4096)
+}
+
+fn main() {
+    TestStructArrayIndexAppendNoOom()
+    TestDirectStructFieldAppend()
+    print("PASS\n")
+}
