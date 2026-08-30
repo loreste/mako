@@ -1,12 +1,4 @@
-// Regression test for issue #42: C backend missing scope cleanup in
-// string-range, channel-range, and map-range loops causes temporaries
-// to leak one rc_alloc per iteration, OOM on durable workloads.
-//
-// Each loop body creates a fresh owned string via concatenation.
-// Without scope cleanup the string leaks; with it the string is freed
-// at the end of each iteration.
-
-fn TestStringRangeNoLeak() {
+export fn TestStringRangeNoLeak() {
     let s = "hello world"
     let mut count = 0
     for ch in range s {
@@ -16,7 +8,7 @@ fn TestStringRangeNoLeak() {
     assert(count == 11)
 }
 
-fn TestMapRangeNoLeak() {
+export fn TestMapRangeNoLeak() {
     let mut m = make(map[string]int, 4)
     m["a"] = 1
     m["b"] = 2
@@ -29,15 +21,12 @@ fn TestMapRangeNoLeak() {
     assert(total == 6)
 }
 
-fn TestLoopHighIterNoOom() {
-    // 50k iterations: without the fix each leaks ~64 bytes, ~3 MB total.
-    // With the fix, peak stays flat.
+export fn TestLoopHighIterNoOom() {
     let mut m = make(map[string]int, 4)
     m["key"] = 1
     for _ in 50000 {
         for k, v in range m {
             let tmp = k + "_" + int_to_string(v)
-            _ = tmp
         }
     }
 }
