@@ -6,7 +6,7 @@ not importing their unsafe surfaces.
 
 Batteries for **web and backends**, with naming conventions adapted to Makori.
 
-**Product tip:** **0.6.2**. Application packs have Go-equivalent surfaces
+**Product tip:** **0.6.5**. Application packs have Go-equivalent surfaces
 (2026-08-18 wave) — snake_case, no panic-on-OOB, `Result` / `(value, err)`
 instead of nil. Not a syntax clone and not every Go toolchain package.
 Lower-level hot path remains builtins over C runtime headers.
@@ -294,7 +294,8 @@ High-level HTTP server with declarative routing:
 | `signal_notify` / `signal_received` | os/signal |
 | `atomic_*` | sync/atomic |
 | `utf8_valid` / `utf8_rune_len` / encode·decode / constants | unicode/utf8 |
-| `unicode_is_*` / `unicode_to_*` / `unicode_is(prop,r)` | unicode (UCD seed) |
+| `unicode_is_*` / `unicode_to_*` / `unicode_is(prop,r)` | unicode (Unicode 17 UCD) |
+| `unicode_nfc` / `nfd` / `nfkc` / `nfkd` | unicode (Unicode 17 normalization) |
 | `list_*` / `stack_peek_*` / `queue_pop_*` / `slices_*_strs` | collections / List[T] |
 | `plugin_open` / `call` / `close` / info·error·slots / hot-reload | plugin |
 | `filepath_walk` / `filepath_walk_n` | path/filepath |
@@ -321,6 +322,11 @@ High-level HTTP server with declarative routing:
 | `metric_*` / `gauge_*` / `hist_*` / `metrics_export` / `metrics_export_prom` / `metrics_export_otlp_json` | process-local metrics + Prometheus + OTLP JSON |
 | `trace_id` / `begin` / `end` / `trace_export_json` / `trace_export_otlp_json` / `trace_span_id` | span-lite + OTLP/HTTP JSON seed |
 | `profile_snapshot_json` / `stack_trace` / `crash_report_install` / `process_rss_bytes` | observability depth seeds |
+| `error_trace` / `error_wrap_trace` / `error_message` / `error_cause` / `error_chain` | error tracing with source locations |
+| `mldsa44_keygen` / `mldsa65_keygen` / `mldsa87_keygen` / `mldsa_sign` / `mldsa_verify` | ML-DSA post-quantum signatures (FIPS 204) |
+| `mldsa_self_signed_cert` / `mldsa_verify_cert` / `tls_server_pqc` / `tls_enable_pqc` | PQC X.509 + TLS 1.3 |
+| `json_f` / `json_b` / `json_get_float` / `json_get_bool` | JSON float/bool marshal/unmarshal |
+| `uuid_v1` / `uuid_v6` / `uuid_v8` / `uuid_timestamp` | UUID v1/v6/v8 (RFC 9562) |
 | `validate_required` / `validate_*_len` / `validate_int_range` / `validate_email` | backend request validation |
 | `game_fixed_steps` / `game_fixed_remainder` / `game_alpha` / `game_frame_budget_ok` | fixed-timestep game-loop helpers |
 | `fx_*` / `det_rng_*` / `replay_*` | deterministic simulation math, RNG, and replay streams |

@@ -3,7 +3,7 @@
 This guide covers the implemented Mako debugging tools, from quick inline
 prints to source-level debugger sessions (DAP and lldb) and sanitizer runs.
 
-**Product tip:** **0.6.2**.
+**Product tip:** **0.6.5**.
 
 ---
 

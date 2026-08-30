@@ -1,0 +1,103 @@
+// ML-DSA post-quantum signature tests (FIPS 204).
+// Requires OpenSSL 3.5+ with MLDSA44/65/87 in the default provider.
+
+export fn TestPqcAvailable() {
+    let ok = pqc_available()
+    assert(ok == 1)
+}
+
+export fn TestMldsa44Keygen() {
+    let key = mldsa44_keygen()
+    assert(len(bytes(key)) > 0)
+    let pub_key = mldsa_public_key(key)
+    assert(len(bytes(pub_key)) > 0)
+    let algo = mldsa_algorithm_name(key)
+    assert_eq_str(algo, "ML-DSA-44")
+}
+
+export fn TestMldsa65Keygen() {
+    let key = mldsa65_keygen()
+    assert(len(bytes(key)) > 0)
+    let algo = mldsa_algorithm_name(key)
+    assert_eq_str(algo, "ML-DSA-65")
+}
+
+export fn TestMldsa87Keygen() {
+    let key = mldsa87_keygen()
+    assert(len(bytes(key)) > 0)
+    let algo = mldsa_algorithm_name(key)
+    assert_eq_str(algo, "ML-DSA-87")
+}
+
+export fn TestMldsa44SignVerify() {
+    let key = mldsa44_keygen()
+    let pub_key = mldsa_public_key(key)
+    let msg = "hello post-quantum world"
+    let sig = mldsa_sign(key, msg)
+    assert(len(bytes(sig)) > 0)
+    let ok = mldsa_verify(pub_key, msg, sig)
+    assert(ok == 1)
+    // tampered message must fail
+    let bad = mldsa_verify(pub_key, "tampered", sig)
+    assert(bad == 0)
+}
+
+export fn TestMldsa65SignVerify() {
+    let key = mldsa65_keygen()
+    let pub_key = mldsa_public_key(key)
+    let msg = "ML-DSA-65 test message"
+    let sig = mldsa_sign(key, msg)
+    assert(mldsa_verify(pub_key, msg, sig) == 1)
+    assert(mldsa_verify(pub_key, "wrong", sig) == 0)
+}
+
+export fn TestMldsa87SignVerify() {
+    let key = mldsa87_keygen()
+    let pub_key = mldsa_public_key(key)
+    let msg = "ML-DSA-87 highest security"
+    let sig = mldsa_sign(key, msg)
+    assert(mldsa_verify(pub_key, msg, sig) == 1)
+    assert(mldsa_verify(pub_key, "wrong", sig) == 0)
+}
+
+export fn TestMldsaCrossKeyReject() {
+    // signature from one key must not verify with another
+    let k1 = mldsa44_keygen()
+    let k2 = mldsa44_keygen()
+    let sig = mldsa_sign(k1, "test")
+    let ok = mldsa_verify(mldsa_public_key(k2), "test", sig)
+    assert(ok == 0)
+}
+
+export fn TestMldsaSelfSignedCert() {
+    let key = mldsa65_keygen()
+    let cert = mldsa_self_signed_cert(key, "CN=test,O=Mako", 365)
+    assert(len(bytes(cert)) > 0)
+    // self-signed cert should verify against itself as CA
+    let ok = mldsa_verify_cert(cert, cert)
+    assert(ok == 1)
+}
+
+export fn TestMldsaEmptyInputs() {
+    // empty key should not crash
+    let sig = mldsa_sign("", "msg")
+    assert(len(bytes(sig)) == 0)
+    let ok = mldsa_verify("", "msg", "sig")
+    assert(ok == 0)
+    let pub_key = mldsa_public_key("")
+    assert(len(bytes(pub_key)) == 0)
+}
+
+fn main() {
+    TestPqcAvailable()
+    TestMldsa44Keygen()
+    TestMldsa65Keygen()
+    TestMldsa87Keygen()
+    TestMldsa44SignVerify()
+    TestMldsa65SignVerify()
+    TestMldsa87SignVerify()
+    TestMldsaCrossKeyReject()
+    TestMldsaSelfSignedCert()
+    TestMldsaEmptyInputs()
+    print("PASS\n")
+}

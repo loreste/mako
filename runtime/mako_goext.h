@@ -1363,24 +1363,48 @@ static inline int64_t mako_utf8_rune_start(int64_t b) {
 /* ---- unicode UCD seed (range tables; not full UCD dump) ----
  * Surfaces general categories + case + scripts used by regexp \p{…}. */
 static inline int64_t mako_unicode_is_letter(int64_t r) {
+#if MAKO_UNICODE17
+    return r >= 0 && mako_u17_is_letter((uint32_t)r);
+#else
     return mako_re_unicode_is_letter((uint32_t)r) ? 1 : 0;
+#endif
 }
 static inline int64_t mako_unicode_is_digit(int64_t r) {
+#if MAKO_UNICODE17
+    return r >= 0 && MAKO_U17_HAS(mako_u17_gc_nd, (uint32_t)r);
+#else
     return mako_re_unicode_is_digit((uint32_t)r) ? 1 : 0;
+#endif
 }
 static inline int64_t mako_unicode_is_space(int64_t r) {
+#if MAKO_UNICODE17
+    return r >= 0 && MAKO_U17_HAS(mako_u17_prop_white_space, (uint32_t)r);
+#else
     return mako_re_unicode_is_space((uint32_t)r) ? 1 : 0;
+#endif
 }
 static inline int64_t mako_unicode_is_punct(int64_t r) {
+#if MAKO_UNICODE17
+    return r >= 0 && mako_u17_is_punct((uint32_t)r);
+#else
     return mako_re_unicode_is_punct((uint32_t)r) ? 1 : 0;
+#endif
 }
 static inline int64_t mako_unicode_is_symbol(int64_t r) {
+#if MAKO_UNICODE17
+    return r >= 0 && mako_u17_is_symbol((uint32_t)r);
+#else
     return mako_re_unicode_is_symbol((uint32_t)r) ? 1 : 0;
+#endif
 }
 static inline int64_t mako_unicode_is_control(int64_t r) {
+#if MAKO_UNICODE17
+    return r >= 0 && MAKO_U17_HAS(mako_u17_gc_cc, (uint32_t)r);
+#else
     if (r < 0) return 0;
     if (r <= 0x1F || (r >= 0x7F && r <= 0x9F)) return 1;
     return 0;
+#endif
 }
 static inline int64_t mako_unicode_is_print(int64_t r) {
     if (r < 0 || r > MAKO_UTF8_MAX_RUNE) return 0;

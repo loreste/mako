@@ -15,5 +15,10 @@ fn to_lower(r: int) -> int { return unicode_to_lower(r) }
 fn to_upper(r: int) -> int { return unicode_to_upper(r) }
 fn to_title(r: int) -> int { return unicode_to_title(r) }
 fn simple_fold(r: int) -> int { return unicode_simple_fold(r) }
+// Unicode 17 normalization forms. Each returns a newly owned string.
+fn nfc(s: string) -> string { return unicode_nfc(s) }
+fn nfd(s: string) -> string { return unicode_nfd(s) }
+fn nfkc(s: string) -> string { return unicode_nfkc(s) }
+fn nfkd(s: string) -> string { return unicode_nfkd(s) }
 // Property/script name match (same tables as regexp \p{…}).
 fn is(prop: string, r: int) -> int { return unicode_is(prop, r) }

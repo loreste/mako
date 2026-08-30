@@ -1,0 +1,73 @@
+// JSON marshalling: #[derive(json)] with float, bool, nested struct support.
+
+#[derive(json)]
+struct Point {
+    x: float
+    y: float
+}
+
+#[derive(json)]
+struct Config {
+    name: string
+    port: int
+    rate: float
+    verbose: bool
+}
+
+#[derive(json)]
+struct Envelope {
+    name: string
+    point: Point
+}
+
+export fn TestJsonFloat() {
+    let j = json_f("pi", 3.14)
+    assert_eq(json_get_bool(json_b("t", true), "t"), 1)
+    let v = json_get_float(j, "pi")
+    assert(v > 3.13 and v < 3.15)
+}
+
+export fn TestJsonBool() {
+    let j = json_b("active", true)
+    let v = json_get_bool(j, "active")
+    assert_eq(v, 1)
+    let j2 = json_b("active", false)
+    assert_eq(json_get_bool(j2, "active"), 0)
+}
+
+export fn TestConfigToJson() {
+    let j = Config_to_json("app", 8080, 1.5, true)
+    assert_eq_str(Config_name_from_json(j), "app")
+    assert_eq(Config_port_from_json(j), 8080)
+}
+
+export fn TestConfigFromJson() {
+    let j = Config_to_json("web", 3000, 0.75, false)
+    assert_eq_str(Config_name_from_json(j), "web")
+    assert_eq(Config_port_from_json(j), 3000)
+}
+
+export fn TestPointToJson() {
+    let j = Point_to_json(1.5, 2.5)
+    assert(str_contains(j, "1.5"))
+    assert(str_contains(j, "2.5"))
+}
+
+export fn TestNestedStructToJson() {
+    let point = Point { x: 4.5, y: 7.25 }
+    let j = Envelope_to_json("sample", point)
+    assert(str_contains(j, "sample"))
+    assert(str_contains(j, "point"))
+    assert(str_contains(j, "4.5"))
+    assert(str_contains(j, "7.25"))
+}
+
+fn main() {
+    TestJsonFloat()
+    TestJsonBool()
+    TestConfigToJson()
+    TestConfigFromJson()
+    TestPointToJson()
+    TestNestedStructToJson()
+    print("PASS\n")
+}

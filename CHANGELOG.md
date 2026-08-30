@@ -2,13 +2,79 @@
 
 ## Unreleased
 
-## 0.6.4 - 2026-08-30 (typed channel C lowering)
+## 0.6.5 - 2026-08-30 (PQC + error tracing + JSON + Unicode 17)
+
+### ML-DSA post-quantum signatures (FIPS 204)
+
+- Added `mldsa44_keygen`, `mldsa65_keygen`, `mldsa87_keygen` for all three
+  NIST security levels, wrapping OpenSSL 3.5+'s native ML-DSA via the EVP API.
+- Added `mldsa_sign` / `mldsa_verify` for post-quantum digital signatures.
+- Added `mldsa_public_key` extraction and `mldsa_algorithm_name` inspection.
+- Added `mldsa_self_signed_cert` for X.509 certificates with ML-DSA signatures
+  and `mldsa_verify_cert` for certificate chain verification.
+- Added `mako_tls_server_pqc` / `mako_tls_enable_pqc` for TLS 1.3 with ML-DSA
+  signature schemes (MLDSA44/65/87).
+- Graceful compile-time stubs for OpenSSL < 3.5; `pqc_available()` runtime probe.
+- New file: `runtime/mako_pqc.h`. 11 adversarial tests in `mldsa_pqc_test.mko`.
+
+### Error tracing
+
+- Added `error_trace(msg)` and `error_wrap_trace(err, context)` builtins that
+  automatically embed source file:line in error strings via codegen injection.
+- Added `error_message`, `error_cause`, `error_chain` for extracting and
+  formatting error context chains with source locations.
+- Wire format uses `\x01`/`\x02` delimiters invisible to normal string ops;
+  `error_chain` renders `"context: message [file.mko:42 → caller.mko:10]"`.
+- New file: `runtime/mako_errtrace.h`. 5 tests in `error_trace_test.mko`.
+- Added native-runtime bridges for trace construction and inspection; native
+  traces retain the chain using a backend marker while C emits exact call-site
+  file and line metadata.
+
+### UUID expansion (RFC 9562)
+
+- Added `uuid_v1` (time + random node, RFC 4122).
+- Added `uuid_v6` (reordered time for natural sort order, RFC 9562).
+- Added `uuid_v8` (custom/experimental 122-bit data, RFC 9562).
+- Added `uuid_timestamp` to extract 60-bit timestamps from v1/v6 UUIDs.
+- 7 tests in `uuid_v1v6v8_test.mko` including sort-order and cross-version.
+- Fixed native `uuid_cmp` to return true three-way ordering instead of treating
+  every unequal UUID as greater.
+
+### JSON marshalling
+
+- Extended `#[derive(json)]` to support `float`, `bool`, and nested struct
+  fields (previously only `string` and `int`).
+- Added `json_f` (float field), `json_b` (bool field) emitters.
+- Added `json_get_float`, `json_get_bool` extractors.
+- Fixed use-after-free in `json_get_float`/`json_get_bool` (`strlen` after
+  `free` on the pattern buffer).
+- 5 tests in `json_marshal_test.mko`.
+- Added native-runtime parity for float and bool JSON emitters/extractors.
+
+### Unicode 17
+
+- **Unicode 17 identifiers:** the lexer now accepts any Unicode XID_Start /
+  XID_Continue scalar in identifiers (`let π = 3.14`, `let 变量 = 1`).
+  Emoji and digit-leading names are still rejected per UAX #31.
+- **Unicode 17 normalization:** added `unicode_nfc`, `unicode_nfd`,
+  `unicode_nfkc`, `unicode_nfkd` builtins and `std/unicode` wrappers
+  (`nfc`, `nfd`, `nfkc`, `nfkd`).
+- Upgraded `unicode_is_letter`, `unicode_is_digit`, `unicode_is_space`,
+  `unicode_is_punct`, `unicode_is_symbol`, `unicode_is_control` to use the
+  full Unicode 17 UCD tables when available, falling back to the legacy
+  regex-derived ranges.
+- Fixed `mako_unicode17.h` not being included in the default (non-lean)
+  header set, which caused C test-backend builds to fail with undeclared
+  normalization functions.
+- Added native-runtime parity for all four normalization forms and ML-DSA.
+
+### C backend
 
 - Fixed C test-backend method lowering for string and aggregate channels so
   `try_send` and `send_timeout` call the matching typed runtime helpers instead
   of passing `MakoString` or boxed values to the integer-channel API (#43).
-- Added string-channel timeout helpers that preserve caller ownership on
-  success, full-channel timeout, and closed-channel outcomes.
+- Added `mako_chan_str_send_timeout` and `mako_chan_str_recv_timeout` runtime
+  functions for string-channel timeout operations.
 - Verified FayDB's `TestTransactionWalCommitOnly` through `mako test --backend c`.
 
 ## 0.6.3 - 2026-08-30 (C backend ownership)

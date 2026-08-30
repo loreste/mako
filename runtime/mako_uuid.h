@@ -240,6 +240,99 @@ static inline MakoUuid mako_uuid_ns_x500(void) {
     return u;
 }
 
+/* UUID v1: 60-bit timestamp (100ns since 1582-10-15) + random node ID.
+ * Uses random node (multicast bit set) per RFC 4122 §4.5. */
+static inline MakoUuid mako_uuid_v1(void) {
+    MakoUuid u;
+    /* 100-ns intervals since UUID epoch (1582-10-15).
+     * Unix epoch offset: 122192928000000000 (100ns units). */
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t ts = (uint64_t)tv.tv_sec * 10000000ULL +
+                  (uint64_t)tv.tv_usec * 10ULL +
+                  UINT64_C(122192928000000000);
+    uint32_t time_low = (uint32_t)(ts & 0xFFFFFFFFULL);
+    uint16_t time_mid = (uint16_t)((ts >> 32) & 0xFFFF);
+    uint16_t time_hi  = (uint16_t)((ts >> 48) & 0x0FFF);
+    u.b[0] = (uint8_t)(time_low >> 24);
+    u.b[1] = (uint8_t)(time_low >> 16);
+    u.b[2] = (uint8_t)(time_low >> 8);
+    u.b[3] = (uint8_t)(time_low);
+    u.b[4] = (uint8_t)(time_mid >> 8);
+    u.b[5] = (uint8_t)(time_mid);
+    u.b[6] = (uint8_t)((time_hi >> 8) | 0x10); /* version 1 */
+    u.b[7] = (uint8_t)(time_hi);
+    /* Clock seq: random 14 bits. */
+    mako_uuid_fill_random(u.b + 8, 2);
+    u.b[8] = (uint8_t)((u.b[8] & 0x3F) | 0x80); /* variant 10 */
+    /* Node: random 6 bytes with multicast bit set (no real MAC). */
+    mako_uuid_fill_random(u.b + 10, 6);
+    u.b[10] |= 0x01; /* multicast bit → random node */
+    return u;
+}
+
+/* UUID v6: reordered v1 — same 60-bit timestamp but big-endian
+ * so UUIDs sort naturally by time. RFC 9562. */
+static inline MakoUuid mako_uuid_v6(void) {
+    MakoUuid u;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t ts = (uint64_t)tv.tv_sec * 10000000ULL +
+                  (uint64_t)tv.tv_usec * 10ULL +
+                  UINT64_C(122192928000000000);
+    /* Big-endian: high 32 bits of 60-bit timestamp first. */
+    u.b[0] = (uint8_t)((ts >> 52) & 0xFF);
+    u.b[1] = (uint8_t)((ts >> 44) & 0xFF);
+    u.b[2] = (uint8_t)((ts >> 36) & 0xFF);
+    u.b[3] = (uint8_t)((ts >> 28) & 0xFF);
+    u.b[4] = (uint8_t)((ts >> 20) & 0xFF);
+    u.b[5] = (uint8_t)((ts >> 12) & 0xFF);
+    u.b[6] = (uint8_t)(((ts >> 8) & 0x0F) | 0x60); /* version 6 */
+    u.b[7] = (uint8_t)(ts & 0xFF);
+    mako_uuid_fill_random(u.b + 8, 2);
+    u.b[8] = (uint8_t)((u.b[8] & 0x3F) | 0x80); /* variant 10 */
+    mako_uuid_fill_random(u.b + 10, 6);
+    return u;
+}
+
+/* UUID v8: custom/experimental — 122 bits of caller-supplied data.
+ * data must be a binary string of exactly 16 bytes; version/variant
+ * bits are overwritten. RFC 9562. */
+static inline MakoUuid mako_uuid_v8(MakoString data) {
+    MakoUuid u;
+    if (data.len >= 16 && data.data) {
+        memcpy(u.b, data.data, 16);
+    } else {
+        memset(u.b, 0, 16);
+        if (data.len > 0 && data.data)
+            memcpy(u.b, data.data, data.len < 16 ? data.len : 16);
+    }
+    u.b[6] = (uint8_t)((u.b[6] & 0x0F) | 0x80); /* version 8 */
+    u.b[8] = (uint8_t)((u.b[8] & 0x3F) | 0x80); /* variant 10 */
+    return u;
+}
+
+/* Extract 60-bit timestamp from v1/v6 UUID (100ns units since 1582-10-15).
+ * Returns 0 for non-time-based versions. For v7, use ulid_timestamp_ms. */
+static inline int64_t mako_uuid_timestamp(MakoUuid u) {
+    int ver = (u.b[6] >> 4) & 0x0F;
+    if (ver == 1) {
+        uint64_t time_low = ((uint64_t)u.b[0] << 24) | ((uint64_t)u.b[1] << 16) |
+                            ((uint64_t)u.b[2] << 8) | (uint64_t)u.b[3];
+        uint64_t time_mid = ((uint64_t)u.b[4] << 8) | (uint64_t)u.b[5];
+        uint64_t time_hi  = ((uint64_t)(u.b[6] & 0x0F) << 8) | (uint64_t)u.b[7];
+        return (int64_t)((time_hi << 48) | (time_mid << 32) | time_low);
+    }
+    if (ver == 6) {
+        uint64_t ts = ((uint64_t)u.b[0] << 52) | ((uint64_t)u.b[1] << 44) |
+                      ((uint64_t)u.b[2] << 36) | ((uint64_t)u.b[3] << 28) |
+                      ((uint64_t)u.b[4] << 20) | ((uint64_t)u.b[5] << 12) |
+                      ((uint64_t)(u.b[6] & 0x0F) << 8) | (uint64_t)u.b[7];
+        return (int64_t)ts;
+    }
+    return 0;
+}
+
 /* Raw 16 bytes as MakoString (binary, not hex). Bounds-checked. */
 static inline MakoString mako_uuid_bytes(MakoUuid u) {
     char *p = (char *)malloc(17);

@@ -63,6 +63,10 @@ There is **no** “let the GC clean it up later.”
 |-------|----------|
 | **Typecheck / NLL** | Use-after-move, kick Send, capture rules |
 | **Codegen drops** | Free on all exits (SAFE-006 matrix) |
+| **Loop scope cleanup** | All loop variants (string range, channel range, map range, iterator) release owned temporaries per iteration — not just integer range, slice, while, and cfor (SAFE-042) |
+| **Append COW release** | `self_consuming_call` path releases old slice backing when append grows, preventing refcount leaks that cause `mako_rc_shared` to always return true and force exponential capacity growth (SAFE-042) |
+| **JSON extractor safety** | Fixed use-after-free in `json_get_float`/`json_get_bool` where `strlen(pat)` was called after `free(pat)` |
+| **PQC resource pairing** | Every `EVP_PKEY_CTX_new`/`EVP_PKEY`/`BIO_new`/`X509_new`/`EVP_MD_CTX_new` in `mako_pqc.h` is paired with its free on all paths (success and error) |
 | **Unit tests** | `own_*`, `double_free_guard`, `leak_detector`, `match_own_free`, … |
 | **ASan CI** | Full suite + ownership fixtures (`--sanitize address`) |
 | **UBSan / TSan** | Undefined behavior + races (opt-in / CI jobs) |

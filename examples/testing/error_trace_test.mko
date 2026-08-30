@@ -1,0 +1,75 @@
+// Error tracing: source-location context embedded in error strings.
+
+fn read_config(path: string) -> Result[string, string] {
+    if str_eq(path, "") {
+        return Err(error_trace("empty path"))
+    }
+    return Err(error_trace("file not found: " + path))
+}
+
+fn load_app(config_path: string) -> Result[string, string] {
+    let r = read_config(config_path)
+    match r {
+        Ok(v) => {
+            return Ok(v)
+        }
+        Err(e) => {
+            return Err(error_wrap_trace(e, "loading app"))
+        }
+    }
+    return Err(error_trace("unreachable"))
+}
+
+export fn TestErrorTrace() {
+    let err = error_trace("something failed")
+    let msg = error_message(err)
+    assert_eq_str(msg, "something failed")
+}
+
+export fn TestErrorWrapTrace() {
+    let inner = error_trace("disk full")
+    let wrapped = error_wrap_trace(inner, "writing log")
+    let msg = error_message(wrapped)
+    assert_eq_str(msg, "writing log: disk full")
+}
+
+export fn TestErrorChain() {
+    let inner = error_trace("not found")
+    let wrapped = error_wrap_trace(inner, "read config")
+    let chain = error_chain(wrapped)
+    // chain should contain both the message and source locations
+    assert(str_contains(chain, "read config: not found"))
+    // Trace should contain source locations in brackets
+    assert(str_contains(chain, "["))
+}
+
+export fn TestErrorCause() {
+    let inner = error_trace("root cause")
+    let wrapped = error_wrap_trace(inner, "layer 1")
+    let wrapped2 = error_wrap_trace(wrapped, "layer 2")
+    let cause = error_cause(wrapped2)
+    assert_eq_str(cause, "root cause")
+}
+
+export fn TestErrorChainThroughResult() {
+    let r = load_app("")
+    match r {
+        Ok(_) => {
+            assert(false)
+        }
+        Err(e) => {
+            let chain = error_chain(e)
+            assert(str_contains(chain, "loading app: empty path"))
+            assert(str_contains(chain, "["))
+        }
+    }
+}
+
+fn main() {
+    TestErrorTrace()
+    TestErrorWrapTrace()
+    TestErrorChain()
+    TestErrorCause()
+    TestErrorChainThroughResult()
+    print("PASS\n")
+}

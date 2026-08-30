@@ -2663,6 +2663,11 @@ impl Codegen {
         "env_get",
         "env_get_or",
         "error_as_tag",
+        "error_cause",
+        "error_chain",
+        "error_message",
+        "error_trace",
+        "error_wrap_trace",
         "exec_output",
         "ffi_abi_name",
         "file_read_exact",
@@ -2825,6 +2830,8 @@ impl Codegen {
         "json_array_strings2",
         "json_get_object",
         "json_get_string",
+        "json_b",
+        "json_f",
         "json_i",
         "json_merge",
         "json_nest",
@@ -2871,6 +2878,13 @@ impl Codegen {
         "mail_msg_rcpt_at",
         "mail_parse_address",
         "mail_simple",
+        "mldsa44_keygen",
+        "mldsa65_keygen",
+        "mldsa87_keygen",
+        "mldsa_algorithm_name",
+        "mldsa_public_key",
+        "mldsa_self_signed_cert",
+        "mldsa_sign",
         "metrics_export",
         "metrics_export_prom",
         "middleware_trace",
@@ -3228,6 +3242,10 @@ impl Codegen {
         "url_query",
         "url_query_escape",
         "url_scheme",
+        "unicode_nfc",
+        "unicode_nfd",
+        "unicode_nfkc",
+        "unicode_nfkd",
         "utf8_encode_rune",
         "uuid_bytes",
         "uuid_string",
@@ -4632,6 +4650,9 @@ impl Codegen {
         self.out.push_str(
             "#ifndef MAKO_RUNTIME_METRICS\n#define MAKO_RUNTIME_METRICS /*__MAKO_RUNTIME_METRICS__*/\n#endif\n",
         );
+        self.out.push_str(
+            "#ifndef MAKO_UNICODE17\n#define MAKO_UNICODE17 /*__MAKO_UNICODE17__*/\n#endif\n",
+        );
         self.out.push_str("#include \"mako_rt.h\"\n");
         // Overflow mode for checked integer ops (must precede mako_overflow.h use).
         self.out.push_str(&format!(
@@ -4687,6 +4708,10 @@ impl Codegen {
             self.out.push_str("#include \"mako_fmt.h\"\n");
             self.out.push_str("#include \"mako_cloud.h\"\n");
             self.out.push_str("#include \"mako_httpengine.h\"\n");
+            self.out.push_str("#include \"mako_pqc.h\"\n");
+            self.out.push_str("#include \"mako_errtrace.h\"\n");
+            self.out
+                .push_str("#if MAKO_UNICODE17\n#include \"mako_unicode17.h\"\n#endif\n");
             self.out.push_str("#endif /* MAKO_WASI */\n\n");
         }
 
@@ -5058,6 +5083,12 @@ impl Codegen {
             "/*__MAKO_RUNTIME_METRICS__*/",
             if runtime_metrics { "1" } else { "0" },
         );
+        let unicode17 = self.out.contains("mako_unicode_")
+            || self.out.contains("mako_utf8_")
+            || self.out.contains("mako_re_");
+        self.out = self
+            .out
+            .replace("/*__MAKO_UNICODE17__*/", if unicode17 { "1" } else { "0" });
 
         let includes = Self::resolve_includes(&self.out);
         self.out = self.out.replace("/*__MAKO_INCLUDES__*/", &includes);
@@ -5143,6 +5174,24 @@ impl Codegen {
                 "mako_cloud.h",
             ),
             (&["mako_httpengine", "httpengine_"], "mako_httpengine.h"),
+            (
+                &[
+                    "mako_mldsa",
+                    "mako_pqc_",
+                    "mako_tls_enable_pqc",
+                    "mako_tls_server_pqc",
+                ],
+                "mako_pqc.h",
+            ),
+            (
+                &[
+                    "mako_unicode_nfc(",
+                    "mako_unicode_nfd(",
+                    "mako_unicode_nfkc(",
+                    "mako_unicode_nfkd(",
+                ],
+                "mako_unicode17.h",
+            ),
         ];
         for (prefixes, header) in conditional {
             if prefixes.iter().any(|p| c_src.contains(p)) {
@@ -14043,6 +14092,12 @@ impl Codegen {
         }
     }
 
+    /// Return the current source file and last-emitted line for error trace injection.
+    fn current_source_loc(&self) -> (String, usize) {
+        let file = self.source_file.as_deref().unwrap_or("<unknown>");
+        (file.to_string(), self.last_emitted_line)
+    }
+
     /// Emit all statements in a block, with `#line` directives for source mapping.
     fn emit_body(&mut self, body: &Block) {
         for (i, s) in body.stmts.iter().enumerate() {
@@ -16186,6 +16241,44 @@ impl Codegen {
                             self.line(&format!("MakoResultInt {tmp} = mako_wrap_err({r}, {msg});"));
                             return ("MakoResultInt".into(), tmp);
                         }
+                        // Error tracing (source-location context)
+                        "error_trace" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("et");
+                            let (file, line) = self.current_source_loc();
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_error_new({v}, \"{file}\", {line});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "error_wrap_trace" => {
+                            let (_, err) = self.emit_expr(&args[0]);
+                            let (_, ctx) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("ewt");
+                            let (file, line) = self.current_source_loc();
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_error_wrap({err}, {ctx}, \"{file}\", {line});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "error_message" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("em");
+                            self.line(&format!("MakoString {tmp} = mako_error_message({v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "error_cause" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("ec");
+                            self.line(&format!("MakoString {tmp} = mako_error_cause({v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "error_chain" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("ech");
+                            self.line(&format!("MakoString {tmp} = mako_error_chain({v});"));
+                            return ("MakoString".into(), tmp);
+                        }
                         "error_join" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
@@ -16472,9 +16565,19 @@ impl Codegen {
                             let (_, b) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_str_builder_len({b})"));
                         }
+                        "uuid_v1" => {
+                            let tmp = self.fresh("u");
+                            self.line(&format!("MakoUuid {tmp} = mako_uuid_v1();"));
+                            return ("MakoUuid".into(), tmp);
+                        }
                         "uuid_v4" => {
                             let tmp = self.fresh("u");
                             self.line(&format!("MakoUuid {tmp} = mako_uuid_v4();"));
+                            return ("MakoUuid".into(), tmp);
+                        }
+                        "uuid_v6" => {
+                            let tmp = self.fresh("u");
+                            self.line(&format!("MakoUuid {tmp} = mako_uuid_v6();"));
                             return ("MakoUuid".into(), tmp);
                         }
                         "uuid_v7" => {
@@ -16489,10 +16592,22 @@ impl Codegen {
                             self.line(&format!("MakoUuid {tmp} = mako_uuid_v5({ns}, {name});"));
                             return ("MakoUuid".into(), tmp);
                         }
+                        "uuid_v8" => {
+                            let (_, d) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("u");
+                            self.line(&format!("MakoUuid {tmp} = mako_uuid_v8({d});"));
+                            return ("MakoUuid".into(), tmp);
+                        }
                         "uuid_nil" => {
                             let tmp = self.fresh("u");
                             self.line(&format!("MakoUuid {tmp} = mako_uuid_nil();"));
                             return ("MakoUuid".into(), tmp);
+                        }
+                        "uuid_timestamp" => {
+                            let (_, u) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("uts");
+                            self.line(&format!("int64_t {tmp} = mako_uuid_timestamp({u});"));
+                            return ("int64_t".into(), tmp);
                         }
                         "uuid_ns_dns" => {
                             let tmp = self.fresh("u");
@@ -23717,6 +23832,34 @@ impl Codegen {
                             self.line(&format!("MakoString {tmp} = mako_json_i({k}, {v});"));
                             return ("MakoString".into(), tmp);
                         }
+                        "json_f" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("jf");
+                            self.line(&format!("MakoString {tmp} = mako_json_f({k}, {v});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "json_b" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let (_, v) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("jb");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_json_b({k}, (int64_t){v});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "json_get_float" => {
+                            let (_, j) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("jgf");
+                            self.line(&format!("double {tmp} = mako_json_get_float({j}, {k});"));
+                            return ("double".into(), tmp);
+                        }
+                        "json_get_bool" => {
+                            let (_, j) = self.emit_expr(&args[0]);
+                            let (_, k) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_json_get_bool({j}, {k})"));
+                        }
                         "json_has" => {
                             let (_, j) = self.emit_expr(&args[0]);
                             let (_, k) = self.emit_expr(&args[1]);
@@ -27201,6 +27344,16 @@ impl Codegen {
                         "utf8_utf_max" => {
                             return ("int64_t".into(), "mako_utf8_utf_max()".into());
                         }
+                        normalization @ ("unicode_nfc" | "unicode_nfd" | "unicode_nfkc"
+                        | "unicode_nfkd") => {
+                            let (_, value) = self.emit_expr(&args[0]);
+                            let suffix = normalization.strip_prefix("unicode_").unwrap();
+                            let tmp = self.fresh("unorm");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_unicode_{suffix}({value});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
                         "unicode_is_letter" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_unicode_is_letter({r})"));
@@ -28462,6 +28615,77 @@ impl Codegen {
                         "bcrypt_available" => {
                             let tmp = self.fresh("bca");
                             self.line(&format!("int64_t {tmp} = mako_bcrypt_available();"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        // ML-DSA post-quantum signatures (FIPS 204)
+                        "pqc_available" => {
+                            let tmp = self.fresh("pqc");
+                            self.line(&format!("int64_t {tmp} = mako_pqc_available();"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "mldsa44_keygen" => {
+                            let tmp = self.fresh("mlk");
+                            self.line(&format!("MakoString {tmp} = mako_mldsa44_keygen();"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "mldsa65_keygen" => {
+                            let tmp = self.fresh("mlk");
+                            self.line(&format!("MakoString {tmp} = mako_mldsa65_keygen();"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "mldsa87_keygen" => {
+                            let tmp = self.fresh("mlk");
+                            self.line(&format!("MakoString {tmp} = mako_mldsa87_keygen();"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "mldsa_public_key" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("mlp");
+                            self.line(&format!("MakoString {tmp} = mako_mldsa_public_key({k});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "mldsa_algorithm_name" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("mlp");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_mldsa_algorithm_name({k});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "mldsa_sign" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("mls");
+                            self.line(&format!("MakoString {tmp} = mako_mldsa_sign({k}, {m});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "mldsa_verify" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            let (_, s) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("mlv");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_mldsa_verify({k}, {m}, {s});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "mldsa_self_signed_cert" => {
+                            let (_, k) = self.emit_expr(&args[0]);
+                            let (_, s) = self.emit_expr(&args[1]);
+                            let (_, d) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("mlc");
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_mldsa_self_signed_cert({k}, {s}, {d});"
+                            ));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "mldsa_verify_cert" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let (_, ca) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("mlvc");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_mldsa_verify_cert({c}, {ca});"
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "aes_gcm_seal" => {
@@ -40693,6 +40917,7 @@ fn main() {
         print_int(len(got))
         i = i + 1
     }
+
 }
 "#;
         let tokens = Lexer::new(source).tokenize().expect("lex");
@@ -40707,6 +40932,24 @@ fn main() {
             generated.contains("mako_read_file(mako_str_view("),
             "literal path arguments must be non-owning views:\n{generated}"
         );
+    }
+
+    #[test]
+    fn unicode_normalization_enables_tables_and_runtime_header_in_tests() {
+        let source = r#"
+fn TestNormalize() {
+    let normalized = unicode_nfc("e")
+    assert_eq_str(normalized, "e")
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new()
+            .with_tests(vec!["TestNormalize".into()])
+            .emit(&program);
+        assert!(generated.contains("#define MAKO_UNICODE17 1"));
+        assert!(generated.contains("#include \"mako_unicode17.h\""));
+        assert!(generated.contains("mako_unicode_nfc("));
     }
 
     #[test]

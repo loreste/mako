@@ -529,6 +529,10 @@ separate surface:
 | `json_ss` | `json_ss(k1: string, v1: string, k2: string, v2: string) -> string` | Create a JSON object with two string key-value pairs |
 | `json_si` | `json_si(k1: string, v1: string, k2: string, v2: int) -> string` | Create a JSON object with a string and an int key-value pair |
 | `json_i` | `json_i(key: string, value: int) -> string` | Create a JSON object with one int key-value pair |
+| `json_f` | `json_f(key: string, value: float) -> string` | Create a JSON object with one float key-value pair |
+| `json_b` | `json_b(key: string, value: bool) -> string` | Create a JSON object with one bool key-value pair |
+| `json_get_float` | `json_get_float(json: string, key: string) -> float` | Extract a float value by key from JSON |
+| `json_get_bool` | `json_get_bool(json: string, key: string) -> int` | Extract a bool value by key (1=true, 0=false) |
 | `json_object_from_map_ss` | `json_object_from_map_ss(m: map[string]string) -> string` | Convert a map[string]string to a JSON object |
 | `json_array_len` | `json_array_len(json: string) -> int` | Return the length of a JSON array |
 | `json_array_get_int` | `json_array_get_int(json: string, idx: int) -> int` | Get an integer element from a JSON array |
@@ -790,6 +794,59 @@ application code. See `examples/testing/scram_test.mko` (RFC 7677 §3 vector),
 | `chacha20_poly1305_seal` | `chacha20_poly1305_seal(key: string, nonce: string, plaintext: string, aad: string) -> string` | Encrypt with ChaCha20-Poly1305 |
 | `chacha20_poly1305_open` | `chacha20_poly1305_open(key: string, nonce: string, ciphertext: string, aad: string) -> string` | Decrypt with ChaCha20-Poly1305 |
 
+### ML-DSA Post-Quantum Signatures (FIPS 204)
+
+Post-quantum digital signatures via OpenSSL 3.5+'s native ML-DSA. All three
+NIST security levels are supported. Keys are PEM-encoded strings. Requires
+`pqc_available() == 1`.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `pqc_available` | `() -> int` | 1 if ML-DSA is available (OpenSSL 3.5+), 0 otherwise |
+| `mldsa44_keygen` | `() -> string` | Generate ML-DSA-44 private key (PEM). Security level 2 (~128-bit) |
+| `mldsa65_keygen` | `() -> string` | Generate ML-DSA-65 private key (PEM). Security level 3 (~192-bit) |
+| `mldsa87_keygen` | `() -> string` | Generate ML-DSA-87 private key (PEM). Security level 5 (~256-bit) |
+| `mldsa_public_key` | `(private_pem: string) -> string` | Extract public key PEM from private key |
+| `mldsa_sign` | `(private_pem: string, message: string) -> string` | Sign message; returns raw signature bytes |
+| `mldsa_verify` | `(public_pem: string, message: string, signature: string) -> int` | Verify signature (1=valid, 0=invalid) |
+| `mldsa_self_signed_cert` | `(private_pem: string, subject: string, days: int) -> string` | Create self-signed X.509 cert with ML-DSA signature |
+| `mldsa_verify_cert` | `(cert_pem: string, ca_pem: string) -> int` | Verify X.509 certificate chain (1=valid) |
+| `mldsa_algorithm_name` | `(private_pem: string) -> string` | Algorithm name from key (e.g. "ML-DSA-65") |
+
+```mko
+let key = mldsa65_keygen()
+let pub_key = mldsa_public_key(key)
+let sig = mldsa_sign(key, "hello post-quantum world")
+assert(mldsa_verify(pub_key, "hello post-quantum world", sig) == 1)
+let cert = mldsa_self_signed_cert(key, "CN=pqc-server,O=Mako", 365)
+```
+
+### Error Tracing
+
+Source-location error context that propagates through Result chains. The
+codegen auto-injects file:line at each call site.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `error_trace` | `(msg: string) -> string` | Create error with auto-injected source file:line |
+| `error_wrap_trace` | `(err: string, context: string) -> string` | Wrap error with context + new source location |
+| `error_message` | `(err: string) -> string` | Extract message without trace metadata |
+| `error_cause` | `(err: string) -> string` | Extract root cause (innermost message) |
+| `error_chain` | `(err: string) -> string` | Format full chain: `"ctx: msg [file:42 → file:10]"` |
+
+```mko
+fn read_config(path: string) -> Result[string, string] {
+    return Err(error_trace("file not found: " + path))
+}
+fn load_app() -> Result[string, string] {
+    match read_config("/etc/app.conf") {
+        Ok(v) => Ok(v)
+        Err(e) => Err(error_wrap_trace(e, "loading app"))
+    }
+}
+// error_chain produces: "loading app: file not found: /etc/app.conf [app.mko:7 → app.mko:2]"
+```
+
 ### DTLS (datagram TLS over UDP)
 
 DTLS 1.2 over a UDP socket — the WebRTC DTLS-SRTP building block: blocking
@@ -921,10 +978,14 @@ Tests: `examples/testing/dtls_test.mko` · interop: `scripts/dtls-smoke.sh`
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `uuid_v1` | `uuid_v1() -> Uuid` | Time + random-node UUID v1 (RFC 4122) |
 | `uuid_v4` | `uuid_v4() -> Uuid` | Random UUID v4 (CSPRNG; 16-byte **Copy** POD) |
-| `uuid_v7` | `uuid_v7() -> Uuid` | Time-ordered UUID v7 (unix-ms + random; index-friendly) |
 | `uuid_v5` | `uuid_v5(ns: Uuid, name: string) -> Uuid` | Name-based UUID v5 (SHA-1 of namespace‖name) |
+| `uuid_v6` | `uuid_v6() -> Uuid` | Reordered-time UUID v6 (RFC 9562; sorts naturally by time) |
+| `uuid_v7` | `uuid_v7() -> Uuid` | Time-ordered UUID v7 (unix-ms + random; index-friendly) |
+| `uuid_v8` | `uuid_v8(data: string) -> Uuid` | Custom UUID v8 (RFC 9562; 122 bits of caller data) |
 | `uuid_nil` | `uuid_nil() -> Uuid` | Nil UUID (all zeros) |
+| `uuid_timestamp` | `uuid_timestamp(u: Uuid) -> int` | Extract 60-bit timestamp from v1/v6 (100ns units since 1582) |
 | `uuid_ns_dns` / `uuid_ns_url` / `uuid_ns_oid` / `uuid_ns_x500` | `() -> Uuid` | RFC 4122 standard namespaces |
 | `uuid_string` | `uuid_string(u: Uuid) -> string` | Canonical lowercase `8-4-4-4-12` |
 | `uuid_string_upper` | `uuid_string_upper(u: Uuid) -> string` | Canonical uppercase |
@@ -2555,9 +2616,10 @@ HTTP seed path `/debug/hot_sites` via `profile_http_route`.
 | `utf8_full_rune` | `utf8_full_rune(s: string) -> int` | Enough bytes for a complete sequence |
 | `utf8_rune_start` | `utf8_rune_start(b: int) -> int` | 1 if byte can start a sequence |
 | `utf8_rune_error` / `rune_self` / `max_rune` / `utf_max` | `() -> int` | UTF-8 constants (U+FFFD, 0x80, …) |
-| `unicode_is_letter` / `digit` / `space` / `punct` / `symbol` | `(r: int) -> int` | UCD category seeds |
-| `unicode_is_control` / `print` / `graphic` / `upper` / `lower` / `title` | `(r: int) -> int` | More category/case seeds |
-| `unicode_to_lower` / `to_upper` / `to_title` / `simple_fold` | `(r: int) -> int` | Case mapping seeds |
+| `unicode_is_letter` / `digit` / `space` / `punct` / `symbol` | `(r: int) -> int` | UCD category tests (Unicode 17 tables when available) |
+| `unicode_is_control` / `print` / `graphic` / `upper` / `lower` / `title` | `(r: int) -> int` | More category/case tests |
+| `unicode_to_lower` / `to_upper` / `to_title` / `simple_fold` | `(r: int) -> int` | Case mapping |
+| `unicode_nfc` / `unicode_nfd` / `unicode_nfkc` / `unicode_nfkd` | `(s: string) -> string` | Unicode 17 normalization forms (NFC, NFD, NFKC, NFKD) |
 | `unicode_is` | `unicode_is(prop: string, r: int) -> int` | `\p{Name}` table match |
 | `list_new_int` / `list_push_int` / `list_pop_int` / … | List[int] helpers | Growable list over `[]int` |
 | `list_*_str` | List[string] helpers | Same for strings |

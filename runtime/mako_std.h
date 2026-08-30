@@ -2625,6 +2625,59 @@ static inline MakoString mako_json_i(MakoString key, int64_t val) {
     return (MakoString){d, (size_t)wrote};
 }
 
+static inline MakoString mako_json_f(MakoString key, double val) {
+    MakoString ek = mako_json_escape(key);
+    size_t n = ek.len + 64;
+    char *d = (char *)malloc(n);
+    int wrote = snprintf(d, n, "{\"%s\":%.17g}", ek.data, val);
+    if (wrote < 0) wrote = 0;
+    mako_str_free(ek);
+    return (MakoString){d, (size_t)wrote};
+}
+
+static inline MakoString mako_json_b(MakoString key, int64_t val) {
+    MakoString ek = mako_json_escape(key);
+    size_t n = ek.len + 16;
+    char *d = (char *)malloc(n);
+    int wrote = snprintf(d, n, "{\"%s\":%s}", ek.data, val ? "true" : "false");
+    if (wrote < 0) wrote = 0;
+    mako_str_free(ek);
+    return (MakoString){d, (size_t)wrote};
+}
+
+static inline double mako_json_get_float(MakoString json, MakoString key) {
+    MakoString ek = mako_json_escape(key);
+    size_t plen = ek.len + 4; /* "key": */
+    char *pat = (char *)malloc(plen + 1);
+    snprintf(pat, plen + 1, "\"%s\":", ek.data);
+    size_t pat_len = strlen(pat);
+    const char *src = json.data ? json.data : "";
+    const char *p = strstr(src, pat);
+    free(pat);
+    mako_str_free(ek);
+    if (!p) return 0.0;
+    p += pat_len;
+    while (*p == ' ' || *p == '\t') p++;
+    return strtod(p, NULL);
+}
+
+static inline int64_t mako_json_get_bool(MakoString json, MakoString key) {
+    MakoString ek = mako_json_escape(key);
+    size_t plen = ek.len + 4;
+    char *pat = (char *)malloc(plen + 1);
+    snprintf(pat, plen + 1, "\"%s\":", ek.data);
+    size_t pat_len = strlen(pat);
+    const char *src = json.data ? json.data : "";
+    const char *p = strstr(src, pat);
+    free(pat);
+    mako_str_free(ek);
+    if (!p) return 0;
+    p += pat_len;
+    while (*p == ' ' || *p == '\t') p++;
+    if (strncmp(p, "true", 4) == 0) return 1;
+    return 0;
+}
+
 /* Parse: returns 1 if haystack contains "\"key\":\"value\"" substring match (seed). */
 static inline int64_t mako_json_has_string(MakoString json, MakoString key, MakoString expect) {
     MakoString needle_key = mako_json_escape(key);

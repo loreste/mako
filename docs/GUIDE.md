@@ -112,7 +112,7 @@ mako check .
 mako run -p app
 ```
 
-`makori version` (also `mako --version` / `-V`) prints `makori version mako0.6.2 darwin/arm64`. Use `makori version -v` for an optional commit line.
+`makori version` (also `mako --version` / `-V`) prints `makori version mako0.6.5 darwin/arm64`. Use `makori version -v` for an optional commit line.
 Override headers if needed: `export MAKO_RUNTIME=/path/to/runtime`.
 
 Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `makori build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): optimized on microbenches).
@@ -243,6 +243,21 @@ Path deps between members still use `[dependencies]` path entries. See `examples
 
 Hard-reserved in `src/lexer/mod.rs` (always keywords, never identifiers).
 Full tables: **[KEYWORDS.md](KEYWORDS.md)**.
+
+### Identifiers
+
+Identifiers follow **Unicode UAX #31** using the XID_Start / XID_Continue
+properties from Unicode 17. ASCII letters, digits, and `_` work as always;
+additionally, any XID_Start scalar can begin an identifier and any
+XID_Continue scalar can continue one:
+
+```mko
+let π = 3.14159
+let 变量 = 42
+let café = "latte"
+```
+
+Emoji and digit-leading names are rejected at lex time.
 
 | Category | Keywords |
 |----------|----------|

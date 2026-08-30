@@ -1,0 +1,25 @@
+// Unicode 17 normalization: canonical, compatibility, ordering, and Hangul.
+fn TestUnicode17CanonicalNormalization() {
+    let decomposed = "e" + utf8_encode_rune(769)
+    assert_eq_str(unicode_nfc(decomposed), "é")
+    assert_eq_str(unicode_nfd("é"), decomposed)
+
+    // U+0315 (ccc=232) must sort after U+0300 (ccc=230).
+    let unordered = "a" + utf8_encode_rune(789) + utf8_encode_rune(768)
+    let ordered = "a" + utf8_encode_rune(768) + utf8_encode_rune(789)
+    assert_eq_str(unicode_nfd(unordered), ordered)
+}
+
+fn TestUnicode17CompatibilityNormalization() {
+    // U+2460 CIRCLED DIGIT ONE has compatibility decomposition "1".
+    let circled_one = utf8_encode_rune(9312)
+    assert_eq_str(unicode_nfkc(circled_one), "1")
+    assert_eq_str(unicode_nfkd(circled_one), "1")
+}
+
+fn TestUnicode17HangulNormalization() {
+    let syllable = utf8_encode_rune(44032) // U+AC00
+    let jamo = utf8_encode_rune(4352) + utf8_encode_rune(4449)
+    assert_eq_str(unicode_nfd(syllable), jamo)
+    assert_eq_str(unicode_nfc(jamo), syllable)
+}

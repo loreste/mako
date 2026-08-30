@@ -62,6 +62,13 @@
 extern "C" {
 #endif
 
+#ifndef MAKO_UNICODE17
+#define MAKO_UNICODE17 0
+#endif
+#if MAKO_UNICODE17
+#include "mako_unicode17_data.h"
+#endif
+
 /* ---- Refcounted allocation infrastructure ----
  * Heap-backed slice types use a refcount header before the
  * data pointer: [4-byte atomic refcount][4-byte pad]. Clone bumps refcount (O(1)),

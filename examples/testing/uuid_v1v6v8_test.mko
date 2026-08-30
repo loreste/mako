@@ -1,0 +1,70 @@
+// UUID v1, v6, v8 expansion tests.
+
+export fn TestUuidV1() {
+    let u = uuid_v1()
+    assert(uuid_version(u) == 1)
+    assert(uuid_variant(u) == 2)
+    assert(uuid_is_nil(u) == false)
+    let ts = uuid_timestamp(u)
+    assert(ts > 0)
+    let s = uuid_string(u)
+    assert(len(bytes(s)) == 36)
+}
+
+export fn TestUuidV6() {
+    let u = uuid_v6()
+    assert(uuid_version(u) == 6)
+    assert(uuid_variant(u) == 2)
+    let ts = uuid_timestamp(u)
+    assert(ts > 0)
+}
+
+export fn TestUuidV6SortOrder() {
+    let a = uuid_v6()
+    sleep_ms(2)
+    let b = uuid_v6()
+    // v6 is time-ordered: b should sort after a
+    assert(uuid_cmp(a, b) < 0)
+}
+
+export fn TestUuidV8Custom() {
+    let data = "0123456789abcdef"
+    let u = uuid_v8(data)
+    assert(uuid_version(u) == 8)
+    assert(uuid_variant(u) == 2)
+}
+
+export fn TestUuidV1Uniqueness() {
+    let a = uuid_v1()
+    let b = uuid_v1()
+    assert(uuid_eq(a, b) == false)
+}
+
+export fn TestUuidTimestampV1V6Match() {
+    let v1 = uuid_v1()
+    let v6 = uuid_v6()
+    let ts1 = uuid_timestamp(v1)
+    let ts6 = uuid_timestamp(v6)
+    // Both should be close in time (within 1 second = 10M 100ns units)
+    let mut diff = ts6 - ts1
+    if diff < 0 {
+        diff = 0 - diff
+    }
+    assert(diff < 10000000)
+}
+
+export fn TestUuidTimestampNonTimeVersion() {
+    let v4 = uuid_v4()
+    assert(uuid_timestamp(v4) == 0)
+}
+
+fn main() {
+    TestUuidV1()
+    TestUuidV6()
+    TestUuidV6SortOrder()
+    TestUuidV8Custom()
+    TestUuidV1Uniqueness()
+    TestUuidTimestampV1V6Match()
+    TestUuidTimestampNonTimeVersion()
+    print("PASS\n")
+}

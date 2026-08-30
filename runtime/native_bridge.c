@@ -4,6 +4,7 @@
 // String args: borrowed MakoNativeString* → temporary MakoString view (not freed).
 // String returns: owned MakoString → transferred into MakoNativeString* header.
 
+#define MAKO_UNICODE17 1
 #include "mako_rt.h"
 #include "mako_net.h"
 #include "mako_http.h"
@@ -11,9 +12,12 @@
 #include "mako_std.h"
 #include "mako_fmt.h"
 #include "mako_uuid.h"
+#include "mako_unicode17.h"
+#include "mako_errtrace.h"
 // TLS before WebSocket — WSS client frames over TlsConn.
 // mako_log.h redefines symbols already in mako_stdlib.h — use stdlib log only.
 #include "mako_tls.h"
+#include "mako_pqc.h"
 #include "mako_dtls.h"
 #include "mako_ws.h"
 #include "mako_db.h"
@@ -392,6 +396,24 @@ void mako_native_chan_drop(MakoChan *c) {
 
 MakoNativeString *mako_native_uuid_v4(void) {
     return bridge_take_str(mako_uuid_string(mako_uuid_v4()));
+}
+
+MakoNativeString *mako_native_uuid_v1(void) {
+    return bridge_take_str(mako_uuid_string(mako_uuid_v1()));
+}
+
+MakoNativeString *mako_native_uuid_v6(void) {
+    return bridge_take_str(mako_uuid_string(mako_uuid_v6()));
+}
+
+MakoNativeString *mako_native_uuid_v8_ptr(MakoNativeString *data) {
+    return bridge_take_str(mako_uuid_string(mako_uuid_v8(bridge_borrow_str(data))));
+}
+
+int64_t mako_native_uuid_timestamp_ptr(MakoNativeString *s) {
+    bool ok = false;
+    MakoUuid u = mako_uuid_parse(bridge_borrow_str(s), &ok);
+    return ok ? mako_uuid_timestamp(u) : 0;
 }
 
 void mako_native_log_info_ptr(MakoNativeString *msg) {
@@ -928,6 +950,110 @@ void mako_native_log_warn_ptr(MakoNativeString *msg) {
 
 MakoNativeString *mako_native_json_i_ptr(MakoNativeString *k, int64_t v) {
     return bridge_take_str(mako_json_i(bridge_borrow_str(k), v));
+}
+
+MakoNativeString *mako_native_json_f_ptr(MakoNativeString *k, double v) {
+    return bridge_take_str(mako_json_f(bridge_borrow_str(k), v));
+}
+
+MakoNativeString *mako_native_json_b_ptr(MakoNativeString *k, int64_t v) {
+    return bridge_take_str(mako_json_b(bridge_borrow_str(k), v));
+}
+
+double mako_native_json_get_float_ptr(MakoNativeString *j, MakoNativeString *k) {
+    return mako_json_get_float(bridge_borrow_str(j), bridge_borrow_str(k));
+}
+
+int64_t mako_native_json_get_bool_ptr(MakoNativeString *j, MakoNativeString *k) {
+    return mako_json_get_bool(bridge_borrow_str(j), bridge_borrow_str(k));
+}
+
+MakoNativeString *mako_native_error_trace_ptr(MakoNativeString *msg) {
+    return bridge_take_str(mako_error_new(bridge_borrow_str(msg), "<native>", 0));
+}
+
+MakoNativeString *mako_native_error_wrap_trace_ptr(MakoNativeString *err,
+                                                   MakoNativeString *context) {
+    return bridge_take_str(mako_error_wrap(bridge_borrow_str(err),
+                                           bridge_borrow_str(context),
+                                           "<native>", 0));
+}
+
+MakoNativeString *mako_native_error_message_ptr(MakoNativeString *err) {
+    return bridge_take_str(mako_error_message(bridge_borrow_str(err)));
+}
+
+MakoNativeString *mako_native_error_cause_ptr(MakoNativeString *err) {
+    return bridge_take_str(mako_error_cause(bridge_borrow_str(err)));
+}
+
+MakoNativeString *mako_native_error_chain_ptr(MakoNativeString *err) {
+    return bridge_take_str(mako_error_chain(bridge_borrow_str(err)));
+}
+
+MakoNativeString *mako_native_unicode_nfc_ptr(MakoNativeString *s) {
+    return bridge_take_str(mako_unicode_nfc(bridge_borrow_str(s)));
+}
+
+MakoNativeString *mako_native_unicode_nfd_ptr(MakoNativeString *s) {
+    return bridge_take_str(mako_unicode_nfd(bridge_borrow_str(s)));
+}
+
+MakoNativeString *mako_native_unicode_nfkc_ptr(MakoNativeString *s) {
+    return bridge_take_str(mako_unicode_nfkc(bridge_borrow_str(s)));
+}
+
+MakoNativeString *mako_native_unicode_nfkd_ptr(MakoNativeString *s) {
+    return bridge_take_str(mako_unicode_nfkd(bridge_borrow_str(s)));
+}
+
+int64_t mako_native_pqc_available(void) {
+    return mako_pqc_available();
+}
+
+MakoNativeString *mako_native_mldsa44_keygen(void) {
+    return bridge_take_str(mako_mldsa44_keygen());
+}
+
+MakoNativeString *mako_native_mldsa65_keygen(void) {
+    return bridge_take_str(mako_mldsa65_keygen());
+}
+
+MakoNativeString *mako_native_mldsa87_keygen(void) {
+    return bridge_take_str(mako_mldsa87_keygen());
+}
+
+MakoNativeString *mako_native_mldsa_public_key_ptr(MakoNativeString *key) {
+    return bridge_take_str(mako_mldsa_public_key(bridge_borrow_str(key)));
+}
+
+MakoNativeString *mako_native_mldsa_algorithm_name_ptr(MakoNativeString *key) {
+    return bridge_take_str(mako_mldsa_algorithm_name(bridge_borrow_str(key)));
+}
+
+MakoNativeString *mako_native_mldsa_sign_ptr(MakoNativeString *key,
+                                             MakoNativeString *message) {
+    return bridge_take_str(mako_mldsa_sign(bridge_borrow_str(key),
+                                           bridge_borrow_str(message)));
+}
+
+int64_t mako_native_mldsa_verify_ptr(MakoNativeString *key,
+                                     MakoNativeString *message,
+                                     MakoNativeString *signature) {
+    return mako_mldsa_verify(bridge_borrow_str(key), bridge_borrow_str(message),
+                             bridge_borrow_str(signature));
+}
+
+MakoNativeString *mako_native_mldsa_self_signed_cert_ptr(MakoNativeString *key,
+                                                         MakoNativeString *subject,
+                                                         int64_t days) {
+    return bridge_take_str(mako_mldsa_self_signed_cert(
+        bridge_borrow_str(key), bridge_borrow_str(subject), days));
+}
+
+int64_t mako_native_mldsa_verify_cert_ptr(MakoNativeString *cert,
+                                          MakoNativeString *ca) {
+    return mako_mldsa_verify_cert(bridge_borrow_str(cert), bridge_borrow_str(ca));
 }
 
 int64_t mako_native_json_has_ptr(MakoNativeString *j, MakoNativeString *k) {
@@ -10157,7 +10283,8 @@ int64_t mako_native_uuid_cmp_ptr(MakoNativeString *a, MakoNativeString *b) {
     MakoUuid ua = mako_uuid_parse(bridge_borrow_str(a), &oka);
     MakoUuid ub = mako_uuid_parse(bridge_borrow_str(b), &okb);
     if (!oka || !okb) return oka==okb ? 0 : (oka ? 1 : -1);
-    return mako_uuid_eq(ua, ub) ? 0 : 1;
+    int cmp = memcmp(ua.b, ub.b, sizeof(ua.b));
+    return cmp < 0 ? -1 : (cmp > 0 ? 1 : 0);
 }
 MakoNativeString *mako_native_uuid_v7(void) {
     return bridge_take_str(mako_uuid_string(mako_uuid_v7()));

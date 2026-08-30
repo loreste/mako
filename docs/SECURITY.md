@@ -9,7 +9,7 @@ and buffer overflows — but not general leak freedom. Edge cases are still
 being found and fixed. This is not yet equivalent to a formally verified
 memory model.
 
-**Product version:** **0.6.2**.
+**Product version:** **0.6.5**.
 
 Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make memory corruption and common backend footguns hard to ship —
@@ -32,7 +32,7 @@ Soundness program: [SOUNDNESS.md](SOUNDNESS.md) · Memory model:
 [MEMORY_MODEL.md](MEMORY_MODEL.md) · Stdlib gate:
 [STDLIB_SAFETY.md](STDLIB_SAFETY.md).
 
-## Slice backing ownership (0.6.2)
+## Slice backing ownership (0.6.2+)
 
 Safe slice values preserve value semantics without a tracing garbage collector:
 
@@ -244,9 +244,12 @@ Makori does **not** ship a full PKI product or “crypto framework.” It expose
 | TLS inspect | `tls_conn_version`, `tls_peer_cn`, `tls_conn_alpn` | Logging / policy |
 | HTTP helpers | `https_*` / `oidc_*` (+ `tls_get` / `tls_post` demos) | Verified HTTPS clients; OIDC never downgrades to `http_*` |
 | JWT signing / verification | `jwt_sign` (HS256), `jwt_sign_es256`, `jwt_verify`, `jwt_verify_rs256`, `jwt_verify_es256`, `jwt_verify_jwks` | Explicit algorithm/key type; ES256 requires a P-256 key; RS256 requires RSA >= 2048 bits |
+| **Post-quantum (ML-DSA)** | `mldsa44_keygen` / `mldsa65_keygen` / `mldsa87_keygen`, `mldsa_sign` / `mldsa_verify` | FIPS 204 signatures; X.509 certs; TLS 1.3 PQC handshakes |
+| PQC X.509 | `mldsa_self_signed_cert` / `mldsa_verify_cert` | Post-quantum certificate chains |
+| PQC TLS | `tls_server_pqc` / `tls_enable_pqc` | TLS 1.3 with ML-DSA signature schemes |
 
 **Secure defaults:** TLS min 1.2; modern cipher suites; client verify and host
-name verification when using `tls_client_new(ca)` / `https_*`. Prefer Argon2id for new password storage. Use `const_eq` /
+name verification when using `tls_client_new(ca)` / `https_*`. Prefer Argon2id for new password storage. ML-DSA-65 (security level 3) for post-quantum applications. Use `const_eq` /
 `secret_eq_str` for tokens — never `==` on secrets in hot auth paths if you care
 about timing (language `==` is not constant-time).
 

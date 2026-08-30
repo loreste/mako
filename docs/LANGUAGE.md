@@ -3,7 +3,7 @@
 Makori is a systems and backend language: clear to write, strict at compile time,
 fast at runtime, and designed so **builds stay fast**.
 
-**Product version:** **0.6.2** (`makori version` → `mako0.6.2`).
+**Product version:** **0.6.5** (`makori version` → `mako0.6.5`).
 
 **Guided tour:** [The Makori Book](book/).  
 **Current syntax guide:** [GUIDE.md](GUIDE.md).

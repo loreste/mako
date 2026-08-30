@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use crate::unicode17_data::{in_ranges, XID_CONTINUE, XID_START};
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
@@ -212,6 +214,35 @@ impl<'a> Lexer<'a> {
             self.col += 1;
         }
         Some(c)
+    }
+
+    fn peek_char(&self) -> Option<char> {
+        std::str::from_utf8(&self.src[self.pos..])
+            .ok()?
+            .chars()
+            .next()
+    }
+
+    fn bump_char(&mut self) -> Option<char> {
+        let c = self.peek_char()?;
+        self.pos += c.len_utf8();
+        if c == '\n' {
+            self.line += 1;
+            self.col = 1;
+        } else {
+            self.col += 1;
+        }
+        Some(c)
+    }
+
+    #[inline]
+    fn is_ident_start(c: char) -> bool {
+        c == '_' || in_ranges(c as u32, XID_START)
+    }
+
+    #[inline]
+    fn is_ident_continue(c: char) -> bool {
+        c == '_' || in_ranges(c as u32, XID_CONTINUE)
     }
 
     fn skip_ws_and_comments(&mut self) {
@@ -472,8 +503,10 @@ impl<'a> Lexer<'a> {
                     kind
                 }
             }
-            other => {
-                return Err(LexError::UnexpectedChar(other as char, line, col));
+            _ if self.peek_char().is_some_and(Self::is_ident_start) => self.lex_ident(),
+            _ => {
+                let other = self.peek_char().unwrap_or('\u{FFFD}');
+                return Err(LexError::UnexpectedChar(other, line, col));
             }
         };
 
@@ -661,11 +694,8 @@ impl<'a> Lexer<'a> {
 
     fn lex_ident(&mut self) -> TokenKind {
         let start = self.pos;
-        while matches!(
-            self.peek(),
-            Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
-        ) {
-            self.bump();
+        while self.peek_char().is_some_and(Self::is_ident_continue) {
+            self.bump_char();
         }
         let s = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
         match s {
@@ -738,6 +768,29 @@ mod tests {
         let tokens = Lexer::new("fn main() { let x = 1 }").tokenize().unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::Fn));
         assert!(matches!(tokens[1].kind, TokenKind::Ident(ref s) if s == "main"));
+    }
+
+    #[test]
+    fn lexes_unicode17_xid_identifiers_by_scalar() {
+        let tokens = Lexer::new("let π = 1\nlet 变量 = π\nlet cafe\u{301} = 2")
+            .tokenize()
+            .unwrap();
+        for expected in ["π", "变量", "cafe\u{301}"] {
+            assert!(tokens
+                .iter()
+                .any(|token| matches!(&token.kind, TokenKind::Ident(name) if name == expected)));
+        }
+    }
+
+    #[test]
+    fn rejects_non_xid_emoji_and_digit_starts() {
+        assert!(matches!(
+            Lexer::new("let 😀 = 1").tokenize(),
+            Err(LexError::UnexpectedChar('😀', 1, 5))
+        ));
+        let tokens = Lexer::new("let 1π = 2").tokenize().unwrap();
+        assert!(matches!(tokens[1].kind, TokenKind::Int(1)));
+        assert!(matches!(&tokens[2].kind, TokenKind::Ident(name) if name == "π"));
     }
 
     #[test]

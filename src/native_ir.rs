@@ -16607,6 +16607,24 @@ impl<'a> FunctionLowerer<'a> {
             "uuid_v4" if args.is_empty() => {
                 Some(("mako_native_uuid_v4", &[], Some(Type::Str), true))
             }
+            "uuid_v1" if args.is_empty() => {
+                Some(("mako_native_uuid_v1", &[], Some(Type::Str), true))
+            }
+            "uuid_v6" if args.is_empty() => {
+                Some(("mako_native_uuid_v6", &[], Some(Type::Str), true))
+            }
+            "uuid_v8" if args.len() == 1 => Some((
+                "mako_native_uuid_v8_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "uuid_timestamp" if args.len() == 1 => Some((
+                "mako_native_uuid_timestamp_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
             "log_info" if args.len() == 1 => {
                 Some(("mako_native_log_info_ptr", &[Type::Str], None, false))
             }
@@ -16703,6 +16721,72 @@ impl<'a> FunctionLowerer<'a> {
             "json_i" if args.len() == 2 => Some((
                 "mako_native_json_i_ptr",
                 &[Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "json_f" if args.len() == 2 => Some((
+                "mako_native_json_f_ptr",
+                &[Type::Str, Type::F64],
+                Some(Type::Str),
+                true,
+            )),
+            "json_b" if args.len() == 2 => Some((
+                "mako_native_json_b_ptr",
+                &[Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "error_trace" if args.len() == 1 => Some((
+                "mako_native_error_trace_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "error_wrap_trace" if args.len() == 2 => Some((
+                "mako_native_error_wrap_trace_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "error_message" if args.len() == 1 => Some((
+                "mako_native_error_message_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "error_cause" if args.len() == 1 => Some((
+                "mako_native_error_cause_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "error_chain" if args.len() == 1 => Some((
+                "mako_native_error_chain_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "unicode_nfc" if args.len() == 1 => Some((
+                "mako_native_unicode_nfc_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "unicode_nfd" if args.len() == 1 => Some((
+                "mako_native_unicode_nfd_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "unicode_nfkc" if args.len() == 1 => Some((
+                "mako_native_unicode_nfkc_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "unicode_nfkd" if args.len() == 1 => Some((
+                "mako_native_unicode_nfkd_ptr",
+                &[Type::Str],
                 Some(Type::Str),
                 true,
             )),
@@ -17134,6 +17218,18 @@ impl<'a> FunctionLowerer<'a> {
             )),
             "json_get_int" if args.len() == 2 => Some((
                 "mako_native_json_get_int_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "json_get_float" if args.len() == 2 => Some((
+                "mako_native_json_get_float_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::F64),
+                false,
+            )),
+            "json_get_bool" if args.len() == 2 => Some((
+                "mako_native_json_get_bool_ptr",
                 &[Type::Str, Type::Str],
                 Some(Type::I64),
                 false,
@@ -21728,6 +21824,54 @@ impl<'a> FunctionLowerer<'a> {
                 &[Type::Str, Type::Str, Type::Str, Type::Str],
                 Some(Type::Str),
                 true,
+            )),
+            "pqc_available" if args.is_empty() => {
+                Some(("mako_native_pqc_available", &[], Some(Type::I64), false))
+            }
+            "mldsa44_keygen" if args.is_empty() => {
+                Some(("mako_native_mldsa44_keygen", &[], Some(Type::Str), true))
+            }
+            "mldsa65_keygen" if args.is_empty() => {
+                Some(("mako_native_mldsa65_keygen", &[], Some(Type::Str), true))
+            }
+            "mldsa87_keygen" if args.is_empty() => {
+                Some(("mako_native_mldsa87_keygen", &[], Some(Type::Str), true))
+            }
+            "mldsa_public_key" if args.len() == 1 => Some((
+                "mako_native_mldsa_public_key_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "mldsa_algorithm_name" if args.len() == 1 => Some((
+                "mako_native_mldsa_algorithm_name_ptr",
+                &[Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "mldsa_sign" if args.len() == 2 => Some((
+                "mako_native_mldsa_sign_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::Str),
+                true,
+            )),
+            "mldsa_verify" if args.len() == 3 => Some((
+                "mako_native_mldsa_verify_ptr",
+                &[Type::Str, Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "mldsa_self_signed_cert" if args.len() == 3 => Some((
+                "mako_native_mldsa_self_signed_cert_ptr",
+                &[Type::Str, Type::Str, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "mldsa_verify_cert" if args.len() == 2 => Some((
+                "mako_native_mldsa_verify_cert_ptr",
+                &[Type::Str, Type::Str],
+                Some(Type::I64),
+                false,
             )),
             "auth_basic_header" if args.len() == 2 => Some((
                 "mako_native_auth_basic_header_ptr",

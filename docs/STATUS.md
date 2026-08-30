@@ -1,6 +1,6 @@
 # Makori status (adversarial / verified)
 
-Last inventory: **2026-08-30** · product **mako0.6.4** (tip; last tag **v0.6.4**) ·
+Last inventory: **2026-08-30** · product **mako0.6.5** (tip; release tag **v0.6.5**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
@@ -17,7 +17,7 @@ CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard fa
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.6.4** tip · last tag [**v0.6.4**](https://github.com/loreste/mako/releases/tag/v0.6.4) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.6.5** tip · release tag [**v0.6.5**](https://github.com/loreste/mako/releases/tag/v0.6.5) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -161,7 +161,7 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | MSI/notarize/brew/winget publish seeds | Done seed — scripts + `package-seed.yml` · WiX skeleton |
 | gfx_poll · GPU backend availability · netcode deltas | Done seed — `residual_seeds_test` |
 | plugin_open/call/close · hot_reload_unwatch | Done seed — `residual_seeds_test` · `domain_tracks_test` |
-| Full unicode + utf8 package | Done seed — UCD props/case + encode/decode · `std/unicode` · `unicode_full_test` |
+| Full unicode + utf8 package | Done — Unicode 17 UCD props/case/normalization (NFC/NFD/NFKC/NFKD) + XID identifiers + encode/decode · `std/unicode` · `unicode_full_test` · `unicode17_normalization_test` |
 | List[T] + richer collections | Done — List/`[]T` + set/heap/ring/stats · `std/collections` · `collections_*_test` |
 | Plugin product package | Done — live dylib load/call/reload/manifest · `std/plugin` · `plugin_product_test` |
 | Full time package | Done — calendar/parse/format/duration · `std/time` · `time_full_test` |
@@ -253,6 +253,10 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | SQL string params + last_insert_id / rows_affected (SQLite + Postgres) | Done — `examples/testing/sql_programming_test.mko` |
 | SQL multi-row cursor + bulk first-column (`sql_query_rows*`, `sql_query_col_*`) | Done — `examples/testing/sql_rows_test.mko` |
 | SIP/SDP/RTP platform (parse/build; build stacks in Makori — not a softswitch) | Done — `examples/testing/sip_test.mko` · `examples/sip_ua.mko` · `std/sip` |
+| ML-DSA post-quantum signatures (FIPS 204, OpenSSL 3.5+) | Done — MLDSA44/65/87 keygen, sign, verify, X.509, TLS 1.3 · `mldsa_pqc_test.mko` |
+| Error tracing with source locations | Done — `error_trace` / `error_wrap_trace` / `error_chain` auto-inject file:line · `error_trace_test.mko` |
+| UUID v1/v6/v8 (RFC 9562 complete) | Done — time-based v1/v6, custom v8, timestamp extraction · `uuid_v1v6v8_test.mko` |
+| JSON marshal float/bool/nested struct (`#[derive(json)]`) | Done — `json_f`/`json_b`/`json_get_float`/`json_get_bool` · `json_marshal_test.mko` |
 | SRTP crypto building blocks (`aes_ctr`, `hmac_sha1` / `hmac_sha1_raw`) | Done — `examples/testing/crypto_srtp_blocks_test.mko` (HMAC RFC 2202) |
 | TLS client socket API (`tls_client_new` / `tls_connect` + SNI/VERIFY_PEER) | Done — `examples/testing/security_crypto_test.mko` |
 | Secrets helpers (`secret_len` / `secret_eq_str`) + HKDF-SHA256 | Done — RFC 5869 A.1 vector; `security_crypto_test.mko` |

@@ -2,7 +2,7 @@
 
 Source brief: `General_Purpose_Backend_Language_Vision.md`.
 
-**Product tip:** **0.6.2**. Patch train: **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
+**Product tip:** **0.6.5**. Patch train: **0.5.0** native-first platform, **0.5.1** toolchain/IDE,
 **0.5.2** runtime trust soaks, **0.5.5** CI/OpaqueHandle, **0.5.7** stdlib expansion,
 **0.5.8** memory-safety gates and claims CI, **0.5.9** stdlib safety
 contract-family enforcement, **0.5.10** package-local malformed codec coverage,
@@ -11,8 +11,12 @@ contract-family enforcement, **0.5.10** package-local malformed codec coverage,
 **0.5.14** stdlib safety completion and package-local evidence,
 **0.5.15** tooling polish for doctor, installers, release metadata, version
 reporting, and normal-user CLI stability; **0.6.0** language-surface additions,
-**0.6.1** native LLM bridge hardening, and **0.6.2** copy-on-write slice
-ownership with allocator and native lifetime hardening.
+**0.6.1** native LLM bridge hardening, **0.6.2** copy-on-write slice
+ownership with allocator and native lifetime hardening, **0.6.3** C-backend
+ownership fixes for loop scopes and append COW, and **0.6.5** ML-DSA
+post-quantum signatures (FIPS 204), error tracing, UUID v1/v6/v8, JSON
+marshal expansion, Unicode 17 identifiers/normalization, and typed channel
+C lowering.
 See [ROADMAP.md](ROADMAP.md) · [STATUS.md](STATUS.md).
 
 Makori's product contract is:

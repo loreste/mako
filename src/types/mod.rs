@@ -751,13 +751,23 @@ impl TypeChecker {
             "builder_len".into(),
             Type::Fn(vec![Type::StrBuilder], Box::new(Type::Int)),
         );
+        fns.insert("uuid_v1".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
         fns.insert("uuid_v4".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
+        fns.insert("uuid_v6".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
         fns.insert("uuid_v7".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
         fns.insert(
             "uuid_v5".into(),
             Type::Fn(vec![Type::Uuid, Type::String], Box::new(Type::Uuid)),
         );
+        fns.insert(
+            "uuid_v8".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Uuid)),
+        );
         fns.insert("uuid_nil".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
+        fns.insert(
+            "uuid_timestamp".into(),
+            Type::Fn(vec![Type::Uuid], Box::new(Type::Int)),
+        );
         fns.insert("uuid_ns_dns".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
         fns.insert("uuid_ns_url".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
         fns.insert("uuid_ns_oid".into(), Type::Fn(vec![], Box::new(Type::Uuid)));
@@ -9236,7 +9246,13 @@ impl TypeChecker {
             Type::Fn(vec![], Box::new(Type::Int)),
         );
         fns.insert("utf8_utf_max".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        // unicode UCD seed (range tables)
+        for name in ["unicode_nfc", "unicode_nfd", "unicode_nfkc", "unicode_nfkd"] {
+            fns.insert(
+                name.into(),
+                Type::Fn(vec![Type::String], Box::new(Type::String)),
+            );
+        }
+        // Unicode 17 properties and casing.
         for name in [
             "unicode_is_letter",
             "unicode_is_digit",
@@ -9824,6 +9840,60 @@ impl TypeChecker {
                 vec![Type::String, Type::String, Type::String, Type::String],
                 Box::new(Type::String),
             ),
+        );
+        // Error tracing with source locations.
+        // These operate on error strings (the .err field of a Result).
+        for name in ["error_message", "error_cause", "error_chain"] {
+            fns.insert(
+                name.into(),
+                Type::Fn(vec![Type::String], Box::new(Type::String)),
+            );
+        }
+        fns.insert(
+            "error_trace".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "error_wrap_trace".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        // ML-DSA post-quantum signatures (FIPS 204, OpenSSL 3.5+)
+        fns.insert(
+            "pqc_available".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        for name in ["mldsa44_keygen", "mldsa65_keygen", "mldsa87_keygen"] {
+            fns.insert(name.into(), Type::Fn(vec![], Box::new(Type::String)));
+        }
+        fns.insert(
+            "mldsa_public_key".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "mldsa_sign".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::String)),
+        );
+        fns.insert(
+            "mldsa_verify".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::String],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "mldsa_self_signed_cert".into(),
+            Type::Fn(
+                vec![Type::String, Type::String, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "mldsa_verify_cert".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mldsa_algorithm_name".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::String)),
         );
         fns.insert(
             "multipart_boundary".into(),
@@ -13214,6 +13284,22 @@ impl TypeChecker {
         fns.insert(
             "json_i".into(),
             Type::Fn(vec![Type::String, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "json_f".into(),
+            Type::Fn(vec![Type::String, Type::Float], Box::new(Type::String)),
+        );
+        fns.insert(
+            "json_b".into(),
+            Type::Fn(vec![Type::String, Type::Bool], Box::new(Type::String)),
+        );
+        fns.insert(
+            "json_get_float".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "json_get_bool".into(),
+            Type::Fn(vec![Type::String, Type::String], Box::new(Type::Int)),
         );
         // TLS
         fns.insert(

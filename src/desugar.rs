@@ -6,6 +6,20 @@ use crate::ast::*;
 pub fn desugar(mut program: Program) -> Program {
     let mut extras: Vec<Item> = Vec::new();
     let mut kept: Vec<Item> = Vec::new();
+    let struct_fields: std::collections::HashMap<String, Vec<(String, TypeExpr)>> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(s) => Some((
+                s.name.clone(),
+                s.fields
+                    .iter()
+                    .map(|(name, ty, _)| (name.clone(), ty.clone()))
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect();
 
     for item in program.items.drain(..) {
         match item {
@@ -17,7 +31,7 @@ pub fn desugar(mut program: Program) -> Program {
             }
             Item::Struct(s) => {
                 if s.derives.iter().any(|d| d == "json") {
-                    extras.extend(expand_json_derive(&s));
+                    extras.extend(expand_json_derive(&s, &struct_fields));
                 }
                 kept.push(Item::Struct(s));
             }
@@ -63,7 +77,10 @@ fn expand_on(on: OnDef) -> Vec<Item> {
 }
 
 /// `Person_to_json(...)` plus `Person_<field>_from_json(j)` extractors.
-fn expand_json_derive(s: &StructDef) -> Vec<Item> {
+fn expand_json_derive(
+    s: &StructDef,
+    struct_fields: &std::collections::HashMap<String, Vec<(String, TypeExpr)>>,
+) -> Vec<Item> {
     let mut items = Vec::new();
 
     let fname = format!("{}_to_json", s.name);
@@ -80,7 +97,7 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
     let mut pieces = s
         .fields
         .iter()
-        .filter_map(|(field, ty, _)| json_field_expr(field, ty));
+        .filter_map(|(field, ty, _)| json_field_expr(field, ty, struct_fields));
     let json_expr = pieces
         .next()
         .map(|first| pieces.fold(first, |acc, next| call("json_merge", vec![acc, next])))
@@ -107,7 +124,9 @@ fn expand_json_derive(s: &StructDef) -> Vec<Item> {
     for (fname_field, ty, _) in &s.fields {
         let (callee, ret_ty) = match ty {
             TypeExpr::Named(n) if n == "string" => ("json_get_string", "string"),
-            TypeExpr::Named(n) if n == "int" => ("json_get_int", "int"),
+            TypeExpr::Named(n) if n == "int" || n == "int64" => ("json_get_int", "int"),
+            TypeExpr::Named(n) if n == "float" || n == "float64" => ("json_get_float", "float"),
+            TypeExpr::Named(n) if n == "bool" => ("json_get_bool", "int"),
             _ => continue,
         };
         items.push(Item::Fn(FnDef {
@@ -146,16 +165,47 @@ fn call(name: &str, args: Vec<Expr>) -> Expr {
     }
 }
 
-fn json_field_expr(field: &str, ty: &TypeExpr) -> Option<Expr> {
+fn json_field_expr(
+    field: &str,
+    ty: &TypeExpr,
+    struct_fields: &std::collections::HashMap<String, Vec<(String, TypeExpr)>>,
+) -> Option<Expr> {
     match ty {
         TypeExpr::Named(n) if n == "string" => Some(call(
             "json_object",
             vec![Expr::String(field.into()), Expr::Ident(field.into())],
         )),
-        TypeExpr::Named(n) if n == "int" => Some(call(
+        TypeExpr::Named(n) if n == "int" || n == "int64" => Some(call(
             "json_i",
             vec![Expr::String(field.into()), Expr::Ident(field.into())],
         )),
+        TypeExpr::Named(n) if n == "float" || n == "float64" => Some(call(
+            "json_f",
+            vec![Expr::String(field.into()), Expr::Ident(field.into())],
+        )),
+        TypeExpr::Named(n) if n == "bool" => Some(call(
+            "json_b",
+            vec![Expr::String(field.into()), Expr::Ident(field.into())],
+        )),
+        TypeExpr::Named(n) if struct_fields.contains_key(n) => {
+            let nested_args = struct_fields[n]
+                .iter()
+                .map(|(nested_field, _)| Expr::Field {
+                    base: Box::new(Expr::Ident(field.into())),
+                    field: nested_field.clone(),
+                })
+                .collect();
+            Some(call(
+                "json_nest",
+                vec![
+                    Expr::String(field.into()),
+                    Expr::Call {
+                        callee: Box::new(Expr::Ident(format!("{n}_to_json"))),
+                        args: nested_args,
+                    },
+                ],
+            ))
+        }
         _ => None,
     }
 }

@@ -26,6 +26,7 @@ mod recovery;
 mod shutdown;
 mod tooling;
 mod types;
+mod unicode17_data;
 
 use clap::{CommandFactory, FromArgMatches, Parser as ClapParser, Subcommand, ValueEnum};
 use std::fs;
