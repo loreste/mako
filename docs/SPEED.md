@@ -57,7 +57,7 @@ contract.
 | `chan[Struct]` / `chan[tuple]` / `chan[Enum]` | Ptr ring; payload boxes via **size freelist** (≤512B) to cut malloc churn |
 | `chan_len` / `chan_cap` | Work on **any** `chan[T]` (int/str/ptr rings); int `cap` is lock-free |
 | Demand-driven map monomorphs | Emit only used `(K,V)` shapes — O(used), not N²; joined key lookup in codegen |
-| Timed chan / join | `send_timeout` / `recv_timeout` / `join_timeout` / `join_deadline` — **2ms sleep slices**, no busy-spin |
+| Timed chan / join | Typed `send_timeout` / `try_send`, plus `recv_timeout` / `join_timeout` / `join_deadline` — **2ms sleep slices**, no busy-spin |
 | `select` | Shared **condvar** wake on send/close (not 2 ms nanosleep poll); 50 ms max wait slice for races |
 | Slice clone (C backend) | Atomic retain of owned heap backing — O(1), no element copy |
 | Slice append / mutation | Reuse unique backing; detach with `malloc + memcpy` when shared, preserving value semantics and sub-slice safety |

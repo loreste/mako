@@ -1,0 +1,50 @@
+fn TestStringTrySendPreservesCaller() {
+    let ch = chan_open[string](1)
+    let first = "first"
+    assert(ch.try_send(first) == 1)
+    assert(first == "first")
+
+    let full = "full"
+    assert(ch.try_send(full) == 0)
+    assert(full == "full")
+    assert(ch.recv() == "first")
+    ch.close()
+}
+
+fn TestStringSendTimeoutPreservesCaller() {
+    let ch = chan_open[string](1)
+    assert(ch.send("queued"))
+
+    let blocked = "blocked"
+    assert(ch.send_timeout(blocked, 5) == 0)
+    assert(blocked == "blocked")
+    assert(ch.recv() == "queued")
+
+    ch.close()
+    let closed = "closed"
+    assert(ch.send_timeout(closed, 5) == -1)
+    assert(closed == "closed")
+}
+
+struct Pair {
+    left int
+    right string
+}
+
+fn TestAggregateTrySendAndTimeout() {
+    let ch = chan_open[Pair](1)
+    let first = Pair { left: 1, right: "first" }
+    assert(ch.try_send(first) == 1)
+    assert(first.left == 1)
+    assert(first.right == "first")
+
+    let blocked = Pair { left: 2, right: "blocked" }
+    assert(ch.send_timeout(blocked, 5) == 0)
+    assert(blocked.left == 2)
+    assert(blocked.right == "blocked")
+
+    let received = ch.recv()
+    assert(received.left == 1)
+    assert(received.right == "first")
+    ch.close()
+}

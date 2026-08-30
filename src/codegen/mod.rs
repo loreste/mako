@@ -36520,10 +36520,62 @@ impl Codegen {
                             m
                         };
                         let tmp = self.fresh("sto");
-                        let is_f64 = vty == "double"
-                            || matches!(receiver.as_ref(), Expr::Ident(n) if self.chan_float.contains(n))
-                            || self.chan_float.contains(&rv);
-                        if rty == "MakoChan*" || rty.starts_with("MakoChan") {
+                        if rty == "MakoChanStr*" {
+                            if method == "try_send" {
+                                self.line(&format!(
+                                    "int64_t {tmp} = mako_chan_str_try_send({rv}, {v});"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "int64_t {tmp} = mako_chan_str_send_timeout({rv}, {v}, {ms});"
+                                ));
+                            }
+                        } else if rty == "MakoChanPtr*" {
+                            let st = self
+                                .chan_ptr_elems
+                                .get(&rv)
+                                .cloned()
+                                .or_else(|| {
+                                    if let Expr::Ident(n) = receiver.as_ref() {
+                                        self.chan_ptr_elems.get(n).cloned()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or_else(|| vty.clone());
+                            let cname = self
+                                .structs
+                                .get(&st)
+                                .map(|s| s.c_name.clone())
+                                .or_else(|| self.enums.get(&st).map(|e| e.c_name.clone()))
+                                .unwrap_or_else(|| {
+                                    if st.starts_with("MakoTup_") {
+                                        st.clone()
+                                    } else {
+                                        st
+                                    }
+                                });
+                            let boxn = self.fresh("sbox");
+                            self.line(&format!(
+                                "{cname} *{boxn} = ({cname}*)mako_box_alloc(sizeof({cname}));"
+                            ));
+                            self.emit_line(format_args!("*{boxn} = {v};"));
+                            if method == "try_send" {
+                                self.line(&format!(
+                                    "int64_t {tmp} = mako_chan_ptr_try_send({rv}, {boxn});"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "int64_t {tmp} = mako_chan_ptr_send_timeout({rv}, {boxn}, {ms});"
+                                ));
+                            }
+                            self.line(&format!(
+                                "if ({tmp} != 1) mako_box_free({boxn}, sizeof({cname}));"
+                            ));
+                        } else {
+                            let is_f64 = vty == "double"
+                                || matches!(receiver.as_ref(), Expr::Ident(n) if self.chan_float.contains(n))
+                                || self.chan_float.contains(&rv);
                             if is_f64 {
                                 self.line(&format!(
                                     "int64_t {tmp} = mako_chan_send_timeout({rv}, mako_f64_to_bits({v}), {ms});"
@@ -36537,10 +36589,6 @@ impl Codegen {
                                     "int64_t {tmp} = mako_chan_send_timeout({rv}, {v}, {ms});"
                                 ));
                             }
-                        } else {
-                            self.line(&format!(
-                                "int64_t {tmp} = 0; /* send_timeout: unsupported chan */"
-                            ));
                         }
                         ("int64_t".into(), tmp)
                     }

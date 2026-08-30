@@ -5618,6 +5618,28 @@ static inline int64_t mako_chan_str_try_send(MakoChanStr *c, MakoString v) {
     return mako_chan_str_try_send_take(c, mako_str_clone(v));
 }
 
+static inline int64_t mako_chan_str_send_timeout(MakoChanStr *c, MakoString v, int64_t timeout_ms) {
+    if (!c) return -1;
+    struct timeval start, now;
+    mako_gettimeofday(&start, NULL);
+    for (;;) {
+        if (mako_chan_str_try_send(c, v)) return 1;
+        pthread_mutex_lock(&c->mu);
+        int closed = c->closed ? 1 : 0;
+        pthread_mutex_unlock(&c->mu);
+        if (closed) return -1;
+        if (timeout_ms >= 0) {
+            mako_gettimeofday(&now, NULL);
+            int64_t elapsed =
+                (now.tv_sec - start.tv_sec) * 1000 +
+                (now.tv_usec - start.tv_usec) / 1000;
+            if (elapsed >= timeout_ms) return 0;
+        }
+        struct timespec ts = {0, 2000000L};
+        nanosleep(&ts, NULL);
+    }
+}
+
 static inline MakoString mako_chan_str_recv(MakoChanStr *c) {
     pthread_mutex_lock(&c->mu);
     c->waiters_recv++;
@@ -5853,6 +5875,54 @@ static inline int64_t mako_chan_ptr_send(MakoChanPtr *c, void *v) {
     pthread_cond_broadcast(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     return 1;
+}
+
+static inline int64_t mako_chan_ptr_try_send(MakoChanPtr *c, void *v) {
+    if (!c) return 0;
+    pthread_mutex_lock(&c->mu);
+    if (c->cap == 0) {
+        if (c->closed || c->waiters_recv <= 0 || c->count != 0) {
+            pthread_mutex_unlock(&c->mu);
+            return 0;
+        }
+        c->buf[0] = v;
+        c->count = 1;
+        pthread_cond_broadcast(&c->can_recv);
+        pthread_mutex_unlock(&c->mu);
+        return 1;
+    }
+    if (c->closed || c->count == c->cap) {
+        pthread_mutex_unlock(&c->mu);
+        return 0;
+    }
+    c->buf[c->tail] = v;
+    c->tail = (c->tail + 1) % c->cap;
+    c->count++;
+    pthread_cond_broadcast(&c->can_recv);
+    pthread_mutex_unlock(&c->mu);
+    return 1;
+}
+
+static inline int64_t mako_chan_ptr_send_timeout(MakoChanPtr *c, void *v, int64_t timeout_ms) {
+    if (!c) return -1;
+    struct timeval start, now;
+    mako_gettimeofday(&start, NULL);
+    for (;;) {
+        if (mako_chan_ptr_try_send(c, v)) return 1;
+        pthread_mutex_lock(&c->mu);
+        int closed = c->closed ? 1 : 0;
+        pthread_mutex_unlock(&c->mu);
+        if (closed) return -1;
+        if (timeout_ms >= 0) {
+            mako_gettimeofday(&now, NULL);
+            int64_t elapsed =
+                (now.tv_sec - start.tv_sec) * 1000 +
+                (now.tv_usec - start.tv_usec) / 1000;
+            if (elapsed >= timeout_ms) return 0;
+        }
+        struct timespec ts = {0, 2000000L};
+        nanosleep(&ts, NULL);
+    }
 }
 
 static inline void *mako_chan_ptr_recv(MakoChanPtr *c) {

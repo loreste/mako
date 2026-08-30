@@ -1,12 +1,12 @@
 # Makori roadmap
 
-**Product version:** **0.6.3** (tip) · last tagged **v0.6.3** · Last sync: **2026-08-30**.
+**Product version:** **0.6.4** (tip) · last tagged **v0.6.4** · Last sync: **2026-08-30**.
 **Suite:** **423** `examples/testing` `*_test.mko` files · **2026-08-26:**
 C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) ·
 `cargo test` **156 passed, 0 failed** · tooling, stdlib, memory-safety, and performance gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.6.3`**; tip train **0.6.3**.
+**Release:** tag **`v0.6.4`**; tip train **0.6.4**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Makori Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  

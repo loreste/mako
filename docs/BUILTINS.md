@@ -1035,7 +1035,7 @@ Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
 | `job.join()` / `join(job)` | Wait for result of type `R` |
 | `job.join_timeout(ms)` | Timed join → **`Result[R, string]`** (`Ok`/`Err("timeout")`). If `R` is already `Result[T, string]`, **flattens** (no nest). |
 | `job.join_deadline(dl)` | Same as `join_timeout`, but `dl` is absolute mono deadline from `deadline_ms`/`deadline_ns` |
-| `ch.send_timeout(v, ms)` / `ch.try_send(v)` | Timed / non-blocking send (`int` channels); **1**/**0**/**-1** |
+| `ch.send_timeout(v, ms)` / `ch.try_send(v)` | Timed / non-blocking typed send (`int`, `float`, `string`, and aggregate channels); **1**/**0**/**-1**. String calls retain caller ownership. |
 | `ch.recv_timeout(ms)` / `ch.try_recv()` | Timed / non-blocking recv → **`Result[int, string]`** (`timeout` / `closed` / `empty`) |
 | `t.drain(ms)` / `crew_drain` | Cancel + join with timeout budget |
 | `t.cancel()` / `t.cancelled()` | Cooperative cancel flag |

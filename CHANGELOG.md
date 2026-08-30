@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.6.4 - 2026-08-30 (typed channel C lowering)
+
+- Fixed C test-backend method lowering for string and aggregate channels so
+  `try_send` and `send_timeout` call the matching typed runtime helpers instead
+  of passing `MakoString` or boxed values to the integer-channel API (#43).
+- Added string-channel timeout helpers that preserve caller ownership on
+  success, full-channel timeout, and closed-channel outcomes.
+- Verified FayDB's `TestTransactionWalCommitOnly` through `mako test --backend c`.
+
 ## 0.6.3 - 2026-08-30 (C backend ownership)
 
 - Fixed C-backend copy-on-write slice detachment to preserve existing capacity
