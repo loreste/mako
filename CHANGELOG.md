@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.6.3 - 2026-08-30 (C backend loop ownership)
+
+- Fixed C-backend range loops to release owned body temporaries at the end of
+  every iteration, preventing unbounded memory growth and `rc_alloc` OOMs in
+  durable string, channel, map, and iterator workloads (#42).
 - Hardened allocation provenance: owned strings consistently use plain
   `malloc`/`free`, while only slice backings use refcount headers. Removed the
   out-of-bounds allocation-tag probe and rejected a partial string-RC migration.

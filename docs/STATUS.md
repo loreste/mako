@@ -17,7 +17,7 @@ CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard fa
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.6.2** tip · last tag [**v0.6.2**](https://github.com/loreste/mako/releases/tag/v0.6.2) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.6.3** tip · last tag [**v0.6.3**](https://github.com/loreste/mako/releases/tag/v0.6.3) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |

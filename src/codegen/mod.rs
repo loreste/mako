@@ -13475,7 +13475,12 @@ impl Codegen {
                 _ => {}
             }
             self.line(&format!("{i} += {w};"));
+            self.push_share_scope();
+            self.loop_drop_bases
+                .push(self.own_drop_scopes.len().saturating_sub(1));
             self.emit_body(body);
+            self.loop_drop_bases.pop();
+            self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
@@ -13512,7 +13517,12 @@ impl Codegen {
                 }
                 _ => {}
             }
+            self.push_share_scope();
+            self.loop_drop_bases
+                .push(self.own_drop_scopes.len().saturating_sub(1));
             self.emit_body(body);
+            self.loop_drop_bases.pop();
+            self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
@@ -13543,7 +13553,12 @@ impl Codegen {
                 }
                 _ => {}
             }
+            self.push_share_scope();
+            self.loop_drop_bases
+                .push(self.own_drop_scopes.len().saturating_sub(1));
             self.emit_body(body);
+            self.loop_drop_bases.pop();
+            self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
@@ -13589,7 +13604,12 @@ impl Codegen {
                 }
                 _ => {}
             }
+            self.push_share_scope();
+            self.loop_drop_bases
+                .push(self.own_drop_scopes.len().saturating_sub(1));
             self.emit_body(body);
+            self.loop_drop_bases.pop();
+            self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
@@ -13787,7 +13807,12 @@ impl Codegen {
                 }
                 _ => {}
             }
+            self.push_share_scope();
+            self.loop_drop_bases
+                .push(self.own_drop_scopes.len().saturating_sub(1));
             self.emit_body(body);
+            self.loop_drop_bases.pop();
+            self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
             }
@@ -13851,7 +13876,10 @@ impl Codegen {
                         _ => {}
                     }
                     self.push_share_scope();
+                    self.loop_drop_bases
+                        .push(self.own_drop_scopes.len().saturating_sub(1));
                     self.emit_body(body);
+                    self.loop_drop_bases.pop();
                     self.pop_share_scope();
                     if let Some(lab) = label {
                         self.emit_line(format_args!("__mako_cont_{lab}: ;"));
