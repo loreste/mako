@@ -70,6 +70,22 @@ static inline uint64_t mako_uuid_unix_ms(void) {
 #endif
 }
 
+static inline uint64_t mako_uuid_unix_100ns(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    struct timespec ts;
+    if (timespec_get(&ts, TIME_UTC) == TIME_UTC) {
+        return (uint64_t)ts.tv_sec * UINT64_C(10000000) +
+               (uint64_t)ts.tv_nsec / UINT64_C(100);
+    }
+    return (uint64_t)time(NULL) * UINT64_C(10000000);
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint64_t)tv.tv_sec * UINT64_C(10000000) +
+           (uint64_t)tv.tv_usec * UINT64_C(10);
+#endif
+}
+
 static inline MakoUuid mako_uuid_nil(void) {
     MakoUuid u;
     memset(u.b, 0, 16);
@@ -246,11 +262,7 @@ static inline MakoUuid mako_uuid_v1(void) {
     MakoUuid u;
     /* 100-ns intervals since UUID epoch (1582-10-15).
      * Unix epoch offset: 122192928000000000 (100ns units). */
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    uint64_t ts = (uint64_t)tv.tv_sec * 10000000ULL +
-                  (uint64_t)tv.tv_usec * 10ULL +
-                  UINT64_C(122192928000000000);
+    uint64_t ts = mako_uuid_unix_100ns() + UINT64_C(122192928000000000);
     uint32_t time_low = (uint32_t)(ts & 0xFFFFFFFFULL);
     uint16_t time_mid = (uint16_t)((ts >> 32) & 0xFFFF);
     uint16_t time_hi  = (uint16_t)((ts >> 48) & 0x0FFF);
@@ -275,11 +287,7 @@ static inline MakoUuid mako_uuid_v1(void) {
  * so UUIDs sort naturally by time. RFC 9562. */
 static inline MakoUuid mako_uuid_v6(void) {
     MakoUuid u;
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    uint64_t ts = (uint64_t)tv.tv_sec * 10000000ULL +
-                  (uint64_t)tv.tv_usec * 10ULL +
-                  UINT64_C(122192928000000000);
+    uint64_t ts = mako_uuid_unix_100ns() + UINT64_C(122192928000000000);
     /* Big-endian: high 32 bits of 60-bit timestamp first. */
     u.b[0] = (uint8_t)((ts >> 52) & 0xFF);
     u.b[1] = (uint8_t)((ts >> 44) & 0xFF);
