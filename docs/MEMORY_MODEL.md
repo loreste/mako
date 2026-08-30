@@ -34,7 +34,7 @@ and cannot enter the refcount release path.
 | When does detachment occur? | Before any indexed write, append/growth, or `mut` boundary that could alter shared backing. Ownership/NLL grants exclusive access before the count is inspected. |
 | Can uniqueness change concurrently? | The count can change when authorized owners retain or release. Count `1` is never proof of exclusive access and cannot authorize mutation. |
 | Are headers atomic? | No. Each header is task-owned and protected by move/borrow rules. Unsafe sharing requires external synchronization. |
-| Can a View outlive detach? | No. A non-retaining View prevents mutation, move, reassign, drop, and therefore detach of its base until its NLL lifetime ends. Safe Mako permits one live View per base; a `mut` View is the sole mutation path. |
+| Can a View outlive detach? | No. A non-retaining View prevents mutation, move, reassign, drop, and therefore detach of its base until its NLL lifetime ends. Safe Mako permits one live View per base; a `mut` View is the sole mutation path. `v = append(v, x)` consumes the View, detaches into owned backing, and ends the borrow. |
 | Are elements deeply owned? | Copy elements copy directly. Own elements clone/drop recursively. Share/Sync elements may remain shallowly shared only under their own contract. |
 | What about destructors? | Detach constructs valid clones before publishing the new header. Each backing drops initialized elements exactly once at final release. Partial clone failure must unwind initialized clones. |
 | Can the refcount overflow? | No. Retain at `UINT32_MAX`, retain at zero, and release at zero abort; the counter never wraps. |

@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.6).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.7).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -162,6 +162,11 @@ message inspection, site history, reports, alerts, and traffic metrics.
 - Package security model is not independently audited
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
+
+## New in 0.6.7
+
+**Consuming View detach** — `v = append(v, x)` safely converts a borrowed View
+to owned backing and ends the base borrow, with portable refcount CI probes.
 
 ## New in 0.6.6
 

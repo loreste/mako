@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserve consuming slice-View detach (`v = append(v, x)`) while keeping the
+  base frozen for every non-consuming mutation, move, reassign, or alias.
+- Make refcount fault probes request portable POSIX/GNU declarations under
+  strict C11 CI builds.
+
 - Made the slice aliasing contract normative: slices and Views are non-Send,
   Views are NLL borrows, and refcount uniqueness never authorizes
   concurrent mutation.

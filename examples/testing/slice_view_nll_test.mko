@@ -4,4 +4,10 @@ fn main() {
     assert_eq(view[0], 2)
     xs[1] = 9
     assert_eq(xs[1], 9)
+
+    let mut tail = xs[1:]
+    tail = append(tail, 10)
+    assert_eq(tail[2], 10)
+    xs[0] = 7
+    assert_eq(xs[0], 7)
 }

@@ -1491,7 +1491,8 @@ The following rules are normative for safe Mako:
    may mutate its range. Safe Mako currently permits one live View per base. In
    either case the base may not be mutated, reassigned,
    moved, dropped, detached, or borrowed again until the View's NLL lifetime
-   ends. A View is not Send.
+   ends. Rebinding a mutable View with `v = append(v, x)` is a consuming detach:
+   append creates owned backing and ends the View borrow. A View is not Send.
 6. Detachment clones elements according to ownership category: Copy values copy;
    Own values clone recursively; Sync handles follow their type's contract.
    Sharing is shallow only where the element type itself is Share or Sync.

@@ -16159,6 +16159,26 @@ impl TypeChecker {
                 let Some((ty, mutable)) = self.lookup(name).cloned() else {
                     return Err(TypeError::new(format!("undefined variable `{name}`")));
                 };
+                // Rebinding a mutable View through append is a consuming detach:
+                // cap==0 forces fresh owned backing, so the old base borrow ends
+                // before this binding takes the detached result.
+                let detaches_view = self.share_sources.contains_key(name)
+                    && mutable
+                    && matches!(
+                        value,
+                        Expr::Call { callee, args }
+                            if matches!(callee.as_ref(), Expr::Ident(fn_name) if fn_name == "append")
+                                && matches!(args.first(), Some(Expr::Ident(arg_name)) if arg_name == name)
+                    );
+                if detaches_view {
+                    self.share_vars.remove(name);
+                    self.share_scope_depth.remove(name);
+                    if let Some(src) = self.share_sources.remove(name) {
+                        if !self.share_sources.values().any(|other| other == &src) {
+                            self.shared_borrows.remove(&src);
+                        }
+                    }
+                }
                 if self.share_vars.contains_key(name) {
                     return Err(TypeError::new(format!(
                         "cannot assign to shared `{name}`"
