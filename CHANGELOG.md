@@ -7,6 +7,9 @@
 - Fixed C-backend range loops to release owned body temporaries at the end of
   every iteration, preventing unbounded memory growth and `rc_alloc` OOMs in
   durable string, channel, map, and iterator workloads (#42).
+- Fixed unbuffered channel rendezvous deadlocks by waking both free-slot and
+  handoff-acknowledgement sender waiters after a receive; buffered channels
+  retain one-peer signaling.
 - Hardened allocation provenance: owned strings consistently use plain
   `malloc`/`free`, while only slice backings use refcount headers. Removed the
   out-of-bounds allocation-tag probe and rejected a partial string-RC migration.

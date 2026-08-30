@@ -33,10 +33,13 @@ Aimed at backend and systems work: request arenas, tight slice/map layouts,
 native binaries.
 
 Integer channels check waiter counts while holding the channel mutex.
-Enqueue/dequeue skip condition-variable signaling when no peer is blocked and
-signal one peer when one item or slot becomes available. Close retains broadcast
-semantics. This removes uncontended wake overhead without weakening MPMC
-synchronization or lifetime guarantees.
+Buffered enqueue/dequeue skips condition-variable signaling when no peer is
+blocked and signals one peer when one item or slot becomes available. Close
+retains broadcast semantics. Unbuffered rendezvous receives broadcast to
+senders because slot waiters and handoff-acknowledgement waiters share one
+condition variable; a one-peer signal can wake the wrong predicate and strand
+the handoff owner. This removes uncontended wake overhead without weakening
+MPMC synchronization or lifetime guarantees.
 
 Runtime telemetry is pay-for-use in generated C. Programs that call
 `runtime_stats_json()` or `runtime_stats_reset()` compile with exact atomic task,

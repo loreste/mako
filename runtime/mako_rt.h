@@ -5176,7 +5176,15 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
         c->count--;
     }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
-    if (c->waiters_send > 0) pthread_cond_signal(&c->can_send);
+    if (c->waiters_send > 0) {
+        /* Rendezvous senders wait on two predicates using can_send: a free
+         * handoff slot and acknowledgement that their value was consumed.
+         * Wake all so the handoff owner cannot remain stranded while a
+         * competing sender consumes the only signal. Buffered channels have
+         * one waiter predicate and retain the one-peer fast path. */
+        if (c->cap == 0) pthread_cond_broadcast(&c->can_send);
+        else pthread_cond_signal(&c->can_send);
+    }
     pthread_mutex_unlock(&c->mu);
     return v;
 }
@@ -5204,7 +5212,10 @@ static inline int64_t mako_chan_recv_ok(MakoChan *c, int64_t *out) {
         c->count--;
     }
     mako_rt_counter_inc(&mako_rt_channel_recvs);
-    if (c->waiters_send > 0) pthread_cond_signal(&c->can_send);
+    if (c->waiters_send > 0) {
+        if (c->cap == 0) pthread_cond_broadcast(&c->can_send);
+        else pthread_cond_signal(&c->can_send);
+    }
     pthread_mutex_unlock(&c->mu);
     if (out) *out = v;
     return 1;
