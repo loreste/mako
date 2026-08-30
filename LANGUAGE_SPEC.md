@@ -1471,6 +1471,43 @@ escape checks. See also [docs/SOUNDNESS.md](docs/SOUNDNESS.md).
 3. Cross-task mutation only through **Sync** or messages — never two `let mut` aliases.
 4. Bounds checks apply to all safe indexing of Own and View slices (**SAFE-001**).
 
+### Slice aliasing and copy-on-write {#slice-aliasing}
+
+The following rules are normative for safe Mako:
+
+1. A slice header (`data`, `len`, `cap`) is a task-owned value. Safe code never
+   reads or writes the same header concurrently, so header fields are not atomic.
+2. Copying an owning slice may retain the same backing allocation. This is a
+   value-semantic optimization, not permission for shared mutation.
+3. Mutation requires an exclusive owning binding. Before indexed mutation,
+   append, growth, or a `mut` call can alter shared backing, the implementation
+   detaches and clones affected elements. A refcount observation never grants
+   mutation authority and is not a synchronization operation.
+4. `crew.kick`, `fan`, and `detach` do not accept slices. Cross-task slice data
+   must move through a channel, be copied into task-local ownership, or live
+   behind an explicit `Sync` abstraction. `share let` does not make a slice Send.
+5. `s[i:j]` over a slice is a zero-copy View. The View does not retain storage.
+   An immutable View is a read borrow; a `mut` View is an exclusive borrow and
+   may mutate its range. Safe Mako currently permits one live View per base. In
+   either case the base may not be mutated, reassigned,
+   moved, dropped, detached, or borrowed again until the View's NLL lifetime
+   ends. A View is not Send.
+6. Detachment clones elements according to ownership category: Copy values copy;
+   Own values clone recursively; Sync handles follow their type's contract.
+   Sharing is shallow only where the element type itself is Share or Sync.
+7. When `T` has drop behavior, detach creates one valid ownership instance per
+   cloned element. Each backing drops every initialized element exactly once
+   when its final owner releases it. A type without valid clone/drop operations
+   cannot be detached and must be rejected before code generation.
+8. Slice refcounts are unsigned 32-bit atomics. Retaining count zero, overflowing
+   `UINT32_MAX`, or releasing count zero is a deterministic runtime abort. Counts
+   never wrap and storage is freed only on the `1 -> 0` transition.
+
+Refcount atomics protect allocation lifetime only. They do not publish mutable
+payload writes, make element access atomic, serialize detachment, or make a
+slice safe for concurrent mutation. Cross-task visibility comes only from the
+happens-before operations in [the memory model](docs/MEMORY_MODEL.md).
+
 ### 6.1 Default Bindings (`let`)
 
 A `let` binding names a value in the current task. Scalars and POD are

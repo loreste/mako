@@ -50,6 +50,7 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 | **Code** | `mako_*_array_free`, `mako_arena_*_array_append`, `mako_arr_arr_*_free` / `*_release_replaced`; codegen `own_drop_scopes` + arena-aware append + reassign free; nested append uses malloc+copy (not realloc). |
 | **Evidence** | `own_drop_slice_test`, `slice_return_own_test`, `nested_arr_drop_test`, ASan reassign/break/append probes. `slice_alias_test.mko` gates owned-field value copies, consuming append, and zero leaks. |
 | **Also** | Return transfers ownership + materialize-before-free; view escape/return type errors; stack POD lits (`cap==0`) heapify on escape. |
+| **Alias concurrency** | Slice Views are NLL borrows, with one live View per base; `mut` Views are exclusive and may mutate their range. Their base cannot mutate, reassign, move, drop, detach, or be borrowed again while live. Slices/Views remain non-Send; refcount uniqueness never grants mutation authority. Checked retain/release abort on overflow, underflow, or resurrection. |
 
 ### SAFE-004 — Compiler-generated drops for maps — **Done**
 

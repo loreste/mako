@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Made the slice aliasing contract normative: slices and Views are non-Send,
+  Views are NLL borrows, and refcount uniqueness never authorizes
+  concurrent mutation.
+- Hardened slice backing refcounts against overflow, underflow, and retaining a
+  released allocation; invalid transitions now abort instead of wrapping.
+
 ## 0.6.5 - 2026-08-30 (PQC + error tracing + JSON + Unicode 17)
 
 ### ML-DSA post-quantum signatures (FIPS 204)

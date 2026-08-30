@@ -1,0 +1,7 @@
+fn main() {
+    let mut xs = [1, 2, 3]
+    let mut view = xs[1:]
+    let other = xs[:2]
+    view[0] = 9
+    print_int(other[0])
+}

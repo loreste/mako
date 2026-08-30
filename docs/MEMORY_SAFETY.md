@@ -44,6 +44,16 @@ are evidence, not the whole defense.
 
 There is **no** “let the GC clean it up later.”
 
+Slice Views are non-retaining borrows. Safe Mako permits one live View per base;
+a `mut` View is exclusive and may mutate its range. While a View is live, NLL prevents its
+base from mutation, reassign, move, drop, competing borrow, or COW detachment. Atomic
+slice refcounts protect backing lifetime only; they are not locks and do not
+make slice payloads safe for concurrent access. Slices remain non-Send.
+
+Retain uses a checked atomic increment. Zero-count retain, `UINT32_MAX`
+overflow, and zero-count release abort instead of wrapping or resurrecting freed
+storage. The ordinary unique-write path pays no refcount or locking cost.
+
 ---
 
 ## What is *not* GC

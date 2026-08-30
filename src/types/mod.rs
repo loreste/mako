@@ -15990,6 +15990,28 @@ impl TypeChecker {
                 }
                 // Sub-slice stored in this binding must not outlive its base.
                 self.assert_slice_view_lifetime(name, init)?;
+                // A non-string sub-slice is a zero-copy, non-retaining borrow.
+                // Reuse the share/NLL machinery so its base cannot detach,
+                // reassign, mutate, or create a competing view while live.
+                // A `mut` view is the one exclusive mutation path.
+                if let Expr::Slice { base, .. } = init {
+                    if !matches!(self.check_expr(base)?, Type::String) {
+                        if let Some(base_name) = Self::race_write_root(base) {
+                            if self.shared_borrows.contains_key(base_name) {
+                                return Err(TypeError::new(format!(
+                                    "cannot borrow slice `{base_name}` while another view is live"
+                                ))
+                                .hint("wait until the existing view's last use"));
+                            }
+                            self.share_vars.insert(name.clone(), true);
+                            self.shared_borrows.insert(base_name.to_string(), true);
+                            self.share_sources
+                                .insert(name.clone(), base_name.to_string());
+                            self.share_scope_depth
+                                .insert(name.clone(), self.scopes.len());
+                        }
+                    }
+                }
                 if matches!(self.lookup(name).map(|(t, _)| t), Some(Type::Fn(_, _))) {
                     let info = self.fn_capture_info_for_expr(init);
                     self.set_fn_capture_info(name, info);
@@ -16147,7 +16169,7 @@ impl TypeChecker {
                     return Err(TypeError::new(format!(
                         "cannot assign to `{name}` while shared"
                     ))
-                    .hint("a live `share_int` borrow conflicts with mutation — drop the share first"));
+                    .hint("a live shared borrow conflicts with mutation — wait until its last use"));
                 }
                 if !mutable {
                     return Err(TypeError::new(format!(
@@ -16190,7 +16212,7 @@ impl TypeChecker {
                         return Err(TypeError::new(format!(
                             "cannot index-assign `{name}` while shared"
                         ))
-                        .hint("drop the share first"));
+                        .hint("wait until the shared borrow's last use"));
                     }
                 }
                 self.assert_no_race_write_expr(base)?;
@@ -18328,7 +18350,7 @@ impl TypeChecker {
                                                 return Err(TypeError::new(format!(
                                                     "cannot pass `{an}` to mut parameter while shared"
                                                 ))
-                                                .hint("drop the share first, or pass a copy"));
+                                        .hint("wait until the shared borrow's last use, or pass a copy"));
                                             }
                                         }
                                     }

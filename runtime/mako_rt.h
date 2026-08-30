@@ -109,13 +109,33 @@ static inline void *mako_rc_calloc(size_t data_bytes) {
     return p;
 }
 static inline void mako_rc_retain(void *data) {
-    if (data)
-        atomic_fetch_add_explicit(mako_rc_of(data), 1, memory_order_relaxed);
+    if (!data) return;
+    _Atomic uint32_t *rc = mako_rc_of(data);
+    uint32_t count = atomic_load_explicit(rc, memory_order_relaxed);
+    for (;;) {
+        if (count == 0) {
+            fprintf(stderr, "mako: retain of released slice backing\n");
+            abort();
+        }
+        if (count == UINT32_MAX) {
+            fprintf(stderr, "mako: slice refcount overflow\n");
+            abort();
+        }
+        if (atomic_compare_exchange_weak_explicit(
+                rc, &count, count + 1,
+                memory_order_relaxed, memory_order_relaxed)) {
+            return;
+        }
+    }
 }
 static inline int mako_rc_release(void *data) {
     if (!data) return 0;
     uint32_t prev = atomic_fetch_sub_explicit(mako_rc_of(data), 1, memory_order_acq_rel);
-    if (prev <= 1) { free((char *)data - MAKO_RC_HEADER); return 1; }
+    if (prev == 0) {
+        fprintf(stderr, "mako: slice refcount underflow\n");
+        abort();
+    }
+    if (prev == 1) { free((char *)data - MAKO_RC_HEADER); return 1; }
     return 0;
 }
 static inline int mako_rc_shared(void *data) {

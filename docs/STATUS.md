@@ -1,11 +1,11 @@
 # Makori status (adversarial / verified)
 
-Last inventory: **2026-08-30** · product **mako0.6.5** (tip; release tag **v0.6.5**) ·
+Last inventory: **2026-08-30** · product **mako0.6.6** (tip; release tag **v0.6.6**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings · `s[i]`) · **423** `examples/testing`
-`*_test.mko` files · **2026-08-26:** C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) · `cargo test` **156 passed, 0 failed** ·
+const-fn depth (match/while/for/strings · `s[i]`) · **437** `examples/testing`
+`*_test.mko` files · **2026-08-30:** release claims gate passed · `cargo test` **356 passed, 0 failed** ·
 tooling, stdlib, memory-safety, and performance gates passed locally ·
 CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard failures/quarantines · [The Makori Book](book/).
 
@@ -17,7 +17,7 @@ CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard fa
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.6.5** tip · release tag [**v0.6.5**](https://github.com/loreste/mako/releases/tag/v0.6.5) ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.6.6** tip · release tag **v0.6.6** ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |

@@ -66,6 +66,14 @@ expect_failure slice-view-escape env MAKO_CACHE="$CACHE/slice-view-escape" \
   "$MAKO" check "$ROOT/examples/bad/slice_view_escape.mko"
 expect_failure slice-view-return env MAKO_CACHE="$CACHE/slice-view-return" \
   "$MAKO" check "$ROOT/examples/bad/slice_view_return.mko"
+expect_failure slice-view-base-mutation env MAKO_CACHE="$CACHE/slice-view-base-mutation" \
+  "$MAKO" check "$ROOT/examples/bad/slice_view_base_mutation.mko"
+expect_failure slice-view-alias-conflict env MAKO_CACHE="$CACHE/slice-view-alias-conflict" \
+  "$MAKO" check "$ROOT/examples/bad/slice_view_alias_conflict.mko"
+expect_failure slice-view-base-reassign env MAKO_CACHE="$CACHE/slice-view-base-reassign" \
+  "$MAKO" check "$ROOT/examples/bad/slice_view_base_reassign.mko"
+expect_failure slice-view-mut-arg env MAKO_CACHE="$CACHE/slice-view-mut-arg" \
+  "$MAKO" check "$ROOT/examples/bad/slice_view_mut_arg.mko"
 expect_failure arena-store-field env MAKO_CACHE="$CACHE/arena-store-field" \
   "$MAKO" check "$ROOT/examples/bad/arena_store_field.mko"
 expect_failure race-mut-after-kick env MAKO_CACHE="$CACHE/race-mut-after-kick" \
@@ -76,6 +84,12 @@ expect_failure kick-mutable-lambda env MAKO_CACHE="$CACHE/kick-mutable-lambda" \
   "$MAKO" check "$ROOT/examples/bad/kick_mutable_lambda_capture.mko"
 expect_failure fan-capture env MAKO_CACHE="$CACHE/fan-capture" \
   "$MAKO" check "$ROOT/examples/bad/fan_capture.mko"
+
+"${CC:-cc}" -std=c11 -pthread -I"$ROOT/runtime" \
+  "$ROOT/scripts/refcount-safety-probe.c" -o "$TMP/refcount-safety-probe"
+expect_failure refcount-overflow "$TMP/refcount-safety-probe" overflow
+expect_failure refcount-released-retain "$TMP/refcount-safety-probe" released-retain
+expect_failure refcount-underflow "$TMP/refcount-safety-probe" underflow
 
 env MAKO_CACHE="$CACHE/cookie-build" "$MAKO" build --release \
   "$ROOT/examples/bad/cookie_injection.mko" -o "$TMP/cookie-injection"

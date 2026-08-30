@@ -89,7 +89,11 @@ force an explicit choice: a loud name, an unsafe boundary, or a failing return.
 channels, `ShareInt` / `AtomicInt` (RC clone), locked handles (`CMap` / `Mutex` /
 `RWMutex`), and **Option/Result/tuple of Send** payloads (heap-boxed across spawn).  
 Rejected: arrays, maps, non-POD structs, `Arena`, nested `Crew`
-(`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`).  
+(`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`).
+
+Slice refcounts govern allocation lifetime, not payload synchronization. Slices
+and zero-copy Views are non-Send; a live View blocks mutation or COW detachment
+of its base. Refcount overflow, underflow, and resurrection abort.
 
 The compiler also analyzes every function value and lambda that crosses a
 `kick` boundary. Unsynchronized mutable captures are rejected, including
