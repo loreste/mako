@@ -327,7 +327,9 @@ static inline int mako_str_is_empty_singleton(MakoString s) {
  * boundary; probing before an arbitrary view pointer would itself be UB. */
 static inline void mako_str_free(MakoString s) {
     if (!s.data || s.data == &mako_str_empty_byte) return;
-    free(s.data);
+    if (*(uint32_t *)((char *)s.data - 4) == 0x4D414B4FU) {
+        mako_rc_release(s.data);
+    }
 }
 
 /* Create an owned MakoString by copying a C string. NULL/empty → shared empty. */
@@ -336,7 +338,7 @@ static inline MakoString mako_str_from_cstr(const char *s) {
         return mako_str_empty;
     }
     size_t n = strlen(s);
-    char *d = (char *)malloc(n + 1);
+    char *d = (char *)mako_rc_alloc(n + 1);
     if (!d) {
         fprintf(stderr, "mako: OOM in str_from_cstr\n");
         abort();
@@ -347,7 +349,7 @@ static inline MakoString mako_str_from_cstr(const char *s) {
 }
 
 static inline MakoString mako_runtime_stats_json(void) {
-    char *d = (char *)malloc(512);
+    char *d = (char *)mako_rc_alloc(512);
     if (!d) {
         fprintf(stderr, "mako: OOM in runtime_stats_json\n");
         abort();
@@ -386,20 +388,20 @@ static inline MakoString mako_str_concat(MakoString a, MakoString b) {
     /* Empty fast paths without calling mako_str_clone (defined later). */
     if (MAKO_UNLIKELY(a.len == 0 && b.len == 0)) return mako_str_empty;
     if (MAKO_UNLIKELY(a.len == 0)) {
-        char *d = (char *)malloc(b.len + 1);
+        char *d = (char *)mako_rc_alloc(b.len + 1);
         if (MAKO_UNLIKELY(!d)) abort();
         memcpy(d, b.data, b.len);
         d[b.len] = 0;
         return (MakoString){d, b.len};
     }
     if (MAKO_UNLIKELY(b.len == 0)) {
-        char *d = (char *)malloc(a.len + 1);
+        char *d = (char *)mako_rc_alloc(a.len + 1);
         if (MAKO_UNLIKELY(!d)) abort();
         memcpy(d, a.data, a.len);
         d[a.len] = 0;
         return (MakoString){d, a.len};
     }
-    char *d = (char *)malloc(a.len + b.len + 1);
+    char *d = (char *)mako_rc_alloc(a.len + b.len + 1);
     if (MAKO_UNLIKELY(!d)) {
         fprintf(stderr, "mako: OOM in str_concat\n");
         abort();
@@ -418,7 +420,7 @@ static inline MakoString mako_str_concat_own(MakoString a, MakoString b) {
     if (MAKO_UNLIKELY(b.len == 0)) return a;
     if (MAKO_UNLIKELY(a.len == 0)) {
         /* a is empty — just clone b; no realloc benefit. */
-        char *d = (char *)malloc(b.len + 1);
+        char *d = (char *)mako_rc_alloc(b.len + 1);
         if (MAKO_UNLIKELY(!d)) abort();
         memcpy(d, b.data, b.len);
         d[b.len] = 0;
@@ -701,7 +703,7 @@ static inline MakoByteArray mako_bytes_from_string(MakoString s) {
 }
 
 static inline MakoString mako_string_from_bytes(MakoByteArray a) {
-    char *d = (char *)malloc(a.len + 1);
+    char *d = (char *)mako_rc_alloc(a.len + 1);
     if (a.len && a.data) memcpy(d, a.data, a.len);
     d[a.len] = 0;
     MakoString out = {d, a.len};
@@ -1824,7 +1826,7 @@ static inline MakoString mako_str_slice(MakoString s, int64_t low, int64_t high)
     if ((size_t)high > s.len) high = (int64_t)s.len;
     if ((size_t)low > s.len) low = (int64_t)s.len;
     size_t n = (size_t)(high - low);
-    char *d = (char *)malloc(n + 1);
+    char *d = (char *)mako_rc_alloc(n + 1);
     if (n) memcpy(d, s.data + (size_t)low, n);
     d[n] = 0;
     MakoString out = {d, n};
@@ -2101,7 +2103,7 @@ static inline MakoString mako_int_to_string(int64_t n) {
     }
     if (neg) *--p = '-';
     size_t len = (size_t)(buf + sizeof(buf) - 1 - p);
-    char *d = (char *)malloc(len + 1);
+    char *d = (char *)mako_rc_alloc(len + 1);
     if (MAKO_UNLIKELY(!d)) abort();
     memcpy(d, p, len + 1);
     return (MakoString){d, len};
@@ -2117,7 +2119,7 @@ typedef struct {
 static inline MakoStrBuilder *mako_str_builder_new(void) {
     MakoStrBuilder *b = (MakoStrBuilder *)malloc(sizeof(MakoStrBuilder));
     if (MAKO_UNLIKELY(!b)) mako_abort("str_builder: out of memory");
-    b->data = (char *)malloc(64); /* start larger — f-strings / logs rarely tiny */
+    b->data = (char *)mako_rc_alloc(64); /* start larger — f-strings / logs rarely tiny */
     if (MAKO_UNLIKELY(!b->data)) mako_abort("str_builder: out of memory");
     b->data[0] = 0;
     b->len = 0;
@@ -2148,7 +2150,7 @@ static inline void mako_sbstack_grow(MakoSBStack *b, size_t need) {
     } else {
         char *nd = (char *)malloc(ncap);
         if (b->len) memcpy(nd, b->data, b->len);
-        free(b->data);
+        mako_rc_release(b->data);
         b->data = nd;
     }
     b->cap = ncap;
@@ -2175,7 +2177,7 @@ static inline void mako_sbstack_write_f64(MakoSBStack *b, double n) {
 static inline MakoString mako_sbstack_finish(MakoSBStack *b) {
     if (b->len == 0) return mako_str_empty;
     if (b->data == b->stack) {
-        char *d = (char *)malloc(b->len + 1);
+        char *d = (char *)mako_rc_alloc(b->len + 1);
         if (MAKO_UNLIKELY(!d)) mako_abort("sbstack: OOM");
         memcpy(d, b->stack, b->len); d[b->len] = 0;
         return (MakoString){d, b->len};
@@ -2203,10 +2205,10 @@ static inline void mako_str_builder_grow(MakoStrBuilder *b, size_t need) {
     if (need <= b->cap) return;
     size_t ncap = b->cap ? b->cap * 2 : 64;
     while (ncap < need) ncap *= 2;
-    char *nd = (char *)malloc(ncap);
+    char *nd = (char *)mako_rc_alloc(ncap);
     if (!nd) mako_abort("str_builder: out of memory");
     if (b->len && b->data) memcpy(nd, b->data, b->len);
-    if (b->data) free(b->data);
+    if (b->data) mako_rc_release(b->data);
     b->data = nd;
     b->cap = ncap;
 }
@@ -2544,7 +2546,7 @@ static inline void mako_str_builder_write_byte(MakoStrBuilder *b, int64_t v) {
 
 /* Copy-out (legacy): keeps builder reusable. Prefer finish on hot paths. */
 static inline MakoString mako_str_builder_string(MakoStrBuilder *b) {
-    char *d = (char *)malloc(b->len + 1);
+    char *d = (char *)mako_rc_alloc(b->len + 1);
     if (MAKO_UNLIKELY(!d)) mako_abort("str_builder: out of memory");
     if (b->len) memcpy(d, b->data, b->len);
     d[b->len] = 0;
@@ -2565,7 +2567,7 @@ static inline MakoString mako_str_builder_finish(MakoStrBuilder *b) {
 
 static inline void mako_str_builder_free(MakoStrBuilder *b) {
     if (!b) return;
-    if (b->data) { free(b->data); b->data = NULL; }
+    if (b->data) { mako_rc_release(b->data); b->data = NULL; }
     b->len = 0;
     b->cap = 0;
     free(b);
@@ -2903,7 +2905,7 @@ static inline uint64_t mako_hash_result_float(MakoResultFloat k) {
 static inline MakoString mako_str_clone(MakoString s) {
     if (MAKO_UNLIKELY(s.len == 0)) return mako_str_empty;
     if (!s.data || s.data == &mako_str_empty_byte) return mako_str_empty;
-    char *d = (char *)malloc(s.len + 1);
+    char *d = (char *)mako_rc_alloc(s.len + 1);
     if (MAKO_UNLIKELY(!d)) {
         fprintf(stderr, "mako: OOM in str_clone\n");
         abort();
@@ -6665,7 +6667,7 @@ static inline MakoString mako_dap_request_command(MakoString req) {
     const char *e = strchr(p, '"');
     if (!e || e <= p) return mako_str_from_cstr("");
     size_t n = (size_t)(e - p);
-    char *d = (char *)malloc(n + 1);
+    char *d = (char *)mako_rc_alloc(n + 1);
     if (!d) return mako_str_from_cstr("");
     memcpy(d, p, n);
     d[n] = 0;
@@ -6942,7 +6944,7 @@ static inline void mako_nursery_note_err(MakoNursery *n, MakoString msg) {
     n->err_count++;
     if (n->first_err) return;
     size_t len = msg.len;
-    char *d = (char *)malloc(len + 1);
+    char *d = (char *)mako_rc_alloc(len + 1);
     if (!d) return;
     if (len && msg.data) memcpy(d, msg.data, len);
     d[len] = 0;
@@ -9104,7 +9106,7 @@ static inline MakoString mako_regex_find(MakoString pat, MakoString text) {
         if (has_dollar) {
             if (mako_re_here(p, plen, t + i, tlen - i)) {
                 size_t n = tlen - i;
-                char *d = (char *)malloc(n + 1);
+                char *d = (char *)mako_rc_alloc(n + 1);
                 memcpy(d, t + i, n);
                 d[n] = 0;
                 return (MakoString){d, n};
@@ -9152,7 +9154,7 @@ static inline MakoString mako_regex_find(MakoString pat, MakoString text) {
                 if (starts_b && !bound) continue;
                 if (starts_B && bound) continue;
             }
-            char *d = (char *)malloc(n + 1);
+            char *d = (char *)mako_rc_alloc(n + 1);
             memcpy(d, t + i, n);
             d[n] = 0;
             mako_re_allow_prefix = 0;
@@ -9245,7 +9247,7 @@ static inline MakoString mako_regex_capture(MakoString pat, MakoString text, int
     size_t len = mako_re_cap_len[idx];
     const char *t = text.data ? text.data : "";
     if (off + len > text.len) return mako_str_from_cstr("");
-    char *d = (char *)malloc(len + 1);
+    char *d = (char *)mako_rc_alloc(len + 1);
     memcpy(d, t + off, len);
     d[len] = 0;
     return (MakoString){d, len};
@@ -9763,7 +9765,7 @@ static inline char *mako_env_cstr(MakoString s) {
     for (size_t i = 0; i < s.len; i++) {
         if (s.data[i] == '\0') return NULL;
     }
-    char *d = (char *)malloc(s.len + 1);
+    char *d = (char *)mako_rc_alloc(s.len + 1);
     if (!d) return NULL;
     if (s.len) memcpy(d, s.data, s.len);
     d[s.len] = 0;
@@ -10287,7 +10289,7 @@ static inline MakoString mako_path_join(MakoString a, MakoString b) {
     if (a.data[al - 1] == '/') need_sep = 0;
     if (b.data[0] == '/') need_sep = 0;
     size_t n = al + bl + (need_sep ? 1 : 0);
-    char *d = (char *)malloc(n + 1);
+    char *d = (char *)mako_rc_alloc(n + 1);
     if (!d) mako_abort("path_join OOM");
     memcpy(d, a.data, al);
     size_t o = al;
