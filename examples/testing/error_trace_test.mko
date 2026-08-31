@@ -65,11 +65,41 @@ export fn TestErrorChainThroughResult() {
     }
 }
 
+fn traced_leaf() -> Result[int, string] {
+    return Err(error_trace("leaf failure"))
+}
+
+fn traced_middle() -> Result[int, string] {
+    let value = traced_leaf()?
+    return Ok(value)
+}
+
+fn traced_top() -> Result[int, string] {
+    let value = traced_middle()?
+    return Ok(value)
+}
+
+export fn TestAutomaticErrorPropagationTrace() {
+    let result = traced_top()
+    match result {
+        Ok(_) => {
+            assert(false)
+        }
+        Err(e) => {
+            let chain = error_chain(e)
+            assert(str_contains(chain, "leaf failure"))
+            assert(str_contains(chain, "error_trace_test.mko:"))
+            assert(str_contains(chain, " → "))
+        }
+    }
+}
+
 fn main() {
     TestErrorTrace()
     TestErrorWrapTrace()
     TestErrorChain()
     TestErrorCause()
     TestErrorChainThroughResult()
+    TestAutomaticErrorPropagationTrace()
     print("PASS\n")
 }

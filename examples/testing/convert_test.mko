@@ -22,3 +22,12 @@ fn TestConvertBytes() {
     assert_eq(len(b), 2)
     assert_eq_str(string(b), "xy")
 }
+
+fn machine_flag(value: int) -> int {
+    return value
+}
+
+fn TestBoolArgumentWidensToMachineInt() {
+    assert_eq(machine_flag(true), 1)
+    assert_eq(machine_flag(false), 0)
+}

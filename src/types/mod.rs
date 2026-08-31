@@ -236,6 +236,19 @@ impl TypeError {
         self
     }
 
+    pub fn at_if_unknown(mut self, line: usize, col: usize) -> Self {
+        let TypeError::At {
+            line: error_line,
+            col: error_col,
+            ..
+        } = &mut self;
+        if *error_line == 0 && line > 0 {
+            *error_line = line;
+            *error_col = col.max(1);
+        }
+        self
+    }
+
     #[allow(dead_code)]
     pub fn message(&self) -> &str {
         match self {
@@ -15596,13 +15609,16 @@ impl TypeChecker {
             stmts.len()
         };
         for (i, stmt) in stmts[..check_n].iter().enumerate() {
-            self.check_stmt(stmt)?;
+            self.check_stmt(stmt)
+                .map_err(|error| error.at_if_unknown(f.body.line_of(i), 1))?;
             // Mid-scope NLL: end shares unused in remaining stmts (incl. trailing expr).
             self.end_unused_shares_after(stmts, i + 1);
         }
         if trailing {
             if let Some(Stmt::Expr(e)) = stmts.last() {
-                let got = self.check_expr(e)?;
+                let got = self
+                    .check_expr(e)
+                    .map_err(|error| error.at_if_unknown(f.body.line_of(stmts.len() - 1), 1))?;
                 if !self.compatible(&got, &self.current_ret) {
                     return Err(TypeError::new(format!(
                         "return type mismatch: expected {}, got {}",
@@ -15632,7 +15648,8 @@ impl TypeChecker {
         self.push_scope();
         let stmts = &block.stmts;
         for (i, stmt) in stmts.iter().enumerate() {
-            self.check_stmt(stmt)?;
+            self.check_stmt(stmt)
+                .map_err(|error| error.at_if_unknown(block.line_of(i), 1))?;
             // Mid-scope NLL seed (straight-line): end share borrows whose share
             // binding and source are not mentioned in any later statement.
             self.end_unused_shares_after(stmts, i + 1);
@@ -18388,7 +18405,8 @@ impl TypeChecker {
                                 self.current_expected = saved;
                                 t
                             };
-                            if !self.compatible(&at, p) {
+                            let bool_to_machine_int = at == Type::Bool && *p == Type::Int;
+                            if !self.compatible(&at, p) && !bool_to_machine_int {
                                 return Err(TypeError::new(format!(
                                     "argument type mismatch: expected {}, got {}",
                                     p.display(),

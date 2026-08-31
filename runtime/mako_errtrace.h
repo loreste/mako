@@ -25,10 +25,10 @@
 static inline MakoString mako_error_new(MakoString msg, const char *file, int line) {
     char loc[512];
     int n = snprintf(loc, sizeof(loc), "%c%s:%d", MAKO_ERR_SEP, file, line);
-    if (n <= 0 || (size_t)n >= sizeof(loc)) return msg;
+    if (n <= 0 || (size_t)n >= sizeof(loc)) return mako_str_clone(msg);
     size_t total = msg.len + (size_t)n;
     char *buf = (char *)malloc(total);
-    if (!buf) return msg;
+    if (!buf) return mako_str_clone(msg);
     if (msg.len > 0 && msg.data) memcpy(buf, msg.data, msg.len);
     memcpy(buf + msg.len, loc, (size_t)n);
     MakoString out = {buf, total};
@@ -65,7 +65,7 @@ static inline MakoString mako_error_wrap(MakoString err, MakoString context, con
     }
 
     char *buf = (char *)malloc(total);
-    if (!buf) return err;
+    if (!buf) return mako_str_clone(err);
 
     size_t off = 0;
     if (has_context) {
@@ -79,6 +79,24 @@ static inline MakoString mako_error_wrap(MakoString err, MakoString context, con
     if (loc_n > 0) { memcpy(buf + off, loc, (size_t)loc_n); off += (size_t)loc_n; }
 
     MakoString out = {buf, off};
+    return out;
+}
+
+/* Add a propagation frame and consume the previous owned error string.
+ * Allocation fallback is always independently owned, so no aliases escape. */
+static inline MakoString mako_error_propagate(MakoString err, const char *file,
+                                              int line) {
+    int has_trace = 0;
+    for (size_t i = 0; i < err.len; i++) {
+        if (err.data[i] == MAKO_ERR_SEP) {
+            has_trace = 1;
+            break;
+        }
+    }
+    if (!has_trace) return err;
+    MakoString empty = {NULL, 0};
+    MakoString out = mako_error_wrap(err, empty, file, line);
+    if (out.data != err.data) mako_str_free(err);
     return out;
 }
 

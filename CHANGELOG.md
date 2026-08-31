@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.6.9 - 2026-08-31 (string ownership safety rollback)
+
+- Restore allocator-matched string ownership: owned strings use `malloc`/`free`,
+  while borrowed and static strings are never passed to the owning destructor.
+- Remove the unsafe pre-pointer allocation-marker probe, which could read outside
+  an object for literals, borrowed buffers, foreign strings, or page-boundary data.
+- Retain conservative whole-struct cloning for mutable value parameters after the
+  attempted field-level optimization proved capable of memory corruption.
+- Preserve exact file/line/column data in tooling lexer and parser diagnostics.
+- Add automatic file:line trace frames when `?` propagates explicitly traced
+  `Result` errors, consistently across the C and native backends; plain error
+  strings remain byte-for-byte unchanged.
+- Make tracing allocation fallbacks independently owned, preventing aliasing,
+  double-free, and use-after-free under allocation failure.
+- Fix issues #44/#45: attach the enclosing source statement to previously
+  spanless type errors and deterministically allow zero-cost `bool`-to-`int`
+  widening at function-call boundaries (including FayDB predicate flags).
+
 ## 0.6.8 - 2026-08-30 (interface type hardening + consolidation plan)
 
 - Require interface implementations to match every declared non-receiver
@@ -26,7 +44,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.8 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.9 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

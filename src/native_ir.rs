@@ -2941,6 +2941,8 @@ struct FunctionLowerer<'a> {
     const_strs: &'a HashMap<String, String>,
     function: Function,
     current: BlockId,
+    source_file: String,
+    current_source_line: usize,
     locals: HashMap<String, (Value, Type)>,
     heap_owned: HashMap<String, bool>,
     /// Innermost-first stack of loop frames: label, break target, continue
@@ -3046,6 +3048,11 @@ impl<'a> FunctionLowerer<'a> {
             const_strs,
             function,
             current: entry,
+            source_file: source
+                .source_file
+                .clone()
+                .unwrap_or_else(|| "<unknown>".into()),
+            current_source_line: 0,
             locals,
             heap_owned,
             loops: Vec::new(),
@@ -3276,10 +3283,11 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_block(&mut self, block: &AstBlock) -> Result<(), IrError> {
-        for statement in &block.stmts {
+        for (index, statement) in block.stmts.iter().enumerate() {
             if self.block().terminator.is_some() {
                 break;
             }
+            self.current_source_line = block.line_of(index);
             self.lower_stmt(statement)?;
         }
         Ok(())
@@ -12600,6 +12608,43 @@ impl<'a> FunctionLowerer<'a> {
     /// Result/Option layout (e.g. `Result[Pt,string]?` inside
     /// `-> Result[int,string]`), plus Option↔Result conversion (None→Err("None"),
     /// Err→None).
+    fn trace_result_error(&mut self, value: Value, enum_id: u32) -> Result<Value, IrError> {
+        let Some((err_index, err_type)) = self.structs.field(enum_id, "Err_0") else {
+            return Ok(value);
+        };
+        if err_type != Type::Str {
+            return Ok(value);
+        }
+        let err = self.value();
+        self.emit(Inst::StructField {
+            out: err,
+            base: value,
+            struct_id: enum_id,
+            index: err_index,
+            ty: Type::Str,
+        });
+        let file = self.value();
+        self.emit(Inst::StringLiteral {
+            out: file,
+            bytes: self.source_file.as_bytes().to_vec(),
+        });
+        let line = self.const_int(self.current_source_line as i64, Type::I64);
+        let traced = self.value();
+        self.emit(Inst::Call {
+            out: Some(traced),
+            function: "mako_native_error_propagate_at_ptr".into(),
+            args: vec![err, file, line],
+            ret: Some(Type::Str),
+        });
+        self.emit(Inst::StructFieldStore {
+            base: value,
+            struct_id: enum_id,
+            index: err_index,
+            value: traced,
+        });
+        Ok(value)
+    }
+
     fn lower_try(&mut self, inner: &Expr) -> Result<(Value, Type, bool), IrError> {
         let (mut val, ty, owned) = self.lower_expr(inner)?;
         let Type::Struct(id) = ty else {
@@ -12663,10 +12708,14 @@ impl<'a> FunctionLowerer<'a> {
         // Locals dropped after we materialize the return value so we still
         // own any payload extracted from `val`.
         if ret_id == id {
+            if is_result {
+                val = self.trace_result_error(val, id)?;
+            }
             self.drop_owned_locals();
             self.terminate(Terminator::Return(Some(val)))?;
         } else if is_result && ret_is_result {
             // Result[A,E]? in Result[B,E] fn: rewrap Err payload into ret monomorph.
+            val = self.trace_result_error(val, id)?;
             let (err_idx, err_ty) = self
                 .structs
                 .field(id, "Err_0")
@@ -13001,6 +13050,7 @@ impl<'a> FunctionLowerer<'a> {
             return Ok((self.const_int(0, Type::I64), Type::I64, false));
         }
         for (i, stmt) in block.stmts.iter().enumerate() {
+            self.current_source_line = block.line_of(i);
             if i + 1 == n {
                 match stmt {
                     Stmt::Expr(e) => return self.lower_expr(e),
@@ -16345,6 +16395,51 @@ impl<'a> FunctionLowerer<'a> {
         function: &str,
         args: &[Expr],
     ) -> Result<Option<(Value, Type, bool)>, IrError> {
+        if matches!(function, "error_trace" | "error_wrap_trace") {
+            let expected = if function == "error_trace" { 1 } else { 2 };
+            if args.len() != expected {
+                return Err(IrError::new(format!(
+                    "native IR: {function} arity mismatch"
+                )));
+            }
+            let mut lowered = Vec::with_capacity(expected + 2);
+            let mut temporaries = Vec::new();
+            for arg in args {
+                let (value, ty, owned) = self.lower_expr(arg)?;
+                if ty != Type::Str {
+                    return Err(IrError::new(format!(
+                        "native IR: {function} expects string arguments"
+                    )));
+                }
+                lowered.push(value);
+                if owned && !matches!(arg, Expr::Ident(_)) {
+                    temporaries.push(value);
+                }
+            }
+            let file = self.value();
+            self.emit(Inst::StringLiteral {
+                out: file,
+                bytes: self.source_file.as_bytes().to_vec(),
+            });
+            lowered.push(file);
+            lowered.push(self.const_int(self.current_source_line as i64, Type::I64));
+            let out = self.value();
+            let bridge = if function == "error_trace" {
+                "mako_native_error_trace_at_ptr"
+            } else {
+                "mako_native_error_wrap_trace_at_ptr"
+            };
+            self.emit(Inst::Call {
+                out: Some(out),
+                function: bridge.into(),
+                args: lowered,
+                ret: Some(Type::Str),
+            });
+            for value in temporaries {
+                self.emit_drop(value, Type::Str);
+            }
+            return Ok(Some((out, Type::Str, true)));
+        }
         // (c_name, arg_types, ret_type, ret_owned)
         // arg types: I64, F64, Str, ChanI, Arena, I1
         type Spec = (&'static str, &'static [Type], Option<Type>, bool);

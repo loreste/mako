@@ -66,6 +66,15 @@ static MakoString bridge_borrow_str(const MakoNativeString *s) {
     return m;
 }
 
+static char *bridge_str_cstr(const MakoNativeString *s) {
+    MakoString value = bridge_borrow_str(s);
+    char *out = (char *)malloc(value.len + 1);
+    if (!out) return NULL;
+    if (value.len > 0) memcpy(out, value.data, value.len);
+    out[value.len] = '\0';
+    return out;
+}
+
 /* Copy a BORROWED MakoString into an owned native header.
  *
  * Use this, not bridge_take_str, when the source is not a fresh allocation:
@@ -972,11 +981,60 @@ MakoNativeString *mako_native_error_trace_ptr(MakoNativeString *msg) {
     return bridge_take_str(mako_error_new(bridge_borrow_str(msg), "<native>", 0));
 }
 
+MakoNativeString *mako_native_error_trace_at_ptr(MakoNativeString *msg,
+                                                 MakoNativeString *file,
+                                                 int64_t line) {
+    char *file_c = bridge_str_cstr(file);
+    MakoNativeString *out = bridge_take_str(
+        mako_error_new(bridge_borrow_str(msg), file_c ? file_c : "<unknown>",
+                       (int)line));
+    free(file_c);
+    mako_native_string_drop_ptr(file);
+    return out;
+}
+
 MakoNativeString *mako_native_error_wrap_trace_ptr(MakoNativeString *err,
                                                    MakoNativeString *context) {
     return bridge_take_str(mako_error_wrap(bridge_borrow_str(err),
                                            bridge_borrow_str(context),
                                            "<native>", 0));
+}
+
+MakoNativeString *mako_native_error_wrap_trace_at_ptr(MakoNativeString *err,
+                                                      MakoNativeString *context,
+                                                      MakoNativeString *file,
+                                                      int64_t line) {
+    char *file_c = bridge_str_cstr(file);
+    MakoNativeString *out = bridge_take_str(mako_error_wrap(
+        bridge_borrow_str(err), bridge_borrow_str(context),
+        file_c ? file_c : "<unknown>", (int)line));
+    free(file_c);
+    mako_native_string_drop_ptr(file);
+    return out;
+}
+
+MakoNativeString *mako_native_error_propagate_at_ptr(MakoNativeString *err,
+                                                     MakoNativeString *file,
+                                                     int64_t line) {
+    MakoString borrowed = bridge_borrow_str(err);
+    int has_trace = 0;
+    for (size_t i = 0; i < borrowed.len; i++) {
+        if (borrowed.data[i] == MAKO_ERR_SEP) {
+            has_trace = 1;
+            break;
+        }
+    }
+    if (!has_trace) {
+        mako_native_string_drop_ptr(file);
+        return err;
+    }
+    char *file_c = bridge_str_cstr(file);
+    MakoNativeString *out = bridge_take_str(mako_error_propagate(
+        borrowed, file_c ? file_c : "<unknown>", (int)line));
+    free(file_c);
+    free(err); /* data ownership moved to `out` (or replaced by propagation) */
+    mako_native_string_drop_ptr(file);
+    return out;
 }
 
 MakoNativeString *mako_native_error_message_ptr(MakoNativeString *err) {

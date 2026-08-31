@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.8).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.9).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -162,6 +162,15 @@ message inspection, site history, reports, alerts, and traffic metrics.
 - Package security model is not independently audited
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
+
+## New in 0.6.9
+
+**String ownership safety** — string destruction again follows explicit
+ownership and never probes memory before a string's data pointer. Mutable
+struct parameters retain conservative whole-value cloning until a proven-safe
+field-level optimization is available.
+Compiler diagnostics preserve file, line, and column locations, while `?`
+adds file:line frames to explicitly traced `Result` error chains on the error path.
 
 ## New in 0.6.8
 

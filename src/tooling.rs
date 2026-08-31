@@ -58,10 +58,10 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
         Diagnostic::error(&path_s, "", Span::unknown(), format!("cannot read: {e}")).emit();
     })?;
     let tokens = Lexer::new(&src).tokenize().map_err(|e| {
-        Diagnostic::error(&path_s, &src, Span::unknown(), format!("{e}")).emit();
+        diagnostic_from_lex_error(&path_s, &src, e).emit();
     })?;
     let program = Parser::new(tokens).parse().map_err(|e| {
-        Diagnostic::error(&path_s, &src, Span::unknown(), format!("{e}")).emit();
+        diagnostic_from_parse_error(&path_s, &src, e).emit();
     })?;
     let program = desugar::desugar(program);
     let program = resolve_imports(path, program).map_err(|e| {
@@ -3855,7 +3855,8 @@ pub(crate) fn parse_program_file_raw(
 }
 
 pub fn parse_program_file(path: &Path) -> Result<Program, String> {
-    let program = parse_program_file_raw(path, None)?;
+    let mut program = parse_program_file_raw(path, None)?;
+    stamp_source_file(&mut program, &path.display().to_string());
     resolve_imports(path, program)
 }
 
@@ -3863,7 +3864,8 @@ fn parse_program_file_verified(
     path: &Path,
     locked_roots: &crate::pkg::VerifiedDependencyRoots,
 ) -> Result<Program, String> {
-    let program = parse_program_file_raw(path, Some(locked_roots))?;
+    let mut program = parse_program_file_raw(path, Some(locked_roots))?;
+    stamp_source_file(&mut program, &path.display().to_string());
     resolve_imports_with_verified(path, program, Some(locked_roots))
 }
 
@@ -4397,8 +4399,24 @@ mod metadata_tests {
         assert!(!ok);
         assert!(report.contains(r#""ok":false"#));
         assert!(report.contains(r#""severity":"error"#));
-        assert!(report.contains(r#""line":"#));
-        assert!(report.contains(r#""column":"#));
+        let value: Value = serde_json::from_str(&report).unwrap();
+        let diagnostic = &value["diagnostics"][0];
+        assert_eq!(diagnostic["line"], 1);
+        assert!(diagnostic["column"].as_u64().unwrap_or(0) > 0);
+        assert_eq!(diagnostic["sourceLine"], "fn main( {");
+    }
+
+    #[test]
+    fn check_json_reports_lexer_error_location() {
+        let path = temp_mko("json-lex-err", "fn main() {\n    @\n}\n");
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(!ok);
+        let value: Value = serde_json::from_str(&report).unwrap();
+        let diagnostic = &value["diagnostics"][0];
+        assert_eq!(diagnostic["line"], 2);
+        assert_eq!(diagnostic["column"], 5);
+        assert_eq!(diagnostic["sourceLine"], "    @");
     }
 
     #[test]
@@ -4445,6 +4463,40 @@ mod metadata_tests {
             "{report}"
         );
         assert_eq!(diagnostic["sourceLine"], "    let bad = true == \"no\"");
+    }
+
+    #[test]
+    fn check_json_reports_argument_type_error_location() {
+        let path = temp_mko(
+            "json-arg-type-err",
+            "fn takes_i32(value: int32) {}\nfn main() {\n    takes_i32(true)\n}\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(!ok);
+        let value: Value = serde_json::from_str(&report).unwrap();
+        let diagnostic = &value["diagnostics"][0];
+        assert_eq!(diagnostic["line"], 3);
+        assert!(diagnostic["column"].as_u64().unwrap_or(0) > 0);
+        assert_eq!(diagnostic["sourceLine"], "    takes_i32(true)");
+        assert!(
+            diagnostic["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("argument type mismatch"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn check_json_accepts_bool_argument_for_machine_int() {
+        let path = temp_mko(
+            "json-bool-int-arg",
+            "fn takes_int(value: int) {}\nfn main() {\n    takes_int(true)\n}\n",
+        );
+        let (ok, report) = check_file_json_report(&path);
+        let _ = fs::remove_file(&path);
+        assert!(ok, "{report}");
     }
 
     #[test]

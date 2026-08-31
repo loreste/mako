@@ -305,7 +305,7 @@ fn fib(n: int) -> int {
 | `int64` / `int32` / `int8` | Fixed widths; `int8(x)` range-checks `-128..127` at runtime |
 | `uint64` | Unsigned 64-bit; reject negative on convert from signed |
 | `byte` | Unsigned 8-bit; element of `[]byte` |
-| `float`, `bool`, `string` | No silent mix with ints |
+| `float`, `bool`, `string` | No silent mix with ints; `bool` may widen to `int` for a function argument |
 | `[]int` / `[]int64` / `[]byte` | Slices (see § Slices / Bytes) |
 | `Option[T]`, `Result[T, E]` | No nil |
 | `chan[T]` | Typed channels (`chan[int]` common) |

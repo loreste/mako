@@ -1,5 +1,11 @@
 # Makori CLI reference
 
+Source diagnostics use `path:line:column` locations when the error originates
+in Mako source. Human output includes the source line and caret; `--json=v1`
+reports numeric `line` and `column` fields. I/O, linker, and environment errors
+that do not originate at a source token report the file or tool context without
+inventing a source line.
+
 Reference for the current `mako` commands, flags, and workflows. Platform- and
 integration-specific limits are called out where they apply.
 

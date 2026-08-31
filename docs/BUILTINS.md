@@ -834,6 +834,12 @@ codegen auto-injects file:line at each call site.
 | `error_cause` | `(err: string) -> string` | Extract root cause (innermost message) |
 | `error_chain` | `(err: string) -> string` | Format full chain: `"ctx: msg [file:42 → file:10]"` |
 
+String-backed `Result` errors initialized with `error_trace` gain a source
+`file:line` frame automatically at each `?` propagation site. Plain `Err("…")`
+strings remain byte-for-byte unchanged. This work occurs only on the error
+branch; the successful `Result` path does not allocate or format trace data.
+Trace strings remain independently owned even if trace allocation fails.
+
 ```mko
 fn read_config(path: string) -> Result[string, string] {
     return Err(error_trace("file not found: " + path))

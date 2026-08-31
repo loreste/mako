@@ -12430,74 +12430,6 @@ impl Codegen {
         out
     }
 
-    /// Collect struct fields that are mutated via field assignment (db.field = ...).
-    /// Returns set of (base_ident, field_name) pairs.
-    fn collect_mutated_fields(stmts: &[Stmt]) -> std::collections::HashSet<(String, String)> {
-        let mut out = std::collections::HashSet::new();
-        for s in stmts {
-            Self::collect_mutated_fields_stmt(s, &mut out);
-        }
-        out
-    }
-
-    fn collect_mutated_fields_stmt(s: &Stmt, out: &mut std::collections::HashSet<(String, String)>) {
-        match s {
-            // Full reassignment (db = ...) means all fields are potentially mutated.
-            Stmt::Assign { name, .. } => {
-                out.insert((name.clone(), "*".to_string()));
-            }
-            Stmt::FieldAssign { base, field, value } => {
-                if let Expr::Ident(name) = base {
-                    out.insert((name.clone(), field.clone()));
-                }
-                // Also check nested field assigns in value
-                if let Expr::Block(b) = value {
-                    for inner in &b.stmts {
-                        Self::collect_mutated_fields_stmt(inner, out);
-                    }
-                }
-            }
-            Stmt::Expr(e) | Stmt::Return(Some(e)) | Stmt::Assign { value: e, .. } => {
-                Self::collect_mutated_fields_in_expr(e, out);
-            }
-            Stmt::Let { init, .. } => {
-                Self::collect_mutated_fields_in_expr(init, out);
-            }
-            Stmt::If { then_block, else_block, .. } => {
-                for s in &then_block.stmts {
-                    Self::collect_mutated_fields_stmt(s, out);
-                }
-                if let Some(eb) = else_block {
-                    for s in &eb.stmts {
-                        Self::collect_mutated_fields_stmt(s, out);
-                    }
-                }
-            }
-            Stmt::While { body, .. } | Stmt::For { body, .. } => {
-                for s in &body.stmts {
-                    Self::collect_mutated_fields_stmt(s, out);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn collect_mutated_fields_in_expr(e: &Expr, out: &mut std::collections::HashSet<(String, String)>) {
-        match e {
-            Expr::Block(b) => {
-                for s in &b.stmts {
-                    Self::collect_mutated_fields_stmt(s, out);
-                }
-            }
-            Expr::Call { args, .. } | Expr::Method { args, .. } => {
-                for a in args {
-                    Self::collect_mutated_fields_in_expr(a, out);
-                }
-            }
-            _ => {}
-        }
-    }
-
     /// Collect identifiers that are *assigned to* (mutated) within an expression.
     fn collect_assigned_idents_in_expr(e: &Expr, out: &mut std::collections::HashSet<String>) {
         match e {
@@ -13289,6 +13221,9 @@ impl Codegen {
     }
 
     fn emit_fn(&mut self, f: &FnDef) {
+        if let Some(source_file) = &f.source_file {
+            self.source_file = Some(source_file.clone());
+        }
         // `live fn` — emit indirect-call trampoline for hot reload.
         if f.is_live {
             self.emit_live_fn(f);
@@ -13368,7 +13303,7 @@ impl Codegen {
                 continue;
             }
             if p.name == "self" && is_mut_self_fn {
-                continue;
+                continue; // mut self is a pointer — handled separately
             }
             let pty = self.type_expr_c(&p.ty);
             let frees = self.struct_own_field_frees(&pty);
@@ -36350,6 +36285,11 @@ impl Codegen {
                     } else {
                         self.line(&format!("if (!{tmp}.ok) {{"));
                         self.indent += 1;
+                        let (file, line) = self.current_source_loc();
+                        self.line(&format!(
+                            "{tmp}.err = mako_error_propagate({tmp}.err, \"{}\", {line});",
+                            escape_c(&file)
+                        ));
                         self.emit_try_early_return_cleanup();
                         self.line(&format!("return {tmp};"));
                         self.indent -= 1;

@@ -255,6 +255,9 @@ tokens include:
 - Untyped integer literals default to `int`.
 - Named integer kinds **do not mix** in arithmetic. Explicit conversion is
   required: `int64(x)`, `int32(x)`, `int8(x)`, `uint64(x)`, `byte(x)`, `int(x)`.
+- At a function-call boundary only, `bool` widens to machine `int` as `0` or
+  `1`. This zero-cost predicate conversion does not permit `bool` in arithmetic,
+  assignments, returns, or calls expecting any other integer kind.
 - `int8(x)` aborts at runtime if the value is outside `-128..127`.
 - `uint64(x)` from a negative signed value aborts at runtime.
 - Constant expressions are range-checked at compile time.
