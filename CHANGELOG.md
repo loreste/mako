@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.12 - 2026-08-31 (LLVM error propagation ownership)
+
+- Fixed the native error-tracing bridge so LLVM result-field replacement borrows
+  the original field and propagates from an owned clone. The field store now
+  remains the sole owner responsible for dropping the replaced value.
+
 ## 0.6.11 - 2026-08-31 (LLVM trace predicate normalization)
 
 - Normalize the native runtime's integer trace predicate through `!= 0` before
@@ -57,7 +63,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.11 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.12 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

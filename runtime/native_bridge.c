@@ -1016,7 +1016,7 @@ MakoNativeString *mako_native_error_wrap_trace_at_ptr(MakoNativeString *err,
 MakoNativeString *mako_native_error_propagate_at_ptr(MakoNativeString *err,
                                                      MakoNativeString *file,
                                                      int64_t line) {
-    MakoString borrowed = bridge_borrow_str(err);
+    MakoString borrowed = mako_str_clone(bridge_borrow_str(err));
     int has_trace = 0;
     for (size_t i = 0; i < borrowed.len; i++) {
         if (borrowed.data[i] == MAKO_ERR_SEP) {
@@ -1032,7 +1032,6 @@ MakoNativeString *mako_native_error_propagate_at_ptr(MakoNativeString *err,
     MakoNativeString *out = bridge_take_str(mako_error_propagate(
         borrowed, file_c ? file_c : "<unknown>", (int)line));
     free(file_c);
-    free(err); /* data ownership moved to `out` (or replaced by propagation) */
     mako_native_string_drop_ptr(file);
     return out;
 }

@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.11).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.12).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -163,9 +163,10 @@ message inspection, site history, reports, alerts, and traffic metrics.
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
 
-## New in 0.6.11
+## New in 0.6.12
 
-**LLVM trace predicate normalization** — runtime integer predicates are
+**LLVM-safe error propagation ownership** — traced errors propagate from an
+owned clone so result-field replacement drops the original exactly once. Runtime integer predicates are
 explicitly compared with zero before shared IR emits an LLVM branch.
 
 ## New in 0.6.10
