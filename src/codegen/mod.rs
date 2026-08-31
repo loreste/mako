@@ -12442,6 +12442,10 @@ impl Codegen {
 
     fn collect_mutated_fields_stmt(s: &Stmt, out: &mut std::collections::HashSet<(String, String)>) {
         match s {
+            // Full reassignment (db = ...) means all fields are potentially mutated.
+            Stmt::Assign { name, .. } => {
+                out.insert((name.clone(), "*".to_string()));
+            }
             Stmt::FieldAssign { base, field, value } => {
                 if let Expr::Ident(name) = base {
                     out.insert((name.clone(), field.clone()));
@@ -13357,11 +13361,8 @@ impl Codegen {
         );
         self.indent = 1;
 
-        // Deep-clone owned fields of `mut` struct params — but ONLY fields
-        // that are actually mutated in the function body. This eliminates
-        // unnecessary O(n) clones for large structs where most fields are
-        // read-only (e.g. Database with 35+ string fields).
-        let mutated_fields = Self::collect_mutated_fields(&f.body.stmts);
+        // Deep-clone owned fields of `mut` struct params so mutations don't
+        // corrupt the caller's data (C struct copy shares interior pointers).
         for p in &f.params {
             if !p.mutable {
                 continue;
@@ -13374,11 +13375,6 @@ impl Codegen {
             if !frees.is_empty() {
                 let mn = mangle(&p.name);
                 for (fname, _) in &frees {
-                    // Skip cloning fields that are never assigned in this function.
-                    // The caller's data is safe because the field is only read.
-                    if frees.len() >= 4 && !mutated_fields.contains(&(p.name.clone(), fname.clone())) {
-                        continue;
-                    }
                     let fty = self
                         .structs
                         .values()
