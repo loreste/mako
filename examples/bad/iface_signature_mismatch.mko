@@ -1,0 +1,22 @@
+interface Reader {
+    fn read(int) -> int
+}
+
+struct BrokenReader {
+    n: int
+}
+
+on BrokenReader {
+    fn read(self, value: string) -> int {
+        return self.n + str_len(value)
+    }
+}
+
+fn consume(reader: Reader) -> int {
+    return reader.read(1)
+}
+
+fn main() {
+    let reader = BrokenReader { n: 1 }
+    print_int(consume(reader))
+}

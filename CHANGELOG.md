@@ -2,16 +2,34 @@
 
 ## Unreleased
 
+## 0.6.8 - 2026-08-30 (interface type hardening + consolidation plan)
+
+- Require interface implementations to match every declared non-receiver
+  parameter and return type.
+- Add an adversarial negative fixture and claims-gate coverage for interface
+  signature mismatches.
+- Publish the v0.7 consolidation plan for ownership, concurrency, Unicode,
+  runtime, performance, CI, and external-review hardening.
+
+## 0.6.7 - 2026-08-30 (consuming View detach portability)
+
 - Preserve consuming slice-View detach (`v = append(v, x)`) while keeping the
   base frozen for every non-consuming mutation, move, reassign, or alias.
 - Make refcount fault probes request portable POSIX/GNU declarations under
-  strict C11 CI builds.
+strict C11 CI builds.
+
+## 0.6.6 - 2026-08-30 (normative slice safety)
 
 - Made the slice aliasing contract normative: slices and Views are non-Send,
   Views are NLL borrows, and refcount uniqueness never authorizes
   concurrent mutation.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
+
+**Next:** v0.6.8 → v0.7 consolidation — no new features. Freeze COW spec,
+property-based ownership testing, channel model-check, Unicode conformance
+suites, C runtime modularization, application benchmarks, CI automation,
+external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).
 
 ## 0.6.5 - 2026-08-30 (PQC + error tracing + JSON + Unicode 17)
 

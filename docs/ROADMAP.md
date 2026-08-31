@@ -466,9 +466,30 @@ Avoid stuffing large language features into 0.5.x patches; open **0.6** if neede
 
 ---
 
-## Toward 1.0 (after 0.5 series)
+## 0.6.8 → 0.7 — Consolidation
 
-Not a commitment to ship immediately after 0.5.2. Preconditions:
+**Theme:** no new features — freeze, specify, verify, audit.
+
+| Track | Scope |
+|-------|-------|
+| **COW spec** | Freeze slice representation; write normative retain/release/detach spec |
+| **Property testing** | Generated ownership programs; adversarial append/clone/view fuzzing |
+| **Channel model-check** | Finite state machine for unbuffered rendezvous; verify no deadlock/lost wakeup |
+| **Unicode conformance** | Official NormalizationTest.txt, GraphemeBreakTest.txt, XID verification |
+| **Windows** | Reduce quarantine; fix native ABI; remove stale README numbers |
+| **Runtime split** | Split monolithic C headers into auditable modules (< 2000 lines each) |
+| **App benchmarks** | SIP, HTTP, HEP throughput vs production baselines; published methodology |
+| **CI automation** | Release facts, binaries, FayDB regression gate — all generated on tag push |
+| **IR verifier** | Self-hosted CFG/SSA dominance, use-before-def, type consistency checks |
+| **External review** | COW ownership, channel wakeups, native ABI, ML-DSA key lifetime |
+
+Full plan: [CONSOLIDATION.md](CONSOLIDATION.md).
+
+---
+
+## Toward 1.0 (after 0.7)
+
+Not a commitment to ship immediately after 0.7. Preconditions:
 
 | Gate | Meaning |
 |------|---------|

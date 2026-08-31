@@ -84,6 +84,8 @@ expect_failure kick-mutable-lambda env MAKO_CACHE="$CACHE/kick-mutable-lambda" \
   "$MAKO" check "$ROOT/examples/bad/kick_mutable_lambda_capture.mko"
 expect_failure fan-capture env MAKO_CACHE="$CACHE/fan-capture" \
   "$MAKO" check "$ROOT/examples/bad/fan_capture.mko"
+expect_failure iface-signature-mismatch env MAKO_CACHE="$CACHE/iface-signature-mismatch" \
+  "$MAKO" check "$ROOT/examples/bad/iface_signature_mismatch.mko"
 
 "${CC:-cc}" -std=c11 -pthread -I"$ROOT/runtime" \
   "$ROOT/scripts/refcount-safety-probe.c" -o "$TMP/refcount-safety-probe"

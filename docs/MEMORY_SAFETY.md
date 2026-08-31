@@ -145,6 +145,16 @@ See [LONG_RUNNING.md](LONG_RUNNING.md).
 
 ---
 
+## Consolidation (v0.6.8 → v0.7)
+
+The next phase freezes the COW slice representation as a normative spec,
+adds property-based ownership fuzzing, model-checks the channel state machine,
+runs official Unicode conformance suites, splits the C runtime into auditable
+modules, and arranges an external review of ownership, channels, and native ABI.
+See [CONSOLIDATION.md](CONSOLIDATION.md).
+
+---
+
 ## What we’ll stand behind
 
 No tracing GC. Ownership free. Bounds checks in release. ASan green on the

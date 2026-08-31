@@ -20241,8 +20241,8 @@ impl TypeChecker {
             Type::Bool => "bool".into(),
             other => other.display(),
         };
-        // Check each interface method exists on the concrete type
-        for (method_name, _param_tys, _ret_ty) in &methods {
+        // Check each interface method exists on the concrete type with matching signature
+        for (method_name, iface_param_tys, iface_ret_ty) in &methods {
             let impl_name = format!("{type_name}_{method_name}");
             if !self.fns.contains_key(&impl_name) {
                 return Err(TypeError::new(format!(
@@ -20252,6 +20252,40 @@ impl TypeChecker {
                 .hint(format!(
                     "add `on {type_name} {{ fn {method_name}(self, ...) {{ ... }} }}`"
                 )));
+            }
+            // Validate parameter and return types match
+            if let Some(Type::Fn(impl_params, impl_ret)) = self.fns.get(&impl_name) {
+                // Skip self parameter (first param of impl)
+                let impl_non_self: Vec<_> = if !impl_params.is_empty() {
+                    impl_params[1..].to_vec()
+                } else {
+                    vec![]
+                };
+                let expected: Vec<_> = iface_param_tys
+                    .iter()
+                    .map(|te| self.resolve_type(te))
+                    .collect::<Result<_, _>>()?;
+                if impl_non_self.len() != expected.len() {
+                    return Err(TypeError::new(format!(
+                        "type `{}` method `{method_name}` has {} params but interface `{iface_name}` requires {}",
+                        type_name, impl_non_self.len(), expected.len()
+                    )));
+                }
+                for (i, (got, want)) in impl_non_self.iter().zip(expected.iter()).enumerate() {
+                    if !self.compatible(got, want) {
+                        return Err(TypeError::new(format!(
+                            "type `{}` method `{method_name}` param {} is {} but interface `{iface_name}` requires {}",
+                            type_name, i + 1, got.display(), want.display()
+                        )));
+                    }
+                }
+                let expected_ret = self.resolve_type(iface_ret_ty)?;
+                if !self.compatible(impl_ret, &expected_ret) {
+                    return Err(TypeError::new(format!(
+                        "type `{}` method `{method_name}` returns {} but interface `{iface_name}` requires {}",
+                        type_name, impl_ret.display(), expected_ret.display()
+                    )));
+                }
             }
         }
         Ok(())
@@ -21564,7 +21598,6 @@ impl TypeChecker {
             Type::Result(ok, err) => self.is_kick_sendable_ty(ok) && self.is_kick_sendable_ty(err),
             Type::Tuple(elems) => elems.iter().all(|e| self.is_kick_sendable_ty(e)),
             Type::Enum { name, variants, .. } => {
-                // Named enum: prefer depth helper (covers unit + POD payloads).
                 if !name.is_empty() && self.is_pod_enum_depth(name, 0) {
                     return true;
                 }

@@ -2495,7 +2495,10 @@ The type checker (`src/types/mod.rs`) performs:
 - **Unused Result** detection (compile error)
 - **Integer kind** mixing prevention (no implicit int/int64 coercion)
 - **Compile-time range** checking for constant `int8(n)` / `byte(n)` / `uint64(n)`
-- **Interface method** implementation requirements
+- **Interface method** implementation requirements. Satisfaction requires each
+  implementation method to match the interface method's non-receiver parameter
+  count and types and its return type. A same-named method with a different
+  signature does not satisfy the interface.
 
 ### 11.6 Code Generator
 
