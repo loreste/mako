@@ -12623,6 +12623,21 @@ impl<'a> FunctionLowerer<'a> {
             index: err_index,
             ty: Type::Str,
         });
+        let has_trace = self.value();
+        self.emit(Inst::Call {
+            out: Some(has_trace),
+            function: "mako_native_error_has_trace_ptr".into(),
+            args: vec![err],
+            ret: Some(Type::I64),
+        });
+        let traced_block = self.new_block();
+        let done_block = self.new_block();
+        self.terminate(Terminator::Branch {
+            condition: has_trace,
+            then_block: traced_block,
+            else_block: done_block,
+        })?;
+        self.current = traced_block;
         let file = self.value();
         self.emit(Inst::StringLiteral {
             out: file,
@@ -12642,6 +12657,8 @@ impl<'a> FunctionLowerer<'a> {
             index: err_index,
             value: traced,
         });
+        self.terminate(Terminator::Jump(done_block))?;
+        self.current = done_block;
         Ok(value)
     }
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.10 - 2026-08-31 (LLVM traced-result ownership)
+
+- Branch before replacing a native/LLVM `Result` error field: plain errors keep
+  their original header, while explicitly traced errors alone receive a new
+  propagation frame. This prevents LLVM self-assignment from invalidating the
+  error string and fixes the `examples/result.mko` CI crash.
+
 ## 0.6.9 - 2026-08-31 (string ownership safety rollback)
 
 - Restore allocator-matched string ownership: owned strings use `malloc`/`free`,
@@ -44,7 +51,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.9 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.10 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

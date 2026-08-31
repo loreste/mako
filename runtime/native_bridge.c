@@ -1037,6 +1037,14 @@ MakoNativeString *mako_native_error_propagate_at_ptr(MakoNativeString *err,
     return out;
 }
 
+int64_t mako_native_error_has_trace_ptr(MakoNativeString *err) {
+    MakoString value = bridge_borrow_str(err);
+    for (size_t i = 0; i < value.len; i++) {
+        if (value.data[i] == MAKO_ERR_SEP) return 1;
+    }
+    return 0;
+}
+
 MakoNativeString *mako_native_error_message_ptr(MakoNativeString *err) {
     return bridge_take_str(mako_error_message(bridge_borrow_str(err)));
 }
