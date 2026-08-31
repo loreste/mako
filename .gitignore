@@ -13,6 +13,9 @@
 /out/
 /app
 /udp_debug
+/examples/testing/json_marshal_test.c
+/examples/testing/unicode17_normalization_test.c
+**/__pycache__/
 
 # Accidental local binaries from `mako build` / experiments in repo root
 /trap_ov
