@@ -1,6 +1,6 @@
-# Consolidation plan: v0.6.12 → v0.7
+# Consolidation plan: v0.6.13 → v0.7
 
-**Product tip:** **0.6.12**. This document tracks the hardening and specification
+**Product tip:** **0.6.13**. This document tracks the hardening and specification
 work required before v0.7.
 
 The goal is **no new features** — only freeze, specify, verify, and audit what

@@ -1044,6 +1044,26 @@ int64_t mako_native_error_has_trace_ptr(MakoNativeString *err) {
     return 0;
 }
 
+/* LLVM lowers strings as two-field values rather than native heap-header
+ * pointers. Keep this ABI separate from the Cranelift bridge above. */
+int64_t mako_llvm_error_has_trace(MakoNativeString err) {
+    return mako_native_error_has_trace_ptr(&err);
+}
+
+MakoNativeString mako_llvm_error_propagate_at(MakoNativeString err,
+                                               MakoNativeString file,
+                                               int64_t line) {
+    MakoString borrowed = bridge_borrow_str(&err);
+    MakoString owned = mako_str_clone(borrowed);
+    if (borrowed.len != 0 && !owned.data) abort();
+    char *file_c = bridge_str_cstr(&file);
+    MakoString traced = mako_error_propagate(
+        owned, file_c ? file_c : "<unknown>", (int)line);
+    free(file_c);
+    MakoNativeString out = {(const char *)traced.data, traced.len};
+    return out;
+}
+
 MakoNativeString *mako_native_error_message_ptr(MakoNativeString *err) {
     return bridge_take_str(mako_error_message(bridge_borrow_str(err)));
 }

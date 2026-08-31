@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.13 - 2026-08-31 (LLVM error propagation ABI)
+
+- Split error-tracing bridges by backend ABI: Cranelift/native keeps pointer
+  string headers while LLVM passes strings as two-field values.
+- Propagate from an owned clone so result-field replacement drops the original
+  value exactly once; allocation failure aborts instead of creating an alias.
+
 ## 0.6.12 - 2026-08-31 (LLVM error propagation ownership)
 
 - Fixed the native error-tracing bridge so LLVM result-field replacement borrows
@@ -63,7 +70,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.12 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.13 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

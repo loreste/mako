@@ -496,6 +496,11 @@ fn emit_instruction<'ctx>(
             args,
             ret,
         } => {
+            let function = match function.as_str() {
+                "mako_native_error_has_trace_ptr" => "mako_llvm_error_has_trace",
+                "mako_native_error_propagate_at_ptr" => "mako_llvm_error_propagate_at",
+                function => function,
+            };
             // Hot map[int]int path: inline open-addressing probe (avoids 200k
             // external calls on the map bench). Rehash still calls runtime.
             if function == "mako_native_map_ii_set_ptr" && args.len() == 3 {
@@ -523,7 +528,7 @@ fn emit_instruction<'ctx>(
             }
             // Pointer-ABI runtime names (`*_ptr`) map to value-ABI entry points
             // when the LLVM string ABI is a struct (not a header pointer).
-            let function_name = match function.as_str() {
+            let function_name = match function {
                 "mako_native_parse_int_ptr" => "mako_native_parse_int",
                 "mako_native_path_join_ptr" => "mako_native_path_join",
                 "mako_native_str_len_ptr" => "mako_native_str_len",
