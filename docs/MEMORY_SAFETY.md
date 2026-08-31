@@ -145,7 +145,7 @@ See [LONG_RUNNING.md](LONG_RUNNING.md).
 
 ---
 
-## Consolidation (v0.6.10 → v0.7)
+## Consolidation (v0.6.11 → v0.7)
 
 The next phase freezes the COW slice representation as a normative spec,
 adds property-based ownership fuzzing, model-checks the channel state machine,

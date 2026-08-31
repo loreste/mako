@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.11 - 2026-08-31 (LLVM trace predicate normalization)
+
+- Normalize the native runtime's integer trace predicate through `!= 0` before
+  branching, producing the LLVM-required `i1` condition while preserving the
+  Cranelift behavior.
+
 ## 0.6.10 - 2026-08-31 (LLVM traced-result ownership)
 
 - Branch before replacing a native/LLVM `Result` error field: plain errors keep
@@ -51,7 +57,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.10 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.11 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

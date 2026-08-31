@@ -12630,10 +12630,19 @@ impl<'a> FunctionLowerer<'a> {
             args: vec![err],
             ret: Some(Type::I64),
         });
+        let zero = self.const_int(0, Type::I64);
+        let should_trace = self.value();
+        self.emit(Inst::Binary {
+            out: should_trace,
+            op: BinOp::Ne,
+            left: has_trace,
+            right: zero,
+            ty: Type::I64,
+        });
         let traced_block = self.new_block();
         let done_block = self.new_block();
         self.terminate(Terminator::Branch {
-            condition: has_trace,
+            condition: should_trace,
             then_block: traced_block,
             else_block: done_block,
         })?;
