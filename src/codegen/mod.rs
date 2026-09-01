@@ -6443,9 +6443,7 @@ impl Codegen {
         let _ = writeln!(self.out, "    a.cap = (size_t)(cap ? cap : 1);");
         let _ = writeln!(self.out, "    return a;");
         let _ = writeln!(self.out, "}}");
-        // Nested free: only deep-free plain slice headers (int/string/float/bool/byte
-        // arrays). Map/channel/handle/nested-arr elements may alias or own
-        // differently — free only the outer buffer for those.
+        // Nested free: deep-free element fields when last reference is released.
         let deep = match elem_c {
             "MakoIntArray" => Some("mako_int_array_free"),
             "MakoStrArray" => Some("mako_str_array_free"),
@@ -6454,14 +6452,29 @@ impl Codegen {
             "MakoByteArray" => Some("mako_byte_array_free"),
             _ => None,
         };
+        // For struct elements, collect field-level frees before emitting.
+        let struct_field_frees: Vec<(String, String)> = if deep.is_none() {
+            self.struct_own_field_frees(elem_c)
+        } else {
+            Vec::new()
+        };
         let _ = writeln!(self.out, "static inline void {pref}_free({mt} a) {{");
         let _ = writeln!(self.out, "    if (!(a.cap > 0 && a.data)) return;");
+        let _ = writeln!(self.out, "    if (!mako_rc_shared(a.data)) {{");
         if let Some(ef) = deep {
             let _ = writeln!(
                 self.out,
-                "    for (size_t i = 0; i < a.len; i++) {ef}(a.data[i]);"
+                "        for (size_t i = 0; i < a.len; i++) {ef}(a.data[i]);"
             );
+        } else if !struct_field_frees.is_empty() {
+            // Deep-free each struct element's owned fields before releasing buffer
+            let _ = writeln!(self.out, "        for (size_t i = 0; i < a.len; i++) {{");
+            for (fname, ffn) in &struct_field_frees {
+                let _ = writeln!(self.out, "            {ffn}(a.data[i].{fname});");
+            }
+            let _ = writeln!(self.out, "        }}");
         }
+        let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "    mako_rc_release(a.data);");
         let _ = writeln!(self.out, "}}");
         // O(1) RC clone: retain backing data, return shallow copy
