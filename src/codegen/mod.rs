@@ -2358,6 +2358,7 @@ impl Codegen {
     fn own_clone_fn(c_ty: &str) -> Option<String> {
         match c_ty {
             "MakoString" => Some("mako_str_clone".into()),
+            "MakoStrBuilder*" => Some("mako_str_builder_clone".into()),
             "MakoIntArray" => Some("mako_int_array_clone".into()),
             "MakoByteArray" => Some("mako_byte_array_clone".into()),
             "MakoStrArray" => Some("mako_str_array_clone".into()),
@@ -4389,6 +4390,10 @@ impl Codegen {
                     "for (int64_t _i = 0; _i < {val}.len; _i++) {{ {tmp}.data[_i] = mako_str_clone({val}.data[_i]); }}"
                 ));
             }
+            own_ty if Self::own_clone_fn(own_ty).is_some() => {
+                let clone_fn = Self::own_clone_fn(own_ty).expect("owned clone helper");
+                self.emit_line(format_args!("{c_ty} {tmp} = {clone_fn}({val});"));
+            }
             enum_ty if enum_ty.starts_with("MakoEnum_") => {
                 let name = &enum_ty["MakoEnum_".len()..];
                 self.emit_line(format_args!(
@@ -6268,7 +6273,20 @@ impl Codegen {
         let _ = writeln!(self.out, "    return a;");
         let _ = writeln!(self.out, "}}");
         let struct_field_frees = self.struct_own_field_frees(&c_name);
-        let _ = writeln!(self.out, "static inline void mako_arr_{c_name}_free({arr} a) {{");
+        let struct_field_clones: Vec<(String, String)> = info
+            .fields
+            .iter()
+            .filter_map(|(fname, fty)| {
+                if matches!(fty.as_str(), "MakoChan*" | "MakoChanStr*" | "MakoChanPtr*") {
+                    return None;
+                }
+                Self::own_clone_fn(fty).map(|clone_fn| (fname.clone(), clone_fn))
+            })
+            .collect();
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_arr_{c_name}_free({arr} a) {{"
+        );
         let _ = writeln!(self.out, "    if (!(a.cap > 0 && a.data)) return;");
         if !struct_field_frees.is_empty() {
             let _ = writeln!(self.out, "    if (!mako_rc_shared(a.data)) {{");
@@ -6285,8 +6303,29 @@ impl Codegen {
             self.out,
             "static inline {arr} mako_arr_{c_name}_clone({arr} a) {{"
         );
-        let _ = writeln!(self.out, "    if (a.cap > 0 && a.data) mako_rc_retain(a.data);");
-        let _ = writeln!(self.out, "    return a;");
+        let _ = writeln!(
+            self.out,
+            "    if (a.len == 0) {{ {arr} e = {{0}}; return e; }}"
+        );
+        let _ = writeln!(
+            self.out,
+            "    {arr} out = mako_arr_{c_name}_make((int64_t)a.len, (int64_t)a.len);"
+        );
+        let _ = writeln!(
+            self.out,
+            "    memcpy(out.data, a.data, a.len * sizeof(a.data[0]));"
+        );
+        if !struct_field_clones.is_empty() {
+            let _ = writeln!(self.out, "    for (size_t i = 0; i < out.len; i++) {{");
+            for (fname, clone_fn) in &struct_field_clones {
+                let _ = writeln!(
+                    self.out,
+                    "        out.data[i].{fname} = {clone_fn}(out.data[i].{fname});"
+                );
+            }
+            let _ = writeln!(self.out, "    }}");
+        }
+        let _ = writeln!(self.out, "    return out;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -6348,10 +6387,28 @@ impl Codegen {
             self.out,
             "        if (s.len) memcpy(nd, s.data, s.len * sizeof({c_name}));"
         );
+        if !struct_field_clones.is_empty() {
+            let _ = writeln!(self.out, "        for (size_t i = 0; i < s.len; i++) {{");
+            for (fname, clone_fn) in &struct_field_clones {
+                let _ = writeln!(
+                    self.out,
+                    "            nd[i].{fname} = {clone_fn}(nd[i].{fname});"
+                );
+            }
+            let _ = writeln!(self.out, "        }}");
+        }
+        let _ = writeln!(self.out, "        mako_arr_{c_name}_free(s);");
         let _ = writeln!(self.out, "        s.data = nd;");
         let _ = writeln!(self.out, "        s.cap = ncap;");
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    s.data[s.len++] = v;");
+        let _ = writeln!(self.out, "    s.data[s.len] = v;");
+        for (fname, clone_fn) in &struct_field_clones {
+            let _ = writeln!(
+                self.out,
+                "    s.data[s.len].{fname} = {clone_fn}(s.data[s.len].{fname});"
+            );
+        }
+        let _ = writeln!(self.out, "    s.len++;");
         let _ = writeln!(self.out, "    return s;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -6478,7 +6535,10 @@ impl Codegen {
         let _ = writeln!(self.out, "}}");
         // O(1) RC clone: retain backing data, return shallow copy
         let _ = writeln!(self.out, "static inline {mt} {pref}_clone({mt} a) {{");
-        let _ = writeln!(self.out, "    if (a.cap > 0 && a.data) mako_rc_retain(a.data);");
+        let _ = writeln!(
+            self.out,
+            "    if (a.cap > 0 && a.data) mako_rc_retain(a.data);"
+        );
         let _ = writeln!(self.out, "    return a;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -13312,6 +13372,22 @@ impl Codegen {
         );
         self.indent = 1;
 
+        // Mutable owning parameters borrow the caller's value. Take a retained
+        // header (or the type's ownership-preserving copy) so the existing drop cannot
+        // reclaim storage that remains live in the caller. Direct indexed
+        // writes intentionally stay visible through the shared backing store;
+        // append/growth helpers detach when required.
+        for p in &f.params {
+            if !p.mutable || p.name == "self" && is_mut_self_fn {
+                continue;
+            }
+            let pty = self.type_expr_c(&p.ty);
+            if let Some(clone_fn) = Self::own_clone_fn(&pty) {
+                let mn = mangle(&p.name);
+                self.emit_line(format_args!("{mn} = {clone_fn}({mn});"));
+            }
+        }
+
         // Deep-clone owned fields of `mut` struct params so mutations don't
         // corrupt the caller's data (C struct copy shares interior pointers).
         for p in &f.params {
@@ -13351,12 +13427,14 @@ impl Codegen {
         // Register mut struct params for owned-drop tracking so field
         // reassignment emits free-before-assign (prevents leaks).
         for p in &f.params {
-            if !p.mutable { continue; }
-            if p.name == "self" && is_mut_self_fn { continue; }
+            if !p.mutable {
+                continue;
+            }
+            if p.name == "self" && is_mut_self_fn {
+                continue;
+            }
             let pty = self.type_expr_c(&p.ty);
-            if Self::own_free_fn(&pty).is_some()
-                || !self.struct_own_field_frees(&pty).is_empty()
-            {
+            if Self::own_free_fn(&pty).is_some() || !self.struct_own_field_frees(&pty).is_empty() {
                 let mn = mangle(&p.name);
                 self.register_own_drop(&mn, &pty);
                 self.scope_drop_safe.insert(mn);
@@ -15244,12 +15322,15 @@ impl Codegen {
                     if let Some(field_free) =
                         Self::own_free_fn(&vty).filter(|_| !consumes_old_field)
                     {
+                        // Always free old field value before reassignment.
+                        // Struct fields are zero-initialized, and free functions
+                        // handle null/empty (e.g. mako_arr_*_free checks cap > 0).
                         if self.own_cond_flags.contains(&mn) {
                             self.emit_line(format_args!(
                                 "if ({mn}__own) {field_free}({b}{arrow}{field});"
                             ));
                             self.emit_line(format_args!("{mn}__own = 1;"));
-                        } else if self.own_drop_live.contains(&mn) {
+                        } else {
                             self.emit_line(format_args!("{field_free}({b}{arrow}{field});"));
                         }
                     }
@@ -34815,7 +34896,13 @@ impl Codegen {
                     // the returned struct (`st_0.s = s`), so the struct outlived
                     // a borrow it did not own — safe only because the caller was
                     // then forced to leak the original.
-                    let v = self.prepare_own_store_rhs(fexpr, &fty, v);
+                    let v = if Self::own_free_fn(&fty).is_some()
+                        || !self.struct_own_field_frees(&fty).is_empty()
+                    {
+                        self.clone_own_val(&fty, &v)
+                    } else {
+                        v
+                    };
                     self.line(&format!("{tmp}.{fname} = {v};"));
                 }
                 (cty, tmp)

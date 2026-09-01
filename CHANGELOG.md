@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.6.16 - 2026-09-01 (recursive ownership hardening)
+
+- Give top-level struct slices independent outer buffers and clone each owned
+  element field, then recursively destroy fields exactly once on final release.
+- Retain mutable owning parameters for their function scope so borrowed buffers
+  cannot be reclaimed while caller aliases remain live.
+- Add deep clone helpers for every built-in map shape, including owned string
+  keys and values.
+- Make shared `StrBuilder` lifetime atomic; `finish` copies when aliases exist
+  and steals the buffer only for the unique owner.
+- Keep the Ubuntu LeakSanitizer regression gate for nested struct clone/drop
+  cycles, in addition to the full AddressSanitizer corpus.
+
 ## 0.6.15 - 2026-08-31 (top-level struct-array cleanup)
 
 - Apply the O(1) COW retain and final-owner recursive element destruction rules
@@ -86,7 +99,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.15 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.16 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

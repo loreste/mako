@@ -147,27 +147,38 @@ See [LONG_RUNNING.md](LONG_RUNNING.md).
 
 ## Nested struct-array ownership
 
-Arrays of structs use copy-on-write backing storage. A by-value clone retains the
-single backing allocation in O(1); it does not recursively clone every element.
-Mutation must detach before writing whenever the backing reference count is not
-unique.
+Top-level arrays of structs use independent outer buffers. A by-value clone copies the
+outer buffer and clones or retains every owned element field.
+Nested refcounted slices use O(1) retains, while maps receive independent table
+storage. Append detachment copies owned fields before releasing the old buffer.
 
-Dropping an alias only decrements the backing reference count. The final owner
+The final outer owner
 recursively destroys every element's owned fields—including strings, nested
-arrays, maps, and nested structs—before releasing the backing allocation. The
-uniqueness check and release are paired so element destructors run exactly once.
-Element destruction must never run for a non-final alias.
+arrays, maps, builders, and nested structs—before releasing the backing allocation.
+Element destructors therefore run exactly once.
 
-Read-only by-value struct parameters can still perform balanced retain/release
-operations for their owned fields. That is CPU/refcount traffic, not retained
-memory; removing it requires a separately specified borrow ABI and is not assumed
-by the current ownership model.
+Mutable owning parameters are borrowed aliases. The callee takes a balanced
+retained header/reference on entry and releases it on every exit. Direct indexed
+writes stay visible through the borrowed backing; growth and append detach when
+required. Borrowed views may not outlive the owner or a detach boundary.
+
+Built-in maps deep-copy table storage when ownership is duplicated. Occupied
+string keys and values are cloned; empty and tombstone slots run no destructor.
+`StrBuilder` is an atomic shared handle: clone uses a relaxed retain, final
+release uses acquire/release ordering, overflow aborts, and `finish` steals only
+from a unique owner.
+
+Atomic reference counts protect lifetime only. They do not authorize concurrent
+mutation of slice headers, maps, elements, or builders. Cross-task aliases must
+be read-only or transferred through `share`/crew/channel ownership rules; a
+writer requires exclusive ownership. Detachment happens before append/growth
+when backing storage is shared, and borrowed views cannot survive that boundary.
 
 Regression coverage: `examples/testing/struct_clone_nested_if_test.mko` stresses
 repeated nested clone/drop cycles. The full sanitizer sweep and native memory
 safety gate execute the ownership suite in CI.
 
-## Consolidation (v0.6.15 → v0.7)
+## Consolidation (v0.6.16 → v0.7)
 
 The next phase freezes the COW slice representation as a normative spec,
 adds property-based ownership fuzzing, model-checks the channel state machine,

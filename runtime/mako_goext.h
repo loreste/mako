@@ -6425,6 +6425,77 @@ static inline int64_t mako_str_count(MakoString s, MakoString sub) {
 
 /* ---- SAFE-004: free built-in map heap handles ---- */
 
+#define MAKO_MAP_CLONE_STORAGE(MapType)                                      \
+    if (!m) return NULL;                                                     \
+    MapType *out = (MapType *)malloc(sizeof(*out));                          \
+    if (!out) mako_abort("out of memory cloning map");                       \
+    *out = *m;                                                               \
+    out->state = (uint8_t *)malloc(m->cap * sizeof(*out->state));            \
+    out->keys = malloc(m->cap * sizeof(*out->keys));                         \
+    out->vals = malloc(m->cap * sizeof(*out->vals));                         \
+    if (!out->state || !out->keys || !out->vals)                             \
+        mako_abort("out of memory cloning map");                            \
+    memcpy(out->state, m->state, m->cap * sizeof(*out->state));              \
+    memcpy(out->keys, m->keys, m->cap * sizeof(*out->keys));                 \
+    memcpy(out->vals, m->vals, m->cap * sizeof(*out->vals))
+
+#define MAKO_DEFINE_MAP_CLONE_POD(fn_name, MapType)                          \
+    static inline MapType *fn_name(MapType *m) {                             \
+        MAKO_MAP_CLONE_STORAGE(MapType);                                     \
+        return out;                                                          \
+    }
+
+#define MAKO_DEFINE_MAP_CLONE_STR_KEY(fn_name, MapType)                      \
+    static inline MapType *fn_name(MapType *m) {                             \
+        MAKO_MAP_CLONE_STORAGE(MapType);                                     \
+        for (size_t i = 0; i < out->cap; i++)                                \
+            if (out->state[i] == MAKO_MAP_FULL)                              \
+                out->keys[i] = mako_str_clone(out->keys[i]);                 \
+        return out;                                                          \
+    }
+
+#define MAKO_DEFINE_MAP_CLONE_STR_VAL(fn_name, MapType)                      \
+    static inline MapType *fn_name(MapType *m) {                             \
+        MAKO_MAP_CLONE_STORAGE(MapType);                                     \
+        for (size_t i = 0; i < out->cap; i++)                                \
+            if (out->state[i] == MAKO_MAP_FULL)                              \
+                out->vals[i] = mako_str_clone(out->vals[i]);                 \
+        return out;                                                          \
+    }
+
+#define MAKO_DEFINE_MAP_CLONE_STR_BOTH(fn_name, MapType)                     \
+    static inline MapType *fn_name(MapType *m) {                             \
+        MAKO_MAP_CLONE_STORAGE(MapType);                                     \
+        for (size_t i = 0; i < out->cap; i++) {                              \
+            if (out->state[i] != MAKO_MAP_FULL) continue;                    \
+            out->keys[i] = mako_str_clone(out->keys[i]);                     \
+            out->vals[i] = mako_str_clone(out->vals[i]);                     \
+        }                                                                    \
+        return out;                                                          \
+    }
+
+MAKO_DEFINE_MAP_CLONE_POD(mako_map_ii_clone, MakoMapII)
+MAKO_DEFINE_MAP_CLONE_POD(mako_map_if_clone, MakoMapIF)
+MAKO_DEFINE_MAP_CLONE_POD(mako_map_fi_clone, MakoMapFI)
+MAKO_DEFINE_MAP_CLONE_POD(mako_map_ff_clone, MakoMapFF)
+MAKO_DEFINE_MAP_CLONE_POD(mako_map_ib_clone, MakoMapIB)
+MAKO_DEFINE_MAP_CLONE_POD(mako_map_bi_clone, MakoMapBI)
+MAKO_DEFINE_MAP_CLONE_POD(mako_map_fb_clone, MakoMapFB)
+MAKO_DEFINE_MAP_CLONE_POD(mako_map_bf_clone, MakoMapBF)
+MAKO_DEFINE_MAP_CLONE_POD(mako_map_bb_clone, MakoMapBB)
+MAKO_DEFINE_MAP_CLONE_STR_KEY(mako_map_si_clone, MakoMapSI)
+MAKO_DEFINE_MAP_CLONE_STR_KEY(mako_map_sf_clone, MakoMapSF)
+MAKO_DEFINE_MAP_CLONE_STR_KEY(mako_map_sb_clone, MakoMapSB)
+MAKO_DEFINE_MAP_CLONE_STR_VAL(mako_map_fs_clone, MakoMapFS)
+MAKO_DEFINE_MAP_CLONE_STR_VAL(mako_map_bs_clone, MakoMapBS)
+MAKO_DEFINE_MAP_CLONE_STR_BOTH(mako_map_ss_clone, MakoMapSS)
+
+#undef MAKO_DEFINE_MAP_CLONE_STR_BOTH
+#undef MAKO_DEFINE_MAP_CLONE_STR_VAL
+#undef MAKO_DEFINE_MAP_CLONE_STR_KEY
+#undef MAKO_DEFINE_MAP_CLONE_POD
+#undef MAKO_MAP_CLONE_STORAGE
+
 static inline void mako_map_ii_free(MakoMapII *m) {
     if (!m) return;
     free(m->state);

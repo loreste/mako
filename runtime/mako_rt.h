@@ -2121,6 +2121,7 @@ static inline MakoString mako_int_to_string(int64_t n) {
 
 /* ---- String builder (growable buffer → string) ---- */
 typedef struct {
+    _Atomic uint32_t refs;
     char *data;
     size_t len;
     size_t cap;
@@ -2129,11 +2130,28 @@ typedef struct {
 static inline MakoStrBuilder *mako_str_builder_new(void) {
     MakoStrBuilder *b = (MakoStrBuilder *)malloc(sizeof(MakoStrBuilder));
     if (MAKO_UNLIKELY(!b)) mako_abort("str_builder: out of memory");
+    atomic_init(&b->refs, 1);
     b->data = (char *)malloc(64); /* start larger — f-strings / logs rarely tiny */
     if (MAKO_UNLIKELY(!b->data)) mako_abort("str_builder: out of memory");
     b->data[0] = 0;
     b->len = 0;
     b->cap = 64;
+    return b;
+}
+
+static inline MakoStrBuilder *mako_str_builder_clone(MakoStrBuilder *b) {
+    if (!b) return NULL;
+    uint32_t old = atomic_load_explicit(&b->refs, memory_order_relaxed);
+    for (;;) {
+        if (MAKO_UNLIKELY(old == 0))
+            mako_abort("str_builder: retain after final release");
+        if (MAKO_UNLIKELY(old == UINT32_MAX))
+            mako_abort("str_builder: reference count overflow");
+        if (atomic_compare_exchange_weak_explicit(
+                &b->refs, &old, old + 1,
+                memory_order_relaxed, memory_order_relaxed))
+            break;
+    }
     return b;
 }
 
@@ -2564,9 +2582,19 @@ static inline MakoString mako_str_builder_string(MakoStrBuilder *b) {
     return out;
 }
 
+static inline void mako_str_builder_free(MakoStrBuilder *b);
+
 /* Steal buffer as MakoString and free the builder shell — one heap string, no copy. */
 static inline MakoString mako_str_builder_finish(MakoStrBuilder *b) {
     if (MAKO_UNLIKELY(!b)) return mako_str_empty;
+    uint32_t expected = 1;
+    if (!atomic_compare_exchange_strong_explicit(
+            &b->refs, &expected, 0,
+            memory_order_acq_rel, memory_order_acquire)) {
+        MakoString out = mako_str_builder_string(b);
+        mako_str_builder_free(b);
+        return out;
+    }
     /* Ensure NUL-terminated owned buffer. */
     mako_str_builder_grow(b, b->len + 1);
     b->data[b->len] = 0;
@@ -2577,6 +2605,10 @@ static inline MakoString mako_str_builder_finish(MakoStrBuilder *b) {
 
 static inline void mako_str_builder_free(MakoStrBuilder *b) {
     if (!b) return;
+    uint32_t old = atomic_fetch_sub_explicit(&b->refs, 1, memory_order_acq_rel);
+    if (MAKO_UNLIKELY(old == 0))
+        mako_abort("str_builder: reference count underflow");
+    if (old != 1) return;
     if (b->data) { free(b->data); b->data = NULL; }
     b->len = 0;
     b->cap = 0;
