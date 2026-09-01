@@ -167,7 +167,7 @@ Regression coverage: `examples/testing/struct_clone_nested_if_test.mko` stresses
 repeated nested clone/drop cycles. The full sanitizer sweep and native memory
 safety gate execute the ownership suite in CI.
 
-## Consolidation (v0.6.14 → v0.7)
+## Consolidation (v0.6.15 → v0.7)
 
 The next phase freezes the COW slice representation as a normative spec,
 adds property-based ownership fuzzing, model-checks the channel state machine,

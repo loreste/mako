@@ -6267,27 +6267,26 @@ impl Codegen {
         let _ = writeln!(self.out, "    a.cap = (size_t)(cap ? cap : 1);");
         let _ = writeln!(self.out, "    return a;");
         let _ = writeln!(self.out, "}}");
-        let _ = writeln!(
-            self.out,
-            "static inline void mako_arr_{c_name}_free({arr} a) {{ if (a.cap > 0 && a.data) mako_rc_release(a.data); }}"
-        );
+        let struct_field_frees = self.struct_own_field_frees(&c_name);
+        let _ = writeln!(self.out, "static inline void mako_arr_{c_name}_free({arr} a) {{");
+        let _ = writeln!(self.out, "    if (!(a.cap > 0 && a.data)) return;");
+        if !struct_field_frees.is_empty() {
+            let _ = writeln!(self.out, "    if (!mako_rc_shared(a.data)) {{");
+            let _ = writeln!(self.out, "        for (size_t i = 0; i < a.len; i++) {{");
+            for (fname, free_fn) in &struct_field_frees {
+                let _ = writeln!(self.out, "            {free_fn}(a.data[i].{fname});");
+            }
+            let _ = writeln!(self.out, "        }}");
+            let _ = writeln!(self.out, "    }}");
+        }
+        let _ = writeln!(self.out, "    mako_rc_release(a.data);");
+        let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
             "static inline {arr} mako_arr_{c_name}_clone({arr} a) {{"
         );
-        let _ = writeln!(
-            self.out,
-            "    if (a.len == 0) {{ {arr} e = {{0}}; return e; }}"
-        );
-        let _ = writeln!(
-            self.out,
-            "    {arr} out = mako_arr_{c_name}_make((int64_t)a.len, (int64_t)a.len);"
-        );
-        let _ = writeln!(
-            self.out,
-            "    memcpy(out.data, a.data, a.len * sizeof(a.data[0]));"
-        );
-        let _ = writeln!(self.out, "    return out;");
+        let _ = writeln!(self.out, "    if (a.cap > 0 && a.data) mako_rc_retain(a.data);");
+        let _ = writeln!(self.out, "    return a;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -13346,6 +13345,21 @@ impl Codegen {
                         }
                     }
                 }
+            }
+        }
+
+        // Register mut struct params for owned-drop tracking so field
+        // reassignment emits free-before-assign (prevents leaks).
+        for p in &f.params {
+            if !p.mutable { continue; }
+            if p.name == "self" && is_mut_self_fn { continue; }
+            let pty = self.type_expr_c(&p.ty);
+            if Self::own_free_fn(&pty).is_some()
+                || !self.struct_own_field_frees(&pty).is_empty()
+            {
+                let mn = mangle(&p.name);
+                self.register_own_drop(&mn, &pty);
+                self.scope_drop_safe.insert(mn);
             }
         }
 

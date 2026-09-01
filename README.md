@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.14).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.15).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -163,7 +163,7 @@ message inspection, site history, reports, alerts, and traffic metrics.
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
 
-## New in 0.6.14
+## New in 0.6.15
 
 Nested struct arrays now clone in O(1) by retaining their copy-on-write backing
 buffer. The last owner recursively destroys each element's owned fields before
