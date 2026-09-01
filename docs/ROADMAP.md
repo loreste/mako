@@ -466,7 +466,7 @@ Avoid stuffing large language features into 0.5.x patches; open **0.6** if neede
 
 ---
 
-## 0.6.20 → 0.7 — Consolidation
+## 0.6.21 → 0.7 — Consolidation
 
 **Theme:** no new features — freeze, specify, verify, audit.
 

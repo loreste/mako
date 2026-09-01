@@ -1,0 +1,36 @@
+struct Detail {
+    label string
+}
+
+struct QueryResult {
+    code int
+    text string
+    detail Detail
+}
+
+fn query_result(text: string, label: string) -> QueryResult {
+    return QueryResult{
+        code: 200,
+        text: text,
+        detail: Detail{label: label},
+    }
+}
+
+fn TestOwnedFieldMoveIntoLet() {
+    let result = query_result("rows", "disk")
+    let text = result.text
+    let detail = result.detail
+
+    assert(text == "rows")
+    assert(detail.label == "disk")
+    assert(result.code == 200)
+}
+
+fn TestOwnedFieldMoveIntoExistingLocal() {
+    let result = query_result("replacement", "kept")
+    let mut text = "old"
+    text = result.text
+
+    assert(text == "replacement")
+    assert(result.detail.label == "kept")
+}

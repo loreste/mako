@@ -82,6 +82,9 @@ pub struct Codegen {
     own_drop_scopes: Vec<Vec<(String, String)>>,
     /// Still-live own-drop keys (mangled); skip if already freed.
     own_drop_live: std::collections::HashSet<String>,
+    /// Owning structs produced by calls. Their fields may be destructured by
+    /// move because the aggregate is a transient return container.
+    call_result_owners: std::collections::HashSet<String>,
     /// Fresh builtin results whose ownership is unambiguous enough to drop at
     /// ordinary scope exit. Other legacy entries retain the conservative
     /// closed-scope behavior until their alias metadata is made path-sensitive.
@@ -237,6 +240,7 @@ impl Codegen {
             fn_env_live: std::collections::HashSet::new(),
             own_drop_scopes: Vec::new(),
             own_drop_live: std::collections::HashSet::new(),
+            call_result_owners: std::collections::HashSet::new(),
             scope_drop_safe: std::collections::HashSet::new(),
             own_bind_scope: std::collections::HashMap::new(),
             own_cond_flags: std::collections::HashSet::new(),
@@ -3835,26 +3839,67 @@ impl Codegen {
 
     /// True when a struct C type has Own fields that need deep free on drop.
     fn struct_own_field_frees(&self, c_ty: &str) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let mut visiting = std::collections::HashSet::new();
+        self.collect_struct_own_field_frees(c_ty, "", &mut visiting, &mut out);
+        out
+    }
+
+    fn collect_struct_own_field_frees(
+        &self,
+        c_ty: &str,
+        prefix: &str,
+        visiting: &mut std::collections::HashSet<String>,
+        out: &mut Vec<(String, String)>,
+    ) {
+        if !visiting.insert(c_ty.to_string()) {
+            return;
+        }
         let info = self
             .structs
             .values()
             .find(|s| s.c_name == c_ty)
             .or_else(|| self.structs.get(c_ty));
         let Some(info) = info else {
-            return Vec::new();
+            visiting.remove(c_ty);
+            return;
         };
-        let mut out = Vec::new();
-        for (fname, fty) in &info.fields {
+        let fields = info.fields.clone();
+        for (fname, fty) in fields {
             // Channels are shared resources — never auto-free on struct drop.
             // Only the creator (chan_new) should free. Struct fields are borrows.
             if matches!(fty.as_str(), "MakoChan*" | "MakoChanStr*" | "MakoChanPtr*") {
                 continue;
             }
-            if let Some(ff) = Self::own_free_fn(fty) {
-                out.push((fname.clone(), ff));
+            let path = if prefix.is_empty() {
+                fname
+            } else {
+                format!("{prefix}.{fname}")
+            };
+            if let Some(ff) = Self::own_free_fn(&fty) {
+                out.push((path, ff));
+            } else {
+                self.collect_struct_own_field_frees(&fty, &path, visiting, out);
             }
         }
-        out
+        visiting.remove(c_ty);
+    }
+
+    fn struct_field_c_type(&self, c_ty: &str, path: &str) -> Option<String> {
+        let mut current = c_ty.to_string();
+        for part in path.split('.') {
+            let info = self
+                .structs
+                .values()
+                .find(|s| s.c_name == current)
+                .or_else(|| self.structs.get(&current))?;
+            current = info
+                .fields
+                .iter()
+                .find(|(name, _)| name == part)
+                .map(|(_, ty)| ty.clone())?;
+        }
+        Some(current)
     }
 
     /// Record which own-drop scope owns this binding (params / lets / pattern binds).
@@ -3874,6 +3919,7 @@ impl Codegen {
             scope.retain(|(n, _)| n != mangled);
         }
         self.own_drop_live.remove(mangled);
+        self.call_result_owners.remove(mangled);
         self.scope_drop_safe.remove(mangled);
         self.own_cond_flags.remove(mangled);
         self.own_bind_scope.insert(mangled.to_string(), idx);
@@ -4110,6 +4156,7 @@ impl Codegen {
     /// Transfer ownership out of the function (return) — do not free this local.
     fn note_own_drop_moved(&mut self, mangled: &str) {
         self.own_drop_live.remove(mangled);
+        self.call_result_owners.remove(mangled);
         if self.own_cond_flags.contains(mangled) && self.bind_scope_active(mangled) {
             // Runtime freer flag: moved value must not be free'd at scope exit.
             self.emit_line(format_args!("{mangled}__own = 0;"));
@@ -4306,7 +4353,10 @@ impl Codegen {
                     val
                 }
             }
-            Expr::Field { .. } | Expr::Index { .. } => self.clone_own_val(c_ty, &val),
+            Expr::Field { .. } => self
+                .prepare_owned_field_move(value, c_ty, &val)
+                .unwrap_or_else(|| self.clone_own_val(c_ty, &val)),
+            Expr::Index { .. } => self.clone_own_val(c_ty, &val),
             _ => {
                 // Fresh owns (calls, concat, lits): if emit produced a tracked temp, move it.
                 if self.own_drop_live.contains(&val) {
@@ -4315,6 +4365,33 @@ impl Codegen {
                 val
             }
         }
+    }
+
+    /// Move an owned field out of a fresh call/method result local without
+    /// allocating. Ordinary struct locals keep value semantics and therefore
+    /// clone on field extraction.
+    fn prepare_owned_field_move(&mut self, value: &Expr, c_ty: &str, val: &str) -> Option<String> {
+        if Self::own_free_fn(c_ty).is_none() && self.struct_own_field_frees(c_ty).is_empty() {
+            return None;
+        }
+        let Expr::Field { base, .. } = value else {
+            return None;
+        };
+        let Expr::Ident(owner) = base.as_ref() else {
+            return None;
+        };
+        let owner = mangle(owner);
+        if !self.own_drop_live.contains(&owner)
+            || self.share_live.contains(&owner)
+            || !self.call_result_owners.contains(&owner)
+        {
+            return None;
+        }
+
+        let moved = self.fresh("field_move");
+        self.emit_line(format_args!("{c_ty} {moved} = {val};"));
+        self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
+        Some(moved)
     }
 
     /// If a call/method is a known consuming function (append, push, pop, insert,
@@ -4404,17 +4481,7 @@ impl Codegen {
                 let fields = self.struct_own_field_frees(c_ty);
                 self.emit_line(format_args!("{c_ty} {tmp} = {val};"));
                 for (field, _) in fields {
-                    let field_ty = self
-                        .structs
-                        .values()
-                        .find(|s| s.c_name == c_ty)
-                        .or_else(|| self.structs.get(c_ty))
-                        .and_then(|s| {
-                            s.fields
-                                .iter()
-                                .find(|(name, _)| name == &field)
-                                .map(|(_, ty)| ty.clone())
-                        });
+                    let field_ty = self.struct_field_c_type(c_ty, &field);
                     if let Some(field_ty) = field_ty {
                         let cloned = self.clone_own_val(&field_ty, &format!("{tmp}.{field}"));
                         self.emit_line(format_args!("{tmp}.{field} = {cloned};"));
@@ -6273,14 +6340,12 @@ impl Codegen {
         let _ = writeln!(self.out, "    return a;");
         let _ = writeln!(self.out, "}}");
         let struct_field_frees = self.struct_own_field_frees(&c_name);
-        let struct_field_clones: Vec<(String, String)> = info
-            .fields
+        let struct_field_clones: Vec<(String, String)> = struct_field_frees
             .iter()
-            .filter_map(|(fname, fty)| {
-                if matches!(fty.as_str(), "MakoChan*" | "MakoChanStr*" | "MakoChanPtr*") {
-                    return None;
-                }
-                Self::own_clone_fn(fty).map(|clone_fn| (fname.clone(), clone_fn))
+            .filter_map(|(path, _)| {
+                self.struct_field_c_type(&c_name, path)
+                    .and_then(|fty| Self::own_clone_fn(&fty))
+                    .map(|clone_fn| (path.clone(), clone_fn))
             })
             .collect();
         let _ = writeln!(
@@ -13396,17 +13461,7 @@ impl Codegen {
             if !frees.is_empty() {
                 let mn = mangle(&p.name);
                 for (fname, _) in &frees {
-                    let fty = self
-                        .structs
-                        .values()
-                        .find(|s| s.c_name == pty)
-                        .or_else(|| self.structs.get(&pty))
-                        .and_then(|s| {
-                            s.fields
-                                .iter()
-                                .find(|(n, _)| n == fname)
-                                .map(|(_, t)| t.clone())
-                        });
+                    let fty = self.struct_field_c_type(&pty, fname);
                     if let Some(ref ft) = fty {
                         if let Some(clone_fn) = Self::own_clone_fn(ft) {
                             self.emit_line(format_args!(
@@ -14570,12 +14625,35 @@ impl Codegen {
                     && (Self::own_free_fn(&ty).is_some()
                         || !self.struct_own_field_frees(&ty).is_empty())
                     && self.current_arena.is_none();
-                let val = if clone_ident_own {
-                    self.clone_own_val(&ty, &val)
+                let transient_call_result_struct = *ownership != Ownership::Share
+                    && self.current_arena.is_none()
+                    && !self.struct_own_field_frees(&ty).is_empty()
+                    && matches!(init, Expr::Call { .. } | Expr::Method { .. });
+                let (val, field_value_owned) = if clone_ident_own {
+                    (self.clone_own_val(&ty, &val), false)
+                } else if *ownership != Ownership::Share && self.current_arena.is_none() {
+                    if let Some(moved) = self.prepare_owned_field_move(init, &ty, &val) {
+                        (moved, true)
+                    } else if matches!(init, Expr::Field { .. })
+                        && (Self::own_free_fn(&ty).is_some()
+                            || !self.struct_own_field_frees(&ty).is_empty())
+                    {
+                        (self.clone_own_val(&ty, &val), true)
+                    } else {
+                        (val, false)
+                    }
                 } else {
-                    val
+                    (val, false)
                 };
                 self.line(&format!("{ty} {name} = {val};"));
+
+                if field_value_owned {
+                    self.register_own_drop(name, &ty);
+                    self.scope_drop_safe.insert(name.to_string());
+                }
+                if transient_call_result_struct {
+                    self.call_result_owners.insert(name.to_string());
+                }
 
                 // A fresh struct value owns each nested owning field. Register its
                 // destructor as an invariant of the declaration so later ownership
@@ -14647,6 +14725,8 @@ impl Codegen {
                     // the call is not syntactically a constructor.
                     self.register_own_drop(name, &ty);
                     self.scope_drop_safe.insert(name.to_string());
+                } else if field_value_owned {
+                    // Registered above after a move or required borrow clone.
                 } else if clone_ident_own {
                     self.register_own_drop(name, &ty);
                     self.scope_drop_safe.insert(name.to_string());

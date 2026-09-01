@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.6.21 - 2026-09-01 (owned field moves)
+
+- Move owned fields out of fresh call-returned local structs without cloning,
+  zeroing the source field so parent and destination destructors remain
+  disjoint while ordinary struct locals keep value semantics.
+- Discover owned fields recursively through nested structs for clone and drop.
+- Add a Linux LeakSanitizer gate for return-struct field extraction.
+
 ## 0.6.20 - 2026-09-01 (aggregate channel ownership)
 
 - Deep-clone owned fields when boxing aggregate channel payloads so sender and
@@ -129,7 +137,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.20 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.21 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

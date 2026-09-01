@@ -165,6 +165,14 @@ call-returned structs, and frees the old fields before whole-struct assignment.
 An indexed struct value is a borrow into its container and never receives an
 independent destructor unless explicitly cloned into owned storage.
 
+Reading an owned field into an owning destination from a fresh call-returned
+local struct is a move, not a clone. Codegen copies the field header/value and
+immediately zeros the source field. The parent destructor recursively visits
+nested fields but skips the zeroed allocation, while the destination becomes
+its sole owner. Ordinary struct locals still clone on field extraction. Fields
+reached through shared, indexed, or otherwise borrowed values clone
+instead because mutating those sources would violate alias safety.
+
 Aggregate channel sends clone owned payload fields before handoff. The sender
 keeps its original value; a successful send transfers the clone to the channel,
 and a rejected normal, timeout, or try-send recursively destroys the clone.
@@ -190,7 +198,7 @@ Regression coverage: `examples/testing/struct_clone_nested_if_test.mko` stresses
 repeated nested clone/drop cycles. The full sanitizer sweep and native memory
 safety gate execute the ownership suite in CI.
 
-## Consolidation (v0.6.20 → v0.7)
+## Consolidation (v0.6.21 → v0.7)
 
 The next phase freezes the COW slice representation as a normative spec,
 adds property-based ownership fuzzing, model-checks the channel state machine,
