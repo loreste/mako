@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.20 - 2026-09-01 (aggregate channel ownership)
+
+- Deep-clone owned fields when boxing aggregate channel payloads so sender and
+  receiver destructors never free the same allocation.
+- Recursively clean the cloned payload when normal, timeout, or try-send fails
+  before the channel accepts ownership.
+
 ## 0.6.19 - 2026-09-01 (owned struct-local destruction)
 
 - Emit scope-exit destructors for fresh struct locals containing owned fields,
@@ -122,7 +129,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.19 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.20 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

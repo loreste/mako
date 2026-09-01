@@ -36881,10 +36881,19 @@ impl Codegen {
                             self.line(&format!(
                                 "{cname} *{boxn} = ({cname}*)mako_box_alloc(sizeof({cname}));"
                             ));
-                            self.emit_line(format_args!("*{boxn} = {v};"));
+                            let cloned = self.clone_own_val(&cname, &v);
+                            self.emit_line(format_args!("*{boxn} = {cloned};"));
                             self.line(&format!(
                                 "bool {tmp} = mako_chan_ptr_send({rv}, {boxn}) != 0;"
                             ));
+                            self.emit_line(format_args!("if (!{tmp}) {{"));
+                            self.indent += 1;
+                            for (field, free_fn) in self.struct_own_field_frees(&cname) {
+                                self.emit_line(format_args!("{free_fn}({boxn}->{field});"));
+                            }
+                            self.emit_line(format_args!("mako_box_free({boxn}, sizeof({cname}));"));
+                            self.indent -= 1;
+                            self.line("}");
                         } else {
                             let is_f64 = vty == "double"
                                 || matches!(receiver.as_ref(), Expr::Ident(n) if self.chan_float.contains(n))
@@ -36947,7 +36956,8 @@ impl Codegen {
                             self.line(&format!(
                                 "{cname} *{boxn} = ({cname}*)mako_box_alloc(sizeof({cname}));"
                             ));
-                            self.emit_line(format_args!("*{boxn} = {v};"));
+                            let cloned = self.clone_own_val(&cname, &v);
+                            self.emit_line(format_args!("*{boxn} = {cloned};"));
                             if method == "try_send" {
                                 self.line(&format!(
                                     "int64_t {tmp} = mako_chan_ptr_try_send({rv}, {boxn});"
@@ -36957,9 +36967,14 @@ impl Codegen {
                                     "int64_t {tmp} = mako_chan_ptr_send_timeout({rv}, {boxn}, {ms});"
                                 ));
                             }
-                            self.line(&format!(
-                                "if ({tmp} != 1) mako_box_free({boxn}, sizeof({cname}));"
-                            ));
+                            self.emit_line(format_args!("if ({tmp} != 1) {{"));
+                            self.indent += 1;
+                            for (field, free_fn) in self.struct_own_field_frees(&cname) {
+                                self.emit_line(format_args!("{free_fn}({boxn}->{field});"));
+                            }
+                            self.emit_line(format_args!("mako_box_free({boxn}, sizeof({cname}));"));
+                            self.indent -= 1;
+                            self.line("}");
                         } else {
                             let is_f64 = vty == "double"
                                 || matches!(receiver.as_ref(), Expr::Ident(n) if self.chan_float.contains(n))

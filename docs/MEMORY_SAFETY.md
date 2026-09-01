@@ -165,6 +165,10 @@ call-returned structs, and frees the old fields before whole-struct assignment.
 An indexed struct value is a borrow into its container and never receives an
 independent destructor unless explicitly cloned into owned storage.
 
+Aggregate channel sends clone owned payload fields before handoff. The sender
+keeps its original value; a successful send transfers the clone to the channel,
+and a rejected normal, timeout, or try-send recursively destroys the clone.
+
 Mutable owning parameters are borrowed aliases. The callee takes a balanced
 retained header/reference on entry and releases it on every exit. Direct indexed
 writes stay visible through the borrowed backing; growth and append detach when
@@ -186,7 +190,7 @@ Regression coverage: `examples/testing/struct_clone_nested_if_test.mko` stresses
 repeated nested clone/drop cycles. The full sanitizer sweep and native memory
 safety gate execute the ownership suite in CI.
 
-## Consolidation (v0.6.19 → v0.7)
+## Consolidation (v0.6.20 → v0.7)
 
 The next phase freezes the COW slice representation as a normative spec,
 adds property-based ownership fuzzing, model-checks the channel state machine,
