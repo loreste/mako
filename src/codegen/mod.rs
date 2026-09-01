@@ -28,7 +28,10 @@ struct StructInfo {
 /// Mut owning structs with this many owned fields (or more) pass by pointer
 /// instead of clone-at-entry. Smaller mut structs keep value semantics so
 /// `w = f(w)` still clones a cheap header rather than aliasing the dest.
-const OWNING_STRUCT_MUT_PTR_FIELDS: usize = 4;
+// Temporarily raised to avoid pointer ABI for large structs (issue #50).
+// The function body doesn't yet rewrite field access (. → ->) and
+// assignment (db = x → *db = x) for pointer params.
+const OWNING_STRUCT_MUT_PTR_FIELDS: usize = 999;
 
 pub struct Codegen {
     out: String,
@@ -5052,25 +5055,12 @@ impl Codegen {
                             self.mut_self_fns.insert(f.name.clone());
                         }
                     }
-                    // Borrow owning structs across the C ABI (issue #46): skip the
-                    // per-field RC clone that used to run at every `fn f(db: Database)`
-                    // / large `mut db` entry. `mut self` already uses a pointer.
+                    // Pointer-pass for owning structs is disabled until the
+                    // function body rewrites field access (. → ->) and
+                    // assignment (x = val → *x = val) for pointer params.
+                    // See issue #50.
                     {
-                        let mut ptr_indices = std::collections::HashSet::new();
-                        for (pi, p) in f.params.iter().enumerate() {
-                            if p.name == "self" && p.mutable {
-                                continue;
-                            }
-                            let pty = self.type_expr_c(&p.ty);
-                            let n_owned = self.struct_own_field_frees(&pty).len();
-                            if n_owned == 0 {
-                                continue;
-                            }
-                            if p.mutable && n_owned < OWNING_STRUCT_MUT_PTR_FIELDS {
-                                continue;
-                            }
-                            ptr_indices.insert(pi);
-                        }
+                        let ptr_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
                         if !ptr_indices.is_empty() {
                             self.mut_ptr_params.insert(f.name.clone(), ptr_indices);
                         }
@@ -12192,7 +12182,7 @@ impl Codegen {
     /// True when this C type is a user-struct pointer (`Database*`), not a
     /// runtime handle (`MakoMapSI*`, `MakoStrBuilder*`, …).
     fn is_user_struct_ptr(c_ty: &str) -> bool {
-        c_ty.ends_with('*') && !c_ty.starts_with("Mako")
+        c_ty.ends_with('*') && !c_ty.starts_with("Mako") && c_ty != "void*"
     }
 
     fn user_struct_ptr_base(c_ty: &str) -> &str {
