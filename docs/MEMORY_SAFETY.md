@@ -201,6 +201,13 @@ string keys and values are cloned; empty and tombstone slots run no destructor.
 release uses acquire/release ordering, overflow aborts, and `finish` steals only
 from a unique owner.
 
+Channel handles use overflow-checked atomic retain/release when copied into
+owning structs or task state. The final release uses acquire/release ordering
+before closing the channel and destroying synchronization state; a non-final
+release never closes shared channel state. This protects blocked senders and
+receivers from a sibling alias being destroyed. Channel payload transfer rules
+remain unchanged.
+
 Atomic reference counts protect lifetime only. They do not authorize concurrent
 mutation of slice headers, maps, elements, or builders. Cross-task aliases must
 be read-only or transferred through `share`/crew/channel ownership rules; a
@@ -218,7 +225,7 @@ destruction. Storing that borrowed struct in an array or map deep-clones its
 owned fields exactly once before the container takes ownership. Opaque `void*`
 handles stay by-value and never enter this struct ABI path.
 
-## Consolidation (v0.6.22 → v0.7)
+## Consolidation (v0.6.23 → v0.7)
 
 The next phase freezes the COW slice representation as a normative spec,
 adds property-based ownership fuzzing, model-checks the channel state machine,

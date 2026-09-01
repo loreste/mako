@@ -2369,6 +2369,9 @@ impl Codegen {
         match c_ty {
             "MakoString" => Some("mako_str_clone".into()),
             "MakoStrBuilder*" => Some("mako_str_builder_clone".into()),
+            "MakoChan*" => Some("mako_chan_clone".into()),
+            "MakoChanStr*" => Some("mako_chan_str_clone".into()),
+            "MakoChanPtr*" => Some("mako_chan_ptr_clone".into()),
             "MakoIntArray" => Some("mako_int_array_clone".into()),
             "MakoByteArray" => Some("mako_byte_array_clone".into()),
             "MakoStrArray" => Some("mako_str_array_clone".into()),
@@ -3906,11 +3909,6 @@ impl Codegen {
         };
         let fields = info.fields.clone();
         for (fname, fty) in fields {
-            // Channels are shared resources — never auto-free on struct drop.
-            // Only the creator (chan_new) should free. Struct fields are borrows.
-            if matches!(fty.as_str(), "MakoChan*" | "MakoChanStr*" | "MakoChanPtr*") {
-                continue;
-            }
             let path = if prefix.is_empty() {
                 fname
             } else {
@@ -41925,6 +41923,82 @@ fn main() {
         assert!(
             generated.contains("mako_str_clone") && generated.contains("identity_heavy"),
             "returning a borrowed owning struct must clone fields:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn returning_borrowed_struct_param_inside_struct_clones_owned_fields() {
+        let source = r#"
+            struct Heavy { a: string b: string c: string d: []int }
+            struct Reply { value: Heavy text: string }
+            fn wrap(mut h: Heavy) -> Reply {
+                return Reply { value: h, text: "ok" }
+            }
+            fn main() {
+                let h = Heavy { a: "a", b: "b", c: "c", d: [1] }
+                let reply = wrap(h)
+                print(reply.value.a)
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        let wrap = generated
+            .split("Reply wrap(")
+            .last()
+            .expect("generated wrap function");
+        assert!(
+            wrap.starts_with("Heavy *h"),
+            "owning param must borrow:\n{generated}"
+        );
+        assert_eq!(
+            wrap.matches("mako_str_clone(cloned_").count(),
+            3,
+            "nested return must clone every borrowed string field once:\n{generated}"
+        );
+        assert!(
+            wrap.contains("mako_int_array_clone(cloned_"),
+            "nested return must clone borrowed slice field:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn cloned_struct_channel_fields_retain_shared_channel_lifetime() {
+        let source = r#"
+            struct Client {
+                req: chan[int]
+                done: chan[string]
+                events: chan[int]
+                replies: chan[string]
+            }
+            struct Reply { client: Client }
+            fn rpc(mut client: Client) -> Reply {
+                return Reply { client: client }
+            }
+            fn main() {
+                let req = chan_new(1)
+                let done = make(chan[string], 1)
+                let events = chan_new(1)
+                let replies = make(chan[string], 1)
+                let client = Client { req: req, done: done, events: events, replies: replies }
+                let reply = rpc(client)
+                let _ = reply.client.req.try_send(1)
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        let rpc = generated
+            .split("Reply rpc(")
+            .last()
+            .expect("generated rpc function");
+        assert!(
+            rpc.starts_with("Client *client"),
+            "owning param must borrow:\n{generated}"
+        );
+        assert!(
+            rpc.contains("mako_chan_clone(cloned_") && rpc.contains("mako_chan_str_clone(cloned_"),
+            "returned struct copy must retain channel fields:\n{generated}"
         );
     }
 

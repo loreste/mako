@@ -5103,6 +5103,7 @@ static inline int64_t mako_slice_copy(MakoIntArray dst, MakoIntArray src) {
  */
 static inline void mako_select_notify(void); /* forward decl — wakes select waiters */
 typedef struct {
+    _Atomic uint32_t refs;
     int64_t *buf;
     size_t cap;       /* 0 = unbuffered rendezvous; else ring capacity */
     size_t head;
@@ -5134,6 +5135,7 @@ static inline MakoChan *mako_chan_new(int64_t capacity) {
     size_t cap = (size_t)capacity;
     size_t slots = mako_chan_alloc_slots(cap);
     MakoChan *c = (MakoChan *)calloc(1, sizeof(MakoChan));
+    atomic_init(&c->refs, 1);
     c->buf = (int64_t *)calloc(slots, sizeof(int64_t));
     c->cap = cap;
     pthread_mutex_init(&c->mu, NULL);
@@ -5141,6 +5143,18 @@ static inline MakoChan *mako_chan_new(int64_t capacity) {
     pthread_cond_init(&c->can_recv, NULL);
     mako_rt_counter_inc(&mako_rt_channels_created);
     return c;
+}
+
+static inline MakoChan *mako_chan_clone(MakoChan *c) {
+    if (!c) return NULL;
+    uint32_t old = atomic_load_explicit(&c->refs, memory_order_relaxed);
+    for (;;) {
+        if (MAKO_UNLIKELY(old == 0)) mako_abort("channel: retain after final release");
+        if (MAKO_UNLIKELY(old == UINT32_MAX)) mako_abort("channel: reference count overflow");
+        if (atomic_compare_exchange_weak_explicit(
+                &c->refs, &old, old + 1,
+                memory_order_relaxed, memory_order_relaxed)) return c;
+    }
 }
 
 static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
@@ -5326,6 +5340,8 @@ static inline void mako_chan_close(MakoChan *c) {
  * destroys synchronization primitives, frees the ring buffer and struct. */
 static inline void mako_chan_free(MakoChan *c) {
     if (!c) return;
+    if (atomic_fetch_sub_explicit(&c->refs, 1, memory_order_acq_rel) != 1) return;
+    atomic_thread_fence(memory_order_acquire);
     /* Close to unblock any waiters before destroying. */
     if (!c->closed) mako_chan_close(c);
     pthread_mutex_destroy(&c->mu);
@@ -5573,6 +5589,7 @@ static inline int64_t mako_chan_select4(
  * recv returns an owned MakoString (caller owns the result).
  */
 typedef struct {
+    _Atomic uint32_t refs;
     MakoString *buf;
     size_t cap; /* 0 = unbuffered rendezvous */
     size_t head;
@@ -5590,12 +5607,25 @@ static inline MakoChanStr *mako_chan_str_new(int64_t capacity) {
     size_t cap = (size_t)capacity;
     size_t slots = mako_chan_alloc_slots(cap);
     MakoChanStr *c = (MakoChanStr *)calloc(1, sizeof(MakoChanStr));
+    atomic_init(&c->refs, 1);
     c->buf = (MakoString *)calloc(slots, sizeof(MakoString));
     c->cap = cap;
     pthread_mutex_init(&c->mu, NULL);
     pthread_cond_init(&c->can_send, NULL);
     pthread_cond_init(&c->can_recv, NULL);
     return c;
+}
+
+static inline MakoChanStr *mako_chan_str_clone(MakoChanStr *c) {
+    if (!c) return NULL;
+    uint32_t old = atomic_load_explicit(&c->refs, memory_order_relaxed);
+    for (;;) {
+        if (MAKO_UNLIKELY(old == 0)) mako_abort("string channel: retain after final release");
+        if (MAKO_UNLIKELY(old == UINT32_MAX)) mako_abort("string channel: reference count overflow");
+        if (atomic_compare_exchange_weak_explicit(
+                &c->refs, &old, old + 1,
+                memory_order_relaxed, memory_order_relaxed)) return c;
+    }
 }
 
 /* Move ownership of `v` into the channel (no clone). Caller must not free/use `v`. */
@@ -5792,6 +5822,8 @@ static inline void mako_chan_str_close(MakoChanStr *c) {
 /* Free a string channel. Drains and frees any remaining buffered strings. */
 static inline void mako_chan_str_free(MakoChanStr *c) {
     if (!c) return;
+    if (atomic_fetch_sub_explicit(&c->refs, 1, memory_order_acq_rel) != 1) return;
+    atomic_thread_fence(memory_order_acquire);
     if (!c->closed) mako_chan_str_close(c);
     /* Free remaining buffered strings. */
     size_t slots = mako_chan_alloc_slots(c->cap);
@@ -5888,6 +5920,7 @@ static inline int64_t mako_chan_str_select2(
  * Used for chan[Struct] seed: send boxes a copy, recv unboxes.
  */
 typedef struct {
+    _Atomic uint32_t refs;
     void **buf;
     size_t cap; /* 0 = unbuffered rendezvous */
     size_t head;
@@ -5905,12 +5938,25 @@ static inline MakoChanPtr *mako_chan_ptr_new(int64_t capacity) {
     size_t cap = (size_t)capacity;
     size_t slots = mako_chan_alloc_slots(cap);
     MakoChanPtr *c = (MakoChanPtr *)calloc(1, sizeof(MakoChanPtr));
+    atomic_init(&c->refs, 1);
     c->buf = (void **)calloc(slots, sizeof(void *));
     c->cap = cap;
     pthread_mutex_init(&c->mu, NULL);
     pthread_cond_init(&c->can_send, NULL);
     pthread_cond_init(&c->can_recv, NULL);
     return c;
+}
+
+static inline MakoChanPtr *mako_chan_ptr_clone(MakoChanPtr *c) {
+    if (!c) return NULL;
+    uint32_t old = atomic_load_explicit(&c->refs, memory_order_relaxed);
+    for (;;) {
+        if (MAKO_UNLIKELY(old == 0)) mako_abort("pointer channel: retain after final release");
+        if (MAKO_UNLIKELY(old == UINT32_MAX)) mako_abort("pointer channel: reference count overflow");
+        if (atomic_compare_exchange_weak_explicit(
+                &c->refs, &old, old + 1,
+                memory_order_relaxed, memory_order_relaxed)) return c;
+    }
 }
 
 static inline int64_t mako_chan_ptr_send(MakoChanPtr *c, void *v) {
@@ -6064,6 +6110,8 @@ static inline void mako_chan_ptr_close(MakoChanPtr *c) {
 /* Free a pointer channel. Drains and frees any remaining buffered boxes. */
 static inline void mako_chan_ptr_free(MakoChanPtr *c) {
     if (!c) return;
+    if (atomic_fetch_sub_explicit(&c->refs, 1, memory_order_acq_rel) != 1) return;
+    atomic_thread_fence(memory_order_acquire);
     if (!c->closed) mako_chan_ptr_close(c);
     /* Free remaining buffered boxes (heap-allocated struct copies). */
     size_t slots = mako_chan_alloc_slots(c->cap);

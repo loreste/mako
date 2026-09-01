@@ -438,6 +438,13 @@ pack-qualified types).
 
 Channel operations are described in Section 7.
 
+Channel handles have shared lifetime: copying a handle into an owning struct or
+task state performs an atomic retain, and destroying that owner releases it.
+Only the final release closes and destroys the channel. Retain overflow and a
+retain after final release are runtime errors; the counter never wraps. Atomic
+handle lifetime does not make concurrently mutated payload objects safe—payload
+ownership still follows the send/receive transfer rules in Section 7.
+
 #### Structs
 
 Product types with named fields. See Section 3.4.

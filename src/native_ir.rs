@@ -10963,10 +10963,15 @@ impl<'a> FunctionLowerer<'a> {
                             .and_then(|flags| flags.get(arg_index))
                             .copied()
                             .unwrap_or(false);
-                        let lvalue = matches!(
-                            arg_expr,
-                            Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
-                        );
+                        // Syntax alone is insufficient here: a bare nullary enum
+                        // variant (`Point`) is parsed as an identifier but lowers
+                        // to a fresh owned heap block. Only a borrowed result can
+                        // designate caller-owned storage.
+                        let lvalue = !owned
+                            && matches!(
+                                arg_expr,
+                                Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                            );
                         let large_mut = is_mut_param && self.structs.owned_field_count(id) >= 4;
                         if lvalue && (!is_mut_param || large_mut) {
                             // Non-mut: borrow (issue #46). Large mut: in-place write.
@@ -33979,6 +33984,31 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(insts.iter().any(|i| matches!(i, Inst::EnumMake { .. })));
         assert!(insts.iter().any(|i| matches!(i, Inst::StructClone { .. })));
+    }
+
+    #[test]
+    fn drops_bare_nullary_enum_temporaries_after_calls() {
+        let source = r#"
+            enum Shape { Circle(int), Point }
+            fn classify(s: Shape) -> int {
+                return match s { Point => 1, _ => 0 }
+            }
+            fn main() { print_int(classify(Point)) }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let main = module.functions.iter().find(|f| f.name == "main").unwrap();
+        let drops = main
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|inst| matches!(inst, Inst::DropStruct { .. }))
+            .count();
+        assert_eq!(
+            drops, 1,
+            "fresh nullary enum call argument must be dropped exactly once"
+        );
     }
 
     #[test]

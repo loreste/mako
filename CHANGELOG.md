@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.6.23 - 2026-09-01 (concurrent handle lifetime safety)
+
+- Make int, string, and aggregate channel handles atomically reference-counted. Struct copies retain channel fields, final release uses acquire/release ordering, and retain-after-release/refcount overflow abort instead of wrapping. This prevents a returned or copied client/session struct from freeing a channel while another task is blocked in `recv` (issue #51).
+- Fix native calls with bare nullary enum arguments (`classify(Point)`): fresh enum blocks are no longer mistaken for borrowed identifier lvalues and now drop exactly once after the call.
+
 - Restore the v0.6.22 ownership/runtime safety implementation and fix C codegen
   pointer/value lowering for borrowed owning-struct parameters (issue #50).
   Whole-value assignment destroys the destination's previous owned fields once
@@ -187,7 +192,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.22 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.23 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

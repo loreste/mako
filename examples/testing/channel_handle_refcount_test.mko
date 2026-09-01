@@ -1,0 +1,20 @@
+struct ChannelOwner {
+    ints: chan[int]
+    strings: chan[string]
+}
+
+fn clone_owner(owner: ChannelOwner) -> ChannelOwner {
+    return ChannelOwner { ints: owner.ints, strings: owner.strings }
+}
+
+fn TestChannelHandlesSurviveStructCopy() {
+    let ints = chan_new(1)
+    let strings = make(chan[string], 1)
+    let first = ChannelOwner { ints: ints, strings: strings }
+    let second = clone_owner(first)
+
+    assert(second.ints.send(42) == 1)
+    assert(first.ints.recv() == 42)
+    assert(second.strings.send("safe") == 1)
+    assert(first.strings.recv() == "safe")
+}
