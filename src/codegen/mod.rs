@@ -6402,12 +6402,6 @@ impl Codegen {
         let _ = writeln!(self.out, "        s.cap = ncap;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "    s.data[s.len] = v;");
-        for (fname, clone_fn) in &struct_field_clones {
-            let _ = writeln!(
-                self.out,
-                "    s.data[s.len].{fname} = {clone_fn}(s.data[s.len].{fname});"
-            );
-        }
         let _ = writeln!(self.out, "    s.len++;");
         let _ = writeln!(self.out, "    return s;");
         let _ = writeln!(self.out, "}}");
@@ -34575,6 +34569,12 @@ impl Codegen {
                             }
                             if let Some(sn) = sty.strip_prefix("MakoArr_") {
                                 let sn = sn.to_string();
+                                // Struct/enum array append consumes an owning element just
+                                // as nested-array append does. Identifier sources move into
+                                // the array; temporaries transfer directly.
+                                if let Expr::Ident(n) = &args[1] {
+                                    self.note_own_drop_moved(&mangle(n));
+                                }
                                 // Nested [][]T: heapify stack POD lits before store.
                                 if sn.starts_with("arr_") {
                                     v = self.ensure_slice_owned(&vty, v);

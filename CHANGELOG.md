@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.18 - 2026-09-01 (append ownership transfer)
+
+- Treat struct/enum array append as a consuming ownership boundary for
+  identifier elements; fresh temporaries transfer directly.
+- Clone existing element fields only during COW detach, eliminating insertion
+  leaks without restoring source-alias use-after-free.
+
 ## 0.6.17 - 2026-09-01 (owned temporary transfer)
 
 - Move fresh owned values into struct-literal fields and clone only borrowed
@@ -106,7 +113,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.17 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.18 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

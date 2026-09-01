@@ -151,6 +151,8 @@ Top-level arrays of structs use independent outer buffers. A by-value clone copi
 outer buffer and clones or retains every owned element field.
 Nested refcounted slices use O(1) retains, while maps receive independent table
 storage. Append detachment copies owned fields before releasing the old buffer.
+Appending a new owning struct/enum element consumes an identifier source or
+moves a fresh temporary; insertion does not add an unbalanced clone.
 
 The final outer owner
 recursively destroys every element's owned fields—including strings, nested
@@ -178,7 +180,7 @@ Regression coverage: `examples/testing/struct_clone_nested_if_test.mko` stresses
 repeated nested clone/drop cycles. The full sanitizer sweep and native memory
 safety gate execute the ownership suite in CI.
 
-## Consolidation (v0.6.17 → v0.7)
+## Consolidation (v0.6.18 → v0.7)
 
 The next phase freezes the COW slice representation as a normative spec,
 adds property-based ownership fuzzing, model-checks the channel state machine,
