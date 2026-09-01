@@ -14624,6 +14624,14 @@ impl Codegen {
                             }
                         }
                     }
+            } else if matches!(init, Expr::Call { .. })
+                    && !self.struct_own_field_frees(&ty).is_empty()
+                    && self.current_arena.is_none()
+                {
+                    // A function-returned struct is a new owning value even when
+                    // the call is not syntactically a constructor.
+                    self.register_own_drop(name, &ty);
+                    self.scope_drop_safe.insert(name.to_string());
                 } else if clone_ident_own {
                     self.register_own_drop(name, &ty);
                     self.scope_drop_safe.insert(name.to_string());
@@ -14987,6 +14995,27 @@ impl Codegen {
                     } else {
                         None
                     };
+                    // Struct reassignment must destroy the destination's previous
+                    // owned fields before overwriting its C value. The replacement
+                    // has already been moved or cloned above, so this cannot
+                    // invalidate the incoming value.
+                    if self.current_arena.is_none() {
+                        let old_fields = self.struct_own_field_frees(&cty_for_rhs);
+                        if !old_fields.is_empty() && (self.own_drop_live.contains(&mn) || cond_own)
+                        {
+                            if cond_own {
+                                self.emit_line(format_args!("if ({mn}__own) {{"));
+                                self.indent += 1;
+                            }
+                            for (field, free_fn) in old_fields {
+                                self.emit_line(format_args!("{free_fn}({mn}.{field});"));
+                            }
+                            if cond_own {
+                                self.indent -= 1;
+                                self.emit_line(format_args!("}}"));
+                            }
+                        }
+                    }
                     if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
                         self.emit_line(format_args!("*{cell} = {val};"));
                     } else {
