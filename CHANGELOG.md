@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.6.19 - 2026-09-01 (owned struct-local destruction)
+
+- Emit scope-exit destructors for fresh struct locals containing owned fields,
+  including structs returned from calls.
+- Destroy the previous owned fields before whole-struct reassignment, closing
+  repeated-update leaks without freeing indexed borrowed structs.
+- Validate nested clone, mutation, return, reassignment, and discard paths with
+  Linux AddressSanitizer and LeakSanitizer.
+
 ## 0.6.18 - 2026-09-01 (append ownership transfer)
 
 - Treat struct/enum array append as a consuming ownership boundary for
@@ -113,7 +122,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.18 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.19 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

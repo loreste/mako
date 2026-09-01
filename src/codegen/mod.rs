@@ -14576,6 +14576,20 @@ impl Codegen {
                     val
                 };
                 self.line(&format!("{ty} {name} = {val};"));
+
+                // A fresh struct value owns each nested owning field. Register its
+                // destructor as an invariant of the declaration so later ownership
+                // bookkeeping cannot accidentally omit call-returned structs.
+                // Indexed struct values remain borrows into their container.
+                let owns_struct_fields = *ownership != Ownership::Share
+                    && self.current_arena.is_none()
+                    && !self.struct_own_field_frees(&ty).is_empty()
+                    && (clone_ident_own
+                        || (Self::expr_is_fresh_own(init) && !matches!(init, Expr::Index { .. })));
+                if owns_struct_fields {
+                    self.register_own_drop(name, &ty);
+                    self.scope_drop_safe.insert(name.to_string());
+                }
                 if *ownership == Ownership::Share {
                     self.register_share_local(name);
                 }
@@ -14624,7 +14638,8 @@ impl Codegen {
                             }
                         }
                     }
-            } else if matches!(init, Expr::Call { .. })
+                } else if matches!(init, Expr::Call { .. })
+                    && *ownership != Ownership::Share
                     && !self.struct_own_field_frees(&ty).is_empty()
                     && self.current_arena.is_none()
                 {
