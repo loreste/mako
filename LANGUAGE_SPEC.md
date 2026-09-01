@@ -1551,6 +1551,12 @@ destination destructors stay disjoint. In-place mutation through a `mut`
 pointer does not clone. Indexed mut arguments pass an element pointer
 (`*_get_ptr`) so writes land in the array.
 
+Whole-value assignment to a pointer-backed owning-struct parameter replaces the
+caller's value: the old owned fields are destroyed exactly once before the new
+value is written through the pointer. A container store from such a parameter
+first makes one deep ownership-preserving clone. Opaque pointer handles are not
+struct borrows and remain by-value across calls.
+
 ```mko
 {
     let mut s = make([]int, 0, 8)

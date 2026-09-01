@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Restore the v0.6.22 ownership/runtime safety implementation and fix C codegen
+  pointer/value lowering for borrowed owning-struct parameters (issue #50).
+  Whole-value assignment destroys the destination's previous owned fields once
+  before writing through the borrow; array/map stores deep-clone owned fields
+  once before taking ownership; opaque `void*` handles remain by-value.
+
 ## 0.6.22 - 2026-09-01 (owned field-move completeness)
 
 - Borrow owning struct parameters on the C backend instead of cloning every

@@ -170,6 +170,11 @@ read, including nested paths and struct literals. C and native move those
 fields instead of cloning. `db = result.db` destroys the previous Database
 before overwrite (issue #49).
 
+C codegen keeps borrowed owning-struct parameters pointer-based without
+mis-lowering opaque `void*` handles. Whole-struct replacement destroys the old
+owned fields exactly once, while array/map escape makes one independent deep
+clone before the container takes ownership (issue #50).
+
 ## New in 0.6.21
 
 Owned fields extracted from fresh call-returned local structs now move without

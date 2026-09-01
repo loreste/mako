@@ -211,6 +211,13 @@ Regression coverage: `examples/testing/struct_clone_nested_if_test.mko` stresses
 repeated nested clone/drop cycles. The full sanitizer sweep and native memory
 safety gate execute the ownership suite in CI.
 
+For C pointer-backed owning-struct parameters, whole-value assignment writes
+through the borrow, recursively destroys the destination's previous owned fields
+before overwrite, and never registers the borrowed parameter for scope-exit
+destruction. Storing that borrowed struct in an array or map deep-clones its
+owned fields exactly once before the container takes ownership. Opaque `void*`
+handles stay by-value and never enter this struct ABI path.
+
 ## Consolidation (v0.6.22 → v0.7)
 
 The next phase freezes the COW slice representation as a normative spec,

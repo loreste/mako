@@ -17193,7 +17193,9 @@ impl TypeChecker {
             .cloned()
             .unwrap_or_default();
         if prior.contains(path) {
-            return Err(TypeError::new(format!("use of moved field `{name}.{path}`")));
+            return Err(TypeError::new(format!(
+                "use of moved field `{name}.{path}`"
+            )));
         }
         for m in &prior {
             if path.starts_with(&format!("{m}.")) || m.starts_with(&format!("{path}.")) {
@@ -17242,10 +17244,7 @@ impl TypeChecker {
         }
         let path = path_fields.join(".");
         self.assert_field_path_available(&name, &path)?;
-        self.hold_moved_fields
-            .entry(name)
-            .or_default()
-            .insert(path);
+        self.hold_moved_fields.entry(name).or_default().insert(path);
         Ok(())
     }
 
@@ -21449,11 +21448,7 @@ impl TypeChecker {
     /// Mut parameters need exclusive access. The same root (`h`, `h.inner`,
     /// `xs[0]`) cannot be passed to a mut parameter and also to any other
     /// argument of the same call — including `h.stamp(h)` method extra-args.
-    fn assert_exclusive_mut_args(
-        &self,
-        muts: &[bool],
-        args: &[&Expr],
-    ) -> Result<(), TypeError> {
+    fn assert_exclusive_mut_args(&self, muts: &[bool], args: &[&Expr]) -> Result<(), TypeError> {
         let mut mut_roots: HashSet<&str> = HashSet::new();
         for (i, a) in args.iter().enumerate() {
             if !muts.get(i).copied().unwrap_or(false) {

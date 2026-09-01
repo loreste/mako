@@ -28,10 +28,7 @@ struct StructInfo {
 /// Mut owning structs with this many owned fields (or more) pass by pointer
 /// instead of clone-at-entry. Smaller mut structs keep value semantics so
 /// `w = f(w)` still clones a cheap header rather than aliasing the dest.
-// Temporarily raised to avoid pointer ABI for large structs (issue #50).
-// The function body doesn't yet rewrite field access (. → ->) and
-// assignment (db = x → *db = x) for pointer params.
-const OWNING_STRUCT_MUT_PTR_FIELDS: usize = 999;
+const OWNING_STRUCT_MUT_PTR_FIELDS: usize = 4;
 
 pub struct Codegen {
     out: String,
@@ -5055,12 +5052,25 @@ impl Codegen {
                             self.mut_self_fns.insert(f.name.clone());
                         }
                     }
-                    // Pointer-pass for owning structs is disabled until the
-                    // function body rewrites field access (. → ->) and
-                    // assignment (x = val → *x = val) for pointer params.
-                    // See issue #50.
+                    // Borrow owning structs across the C ABI (issue #46): skip the
+                    // per-field RC clone that used to run at every `fn f(db: Database)`
+                    // / large `mut db` entry. `mut self` already uses a pointer.
                     {
-                        let ptr_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+                        let mut ptr_indices = std::collections::HashSet::new();
+                        for (pi, p) in f.params.iter().enumerate() {
+                            if p.name == "self" && p.mutable {
+                                continue;
+                            }
+                            let pty = self.type_expr_c(&p.ty);
+                            let n_owned = self.struct_own_field_frees(&pty).len();
+                            if n_owned == 0 {
+                                continue;
+                            }
+                            if p.mutable && n_owned < OWNING_STRUCT_MUT_PTR_FIELDS {
+                                continue;
+                            }
+                            ptr_indices.insert(pi);
+                        }
                         if !ptr_indices.is_empty() {
                             self.mut_ptr_params.insert(f.name.clone(), ptr_indices);
                         }
@@ -6222,9 +6232,7 @@ impl Codegen {
                     let mut sig = vec!["void *self".to_string()];
                     let mut call_args = Vec::new();
                     if has_self {
-                        if self.mut_self_fns.contains(&key)
-                            || self.param_passed_by_ptr(&key, 0)
-                        {
+                        if self.mut_self_fns.contains(&key) || self.param_passed_by_ptr(&key, 0) {
                             call_args.push(format!("({concrete} *)self"));
                         } else {
                             call_args.push(format!("*({concrete} *)self"));
@@ -15297,14 +15305,31 @@ impl Codegen {
                     val
                 };
                 let mn = mangle(name);
+                let borrowed_struct_ty = self.locals.get(name).and_then(|ty| {
+                    Self::is_user_struct_ptr(ty).then(|| Self::user_struct_ptr_base(ty).to_string())
+                });
                 // Double-free guard: move live owns, clone aliases/field/index borrows.
                 // Destination always becomes a freer for Own types after this store.
-                let cty_for_rhs = self
-                    .locals
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| vty.clone());
+                let cty_for_rhs = borrowed_struct_ty.clone().unwrap_or_else(|| {
+                    self.locals
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_else(|| vty.clone())
+                });
                 let val = self.prepare_own_store_rhs(value, &cty_for_rhs, val);
+                if let Some(cty) = borrowed_struct_ty {
+                    // Pointer-backed owning struct parameters borrow the caller's
+                    // storage. A whole-value assignment must replace that storage,
+                    // not the local pointer, and must release the previous fields
+                    // exactly once before overwriting them.
+                    if self.current_arena.is_none() {
+                        for (field, free_fn) in self.struct_own_field_frees(&cty) {
+                            self.emit_line(format_args!("{free_fn}((*{mn}).{field});"));
+                        }
+                    }
+                    self.emit_line(format_args!("*{mn} = {val};"));
+                    return;
+                }
                 let cond_own = self.own_cond_flags.contains(&mn);
                 // A call receiving the destination's current owned value consumes
                 // that value. It may return the same allocation (append/realloc is
@@ -15512,7 +15537,20 @@ impl Codegen {
             Stmt::IndexAssign { base, index, value } => {
                 let (bty, b) = self.emit_expr(base);
                 let (_, i) = self.emit_expr(index);
-                let (vty, mut v) = self.emit_expr(value);
+                let (vty, v) = self.emit_expr(value);
+                let expected_vty = bty
+                    .strip_prefix("MakoArr_")
+                    .map(|sn| self.product_c_ty(sn))
+                    .or_else(|| self.map_value_c_ty(&bty));
+                let (vty, mut v) = if expected_vty
+                    .as_ref()
+                    .is_some_and(|expected| !Self::is_user_struct_ptr(expected))
+                    && Self::is_user_struct_ptr(&vty)
+                {
+                    Self::coerce_user_struct_value(&vty, v)
+                } else {
+                    (vty, v)
+                };
                 // Heapify POD stack/view slices before storing into maps/nested arrays.
                 v = self.ensure_slice_owned(&vty, v);
                 // Move live owns / clone aliases & field borrows so container free
@@ -37735,7 +37773,9 @@ impl Codegen {
                                 .or_else(|| {
                                     self.structs
                                         .iter()
-                                        .find(|(n, info)| *n == &rty_base || info.c_name == rty_base)
+                                        .find(|(n, info)| {
+                                            *n == &rty_base || info.c_name == rty_base
+                                        })
                                         .map(|(n, _)| n.clone())
                                 })
                                 .or_else(|| {
@@ -41742,10 +41782,7 @@ fn main() {
             generated.contains("count_items(&bag)") || generated.contains("count_items(&"),
             "call sites must pass the address of an owning struct:\n{generated}"
         );
-        let count_fn = generated
-            .split("count_items(")
-            .nth(2)
-            .unwrap_or("");
+        let count_fn = generated.split("count_items(").nth(2).unwrap_or("");
         assert!(
             !count_fn.contains("mako_str_clone(bag")
                 && !count_fn.contains("mako_int_array_clone(bag"),
@@ -41827,6 +41864,39 @@ fn main() {
         assert!(
             generated.contains("grow_heavy(&h)"),
             "call must pass &h:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn storing_borrowed_owning_struct_in_array_clones_fields() {
+        let source = r#"
+struct Heavy { a: string b: string c: string d: []int }
+fn store(out: []Heavy, h: Heavy) {
+    out[0] = h
+}
+fn main() {
+    let h = Heavy { a: "x", b: "y", c: "z", d: make([]int, 0, 1) }
+    let out = make([]Heavy, 1)
+    store(out, h)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        assert!(
+            generated.contains("store(out, &h)"),
+            "call must borrow the owning struct:\n{generated}"
+        );
+        assert!(
+            generated.contains("mako_arr_Heavy_set")
+                && generated.contains("Heavy cloned_")
+                && generated.contains("mako_str_clone(cloned_"),
+            "container store must clone borrowed owned fields:\n{generated}"
+        );
+        assert_eq!(
+            generated.matches("mako_str_clone(cloned_").count(),
+            3,
+            "each borrowed string field must be cloned exactly once:\n{generated}"
         );
     }
 

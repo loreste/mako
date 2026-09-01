@@ -6008,7 +6008,8 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![pack, idx, v],
                 ret: None,
             });
-            if owned && ty.is_heap() && !ty.is_consumable_header() && !matches!(ty, Type::Struct(_)) {
+            if owned && ty.is_heap() && !ty.is_consumable_header() && !matches!(ty, Type::Struct(_))
+            {
                 // Pack holds a borrow of the pointer for the join lifetime.
                 // Heap temps (struct lits, etc.) are stored in a stack local so
                 // the pointer remains valid until join; drop after spawn via
@@ -16430,9 +16431,11 @@ impl<'a> FunctionLowerer<'a> {
         path: &[String],
         leaf_ty: Type,
     ) -> Result<(), IrError> {
-        let (slot, ty) = self.locals.get(owner).copied().ok_or_else(|| {
-            IrError::new(format!("native IR: unknown local `{owner}`"))
-        })?;
+        let (slot, ty) = self
+            .locals
+            .get(owner)
+            .copied()
+            .ok_or_else(|| IrError::new(format!("native IR: unknown local `{owner}`")))?;
         let Type::Struct(mut id) = ty else {
             return Ok(());
         };
@@ -16443,9 +16446,10 @@ impl<'a> FunctionLowerer<'a> {
             ty,
         });
         for (i, fname) in path.iter().enumerate() {
-            let (index, field_ty) = self.structs.field(id, fname).ok_or_else(|| {
-                IrError::new(format!("native IR: unknown field `{fname}`"))
-            })?;
+            let (index, field_ty) = self
+                .structs
+                .field(id, fname)
+                .ok_or_else(|| IrError::new(format!("native IR: unknown field `{fname}`")))?;
             if i + 1 == path.len() {
                 let null = self.value();
                 self.emit(Inst::NullHeap {
@@ -31888,8 +31892,7 @@ impl<'a> FunctionLowerer<'a> {
             let mut call_args = vec![data];
             let mut temps = Vec::new();
             let mut_flags = self.mut_param_fns.get(&fn_name);
-            for (arg_index, (arg, expected)) in args.iter().zip(params.iter().skip(1)).enumerate()
-            {
+            for (arg_index, (arg, expected)) in args.iter().zip(params.iter().skip(1)).enumerate() {
                 let (mut v, t, o) = self.lower_expr(arg)?;
                 if t != *expected {
                     return Err(IrError::new("native IR: iface method arg type"));
