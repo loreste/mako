@@ -34,6 +34,17 @@ let w = str_as_view(owned)
 For most local computation, this is all you need. Prefer `string_view` for
 read-only hot paths; use `make([]T, 0, n)` when you will grow.
 
+Passing an owning struct into a function does **not** clone its fields.
+`fn f(db: Database)` (and a large `mut db`) borrows the caller's value —
+the engine can call parse/plan/exec helpers without RC-amplifying a
+60-field Database on every call. Small `mut` structs still clone at
+entry so `w = f(w)` stays a value update. Returning that param, storing
+it in another struct, or appending it clones so the new owner does not
+share the caller's destructor. Two arguments cannot alias when one is
+`mut` (`swap(h, h)` is a type error; `sum(h, h)` with two reads is
+fine). Kick of a Send struct clones owned fields into the worker and
+drops that copy after the call.
+
 ### Match and free
 
 Matching on `Result` / `Option` Own payloads takes ownership of the payload for
@@ -123,12 +134,12 @@ print_int(x)            // 9
 Move individual fields while keeping the rest usable:
 
 ```mko
-struct Point { x: int  y: int }
+struct Box { label: string  n: int }
 
-hold let p = Point { x: 1, y: 2 }
-let px = p.x            // moves only x
-print_int(p.y)          // y still usable
-// print_int(p.x)       // COMPILE ERROR: x already moved
+hold let p = Box { label: "x", n: 2 }
+let s = p.label         // moves only label
+print_int(p.n)          // n is Copy — still usable
+// print(p.label)       // COMPILE ERROR: label already moved
 ```
 
 ### Copy types

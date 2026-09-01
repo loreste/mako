@@ -25,6 +25,11 @@ struct StructInfo {
     defaults: HashMap<String, Expr>,
 }
 
+/// Mut owning structs with this many owned fields (or more) pass by pointer
+/// instead of clone-at-entry. Smaller mut structs keep value semantics so
+/// `w = f(w)` still clones a cheap header rather than aliasing the dest.
+const OWNING_STRUCT_MUT_PTR_FIELDS: usize = 4;
+
 pub struct Codegen {
     out: String,
     tmp: usize,
@@ -104,8 +109,11 @@ pub struct Codegen {
     mut_capture_cells: HashMap<String, String>,
     /// Functions with `mut self` as first param — callers pass &receiver, function takes pointer.
     mut_self_fns: std::collections::HashSet<String>,
-    /// Functions with `mut` struct params that have owned fields — pass by pointer
-    /// instead of deep-cloning at entry. Key: fn name, Value: set of param indices.
+    /// Functions whose struct params are passed by pointer (C borrow) instead of
+    /// by-value header copy + owned-field clone. Key: fn name, Value: param indices.
+    /// Non-mut owning structs always borrow. Mut owning structs borrow when they
+    /// have many owned fields (see `OWNING_STRUCT_MUT_PTR_FIELDS`); smaller mut
+    /// structs keep clone-at-entry so `w = f(w)` value semantics stay cheap.
     mut_ptr_params: HashMap<String, std::collections::HashSet<usize>>,
     /// Nesting of `unsafe { }` — skip debug bounds checks when > 0.
     unsafe_depth: usize,
@@ -2357,8 +2365,6 @@ impl Codegen {
 
     /// Clone function for an owned C type (mirrors `own_free_fn`).
     /// Used to deep-clone `mut` struct param fields at function entry.
-    /// Clone function for an owned C type (mirrors `own_free_fn`).
-    /// Used to deep-clone `mut` struct param fields at function entry.
     fn own_clone_fn(c_ty: &str) -> Option<String> {
         match c_ty {
             "MakoString" => Some("mako_str_clone".into()),
@@ -2389,12 +2395,20 @@ impl Codegen {
                 let name = &other["MakoArr_".len()..];
                 Some(format!("mako_arr_{name}_clone"))
             }
+            other if other.starts_with("MakoEnum_") => {
+                let name = &other["MakoEnum_".len()..];
+                Some(format!("mako_enum_{name}_clone"))
+            }
             // Pointer maps: MakoMapS_Point* → mako_map_s_Point_clone
             other if other.starts_with("MakoMap") && other.ends_with('*') => {
                 let body = &other["MakoMap".len()..other.len() - 1];
                 if let Some((ks, rest)) = body.split_once('_') {
                     let ks = ks.to_ascii_lowercase();
-                    Some(format!("mako_map_{ks}_{rest}_clone"))
+                    if ks == "k" {
+                        Some(format!("mako_map_k_{rest}_clone"))
+                    } else {
+                        Some(format!("mako_map_{ks}_{rest}_clone"))
+                    }
                 } else {
                     Some(format!("mako_map_{}_clone", body.to_ascii_lowercase()))
                 }
@@ -3531,6 +3545,11 @@ impl Codegen {
         if let Some(interface) = receiver_ty.strip_prefix("MakoIface_") {
             return self.fn_ret_types.get(&format!("{interface}_{method}"));
         }
+        let receiver_ty = if Self::is_user_struct_ptr(&receiver_ty) {
+            Self::user_struct_ptr_base(&receiver_ty).to_string()
+        } else {
+            receiver_ty
+        };
         let source_ty = self
             .structs
             .iter()
@@ -3619,7 +3638,28 @@ impl Codegen {
         val: &str,
     ) -> bool {
         if !matches!(c_ty, "MakoOptionInt" | "MakoResultInt" | "MakoResultFloat") {
-            return false;
+            // Discarded owning struct from a fresh call/literal (including a
+            // clone of a borrowed param returned by value) must drop its fields.
+            // Field/index/ident discards stay with the parent owner.
+            if !matches!(
+                expr,
+                Expr::Call { .. }
+                    | Expr::Method { .. }
+                    | Expr::StructLit { .. }
+                    | Expr::StructLitPos { .. }
+            ) {
+                return false;
+            }
+            let fields = self.struct_own_field_frees(c_ty);
+            if fields.is_empty() {
+                return false;
+            }
+            let tmp = self.fresh("discard_st");
+            self.emit_line(format_args!("{c_ty} {tmp} = {val};"));
+            for (field, ff) in fields {
+                self.emit_line(format_args!("{ff}({tmp}.{field});"));
+            }
+            return true;
         }
         let inferred_ty = self.bag_type_for_discard(expr, ann);
         if !Self::discarded_bag_is_owned(expr) {
@@ -4163,6 +4203,31 @@ impl Codegen {
         }
     }
 
+    /// Destroy owned fields of a live struct local before its C value is
+    /// overwritten. User structs have no `own_free_fn`; skipping this leaks
+    /// nested arrays/strings on `db = result.db` (issue #49).
+    fn emit_destroy_owned_struct_local(&mut self, mn: &str, cty: &str) {
+        let fields = self.struct_own_field_frees(cty);
+        if fields.is_empty() {
+            return;
+        }
+        let cond = self.own_cond_flags.contains(mn);
+        if !self.own_drop_live.contains(mn) && !cond {
+            return;
+        }
+        if cond {
+            self.emit_line(format_args!("if ({mn}__own) {{"));
+            self.indent += 1;
+        }
+        for (field, free_fn) in fields {
+            self.emit_line(format_args!("{free_fn}({mn}.{field});"));
+        }
+        if cond {
+            self.indent -= 1;
+            self.emit_line(format_args!("}}"));
+        }
+    }
+
     /// Emit free of one Own local (respects conditional `__own` freer flag).
     /// Skips names not bound on this path (closed bind scope).
     fn emit_free_one(&mut self, name: &str, free_fn: &str) {
@@ -4319,7 +4384,7 @@ impl Codegen {
     /// which is the existing contract (a fresh temp payload is already owned
     /// and dropped by the container).
     fn clone_if_borrowed(&mut self, value: &Expr, c_ty: &str, val: String) -> String {
-        if Self::own_free_fn(c_ty).is_none() {
+        if !self.c_ty_owns_fields(c_ty) {
             return val;
         }
         match value {
@@ -4367,24 +4432,16 @@ impl Codegen {
         }
     }
 
-    /// Move an owned field out of a fresh call/method result local without
-    /// allocating. Ordinary struct locals keep value semantics and therefore
-    /// clone on field extraction.
+    /// Move an owned field out of a unique owning local without allocating.
+    /// Shared, indexed, and other borrowed sources still clone. Cloning a
+    /// unique owner's field aliases storage with the parent destructor.
     fn prepare_owned_field_move(&mut self, value: &Expr, c_ty: &str, val: &str) -> Option<String> {
         if Self::own_free_fn(c_ty).is_none() && self.struct_own_field_frees(c_ty).is_empty() {
             return None;
         }
-        let Expr::Field { base, .. } = value else {
-            return None;
-        };
-        let Expr::Ident(owner) = base.as_ref() else {
-            return None;
-        };
-        let owner = mangle(owner);
-        if !self.own_drop_live.contains(&owner)
-            || self.share_live.contains(&owner)
-            || !self.call_result_owners.contains(&owner)
-        {
+        let owner = Self::field_move_owner(value)?;
+        let owner = mangle(&owner);
+        if !self.own_drop_live.contains(&owner) || self.share_live.contains(&owner) {
             return None;
         }
 
@@ -4392,6 +4449,18 @@ impl Codegen {
         self.emit_line(format_args!("{c_ty} {moved} = {val};"));
         self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
         Some(moved)
+    }
+
+    /// Root ident of a field path (`result.detail.label` → `result`).
+    fn field_move_owner(value: &Expr) -> Option<String> {
+        let mut cur = value;
+        loop {
+            match cur {
+                Expr::Field { base, .. } => cur = base.as_ref(),
+                Expr::Ident(name) => return Some(name.clone()),
+                _ => return None,
+            }
+        }
     }
 
     /// If a call/method is a known consuming function (append, push, pop, insert,
@@ -4983,23 +5052,24 @@ impl Codegen {
                             self.mut_self_fns.insert(f.name.clone());
                         }
                     }
-                    // Track mut struct params with owned fields — pass by pointer
-                    // to avoid deep-cloning entire databases on every call.
+                    // Borrow owning structs across the C ABI (issue #46): skip the
+                    // per-field RC clone that used to run at every `fn f(db: Database)`
+                    // / large `mut db` entry. `mut self` already uses a pointer.
                     {
                         let mut ptr_indices = std::collections::HashSet::new();
                         for (pi, p) in f.params.iter().enumerate() {
-                            if !p.mutable {
-                                continue;
-                            }
-                            if p.name == "self" {
+                            if p.name == "self" && p.mutable {
                                 continue;
                             }
                             let pty = self.type_expr_c(&p.ty);
-                            let frees = self.struct_own_field_frees(&pty);
-                            if frees.len() >= 4 {
-                                // Large struct with many owned fields — pass by pointer
-                                ptr_indices.insert(pi);
+                            let n_owned = self.struct_own_field_frees(&pty).len();
+                            if n_owned == 0 {
+                                continue;
                             }
+                            if p.mutable && n_owned < OWNING_STRUCT_MUT_PTR_FIELDS {
+                                continue;
+                            }
+                            ptr_indices.insert(pi);
                         }
                         if !ptr_indices.is_empty() {
                             self.mut_ptr_params.insert(f.name.clone(), ptr_indices);
@@ -6010,17 +6080,22 @@ impl Codegen {
                     .cloned()
                     .unwrap_or_else(|| "int64_t".into());
                 let params = self.fn_params.get(&key).cloned().unwrap_or_default();
-                let arg_tys: Vec<String> = if !params.is_empty()
+                let has_self = !params.is_empty()
                     && (self.structs.values().any(|s| s.c_name == params[0])
-                        || self.structs.contains_key(&params[0]))
-                {
+                        || self.structs.contains_key(&params[0]));
+                let arg_tys: Vec<String> = if has_self {
                     params[1..].to_vec()
                 } else {
                     params.clone()
                 };
                 let mut sig = vec!["void *self".to_string()];
                 for (i, t) in arg_tys.iter().enumerate() {
-                    sig.push(format!("{t} a{i}"));
+                    let param_index = if has_self { i + 1 } else { i };
+                    if self.param_passed_by_ptr(&key, param_index) {
+                        sig.push(format!("{t} *a{i}"));
+                    } else {
+                        sig.push(format!("{t} a{i}"));
+                    }
                 }
                 let _ = writeln!(self.out, "    {ret} (*{m})({});", sig.join(", "));
             }
@@ -6157,11 +6232,23 @@ impl Codegen {
                     let mut sig = vec!["void *self".to_string()];
                     let mut call_args = Vec::new();
                     if has_self {
-                        call_args.push(format!("*({concrete} *)self"));
+                        if self.mut_self_fns.contains(&key)
+                            || self.param_passed_by_ptr(&key, 0)
+                        {
+                            call_args.push(format!("({concrete} *)self"));
+                        } else {
+                            call_args.push(format!("*({concrete} *)self"));
+                        }
                     }
                     for (i, t) in arg_tys.iter().enumerate() {
-                        sig.push(format!("{t} a{i}"));
-                        call_args.push(format!("a{i}"));
+                        let param_index = if has_self { i + 1 } else { i };
+                        if self.param_passed_by_ptr(&key, param_index) {
+                            sig.push(format!("{t} *a{i}"));
+                            call_args.push(format!("a{i}"));
+                        } else {
+                            sig.push(format!("{t} a{i}"));
+                            call_args.push(format!("a{i}"));
+                        }
                     }
                     let _ = writeln!(self.out, "static {ret} {wrap}({}) {{", sig.join(", "));
                     if ret == "void" {
@@ -12090,7 +12177,9 @@ impl Codegen {
             .enumerate()
             .map(|(i, p)| {
                 let ty = self.type_expr_c(&p.ty);
-                if i == 0 && p.name == "self" && is_mut_self {
+                if (i == 0 && p.name == "self" && is_mut_self)
+                    || self.param_passed_by_ptr(&f.name, i)
+                {
                     format!("{ty} *{}", mangle(&p.name))
                 } else {
                     format!("{ty} {}", mangle(&p.name))
@@ -12098,6 +12187,130 @@ impl Codegen {
             })
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    /// True when this C type is a user-struct pointer (`Database*`), not a
+    /// runtime handle (`MakoMapSI*`, `MakoStrBuilder*`, …).
+    fn is_user_struct_ptr(c_ty: &str) -> bool {
+        c_ty.ends_with('*') && !c_ty.starts_with("Mako")
+    }
+
+    fn user_struct_ptr_base(c_ty: &str) -> &str {
+        c_ty.trim_end_matches('*')
+    }
+
+    fn param_passed_by_ptr(&self, fname: &str, index: usize) -> bool {
+        if self
+            .mut_ptr_params
+            .get(fname)
+            .is_some_and(|s| s.contains(&index))
+        {
+            return true;
+        }
+        // Generic specialization `id__int` falls back to the template name.
+        if let Some((base, _)) = fname.rsplit_once("__") {
+            if self.generic_templates.contains_key(base) {
+                return self
+                    .mut_ptr_params
+                    .get(base)
+                    .is_some_and(|s| s.contains(&index));
+            }
+        }
+        false
+    }
+
+    fn is_c_lvalue(val: &str) -> bool {
+        if val.is_empty() {
+            return false;
+        }
+        if val.starts_with("(*") && val.ends_with(')') {
+            return true;
+        }
+        !val.contains('(')
+    }
+
+    /// Take the address of a struct value for a borrowed (pointer) parameter.
+    fn take_owning_struct_arg_addr(&mut self, aty: &str, val: String) -> String {
+        if Self::is_user_struct_ptr(aty) {
+            return val;
+        }
+        if Self::is_c_lvalue(&val) {
+            format!("&{val}")
+        } else {
+            let tmp = self.fresh("sarg");
+            self.line(&format!("{aty} {tmp} = {val};"));
+            format!("&{tmp}")
+        }
+    }
+
+    /// Indexed struct elements are rvalues from `*_get`. Mut pointer params
+    /// must receive `*_get_ptr` so writes land in the array, not a copy.
+    fn emit_index_struct_ptr_arg(&mut self, expr: &Expr) -> Option<(String, String)> {
+        let Expr::Index { base, index } = expr else {
+            return None;
+        };
+        let (bty, b) = self.emit_expr(base);
+        let sn = bty.strip_prefix("MakoArr_")?.to_string();
+        let (_, idx) = self.emit_expr(index);
+        let tmp = self.fresh("iarg");
+        self.emit_line(format_args!("int64_t {tmp} = {idx};"));
+        let elem = self.arr_elem_c_ty(&sn);
+        Some((
+            format!("{elem}*"),
+            format!("mako_arr_{sn}_get_ptr({b}, {tmp})"),
+        ))
+    }
+
+    fn emit_struct_ptr_arg(&mut self, expr: &Expr) -> (String, String) {
+        if let Some(got) = self.emit_index_struct_ptr_arg(expr) {
+            return got;
+        }
+        let (aty, v) = self.emit_expr(expr);
+        let v = self.take_owning_struct_arg_addr(&aty, v);
+        if Self::is_user_struct_ptr(&aty) {
+            (aty, v)
+        } else {
+            (format!("{aty}*"), v)
+        }
+    }
+
+    /// Coerce a user-struct pointer into a by-value expression (`(*db)`).
+    fn coerce_user_struct_value(c_ty: &str, val: String) -> (String, String) {
+        if Self::is_user_struct_ptr(c_ty) {
+            (
+                Self::user_struct_ptr_base(c_ty).to_string(),
+                format!("(*{val})"),
+            )
+        } else {
+            (c_ty.to_string(), val)
+        }
+    }
+
+    fn ident_is_user_struct_borrow(&self, name: &str) -> bool {
+        self.locals
+            .get(name)
+            .is_some_and(|ty| Self::is_user_struct_ptr(ty))
+    }
+
+    fn c_ty_owns_fields(&self, c_ty: &str) -> bool {
+        Self::own_free_fn(c_ty).is_some() || !self.struct_own_field_frees(c_ty).is_empty()
+    }
+
+    /// A user-struct pointer is a borrow. Returning or storing `(*p)` without
+    /// cloning would alias the caller's fields with a new destructor.
+    fn clone_escaped_struct_borrow(&mut self, expr: &Expr, c_ty: &str, val: String) -> String {
+        if !self.c_ty_owns_fields(c_ty) {
+            return val;
+        }
+        if Self::is_field_borrow_return(expr) {
+            return self.clone_own_val(c_ty, &val);
+        }
+        if let Expr::Ident(n) = expr {
+            if self.ident_is_user_struct_borrow(n) {
+                return self.clone_own_val(c_ty, &val);
+            }
+        }
+        val
     }
 
     fn type_expr_c(&self, t: &TypeExpr) -> String {
@@ -13401,7 +13614,9 @@ impl Codegen {
         self.push_share_scope();
         let is_mut_self_fn = self.mut_self_fns.contains(&f.name);
         for (pi, p) in f.params.iter().enumerate() {
-            let pty = if pi == 0 && p.name == "self" && is_mut_self_fn {
+            let pty = if (pi == 0 && p.name == "self" && is_mut_self_fn)
+                || self.param_passed_by_ptr(&f.name, pi)
+            {
                 format!("{}*", self.type_expr_c(&p.ty))
             } else {
                 self.type_expr_c(&p.ty)
@@ -13449,12 +13664,16 @@ impl Codegen {
 
         // Deep-clone owned fields of `mut` struct params so mutations don't
         // corrupt the caller's data (C struct copy shares interior pointers).
-        for p in &f.params {
+        // Pointer-passed params (issue #46) borrow the caller — skip clone.
+        for (pi, p) in f.params.iter().enumerate() {
             if !p.mutable {
                 continue;
             }
             if p.name == "self" && is_mut_self_fn {
                 continue; // mut self is a pointer — handled separately
+            }
+            if self.param_passed_by_ptr(&f.name, pi) {
+                continue;
             }
             let pty = self.type_expr_c(&p.ty);
             let frees = self.struct_own_field_frees(&pty);
@@ -13475,11 +13694,15 @@ impl Codegen {
 
         // Register mut struct params for owned-drop tracking so field
         // reassignment emits free-before-assign (prevents leaks).
-        for p in &f.params {
+        // Pointer-passed params are caller-owned — do not drop at exit.
+        for (pi, p) in f.params.iter().enumerate() {
             if !p.mutable {
                 continue;
             }
             if p.name == "self" && is_mut_self_fn {
+                continue;
+            }
+            if self.param_passed_by_ptr(&f.name, pi) {
                 continue;
             }
             let pty = self.type_expr_c(&p.ty);
@@ -13518,6 +13741,8 @@ impl Codegen {
         if implicit_return {
             if let Some(Stmt::Expr(e)) = stmts.last() {
                 let (ty, val) = self.emit_expr(e);
+                let (ty, val) = Self::coerce_user_struct_value(&ty, val);
+                let val = self.clone_escaped_struct_borrow(e, &ty, val);
                 // Materialize before free — index/expr strings may reference locals
                 // that own_drop frees (free-before-return UAF).
                 let val = self.materialize_return_val(&ty, val);
@@ -13569,7 +13794,21 @@ impl Codegen {
         self.emit_fn(&impl_fn);
 
         // 2) Emit the global function pointer
-        let param_types: Vec<String> = f.params.iter().map(|p| self.type_expr_c(&p.ty)).collect();
+        let param_types: Vec<String> = f
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let ty = self.type_expr_c(&p.ty);
+                if (i == 0 && p.name == "self" && self.mut_self_fns.contains(&f.name))
+                    || self.param_passed_by_ptr(&f.name, i)
+                {
+                    format!("{ty} *")
+                } else {
+                    ty
+                }
+            })
+            .collect();
         let ptr_params = if param_types.is_empty() {
             "void".to_string()
         } else {
@@ -14062,7 +14301,13 @@ impl Codegen {
                     let vtmp = self.fresh("it_opt");
                     let next_mangled = mangle(&next_fn);
                     let recv = if self.mut_self_fns.contains(&next_fn) {
-                        format!("&{val}")
+                        if Self::is_user_struct_ptr(&ty) {
+                            val.clone()
+                        } else {
+                            format!("&{val}")
+                        }
+                    } else if Self::is_user_struct_ptr(&ty) {
+                        Self::coerce_user_struct_value(&ty, val.clone()).1
                     } else {
                         val.clone()
                     };
@@ -14650,6 +14895,11 @@ impl Codegen {
                 if field_value_owned {
                     self.register_own_drop(name, &ty);
                     self.scope_drop_safe.insert(name.to_string());
+                    // A nested struct moved out of a unique owner is itself a
+                    // unique owner — further field extracts must move, not clone.
+                    if !self.struct_own_field_frees(&ty).is_empty() {
+                        self.call_result_owners.insert(name.to_string());
+                    }
                 }
                 if transient_call_result_struct {
                     self.call_result_owners.insert(name.to_string());
@@ -15033,6 +15283,16 @@ impl Codegen {
                     false
                 };
                 let (vty, val) = self.emit_expr(value);
+                let (vty, val) = if self
+                    .locals
+                    .get(name)
+                    .is_some_and(|exp| !Self::is_user_struct_ptr(exp))
+                    && Self::is_user_struct_ptr(&vty)
+                {
+                    Self::coerce_user_struct_value(&vty, val)
+                } else {
+                    (vty, val)
+                };
                 let val = if let Some(exp) = self.locals.get(name).cloned() {
                     if exp.starts_with("MakoIface_") && vty != exp {
                         let iname = &exp["MakoIface_".len()..];
@@ -15230,6 +15490,23 @@ impl Codegen {
                                 return;
                             }
                         }
+                        // User structs have no own_free_fn. Destroy owned fields
+                        // before overwrite so `db = result.db` cannot leak the
+                        // previous Database (issue #49). Returning a borrowed
+                        // struct param clones first, so dest-destroy is safe.
+                        if !self.struct_own_field_frees(&cty).is_empty() {
+                            self.emit_destroy_owned_struct_local(&mn, &cty);
+                            if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                self.emit_line(format_args!("*{cell} = {val};"));
+                            } else {
+                                self.emit_line(format_args!("{mn} = {val};"));
+                            }
+                            if cond_own {
+                                self.emit_line(format_args!("{mn}__own = 1;"));
+                            }
+                            self.register_own_drop(&mn, &cty);
+                            return;
+                        }
                     }
                 } // end arena guard
                   // Mutable closure capture: write through heap cell pointer.
@@ -15380,6 +15657,7 @@ impl Codegen {
                     if let Some(sn) = aty.strip_prefix("MakoArr_") {
                         let (_, idx) = self.emit_expr(index);
                         let (vty, v) = self.emit_expr(value);
+                        let (vty, v) = Self::coerce_user_struct_value(&vty, v);
                         let v = self.ensure_slice_owned(&vty, v);
                         let v = self.prepare_own_store_rhs(value, &vty, v);
                         let tmp = self.fresh("ifield");
@@ -15409,6 +15687,7 @@ impl Codegen {
                 }
                 let (bty, b) = self.emit_expr(base);
                 let (vty, v) = self.emit_expr(value);
+                let (vty, v) = Self::coerce_user_struct_value(&vty, v);
                 // Escape POD stack/views into long-lived struct fields.
                 let v = self.ensure_slice_owned(&vty, v);
                 // Move live owns / clone aliases & field borrows — struct field free
@@ -15437,19 +15716,36 @@ impl Codegen {
                 );
                 if let Expr::Ident(base_name) = base {
                     let mn = mangle(base_name);
-                    if let Some(field_free) =
-                        Self::own_free_fn(&vty).filter(|_| !consumes_old_field)
-                    {
-                        // Always free old field value before reassignment.
-                        // Struct fields are zero-initialized, and free functions
-                        // handle null/empty (e.g. mako_arr_*_free checks cap > 0).
-                        if self.own_cond_flags.contains(&mn) {
-                            self.emit_line(format_args!(
-                                "if ({mn}__own) {field_free}({b}{arrow}{field});"
-                            ));
-                            self.emit_line(format_args!("{mn}__own = 1;"));
+                    if !consumes_old_field {
+                        if let Some(field_free) = Self::own_free_fn(&vty) {
+                            // Always free old field value before reassignment.
+                            // Struct fields are zero-initialized, and free functions
+                            // handle null/empty (e.g. mako_arr_*_free checks cap > 0).
+                            if self.own_cond_flags.contains(&mn) {
+                                self.emit_line(format_args!(
+                                    "if ({mn}__own) {field_free}({b}{arrow}{field});"
+                                ));
+                                self.emit_line(format_args!("{mn}__own = 1;"));
+                            } else {
+                                self.emit_line(format_args!("{field_free}({b}{arrow}{field});"));
+                            }
                         } else {
-                            self.emit_line(format_args!("{field_free}({b}{arrow}{field});"));
+                            for (path, field_free) in self.struct_own_field_frees(&vty) {
+                                if self.own_cond_flags.contains(&mn) {
+                                    self.emit_line(format_args!(
+                                        "if ({mn}__own) {field_free}({b}{arrow}{field}.{path});"
+                                    ));
+                                } else {
+                                    self.emit_line(format_args!(
+                                        "{field_free}({b}{arrow}{field}.{path});"
+                                    ));
+                                }
+                            }
+                            if self.own_cond_flags.contains(&mn)
+                                && !self.struct_own_field_frees(&vty).is_empty()
+                            {
+                                self.emit_line(format_args!("{mn}__own = 1;"));
+                            }
                         }
                     }
                     if Self::own_free_fn(&bty).is_some()
@@ -15514,15 +15810,17 @@ impl Codegen {
             }
             Stmt::Return(Some(e)) => {
                 let (ty, val) = self.emit_expr(e);
-                // SAFE: returning a struct field that is an owning type (string/slice)
-                // must clone — caller owns the result, struct still owns the field.
-                let val = if Self::is_field_borrow_return(e) && Self::own_free_fn(&ty).is_some() {
+                let (ty, val) = Self::coerce_user_struct_value(&ty, val);
+                // SAFE: returning a struct field or a borrowed struct param must
+                // clone — the caller owns the result, the source still owns its
+                // fields. A header copy of `(*borrow)` aliases the caller.
+                let val = if Self::is_field_borrow_return(e) && self.c_ty_owns_fields(&ty) {
                     self.clone_own_val(&ty, &val)
                 } else if let Expr::Ident(n) = e {
-                    // Alias return: Ident not in own_drop_live still points at
-                    // data owned by another local that will be freed below.
                     let mn = mangle(n);
-                    if Self::own_free_fn(&ty).is_some() && !self.own_drop_live.contains(&mn) {
+                    if self.ident_is_user_struct_borrow(n)
+                        || (Self::own_free_fn(&ty).is_some() && !self.own_drop_live.contains(&mn))
+                    {
                         self.clone_own_val(&ty, &val)
                     } else {
                         val
@@ -16328,6 +16626,7 @@ impl Codegen {
                         }
                         "Ok" => {
                             let (vty, v) = self.emit_expr(&args[0]);
+                            let (vty, v) = Self::coerce_user_struct_value(&vty, v);
                             if vty == "MakoString" {
                                 let v = self.clone_if_borrowed(&args[0], &vty, v);
                                 return ("MakoResultInt".into(), format!("mako_ok_str({v})"));
@@ -16339,6 +16638,7 @@ impl Codegen {
                             if self.structs.contains_key(&vty)
                                 || self.structs.values().any(|s| s.c_name == vty)
                             {
+                                let v = self.clone_if_borrowed(&args[0], &vty, v);
                                 let boxn = self.fresh("okbox");
                                 self.line(&format!(
                                     "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
@@ -16598,6 +16898,7 @@ impl Codegen {
                         }
                         "Some" => {
                             let (vty, v) = self.emit_expr(&args[0]);
+                            let (vty, v) = Self::coerce_user_struct_value(&vty, v);
                             // Nested Option: heap-box inner option
                             if vty == "MakoOptionInt" {
                                 let boxn = self.fresh("opnest");
@@ -16635,6 +16936,7 @@ impl Codegen {
                             if self.structs.contains_key(&vty)
                                 || self.structs.values().any(|s| s.c_name == vty)
                             {
+                                let v = self.clone_if_borrowed(&args[0], &vty, v);
                                 let boxn = self.fresh("opbox");
                                 self.line(&format!(
                                     "{vty} *{boxn} = ({vty}*)malloc(sizeof({vty}));"
@@ -34637,7 +34939,8 @@ impl Codegen {
                             let (vty, mut v) = if sty == "MakoStrArray" {
                                 ("MakoString".into(), self.emit_str_arg(&args[1]))
                             } else {
-                                self.emit_expr(&args[1])
+                                let (vty, v) = self.emit_expr(&args[1]);
+                                Self::coerce_user_struct_value(&vty, v)
                             };
                             let tmp = self.fresh("ap");
                             if sty == "MakoByteArray" {
@@ -34695,9 +34998,14 @@ impl Codegen {
                                 let sn = sn.to_string();
                                 // Struct/enum array append consumes an owning element just
                                 // as nested-array append does. Identifier sources move into
-                                // the array; temporaries transfer directly.
+                                // the array; temporaries transfer directly. A borrowed
+                                // struct param must clone — moving `(*p)` aliases the caller.
                                 if let Expr::Ident(n) = &args[1] {
-                                    self.note_own_drop_moved(&mangle(n));
+                                    if self.ident_is_user_struct_borrow(n) {
+                                        v = self.clone_own_val(&vty, &v);
+                                    } else {
+                                        self.note_own_drop_moved(&mangle(n));
+                                    }
                                 }
                                 // Nested [][]T: heapify stack POD lits before store.
                                 if sn.starts_with("arr_") {
@@ -34861,6 +35169,10 @@ impl Codegen {
                                         .is_some_and(|ty| ty == "MakoString")
                                 {
                                     ("MakoString".into(), self.emit_str_arg(a))
+                                } else if self.param_passed_by_ptr(name, i)
+                                    && matches!(a, Expr::Index { .. })
+                                {
+                                    self.emit_struct_ptr_arg(a)
                                 } else {
                                     self.emit_expr(a)
                                 };
@@ -34907,6 +35219,15 @@ impl Codegen {
                                     } else {
                                         v
                                     }
+                                } else {
+                                    v
+                                };
+                                let v = if self.param_passed_by_ptr(&resolved, i)
+                                    || self.param_passed_by_ptr(name, i)
+                                {
+                                    self.take_owning_struct_arg_addr(aty, v)
+                                } else if Self::is_user_struct_ptr(aty) {
+                                    Self::coerce_user_struct_value(aty, v).1
                                 } else {
                                     v
                                 };
@@ -34983,7 +35304,8 @@ impl Codegen {
                 let tmp = self.fresh("st");
                 self.line(&format!("{cty} {tmp};"));
                 if let Some(base) = update {
-                    let (_, bv) = self.emit_expr(base);
+                    let (bty, bv) = self.emit_expr(base);
+                    let (_, bv) = Self::coerce_user_struct_value(&bty, bv);
                     // Functional update: copy scalar fields and clone inherited
                     // owners. A plain C struct copy would make the new value and
                     // base free the same string/slice allocation.
@@ -35013,6 +35335,7 @@ impl Codegen {
                 }
                 for (fname, fexpr) in fields {
                     let (fty, v) = self.emit_expr(fexpr);
+                    let (fty, v) = Self::coerce_user_struct_value(&fty, v);
                     // Heapify POD stack/view slices stored in struct fields.
                     let v = self.ensure_slice_owned(&fty, v);
                     // Move a fresh/live owner into the field, but clone a borrowed alias.
@@ -35114,6 +35437,7 @@ impl Codegen {
                 self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
                 for (i, vexpr) in values.iter().enumerate() {
                     let (fty, v) = self.emit_expr(vexpr);
+                    let (fty, v) = Self::coerce_user_struct_value(&fty, v);
                     let v = self.ensure_slice_owned(&fty, v);
                     // Same as the named form: move a live owner, clone a borrow.
                     let v = self.prepare_own_store_rhs(vexpr, &fty, v);
@@ -35134,6 +35458,8 @@ impl Codegen {
                 let mut vals = Vec::new();
                 for e in elems {
                     let (t, v) = self.emit_expr(e);
+                    let (t, v) = Self::coerce_user_struct_value(&t, v);
+                    let v = self.clone_if_borrowed(e, &t, v);
                     // Materialize bag ctors so Some/Ok payload kinds attach to a local
                     // (expr strings like mako_some_str(…) are not metadata keys).
                     if (t == "MakoOptionInt" || t == "MakoResultInt")
@@ -35172,7 +35498,6 @@ impl Codegen {
                         tys.push(t);
                         vals.push(tmp);
                     } else {
-                        let v = self.clone_if_borrowed(e, &t, v);
                         tys.push(t);
                         vals.push(v);
                     }
@@ -36781,7 +37106,9 @@ impl Codegen {
                                         || self.structs.contains_key(pty)
                                         || self.structs.values().any(|s| s.c_name == *pty)
                                     {
-                                        // POD struct: heap-box copy; clone string fields.
+                                        // Independent task copy: clone every owned field
+                                        // (strings, slices, nested structs), not just strings.
+                                        let (aty, v) = Self::coerce_user_struct_value(&aty, v);
                                         let cname = if self.structs.contains_key(&aty) {
                                             aty.clone()
                                         } else if self.structs.contains_key(pty) {
@@ -36789,26 +37116,12 @@ impl Codegen {
                                         } else {
                                             aty.clone()
                                         };
-                                        let fields = self
-                                            .structs
-                                            .get(&cname)
-                                            .or_else(|| {
-                                                self.structs.values().find(|s| s.c_name == cname)
-                                            })
-                                            .map(|s| s.fields.clone())
-                                            .unwrap_or_default();
+                                        let v = self.clone_own_val(&cname, &v);
                                         let boxn = self.fresh("podbox");
                                         self.line(&format!(
                                             "{cname} *{boxn} = ({cname}*)malloc(sizeof({cname}));"
                                         ));
                                         self.emit_line(format_args!("*{boxn} = {v};"));
-                                        for (fname, ft) in &fields {
-                                            if ft == "MakoString" {
-                                                self.line(&format!(
-                                                    "{boxn}->{fname} = mako_str_clone({v}.{fname});"
-                                                ));
-                                            }
-                                        }
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if pty.contains('*') || aty.contains('*') {
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){v};"));
@@ -37419,21 +37732,26 @@ impl Codegen {
                         // Struct/enum associated method: Type_method(self, ...)
                         // Includes `on Type { fn method… }` desugar.
                         {
+                            let rty_base = if Self::is_user_struct_ptr(&rty) {
+                                Self::user_struct_ptr_base(&rty).to_string()
+                            } else {
+                                rty.clone()
+                            };
                             let tname = self
                                 .enums
                                 .iter()
-                                .find(|(n, info)| *n == &rty || info.c_name == rty)
+                                .find(|(n, info)| *n == &rty_base || info.c_name == rty_base)
                                 .map(|(n, _)| n.clone())
                                 .or_else(|| {
                                     self.structs
                                         .iter()
-                                        .find(|(n, info)| *n == &rty || info.c_name == rty)
+                                        .find(|(n, info)| *n == &rty_base || info.c_name == rty_base)
                                         .map(|(n, _)| n.clone())
                                 })
                                 .or_else(|| {
                                     // Receiver C type often equals struct name
-                                    if self.structs.contains_key(&rty) {
-                                        Some(rty.clone())
+                                    if self.structs.contains_key(&rty_base) {
+                                        Some(rty_base.clone())
                                     } else {
                                         None
                                     }
@@ -37450,15 +37768,32 @@ impl Codegen {
                             };
                             if !key.is_empty() {
                                 let mut arg_vals = Vec::new();
-                                for a in args {
-                                    let (_, v) = self.emit_expr(a);
+                                for (ai, a) in args.iter().enumerate() {
+                                    let v = if self.param_passed_by_ptr(&key, ai + 1) {
+                                        self.emit_struct_ptr_arg(a).1
+                                    } else {
+                                        let (aty, v) = self.emit_expr(a);
+                                        if Self::is_user_struct_ptr(&aty) {
+                                            Self::coerce_user_struct_value(&aty, v).1
+                                        } else {
+                                            v
+                                        }
+                                    };
                                     arg_vals.push(v);
                                 }
                                 let params = self.fn_params.get(&key).cloned().unwrap_or_default();
                                 let call_args = if params.len() == arg_vals.len() + 1 {
-                                    // For mut self methods, pass address of receiver
-                                    let recv = if self.mut_self_fns.contains(&key) {
-                                        format!("&{rv}")
+                                    // mut self / borrowed owning self: pass address
+                                    let recv = if self.mut_self_fns.contains(&key)
+                                        || self.param_passed_by_ptr(&key, 0)
+                                    {
+                                        if Self::is_user_struct_ptr(&rty) {
+                                            rv.clone()
+                                        } else {
+                                            format!("&{rv}")
+                                        }
+                                    } else if Self::is_user_struct_ptr(&rty) {
+                                        Self::coerce_user_struct_value(&rty, rv.clone()).1
                                     } else {
                                         rv.clone()
                                     };
@@ -37485,15 +37820,24 @@ impl Codegen {
                         }
                         // Fat-pointer interface: recv.method(args) → recv.vtable->method(recv.data, ...)
                         if let Some(iname_prefix) = rty.strip_prefix("MakoIface_") {
+                            let key = format!("{iname_prefix}_{other}");
+                            let params = self.fn_params.get(&key).cloned().unwrap_or_default();
+                            let has_self = !params.is_empty()
+                                && (self.structs.contains_key(&params[0])
+                                    || self.structs.values().any(|s| s.c_name == params[0]));
                             let mut arg_vals = Vec::new();
-                            for a in args {
-                                let (_, v) = self.emit_expr(a);
+                            for (i, a) in args.iter().enumerate() {
+                                let param_index = if has_self { i + 1 } else { i };
+                                let v = if self.param_passed_by_ptr(&key, param_index) {
+                                    self.emit_struct_ptr_arg(a).1
+                                } else {
+                                    self.emit_expr(a).1
+                                };
                                 arg_vals.push(v);
                             }
                             let mut call_args = vec![format!("{rv}.data")];
                             call_args.extend(arg_vals);
                             let call = format!("{rv}.vtable->{other}({})", call_args.join(", "));
-                            let key = format!("{iname_prefix}_{other}");
                             let ret = self
                                 .fn_rets
                                 .get(&key)
@@ -37509,18 +37853,18 @@ impl Codegen {
                         }
                         // Interface method sugar: recv.method(args) → Iface_method([self,] args)
                         // or Iface_Concrete_method when multi-concrete, or Concrete_method (Go).
-                        let mut arg_vals = Vec::new();
-                        for a in args {
-                            let (_, v) = self.emit_expr(a);
-                            arg_vals.push(v);
-                        }
                         let mut resolved: Option<String> = None;
-                        let recv_is_struct = self.structs.contains_key(&rty)
-                            || self.structs.values().any(|s| s.c_name == rty);
-                        let concrete_name = if self.structs.contains_key(&rty) {
-                            Some(rty.clone())
-                        } else if self.structs.values().any(|s| s.c_name == rty) {
-                            Some(rty.clone())
+                        let rty_base = if Self::is_user_struct_ptr(&rty) {
+                            Self::user_struct_ptr_base(&rty).to_string()
+                        } else {
+                            rty.clone()
+                        };
+                        let recv_is_struct = self.structs.contains_key(&rty_base)
+                            || self.structs.values().any(|s| s.c_name == rty_base);
+                        let concrete_name = if self.structs.contains_key(&rty_base) {
+                            Some(rty_base.clone())
+                        } else if self.structs.values().any(|s| s.c_name == rty_base) {
+                            Some(rty_base.clone())
                         } else {
                             None
                         };
@@ -37558,8 +37902,37 @@ impl Codegen {
                         let _ = recv_is_struct;
                         if let Some(key) = resolved {
                             let params = self.fn_params.get(&key).cloned().unwrap_or_default();
-                            let call_args = if params.len() == arg_vals.len() + 1 {
-                                let mut all = vec![rv.clone()];
+                            let has_self = params.len() == args.len() + 1;
+                            let mut arg_vals = Vec::new();
+                            for (i, a) in args.iter().enumerate() {
+                                let param_index = if has_self { i + 1 } else { i };
+                                let v = if self.param_passed_by_ptr(&key, param_index) {
+                                    self.emit_struct_ptr_arg(a).1
+                                } else {
+                                    let (aty, v) = self.emit_expr(a);
+                                    if Self::is_user_struct_ptr(&aty) {
+                                        Self::coerce_user_struct_value(&aty, v).1
+                                    } else {
+                                        v
+                                    }
+                                };
+                                arg_vals.push(v);
+                            }
+                            let call_args = if has_self {
+                                let recv = if self.mut_self_fns.contains(&key)
+                                    || self.param_passed_by_ptr(&key, 0)
+                                {
+                                    if Self::is_user_struct_ptr(&rty) {
+                                        rv.clone()
+                                    } else {
+                                        format!("&{rv}")
+                                    }
+                                } else if Self::is_user_struct_ptr(&rty) {
+                                    Self::coerce_user_struct_value(&rty, rv.clone()).1
+                                } else {
+                                    rv.clone()
+                                };
+                                let mut all = vec![recv];
                                 all.extend(arg_vals);
                                 all
                             } else {
@@ -37943,6 +38316,7 @@ impl Codegen {
         let arm_idx_then = self.own_drop_scopes.len().saturating_sub(1);
         let saved_then = self.own_drop_live.clone();
         let (tty, tval) = self.emit_block_trailing(then_block);
+        let (tty, tval) = Self::coerce_user_struct_value(&tty, tval);
         let tval = self.transfer_or_clone_arm_value(then_block, &tty, tval);
         if tval != "/*void*/" {
             self.line(&format!("{result} = {tval};"));
@@ -37956,6 +38330,7 @@ impl Codegen {
         let arm_idx_else = self.own_drop_scopes.len().saturating_sub(1);
         let saved_else = self.own_drop_live.clone();
         let (ety, eval) = self.emit_block_trailing(else_block);
+        let (ety, eval) = Self::coerce_user_struct_value(&ety, eval);
         let eval = self.transfer_or_clone_arm_value(else_block, &ety, eval);
         if eval != "/*void*/" {
             self.line(&format!("{result} = {eval};"));
@@ -38039,6 +38414,7 @@ impl Codegen {
 
     fn emit_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> (String, String) {
         let (sty, sval) = self.emit_expr(scrutinee);
+        let (sty, sval) = Self::coerce_user_struct_value(&sty, sval);
         let result = self.fresh("m");
         // Infer result C type from first arm by emitting into a probe — use int64_t default,
         // upgrade when we see string/result/option/enum from arm bodies.
@@ -38355,6 +38731,7 @@ impl Codegen {
             }
 
             let (bty, bval) = self.emit_expr(&arm.body);
+            let (bty, bval) = Self::coerce_user_struct_value(&bty, bval);
             if result_ty.is_none() {
                 result_ty = Some(bty.clone());
             }
@@ -38987,6 +39364,8 @@ impl Codegen {
                 format!("return (void*)(intptr_t)mako_f64_to_bits({call});\n")
             } else if ret_ty.contains('*') {
                 format!("return (void*){call};\n")
+            } else if ret_ty == "void" {
+                format!("{call};\nreturn NULL;\n")
             } else {
                 format!("return (void*)(intptr_t)(int64_t){call};\n")
             };
@@ -39051,7 +39430,16 @@ impl Codegen {
                 unpack.push_str(&format!(
                     "{ty} {local} = *({ty}*)a[{i}]; free((void*)a[{i}]);\n"
                 ));
-                call_args.push(local);
+                if self.param_passed_by_ptr(fname, i) {
+                    call_args.push(format!("&{local}"));
+                } else {
+                    call_args.push(local.clone());
+                }
+                // The boxed value is the task's owned clone. Drop it after the
+                // callee returns (the callee borrows and must not free it).
+                for (path, ff) in self.struct_own_field_frees(ty) {
+                    cleanup.push_str(&format!("{ff}({local}.{path});\n"));
+                }
             } else if ty.contains('*') {
                 unpack.push_str(&format!("{ty} {local} = ({ty})a[{i}];\n"));
                 call_args.push(local);
@@ -39097,6 +39485,8 @@ impl Codegen {
                 "{unpack}double __r = {call};\n{cleanup}\
                  return (void*)(intptr_t)mako_f64_to_bits(__r);\n"
             )
+        } else if ret_ty == "void" {
+            format!("{unpack}{call};\n{cleanup}return NULL;\n")
         } else {
             format!(
                 "{unpack}int64_t __r = (int64_t){call};\n{cleanup}return (void*)(intptr_t)__r;\n"
@@ -41327,6 +41717,216 @@ fn main() {
         assert!(
             !generated.contains("mako_str_concat_own(mako_str_view("),
             "static string views cannot be passed to reallocating concat:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn borrows_owning_struct_params_without_cloning_fields() {
+        // Issue #46: `fn f(db: Database)` must not RC-clone every owned field.
+        let source = r#"
+struct Bag {
+    a: string
+    b: string
+    c: []int
+}
+
+fn count_items(bag: Bag) -> int {
+    return len(bag.c)
+}
+
+fn main() {
+    let mut bag = Bag { a: "x", b: "y", c: make([]int, 0, 2) }
+    bag.c = append(bag.c, 1)
+    print_int(count_items(bag))
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+
+        assert!(
+            generated.contains("Bag *bag") || generated.contains("Bag * bag"),
+            "owning struct params must pass by pointer:\n{generated}"
+        );
+        assert!(
+            generated.contains("count_items(&bag)") || generated.contains("count_items(&"),
+            "call sites must pass the address of an owning struct:\n{generated}"
+        );
+        let count_fn = generated
+            .split("count_items(")
+            .nth(2)
+            .unwrap_or("");
+        assert!(
+            !count_fn.contains("mako_str_clone(bag")
+                && !count_fn.contains("mako_int_array_clone(bag"),
+            "borrowed struct params must not clone owned fields at entry:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn large_mut_owning_struct_params_borrow_without_clone() {
+        let source = r#"
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+fn grow(mut h: Heavy) {
+    h.d = append(h.d, 7)
+}
+
+fn main() {
+    let mut h = Heavy { a: "x", b: "y", c: "z", d: make([]int, 0, 1) }
+    grow(h)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+
+        assert!(
+            generated.contains("Heavy *h") || generated.contains("Heavy * h"),
+            "large mut owning structs must pass by pointer:\n{generated}"
+        );
+        assert!(
+            !generated.contains("h.a = mako_str_clone")
+                && !generated.contains("h.d = mako_arr_")
+                && !generated.contains("h.d = mako_int_array_clone"),
+            "large mut struct params must not clone owned fields at entry:\n{generated}"
+        );
+        assert!(
+            generated.contains("h->d") || generated.contains("h->a"),
+            "large mut struct params must use pointer field access:\n{generated}"
+        );
+        assert!(
+            generated.contains("grow(&h)") || generated.contains("grow(&"),
+            "call site must pass &h:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn grow_heavy_assigns_string_field_through_pointer() {
+        let source = r#"
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+fn grow_heavy(mut h: Heavy) {
+    h.d = append(h.d, 7)
+    h.a = "grew"
+}
+
+fn main() {
+    let mut h = Heavy { a: "x", b: "y", c: "z", d: make([]int, 0, 2) }
+    grow_heavy(h)
+    print(h.a)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        assert!(
+            generated.contains("h->a") && generated.contains("h->d"),
+            "grow_heavy must assign through pointer:\n{generated}"
+        );
+        assert!(
+            generated.contains("grow_heavy(&h)"),
+            "call must pass &h:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn returning_borrowed_struct_param_clones_owned_fields() {
+        let source = r#"
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+fn identity_heavy(mut h: Heavy) -> Heavy {
+    return h
+}
+
+fn main() {
+    let mut h = Heavy { a: "x", b: "y", c: "z", d: make([]int, 0, 1) }
+    h = identity_heavy(h)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        assert!(
+            generated.contains("mako_str_clone") && generated.contains("identity_heavy"),
+            "returning a borrowed owning struct must clone fields:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn mut_struct_index_arg_passes_element_pointer() {
+        let source = r#"
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+fn stamp(mut h: Heavy) {
+    h.a = "stamped"
+}
+
+fn main() {
+    let mut xs = make([]Heavy, 0, 1)
+    xs = append(xs, Heavy { a: "i0", b: "b0", c: "c0", d: make([]int, 0, 1) })
+    stamp(xs[0])
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        assert!(
+            generated.contains("get_ptr"),
+            "mut owning-struct index args must pass element pointers:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn kick_owning_struct_clones_fields_and_drops_worker_copy() {
+        let source = r#"
+struct Label {
+    a: string
+    b: string
+}
+
+fn label_len(l: Label) -> int {
+    return str_len(l.a)
+}
+
+fn main() {
+    let l = Label { a: "aa", b: "bb" }
+    crew t {
+        let j = t.kick(label_len(l))
+        print_int(j.join())
+    }
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        assert!(
+            generated.contains("mako_str_clone"),
+            "kick must clone owned struct fields into the task box:\n{generated}"
+        );
+        assert!(
+            generated.contains("mako_str_free") && generated.contains("__kick_"),
+            "kick helper must drop the worker's cloned struct after the call:\n{generated}"
         );
     }
 }

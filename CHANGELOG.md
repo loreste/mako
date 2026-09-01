@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+## 0.6.22 - 2026-09-01 (owned field-move completeness)
+
+- Borrow owning struct parameters on the C backend instead of cloning every
+  owned field at each call (issue #46). Non-mut params always pass by pointer;
+  mut params with four or more owned fields do the same and mutate in place
+  on both C and native. Smaller mut structs keep clone-at-entry so `w = f(w)`
+  stays value-semantic. Escaping a borrow (return, `Some`/`Ok`, append,
+  struct-field store, if/match arm, tuple, functional update) clones owned
+  fields so the new owner and the caller never share a destructor. Indexed
+  mut args pass `*_get_ptr` so writes land in the array. Coverage:
+  `owning_struct_param_borrow_test.mko`,
+  `owning_struct_param_borrow_adversarial_test.mko`.
+- Typecheck rejects passing the same place to a `mut` parameter and another
+  argument of the same call (`f(h, h)`, `h.stamp(h)`, `f(h.inner, h)`,
+  `f(xs[0], xs[0])`, generic `swap(h, h)`). Two non-mut borrows of the
+  same value remain allowed. Compile-fail: `examples/bad/mut_alias_*.mko`.
+- Kick boxing deep-clones every owned struct field (not just strings) and
+  drops the worker copy after the callee returns, so the parent destructor
+  stays disjoint. Native spawn packs the same clone and the trampoline drops
+  it. Coverage: `TestKickStructCloneIndependent`.
+- Kick of a void function compiles: the spawn helper calls then returns
+  NULL instead of casting `void` to `int64_t`. Native trampolines emit a
+  void call and return 0.
+- Interface vtable wrappers pass `mut self` and pointer extra-args as
+  pointers (not a dereferenced copy), so dyn `s.apply(xs[0])` mutates the
+  array element. Native iface extra-args borrow large-mut lvalues.
+- Typecheck rejects a second read of an owned field moved out of a unique
+  owning struct local (call/method result or struct literal), including
+  nested paths (`result.detail.label`).
+- Move unique-owner fields instead of cloning on the C and native backends.
+  Cloning those fields aliases the parent destructor.
+- Move nested field paths and treat a nested struct moved out of a unique
+  owner as a unique owner so further extracts do not clone.
+- Clone enum-typed owned fields through `mako_enum_*_clone` only when a
+  true alias must duplicate payload storage.
+- Negative tests: `examples/bad/own_field_after_move.mko`,
+  `examples/bad/own_nested_field_after_move.mko`,
+  `examples/bad/own_struct_lit_field_after_move.mko`.
+- Destroy previous owned struct fields on `db = result.db` so function-return
+  field extraction cannot leak the old Database (issue #49).
+- Coverage: `exec_result_field_move_test.mko` (reassign, partial extract,
+  nested field assign, many queries), compile-fail `own_field_after_assign`
+  / `own_related_field_after_move`, native IR move-without-clone.
+
 ## 0.6.21 - 2026-09-01 (owned field moves)
 
 - Move owned fields out of fresh call-returned local structs without cloning,
@@ -137,7 +181,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.21 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.22 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

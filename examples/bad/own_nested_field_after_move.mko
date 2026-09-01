@@ -1,0 +1,25 @@
+// Must fail: nested owned field already moved out of a call-returned struct
+struct Detail {
+    label string
+}
+
+struct QueryResult {
+    code int
+    text string
+    detail Detail
+}
+
+fn query_result(text: string, label: string) -> QueryResult {
+    return QueryResult{
+        code: 200,
+        text: text,
+        detail: Detail{label: label},
+    }
+}
+
+fn main() {
+    let result = query_result("rows", "disk")
+    let label = result.detail.label
+    print(result.detail.label)
+    print(label)
+}

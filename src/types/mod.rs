@@ -291,8 +291,12 @@ pub struct TypeChecker {
     moved_holds: HashMap<String, bool>,
     /// Currently live `hold` bindings in scope.
     hold_vars: HashMap<String, bool>,
-    /// Partial moves: hold name → set of moved field names.
+    /// Partial moves: hold / unique-owner name → set of moved field names.
     hold_moved_fields: HashMap<String, HashSet<String>>,
+    /// Default-`let` unique owners whose non-Copy fields move on extract.
+    /// Call/method results and nested structs moved out of those results.
+    /// Unlike `hold`, reading the whole binding does not consume it.
+    unique_field_owners: HashSet<String>,
     /// `share let` bindings — immutable after bind (shared-borrow seed).
     share_vars: HashMap<String, bool>,
     /// Locals currently shared via `share_int(x)` — reject mut assign while live.
@@ -13741,6 +13745,7 @@ impl TypeChecker {
             moved_holds: HashMap::new(),
             hold_vars: HashMap::new(),
             hold_moved_fields: HashMap::new(),
+            unique_field_owners: HashSet::new(),
             share_vars: HashMap::new(),
             shared_borrows: HashMap::new(),
             share_sources: HashMap::new(),
@@ -15578,6 +15583,10 @@ impl TypeChecker {
         };
         self.current_ret = *ret;
         self.pending_defers.clear();
+        self.moved_holds.clear();
+        self.hold_vars.clear();
+        self.hold_moved_fields.clear();
+        self.unique_field_owners.clear();
         self.push_scope();
         for (p, ty) in f.params.iter().zip(params) {
             self.define(&p.name, ty, p.mutable);
@@ -16040,6 +16049,10 @@ impl TypeChecker {
                     self.moved_holds.insert(name.clone(), false);
                     self.hold_moved_fields.insert(name.clone(), HashSet::new());
                 }
+                if *ownership != Ownership::Share {
+                    self.note_unique_field_owner(name, &final_ty, init);
+                    self.note_unique_field_move(init, &final_ty)?;
+                }
                 if *ownership == Ownership::Share {
                     self.share_vars.insert(name.clone(), true);
                     self.share_scope_depth
@@ -16235,6 +16248,13 @@ impl TypeChecker {
                 if self.hold_vars.contains_key(name) {
                     self.moved_holds.insert(name.clone(), false);
                     self.hold_moved_fields.insert(name.clone(), HashSet::new());
+                }
+                if self.unique_field_owners.contains(name) {
+                    self.hold_moved_fields.insert(name.clone(), HashSet::new());
+                }
+                if !self.share_vars.contains_key(name) {
+                    self.note_unique_field_owner(name, &ty, value);
+                    self.note_unique_field_move(value, &ty)?;
                 }
                 // Track Sync handles for race model (allowed concurrent mut).
                 if self.is_sync_ty(&ty) {
@@ -17127,6 +17147,132 @@ impl TypeChecker {
                 self.hold_moved_fields = joined_fields;
                 Ok(())
             }
+        }
+    }
+
+    fn tracks_field_moves(&self, name: &str) -> bool {
+        self.hold_vars.contains_key(name) || self.unique_field_owners.contains(name)
+    }
+
+    fn resolved_type<'a>(&'a self, t: &'a Type) -> &'a Type {
+        match t {
+            Type::Named(n) => self.types.get(n).unwrap_or(t),
+            other => other,
+        }
+    }
+
+    fn type_is_owning(&self, t: &Type) -> bool {
+        match self.resolved_type(t) {
+            Type::Void
+            | Type::Int
+            | Type::Int64
+            | Type::Int32
+            | Type::Int8
+            | Type::UInt64
+            | Type::Byte
+            | Type::Bool
+            | Type::Float
+            | Type::Uuid => false,
+            Type::Struct { fields, .. } => fields.iter().any(|(_, ft)| self.type_is_owning(ft)),
+            Type::Enum { variants, .. } => variants
+                .iter()
+                .any(|(_, fs)| fs.iter().any(|ft| self.type_is_owning(ft))),
+            Type::Named(_) => false,
+            _ => true,
+        }
+    }
+
+    fn is_owning_struct(&self, t: &Type) -> bool {
+        matches!(self.resolved_type(t), Type::Struct { .. }) && self.type_is_owning(t)
+    }
+
+    fn assert_field_path_available(&self, name: &str, path: &str) -> Result<(), TypeError> {
+        let prior = self
+            .hold_moved_fields
+            .get(name)
+            .cloned()
+            .unwrap_or_default();
+        if prior.contains(path) {
+            return Err(TypeError::new(format!("use of moved field `{name}.{path}`")));
+        }
+        for m in &prior {
+            if path.starts_with(&format!("{m}.")) || m.starts_with(&format!("{path}.")) {
+                return Err(TypeError::new(format!(
+                    "cannot use `{name}.{path}` — related field `{name}.{m}` was moved"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn field_type_at(&self, ty: &Type, path_fields: &[String]) -> Result<Type, TypeError> {
+        let mut cur = ty.clone();
+        for fname in path_fields {
+            if let Type::Named(n) = &cur {
+                cur = self.types.get(n).cloned().ok_or_else(|| {
+                    TypeError::new(format!("cannot access field `{fname}` on {n}"))
+                })?;
+            }
+            let Type::Struct { fields, .. } = cur else {
+                return Err(TypeError::new(format!(
+                    "cannot access field `{fname}` on {}",
+                    cur.display()
+                )));
+            };
+            let Some((_, fty)) = fields.iter().find(|(n, _)| n == fname) else {
+                return Err(TypeError::new(format!("no field `{fname}`")));
+            };
+            cur = fty.clone();
+        }
+        Ok(cur)
+    }
+
+    fn note_unique_field_move(&mut self, expr: &Expr, ty: &Type) -> Result<(), TypeError> {
+        if is_copy_type(ty) {
+            return Ok(());
+        }
+        let Expr::Field { base, field } = expr else {
+            return Ok(());
+        };
+        let Some((name, path_fields)) = Self::hold_field_path(base, field) else {
+            return Ok(());
+        };
+        if !self.unique_field_owners.contains(&name) {
+            return Ok(());
+        }
+        let path = path_fields.join(".");
+        self.assert_field_path_available(&name, &path)?;
+        self.hold_moved_fields
+            .entry(name)
+            .or_default()
+            .insert(path);
+        Ok(())
+    }
+
+    fn note_unique_field_owner(&mut self, name: &str, ty: &Type, init: &Expr) {
+        self.unique_field_owners.remove(name);
+        self.hold_moved_fields.remove(name);
+        if !self.is_owning_struct(ty) {
+            return;
+        }
+        if matches!(
+            init,
+            Expr::Call { .. }
+                | Expr::Method { .. }
+                | Expr::StructLit { .. }
+                | Expr::StructLitPos { .. }
+        ) {
+            self.unique_field_owners.insert(name.to_string());
+            return;
+        }
+        let Expr::Field { base, field } = init else {
+            return;
+        };
+        let Some((root, _)) = Self::hold_field_path(base, field) else {
+            return;
+        };
+        if self.tracks_field_moves(&root) {
+            self.unique_field_owners.insert(name.to_string());
         }
     }
 
@@ -18378,20 +18524,11 @@ impl TypeChecker {
                             )));
                         }
                         // Borrowck: cannot pass a live-shared local into a `mut` parameter.
+                        // A mut parameter also cannot alias any other argument (`f(h, h)`).
                         if let Expr::Ident(fname) = callee.as_ref() {
-                            if let Some(muts) = self.fn_mut_params.get(fname).cloned() {
-                                for (i, a) in args.iter().enumerate() {
-                                    if muts.get(i).copied().unwrap_or(false) {
-                                        if let Expr::Ident(an) = a {
-                                            if self.shared_borrows.contains_key(an) {
-                                                return Err(TypeError::new(format!(
-                                                    "cannot pass `{an}` to mut parameter while shared"
-                                                ))
-                                        .hint("wait until the shared borrow's last use, or pass a copy"));
-                                            }
-                                        }
-                                    }
-                                }
+                            if let Some(muts) = self.fn_mut_params.get(fname) {
+                                let arg_refs: Vec<&Expr> = args.iter().collect();
+                                self.assert_exclusive_mut_args(muts, &arg_refs)?;
                             }
                         }
                         for (p, a) in params.iter().zip(args) {
@@ -18830,6 +18967,14 @@ impl TypeChecker {
                                         )));
                                     }
                                 }
+                                if let Some(muts) = self.fn_mut_params.get(&key) {
+                                    let mut arg_refs: Vec<&Expr> = Vec::new();
+                                    if has_self {
+                                        arg_refs.push(receiver.as_ref());
+                                    }
+                                    arg_refs.extend(args.iter());
+                                    self.assert_exclusive_mut_args(muts, &arg_refs)?;
+                                }
                                 return Ok(*fr);
                             }
                         }
@@ -18902,6 +19047,14 @@ impl TypeChecker {
                                                 at.display()
                                             )));
                                         }
+                                    }
+                                    if let Some(muts) = self.fn_mut_params.get(&key) {
+                                        let mut arg_refs: Vec<&Expr> = Vec::new();
+                                        if has_self {
+                                            arg_refs.push(receiver.as_ref());
+                                        }
+                                        arg_refs.extend(args.iter());
+                                        self.assert_exclusive_mut_args(muts, &arg_refs)?;
                                     }
                                     return Ok(self.resolve_type(ret)?);
                                 }
@@ -19039,59 +19192,28 @@ impl TypeChecker {
                 }
                 // Nested partial moves: `p.inner.a` moves path "inner.a" only.
                 if let Some((name, path_fields)) = Self::hold_field_path(base, field) {
-                    if self.hold_vars.contains_key(&name) {
-                        if self.moved_holds.get(&name).copied().unwrap_or(false) {
+                    if self.tracks_field_moves(&name) {
+                        if self.hold_vars.contains_key(&name)
+                            && self.moved_holds.get(&name).copied().unwrap_or(false)
+                        {
                             return Err(TypeError::new(format!("use of moved value `{name}`"))
                                 .hint("hold binding was fully moved"));
                         }
                         let path = path_fields.join(".");
-                        let prior = self
-                            .hold_moved_fields
-                            .get(&name)
-                            .cloned()
-                            .unwrap_or_default();
-                        if prior.contains(&path) {
-                            return Err(TypeError::new(format!(
-                                "use of moved field `{name}.{path}`"
-                            )));
-                        }
-                        for m in &prior {
-                            if path.starts_with(&format!("{m}."))
-                                || m.starts_with(&format!("{path}."))
-                            {
-                                return Err(TypeError::new(format!(
-                                    "cannot use `{name}.{path}` — related field `{name}.{m}` was moved"
-                                )));
-                            }
-                        }
+                        self.assert_field_path_available(&name, &path)?;
                         let Some((ty, _)) = self.lookup(&name).cloned() else {
                             return Err(TypeError::new(format!("undefined variable `{name}`")));
                         };
-                        let mut cur = ty;
-                        for (i, fname) in path_fields.iter().enumerate() {
-                            let Type::Struct { fields, .. } = cur else {
-                                return Err(TypeError::new(format!(
-                                    "cannot access field `{fname}` on {}",
-                                    cur.display()
-                                )));
-                            };
-                            let Some((_, fty)) = fields.iter().find(|(n, _)| n == fname) else {
-                                return Err(TypeError::new(format!("no field `{fname}`")));
-                            };
-                            if i + 1 == path_fields.len() {
-                                let fty = fty.clone();
-                                // Copy fields may be read repeatedly without moving.
-                                if !is_copy_type(&fty) {
-                                    self.hold_moved_fields
-                                        .entry(name.clone())
-                                        .or_default()
-                                        .insert(path.clone());
-                                }
-                                return Ok(fty);
-                            }
-                            cur = fty.clone();
+                        let fty = self.field_type_at(&ty, &path_fields)?;
+                        // `hold` moves on any field read. Unique call-result
+                        // owners only move when the field is stored (let/assign).
+                        if self.hold_vars.contains_key(&name) && !is_copy_type(&fty) {
+                            self.hold_moved_fields
+                                .entry(name.clone())
+                                .or_default()
+                                .insert(path);
                         }
-                        unreachable!();
+                        return Ok(fty);
                     }
                 }
                 let bt = self.check_expr(base)?;
@@ -20322,6 +20444,9 @@ impl TypeChecker {
                 args.len()
             )));
         }
+        let muts: Vec<bool> = template.params.iter().map(|p| p.mutable).collect();
+        let arg_refs: Vec<&Expr> = args.iter().collect();
+        self.assert_exclusive_mut_args(&muts, &arg_refs)?;
         let mut arg_tys = Vec::new();
         for a in args {
             arg_tys.push(self.check_expr(a)?);
@@ -21319,6 +21444,56 @@ impl TypeChecker {
             Expr::Unary { expr, .. } | Expr::Try(expr) => Self::race_write_root(expr),
             _ => None,
         }
+    }
+
+    /// Mut parameters need exclusive access. The same root (`h`, `h.inner`,
+    /// `xs[0]`) cannot be passed to a mut parameter and also to any other
+    /// argument of the same call — including `h.stamp(h)` method extra-args.
+    fn assert_exclusive_mut_args(
+        &self,
+        muts: &[bool],
+        args: &[&Expr],
+    ) -> Result<(), TypeError> {
+        let mut mut_roots: HashSet<&str> = HashSet::new();
+        for (i, a) in args.iter().enumerate() {
+            if !muts.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            if let Expr::Ident(an) = a {
+                if self.shared_borrows.contains_key(an) {
+                    return Err(TypeError::new(format!(
+                        "cannot pass `{an}` to mut parameter while shared"
+                    ))
+                    .hint("wait until the shared borrow's last use, or pass a copy"));
+                }
+            }
+            if let Some(root) = Self::race_write_root(a) {
+                if !mut_roots.insert(root) {
+                    return Err(TypeError::new(format!(
+                        "cannot pass `{root}` to two mut parameters in the same call"
+                    ))
+                    .hint(
+                        "mut parameters need exclusive access — clone first if both need a value",
+                    ));
+                }
+            }
+        }
+        for (i, a) in args.iter().enumerate() {
+            if muts.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            if let Some(root) = Self::race_write_root(a) {
+                if mut_roots.contains(root) {
+                    return Err(TypeError::new(format!(
+                        "cannot pass `{root}` to a mut parameter and another parameter in the same call"
+                    ))
+                    .hint(
+                        "mut parameters need exclusive access — clone first if both need a value",
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// SAFE-007: arena-backed values and the arena handle must not escape the block.

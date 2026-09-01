@@ -1,0 +1,16 @@
+// Must fail: a mut parameter cannot alias another argument of the same call.
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+fn copy_into(src: Heavy, mut dest: Heavy) {
+    dest.a = src.a
+}
+
+fn main() {
+    let mut h = Heavy { a: "h", b: "b", c: "c", d: make([]int, 0, 1) }
+    copy_into(h, h)
+}

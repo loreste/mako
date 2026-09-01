@@ -1,0 +1,25 @@
+// Must fail: mut field and the whole struct alias the same root.
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+struct Holder {
+    inner: Heavy
+    n: int
+}
+
+fn touch(mut inner: Heavy, holder: Holder) {
+    inner.a = "x"
+    let _ = holder.n
+}
+
+fn main() {
+    let mut holder = Holder {
+        inner: Heavy { a: "h", b: "b", c: "c", d: make([]int, 0, 1) },
+        n: 1,
+    }
+    touch(holder.inner, holder)
+}

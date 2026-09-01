@@ -578,6 +578,13 @@ jobs:
           MAKO_BACKEND: c
         run: |
           ./target/release/mako test --sanitize address examples/testing/owned_field_move_test.mko
+      - name: Check exec-result field move reassignment
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          MAKO_TEST_TIMEOUT_SECS: "120"
+          MAKO_BACKEND: c
+        run: |
+          ./target/release/mako test --sanitize address examples/testing/exec_result_field_move_test.mko
       - name: Check borrowed bag discard
         env:
           ASAN_OPTIONS: detect_leaks=0

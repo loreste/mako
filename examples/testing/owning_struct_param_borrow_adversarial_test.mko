@@ -1,0 +1,453 @@
+// Adversarial memory-safety for borrowed owning struct params:
+// if-expr / match / Some / Ok / tuple / functional update / field arg /
+// alias `f(h,h)` / implicit return / nested field / empty slices.
+
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+struct Holder {
+    inner: Heavy
+    n: int
+}
+
+fn copy_heavy(h: Heavy) -> Heavy {
+    return h
+}
+
+fn implicit_copy(h: Heavy) -> Heavy {
+    h
+}
+
+fn pick(c: bool, h: Heavy, other: Heavy) -> Heavy {
+    return if c { h } else { other }
+}
+
+fn TestIfExprBorrowIsIndependent() {
+    let h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    let o = Heavy { a: "o", b: "ob", c: "oc", d: make([]int, 0, 1) }
+    let mut y = pick(true, h, o)
+    y.a = "yy"
+    assert(h.a == "h")
+    assert(o.a == "o")
+    assert(y.a == "yy")
+}
+
+fn wrap_some(h: Heavy) -> Option[Heavy] {
+    return Some(h)
+}
+
+fn TestSomeBorrowIsIndependent() {
+    let h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    match wrap_some(h) {
+        Some(got) => {
+            let mut y = got
+            y.a = "yy"
+            assert(y.a == "yy")
+        },
+        None => {
+            assert(false)
+        },
+    }
+    assert(h.a == "h")
+}
+
+fn wrap_ok(h: Heavy) -> Result[Heavy, string] {
+    return Ok(h)
+}
+
+fn TestOkBorrowIsIndependent() {
+    let h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    match wrap_ok(h) {
+        Ok(got) => {
+            let mut y = got
+            y.a = "yy"
+            assert(y.a == "yy")
+        },
+        Err(e) => {
+            assert(str_len(e) == 0)
+        },
+    }
+    assert(h.a == "h")
+}
+
+fn pair_heavy(h: Heavy) -> (Heavy, int) {
+    return (h, 7)
+}
+
+fn TestTupleBorrowIsIndependent() {
+    let h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    match pair_heavy(h) {
+        (got, n) => {
+            let mut y = got
+            y.a = "yy"
+            assert(n == 7)
+            assert(y.a == "yy")
+        },
+    }
+    assert(h.a == "h")
+}
+
+fn spread_heavy(h: Heavy) -> Heavy {
+    return Heavy { a: "z", ..h }
+}
+
+fn TestFunctionalUpdateFromBorrow() {
+    let h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    let mut y = spread_heavy(h)
+    y.b = "yb"
+    assert(h.a == "h")
+    assert(h.b == "hb")
+    assert(y.a == "z")
+    assert(y.b == "yb")
+}
+
+fn TestImplicitReturnBorrow() {
+    let h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    let mut y = implicit_copy(h)
+    y.a = "yy"
+    assert(h.a == "h")
+    assert(y.a == "yy")
+}
+
+fn read_inner(h: Heavy) -> string {
+    return h.a
+}
+
+fn TestPassFieldOfHolder() {
+    let holder = Holder {
+        inner: Heavy { a: "in", b: "ib", c: "ic", d: make([]int, 0, 1) },
+        n: 3,
+    }
+    let s = read_inner(holder.inner)
+    assert(s == "in")
+    assert(holder.inner.a == "in")
+    assert(holder.n == 3)
+}
+
+fn TestPassIndexElement() {
+    let mut xs = make([]Heavy, 0, 2)
+    xs = append(xs, Heavy { a: "i0", b: "b0", c: "c0", d: make([]int, 0, 1) })
+    let s = read_inner(xs[0])
+    assert(s == "i0")
+    assert(xs[0].a == "i0")
+}
+
+fn sum_labels(x: Heavy, y: Heavy) -> int {
+    return str_len(x.a) + str_len(y.a)
+}
+
+fn TestAliasTwoBorrowsSameValue() {
+    let h = Heavy { a: "hh", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    let n = sum_labels(h, h)
+    assert(n == 4)
+    assert(h.a == "hh")
+}
+
+fn branch_return(c: bool, h: Heavy) -> Heavy {
+    if c {
+        return h
+    }
+    return Heavy { a: "no", b: "nb", c: "nc", d: make([]int, 0, 1) }
+}
+
+fn TestBranchReturnBorrow() {
+    let h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    let mut y = branch_return(true, h)
+    y.a = "yy"
+    assert(h.a == "h")
+    assert(y.a == "yy")
+    let z = branch_return(false, h)
+    assert(z.a == "no")
+    assert(h.a == "h")
+}
+
+fn match_heavy(h: Heavy) -> string {
+    match h {
+        Heavy { a, b, c, d } => a,
+    }
+}
+
+fn TestMatchBorrowedStruct() {
+    let h = Heavy { a: "lab", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    let s = match_heavy(h)
+    assert(s == "lab")
+    assert(h.a == "lab")
+}
+
+fn TestEmptySliceBorrowRoundTrip() {
+    let h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 0) }
+    let y = copy_heavy(h)
+    assert(len(h.d) == 0)
+    assert(len(y.d) == 0)
+    assert(h.a == "h")
+    assert(y.a == "h")
+}
+
+fn TestNestedCallThenMutateSource() {
+    let mut h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 2) }
+    h.d = append(h.d, 1)
+    let y = copy_heavy(h)
+    h.a = "mut"
+    h.d = append(h.d, 2)
+    assert(y.a == "h")
+    assert(len(y.d) == 1)
+    assert(y.d[0] == 1)
+    assert(h.a == "mut")
+    assert(len(h.d) == 2)
+}
+
+fn TestDiscardSomeKeepsSource() {
+    let h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    wrap_some(h)
+    assert(h.a == "h")
+    assert(h.b == "hb")
+}
+
+fn stamp(mut h: Heavy) {
+    h.a = "stamped"
+}
+
+fn TestMutBorrowFieldLvalue() {
+    let mut holder = Holder {
+        inner: Heavy { a: "in", b: "ib", c: "ic", d: make([]int, 0, 1) },
+        n: 1,
+    }
+    stamp(holder.inner)
+    assert(holder.inner.a == "stamped")
+}
+
+fn TestMutBorrowIndexElement() {
+    let mut xs = make([]Heavy, 0, 2)
+    xs = append(xs, Heavy { a: "i0", b: "b0", c: "c0", d: make([]int, 0, 1) })
+    stamp(xs[0])
+    assert(xs[0].a == "stamped")
+}
+
+// Strings are Send; a struct of strings may cross kick. The worker must
+// own a clone so dropping it cannot free the parent's fields.
+struct Label {
+    a: string
+    b: string
+}
+
+fn label_len(l: Label) -> int {
+    return str_len(l.a) + str_len(l.b)
+}
+
+fn TestKickStructCloneIndependent() {
+    let l = Label { a: "aa", b: "bb" }
+    crew t {
+        let j = t.kick(label_len(l))
+        assert(j.join() == 4)
+    }
+    assert(l.a == "aa")
+    assert(l.b == "bb")
+}
+
+fn TestKickThenMutateParent() {
+    let mut l = Label { a: "aa", b: "bb" }
+    crew t {
+        let j = t.kick(label_len(l))
+        assert(j.join() == 4)
+    }
+    l.a = "zz"
+    assert(l.a == "zz")
+    assert(l.b == "bb")
+}
+
+// Four string fields: Send (no slices) and large-mut (≥4), so kick clones
+// and the worker mutates its copy in place — parent must stay intact.
+struct Quad {
+    a: string
+    b: string
+    c: string
+    e: string
+}
+
+fn stamp_quad(mut q: Quad) -> int {
+    q.a = "kicked"
+    return 0
+}
+
+fn TestKickLargeMutDoesNotMutateParent() {
+    let mut q = Quad { a: "aa", b: "bb", c: "cc", e: "ee" }
+    crew t {
+        let j = t.kick(stamp_quad(q))
+        assert(j.join() == 0)
+    }
+    assert(q.a == "aa")
+    assert(q.b == "bb")
+    assert(q.c == "cc")
+    assert(q.e == "ee")
+}
+
+fn swap_labels(mut x: Heavy, mut y: Heavy) {
+    let t = x.a
+    x.a = y.a
+    y.a = t
+}
+
+fn TestMutTwoDistinctValues() {
+    let mut a = Heavy { a: "aa", b: "ab", c: "ac", d: make([]int, 0, 1) }
+    let mut b = Heavy { a: "bb", b: "bb", c: "bc", d: make([]int, 0, 1) }
+    swap_labels(a, b)
+    assert(a.a == "bb")
+    assert(b.a == "aa")
+}
+
+fn TestMutIndexSiblingUntouched() {
+    let mut xs = make([]Heavy, 0, 2)
+    xs = append(xs, Heavy { a: "i0", b: "b0", c: "c0", d: make([]int, 0, 1) })
+    xs = append(xs, Heavy { a: "i1", b: "b1", c: "c1", d: make([]int, 0, 1) })
+    stamp(xs[0])
+    assert(xs[0].a == "stamped")
+    assert(xs[1].a == "i1")
+    assert(xs[1].b == "b1")
+}
+
+on Heavy {
+    fn stamp_self(mut self) {
+        self.a = "method"
+    }
+
+    fn stamp_other(mut self, mut other: Heavy) {
+        other.a = "other"
+        self.a = "self"
+    }
+
+    fn mark(mut self) {
+        self.a = "gen"
+    }
+}
+
+fn TestMutMethodDistinctReceiver() {
+    let mut h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    h.stamp_self()
+    assert(h.a == "method")
+}
+
+fn TestMutMethodDistinctOther() {
+    let mut h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    let mut o = Heavy { a: "o", b: "ob", c: "oc", d: make([]int, 0, 1) }
+    h.stamp_other(o)
+    assert(h.a == "self")
+    assert(o.a == "other")
+}
+
+struct Nest {
+    outer: Holder
+}
+
+fn TestMutBorrowNestedFieldLvalue() {
+    let mut n = Nest {
+        outer: Holder {
+            inner: Heavy { a: "in", b: "ib", c: "ic", d: make([]int, 0, 1) },
+            n: 1,
+        },
+    }
+    stamp(n.outer.inner)
+    assert(n.outer.inner.a == "stamped")
+    assert(n.outer.n == 1)
+}
+
+fn TestNestedFieldReturnIsIndependent() {
+    let n = Nest {
+        outer: Holder {
+            inner: Heavy { a: "in", b: "ib", c: "ic", d: make([]int, 0, 1) },
+            n: 4,
+        },
+    }
+    let mut y = copy_heavy(n.outer.inner)
+    y.a = "yy"
+    assert(n.outer.inner.a == "in")
+    assert(y.a == "yy")
+}
+
+fn stamp_gen[T](mut x: T) {
+}
+
+fn TestGenericMutDistinctOk() {
+    let mut a = Heavy { a: "aa", b: "ab", c: "ac", d: make([]int, 0, 1) }
+    let mut b = Heavy { a: "bb", b: "bb", c: "bc", d: make([]int, 0, 1) }
+    stamp_gen(a)
+    stamp_gen(b)
+    assert(a.a == "aa")
+    assert(b.a == "bb")
+}
+
+interface Stamper {
+    fn apply(Heavy)
+}
+
+struct Tool {
+    n: int
+}
+
+fn Stamper_apply(self: Tool, mut h: Heavy) {
+    h.a = "iface"
+}
+
+fn TestIfaceMutIndexElement() {
+    let tool = Tool { n: 1 }
+    let mut xs = make([]Heavy, 0, 1)
+    xs = append(xs, Heavy { a: "i0", b: "b0", c: "c0", d: make([]int, 0, 1) })
+    tool.apply(xs[0])
+    assert(xs[0].a == "iface")
+}
+
+fn TestIfaceMutFieldLvalue() {
+    let tool = Tool { n: 1 }
+    let mut holder = Holder {
+        inner: Heavy { a: "in", b: "ib", c: "ic", d: make([]int, 0, 1) },
+        n: 1,
+    }
+    tool.apply(holder.inner)
+    assert(holder.inner.a == "iface")
+}
+
+fn TestDynIfaceMutIndex() {
+    let tool = Tool { n: 1 }
+    let s: Stamper = tool
+    let mut xs = make([]Heavy, 0, 1)
+    xs = append(xs, Heavy { a: "i0", b: "b0", c: "c0", d: make([]int, 0, 1) })
+    s.apply(xs[0])
+    assert(xs[0].a == "iface")
+}
+
+fn TestDynIfaceMutField() {
+    let tool = Tool { n: 1 }
+    let s: Stamper = tool
+    let mut h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    s.apply(h)
+    assert(h.a == "iface")
+}
+
+interface Stampable {
+    fn mark()
+}
+
+fn apply_gen[T: Stampable](mut x: T) {
+    x.mark()
+}
+
+fn TestGenericMutInPlace() {
+    let mut h = Heavy { a: "h", b: "hb", c: "hc", d: make([]int, 0, 1) }
+    apply_gen(h)
+    assert(h.a == "gen")
+}
+
+fn noop_void() {
+}
+
+fn TestKickVoid() {
+    crew t {
+        let j = t.kick(noop_void())
+        j.join()
+    }
+}
+
+

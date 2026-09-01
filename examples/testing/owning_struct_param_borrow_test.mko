@@ -1,0 +1,177 @@
+// Issue #46: owning struct parameters borrow (C pointer) instead of
+// cloning every owned field at each call. Escaping a borrow (return,
+// Some, append, struct-field store) clones so the new owner and the
+// caller never share a destructor.
+
+struct Bag {
+    a: string
+    b: string
+    c: []int
+}
+
+fn count_items(bag: Bag) -> int {
+    return len(bag.c)
+}
+
+fn inner_count(bag: Bag) -> int {
+    return count_items(bag)
+}
+
+fn TestBorrowReadOnlyStructParam() {
+    let mut bag = Bag {
+        a: "x",
+        b: "y",
+        c: make([]int, 0, 8),
+    }
+    bag.c = append(bag.c, 1)
+    bag.c = append(bag.c, 2)
+    let mut n = 0
+    let mut i = 0
+    while i < 32 {
+        n = inner_count(bag)
+        i = i + 1
+    }
+    assert(n == 2)
+    assert(bag.a == "x")
+    assert(bag.b == "y")
+    assert(len(bag.c) == 2)
+    assert(bag.c[1] == 2)
+}
+
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+fn identity_heavy(mut h: Heavy) -> Heavy {
+    h.a = "id"
+    return h
+}
+
+fn copy_heavy(h: Heavy) -> Heavy {
+    return h
+}
+
+fn TestLargeMutStructReassignSameDest() {
+    let mut h = Heavy {
+        a: "x",
+        b: "y",
+        c: "z",
+        d: make([]int, 0, 1),
+    }
+    h = identity_heavy(h)
+    assert(h.a == "id")
+    assert(h.b == "y")
+}
+
+fn TestReturnBorrowIsIndependentOwner() {
+    let mut h = Heavy {
+        a: "x",
+        b: "y",
+        c: "z",
+        d: make([]int, 0, 1),
+    }
+    let mut y = copy_heavy(h)
+    y.a = "other"
+    y.d = append(y.d, 9)
+    assert(h.a == "x")
+    assert(y.a == "other")
+    assert(len(y.d) == 1)
+    assert(y.d[0] == 9)
+}
+
+fn TestDiscardReturnedBorrowKeepsSource() {
+    let h = Heavy {
+        a: "x",
+        b: "y",
+        c: "z",
+        d: make([]int, 0, 1),
+    }
+    copy_heavy(h)
+    assert(h.a == "x")
+    assert(h.b == "y")
+}
+
+struct ExecResult {
+    db: Heavy
+    text: string
+}
+
+fn pack_heavy(h: Heavy) -> ExecResult {
+    return ExecResult {
+        db: h,
+        text: "ok",
+    }
+}
+
+fn TestStoreBorrowedStructIntoResult() {
+    let mut h = Heavy {
+        a: "x",
+        b: "y",
+        c: "z",
+        d: make([]int, 0, 1),
+    }
+    h.d = append(h.d, 3)
+    let result = pack_heavy(h)
+    assert(result.text == "ok")
+    assert(result.db.a == "x")
+    assert(len(result.db.d) == 1)
+    assert(h.a == "x")
+    assert(len(h.d) == 1)
+    assert(h.d[0] == 3)
+}
+
+fn take_and_append(bag: Bag) -> []Bag {
+    let mut xs = make([]Bag, 0, 2)
+    xs = append(xs, bag)
+    return xs
+}
+
+fn TestAppendBorrowedStructClones() {
+    let mut bag = Bag {
+        a: "keep",
+        b: "y",
+        c: make([]int, 0, 2),
+    }
+    bag.c = append(bag.c, 1)
+    let mut xs = take_and_append(bag)
+    xs[0].a = "moved"
+    assert(bag.a == "keep")
+    assert(xs[0].a == "moved")
+    assert(len(bag.c) == 1)
+    assert(bag.c[0] == 1)
+}
+
+fn label_of(h: Heavy) -> string {
+    return h.a
+}
+
+fn TestFieldReturnFromBorrowClones() {
+    let h = Heavy {
+        a: "lab",
+        b: "y",
+        c: "z",
+        d: make([]int, 0, 1),
+    }
+    let s = label_of(h)
+    assert(s == "lab")
+    assert(h.a == "lab")
+}
+
+fn TestReassignBorrowLoopNoLeak() {
+    let mut h = Heavy {
+        a: "x",
+        b: "y",
+        c: "z",
+        d: make([]int, 0, 1),
+    }
+    let mut i = 0
+    while i < 24 {
+        h = identity_heavy(h)
+        i = i + 1
+    }
+    assert(h.a == "id")
+    assert(h.b == "y")
+}

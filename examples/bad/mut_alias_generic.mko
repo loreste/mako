@@ -1,0 +1,15 @@
+// Must fail: generic mut parameters cannot alias the same place.
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+fn swap_gen[T](mut x: T, mut y: T) {
+}
+
+fn main() {
+    let mut h = Heavy { a: "h", b: "b", c: "c", d: make([]int, 0, 1) }
+    swap_gen(h, h)
+}

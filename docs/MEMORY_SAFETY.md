@@ -77,6 +77,7 @@ storage. The ordinary unique-write path pays no refcount or locking cost.
 | **Append COW release** | `self_consuming_call` path releases old slice backing when append grows, preventing refcount leaks that cause `mako_rc_shared` to always return true and force exponential capacity growth (SAFE-042) |
 | **JSON extractor safety** | Fixed use-after-free in `json_get_float`/`json_get_bool` where `strlen(pat)` was called after `free(pat)` |
 | **PQC resource pairing** | Every `EVP_PKEY_CTX_new`/`EVP_PKEY`/`BIO_new`/`X509_new`/`EVP_MD_CTX_new` in `mako_pqc.h` is paired with its free on all paths (success and error) |
+| **Owning struct params** | Non-mut and large-mut structs pass by pointer (no per-field RC clone at call, issue #46); native matches the ≥4 owned-field in-place threshold. Escaping a borrow clones so caller and destination destructors stay disjoint. Two args cannot alias a `mut` parameter (`f(h, h)`). Kick deep-clones owned fields and drops the worker copy. Tests: `owning_struct_param_borrow_test.mko`, `owning_struct_param_borrow_adversarial_test.mko` |
 | **Unit tests** | `own_*`, `double_free_guard`, `leak_detector`, `match_own_free`, … |
 | **ASan CI** | Full suite + ownership fixtures (`--sanitize address`) |
 | **UBSan / TSan** | Undefined behavior + races (opt-in / CI jobs) |
@@ -165,13 +166,25 @@ call-returned structs, and frees the old fields before whole-struct assignment.
 An indexed struct value is a borrow into its container and never receives an
 independent destructor unless explicitly cloned into owned storage.
 
-Reading an owned field into an owning destination from a fresh call-returned
-local struct is a move, not a clone. Codegen copies the field header/value and
-immediately zeros the source field. The parent destructor recursively visits
+Reading an owned field into an owning destination from a unique owning
+struct local (call/method result, struct literal, or a nested struct moved
+out of one) is a move, not a clone. Codegen copies the field header/value and
+immediately zeros the source field, including nested paths
+(`result.detail.label`). A nested struct moved out of that owner is itself a
+unique owner, so further field extracts also move. The typechecker rejects a
+second read of a moved field path. The parent destructor recursively visits
 nested fields but skips the zeroed allocation, while the destination becomes
-its sole owner. Ordinary struct locals still clone on field extraction. Fields
-reached through shared, indexed, or otherwise borrowed values clone
-instead because mutating those sources would violate alias safety.
+its sole owner. Cloning a unique owner's field aliases the parent destructor
+and is not used. Fields reached through shared, indexed, or otherwise borrowed
+values clone instead because mutating those sources would violate alias safety.
+The native backend follows the same move-and-zero rule. Enum-typed owned
+fields that must be duplicated (true aliases) clone through
+`mako_enum_*_clone` so copies never alias payload storage.
+
+Reassigning a unique struct local from a moved field (`db = result.db`)
+destroys the destination's previous owned fields before overwrite. User
+structs have no single free function; skipping that step leaked nested
+arrays and strings on every query (issue #49).
 
 Aggregate channel sends clone owned payload fields before handoff. The sender
 keeps its original value; a successful send transfers the clone to the channel,
@@ -198,7 +211,7 @@ Regression coverage: `examples/testing/struct_clone_nested_if_test.mko` stresses
 repeated nested clone/drop cycles. The full sanitizer sweep and native memory
 safety gate execute the ownership suite in CI.
 
-## Consolidation (v0.6.21 → v0.7)
+## Consolidation (v0.6.22 → v0.7)
 
 The next phase freezes the COW slice representation as a normative spec,
 adds property-based ownership fuzzing, model-checks the channel state machine,

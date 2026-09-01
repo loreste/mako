@@ -1,0 +1,18 @@
+// Must fail: two mut parameters cannot alias the same indexed element.
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+fn stamp_both(mut x: Heavy, mut y: Heavy) {
+    x.a = "x"
+    y.a = "y"
+}
+
+fn main() {
+    let mut xs = make([]Heavy, 0, 1)
+    xs = append(xs, Heavy { a: "i0", b: "b0", c: "c0", d: make([]int, 0, 1) })
+    stamp_both(xs[0], xs[0])
+}

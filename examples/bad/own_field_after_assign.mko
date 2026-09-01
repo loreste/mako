@@ -1,0 +1,24 @@
+// Must fail: owned field already moved by assignment from a call result
+struct Database {
+    name string
+}
+
+struct ExecResult {
+    db Database
+    text string
+}
+
+fn db_exec() -> ExecResult {
+    return ExecResult{
+        db: Database{name: "main"},
+        text: "ok",
+    }
+}
+
+fn main() {
+    let mut db = Database{name: "old"}
+    let result = db_exec()
+    db = result.db
+    print(result.db.name)
+    print(db.name)
+}

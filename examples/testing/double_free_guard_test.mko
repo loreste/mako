@@ -131,21 +131,19 @@ fn TestSequentialMatchFree() {
     }
 }
 
-// Struct field free once when struct drops (not also via alias field let).
-fn TestStructFieldAliasNoDoubleFree() {
+// Struct field moves into the destination; parent drop skips the zeroed field.
+fn TestStructFieldMoveNoDoubleFree() {
     let n = Named { label: str_repeat("L", 3) }
     let lab = n.label
     assert_eq_str(lab, "LLL")
-    assert_eq_str(n.label, "LLL")
 }
 
-// Field store into mut local — must clone (struct still owns field).
-fn TestFieldAssignNoDoubleFree() {
+// Field store into mut local moves; parent drop skips the zeroed field.
+fn TestFieldAssignMoveNoDoubleFree() {
     let n = Named { label: str_repeat("A", 5) }
     let mut s = "init"
     s = n.label
     assert_eq_str(s, "AAAAA")
-    assert_eq_str(n.label, "AAAAA")
 }
 
 // Alias assign into mut — must clone (original still owns).

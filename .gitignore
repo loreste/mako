@@ -22,6 +22,8 @@
 /trap_*
 /hello
 /bench_*
+/owning_struct_param_borrow_test
+/pg_server
 
 # Debug symbol bundles
 *.dSYM/

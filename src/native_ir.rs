@@ -991,6 +991,16 @@ impl StructRegistry {
         self.layouts.borrow()[id as usize].fields.len()
     }
 
+    /// Heap-owned fields (strings, slices, nested structs). Matches the C
+    /// backend's `OWNING_STRUCT_MUT_PTR_FIELDS` threshold of 4.
+    fn owned_field_count(&self, id: u32) -> usize {
+        self.layouts.borrow()[id as usize]
+            .fields
+            .iter()
+            .filter(|(_, ty)| ty.is_heap() && !ty.is_shared_handle())
+            .count()
+    }
+
     fn field_type(&self, id: u32, index: usize) -> Type {
         self.layouts.borrow()[id as usize].fields[index].1
     }
@@ -3323,6 +3333,11 @@ impl<'a> FunctionLowerer<'a> {
                 } else {
                     self.lower_expr(init)?
                 };
+                if inferred.is_heap() && !inferred.is_shared_handle() {
+                    if self.take_owned_field(init, inferred)? {
+                        owned = true;
+                    }
+                }
                 match inferred {
                     // Map headers are pointer handles: keep borrows so nested
                     // mutation through retrieved maps is shared (Go-like).
@@ -3749,6 +3764,11 @@ impl<'a> FunctionLowerer<'a> {
                         IrError::new(format!("native IR: unknown local `{name}`"))
                     })?;
                 let (mut value, actual, mut owned) = self.lower_expr(rhs)?;
+                if actual.is_heap() && !actual.is_shared_handle() {
+                    if self.take_owned_field(rhs, actual)? {
+                        owned = true;
+                    }
+                }
                 // A slice expression owns its heap header but borrows its
                 // backing allocation. Assignment may drop the destination's
                 // old backing, so materialize an independent slice first and
@@ -5969,10 +5989,18 @@ impl<'a> FunctionLowerer<'a> {
             }
             if ty.is_consumable_header() {
                 v = self.emit_clone(v, ty);
+            } else if matches!(ty, Type::Struct(_)) {
+                // Independent task copy: clone owned fields so the trampoline
+                // can drop the worker value without freeing the parent's.
+                let original = v;
+                v = self.emit_clone(v, ty);
+                if owned {
+                    self.emit_drop(original, ty);
+                }
             }
             let idx = self.const_int(i as i64, Type::I64);
-            // Pack slots are pointer-sized. Consumable headers are cloned for
-            // the child task so by-value callee ownership cannot alias the
+            // Pack slots are pointer-sized. Consumable headers and structs are
+            // cloned for the child task so callee ownership cannot alias the
             // parent scope.
             self.emit(Inst::Call {
                 out: None,
@@ -5980,7 +6008,7 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![pack, idx, v],
                 ret: None,
             });
-            if owned && ty.is_heap() && !ty.is_consumable_header() {
+            if owned && ty.is_heap() && !ty.is_consumable_header() && !matches!(ty, Type::Struct(_)) {
                 // Pack holds a borrow of the pointer for the join lifetime.
                 // Heap temps (struct lits, etc.) are stored in a stack local so
                 // the pointer remains valid until join; drop after spawn via
@@ -6139,20 +6167,42 @@ impl<'a> FunctionLowerer<'a> {
             };
             call_args.push(arg);
         }
-        let ret_ty = match ret {
-            Some(Type::I1) | None => Type::I64,
-            Some(Type::F64) => Type::F64,
-            Some(ty) => ty,
+        let ret_v = if ret.is_none() {
+            emit(Inst::Call {
+                out: None,
+                function: target.to_string(),
+                args: call_args.clone(),
+                ret: None,
+            });
+            None
+        } else {
+            let ret_ty = match ret {
+                Some(Type::I1) => Type::I64,
+                Some(Type::F64) => Type::F64,
+                Some(ty) => ty,
+                None => unreachable!(),
+            };
+            let ret_v = next();
+            emit(Inst::Call {
+                out: Some(ret_v),
+                function: target.to_string(),
+                args: call_args.clone(),
+                ret: Some(ret_ty),
+            });
+            Some(ret_v)
         };
-        let ret_v = next();
-        emit(Inst::Call {
-            out: Some(ret_v),
-            function: target.to_string(),
-            args: call_args,
-            ret: Some(ret_ty),
-        });
-        let ret_raw = match ret {
-            Some(Type::I1) => {
+        // The packed struct is the task's owned clone. Drop it after the
+        // callee returns (the callee borrows and must not free it).
+        for (arg, pty) in call_args.iter().zip(params.iter()) {
+            if let Type::Struct(id) = *pty {
+                emit(Inst::DropStruct {
+                    value: *arg,
+                    struct_id: id,
+                });
+            }
+        }
+        let ret_raw = match (ret, ret_v) {
+            (Some(Type::I1), Some(ret_v)) => {
                 let raw = next();
                 emit(Inst::Cast {
                     out: raw,
@@ -6162,7 +6212,7 @@ impl<'a> FunctionLowerer<'a> {
                 });
                 raw
             }
-            Some(Type::F64) => {
+            (Some(Type::F64), Some(ret_v)) => {
                 let raw = next();
                 emit(Inst::Call {
                     out: Some(raw),
@@ -6172,7 +6222,7 @@ impl<'a> FunctionLowerer<'a> {
                 });
                 raw
             }
-            None => {
+            (None, _) => {
                 let zero = next();
                 emit(Inst::ConstInt {
                     out: zero,
@@ -6181,7 +6231,16 @@ impl<'a> FunctionLowerer<'a> {
                 });
                 zero
             }
-            _ => ret_v,
+            (_, Some(ret_v)) => ret_v,
+            (_, None) => {
+                let zero = next();
+                emit(Inst::ConstInt {
+                    out: zero,
+                    value: 0,
+                    ty: Type::I64,
+                });
+                zero
+            }
         };
         function.blocks[0].terminator = Some(Terminator::Return(Some(ret_raw)));
         Ok(function)
@@ -10899,9 +10958,22 @@ impl<'a> FunctionLowerer<'a> {
                         }
                     }
                     if let Type::Struct(id) = actual {
-                        // By-value argument: hand the callee an owned copy so a
-                        // mutating callee cannot observe the caller's storage,
-                        // and drop that copy once the call returns.
+                        let is_mut_param = mut_flags
+                            .and_then(|flags| flags.get(arg_index))
+                            .copied()
+                            .unwrap_or(false);
+                        let lvalue = matches!(
+                            arg_expr,
+                            Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                        );
+                        let large_mut = is_mut_param && self.structs.owned_field_count(id) >= 4;
+                        if lvalue && (!is_mut_param || large_mut) {
+                            // Non-mut: borrow (issue #46). Large mut: in-place write.
+                            lowered.push(value);
+                            continue;
+                        }
+                        // Small mut keeps value semantics (clone, mutate copy, drop).
+                        // Fresh rvalues also get a copy the caller drops after return.
                         if !owned {
                             let clone = self.value();
                             self.emit(Inst::StructClone {
@@ -10998,16 +11070,26 @@ impl<'a> FunctionLowerer<'a> {
                     ty: field_ty,
                 });
                 if base_owned {
-                    // The base temporary is freed here (with its owned fields),
-                    // so an owned field must be cloned out first; scalars are
-                    // already value copies.
-                    if field_ty.is_heap() {
-                        let cloned = self.emit_clone(out, field_ty);
+                    // The base temporary is freed here. Move a heap field out
+                    // by zeroing the slot so DropStruct does not free it —
+                    // cloning aliases the parent destructor.
+                    if field_ty.is_heap() && !field_ty.is_shared_handle() {
+                        let null = self.value();
+                        self.emit(Inst::NullHeap {
+                            out: null,
+                            ty: field_ty,
+                        });
+                        self.emit(Inst::StructFieldStore {
+                            base: base_ptr,
+                            struct_id: id,
+                            index,
+                            value: null,
+                        });
                         self.emit(Inst::DropStruct {
                             value: base_ptr,
                             struct_id: id,
                         });
-                        return Ok((cloned, field_ty, true));
+                        return Ok((out, field_ty, true));
                     }
                     self.emit(Inst::DropStruct {
                         value: base_ptr,
@@ -14643,15 +14725,18 @@ impl<'a> FunctionLowerer<'a> {
                 .and_then(|flags| flags.get(param_index))
                 .copied()
                 .unwrap_or(false);
-            if let Type::Struct(_sid) = t {
-                if is_mut_param {
-                    if o && !matches!(arg, Expr::Ident(_)) {
-                        temps.push((v, t));
-                    }
-                } else if !o {
-                    v = self.emit_clone(v, t);
-                    temps.push((v, t));
+            if let Type::Struct(sid) = t {
+                let lvalue = matches!(
+                    arg,
+                    Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                );
+                let large_mut = is_mut_param && self.structs.owned_field_count(sid) >= 4;
+                if lvalue && (!is_mut_param || large_mut) {
+                    // Non-mut or large-mut: borrow the caller's block.
                 } else {
+                    if !o {
+                        v = self.emit_clone(v, t);
+                    }
                     temps.push((v, t));
                 }
             } else if t.is_consumable_header() {
@@ -16304,6 +16389,96 @@ impl<'a> FunctionLowerer<'a> {
     /// becomes the sole owner). Otherwise preserve `already_owned` so that
     /// owned temporaries (`None`, `Ok(1)`, `share_int(…)`, call results)
     /// are not mistaken for borrows — cloning those would leak the original.
+    /// Move a heap field out of a uniquely owned local struct. Zero the source
+    /// field so the parent destructor skips it. Returns true when the value is
+    /// now the sole owner and must not be cloned.
+    fn take_owned_field(&mut self, expr: &Expr, field_ty: Type) -> Result<bool, IrError> {
+        let Some((owner, path)) = Self::owned_field_path(expr) else {
+            return Ok(false);
+        };
+        if self.heap_owned.get(&owner) != Some(&true) {
+            return Ok(false);
+        }
+        self.zero_struct_field_path(&owner, &path, field_ty)?;
+        Ok(true)
+    }
+
+    fn owned_field_path(expr: &Expr) -> Option<(String, Vec<String>)> {
+        let Expr::Field { base, field } = expr else {
+            return None;
+        };
+        let mut fields = vec![field.clone()];
+        let mut cur = base.as_ref();
+        loop {
+            match cur {
+                Expr::Field { base, field } => {
+                    fields.push(field.clone());
+                    cur = base.as_ref();
+                }
+                Expr::Ident(name) => {
+                    fields.reverse();
+                    return Some((name.clone(), fields));
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    fn zero_struct_field_path(
+        &mut self,
+        owner: &str,
+        path: &[String],
+        leaf_ty: Type,
+    ) -> Result<(), IrError> {
+        let (slot, ty) = self.locals.get(owner).copied().ok_or_else(|| {
+            IrError::new(format!("native IR: unknown local `{owner}`"))
+        })?;
+        let Type::Struct(mut id) = ty else {
+            return Ok(());
+        };
+        let mut base = self.value();
+        self.emit(Inst::Load {
+            out: base,
+            ptr: slot,
+            ty,
+        });
+        for (i, fname) in path.iter().enumerate() {
+            let (index, field_ty) = self.structs.field(id, fname).ok_or_else(|| {
+                IrError::new(format!("native IR: unknown field `{fname}`"))
+            })?;
+            if i + 1 == path.len() {
+                let null = self.value();
+                self.emit(Inst::NullHeap {
+                    out: null,
+                    ty: leaf_ty,
+                });
+                self.emit(Inst::StructFieldStore {
+                    base,
+                    struct_id: id,
+                    index,
+                    value: null,
+                });
+                return Ok(());
+            }
+            let next = self.value();
+            self.emit(Inst::StructField {
+                out: next,
+                base,
+                struct_id: id,
+                index,
+                ty: field_ty,
+            });
+            base = next;
+            let Type::Struct(next_id) = field_ty else {
+                return Err(IrError::new(format!(
+                    "native IR: nested field `{fname}` is not a struct"
+                )));
+            };
+            id = next_id;
+        }
+        Ok(())
+    }
+
     fn take_bare_string_local(&mut self, expr: &Expr, already_owned: bool) -> bool {
         let Expr::Ident(name) = expr else {
             return already_owned;
@@ -31712,12 +31887,33 @@ impl<'a> FunctionLowerer<'a> {
             // data is the struct pointer; cast conceptually to Struct type of first param.
             let mut call_args = vec![data];
             let mut temps = Vec::new();
-            for (arg, expected) in args.iter().zip(params.iter().skip(1)) {
+            let mut_flags = self.mut_param_fns.get(&fn_name);
+            for (arg_index, (arg, expected)) in args.iter().zip(params.iter().skip(1)).enumerate()
+            {
                 let (mut v, t, o) = self.lower_expr(arg)?;
                 if t != *expected {
                     return Err(IrError::new("native IR: iface method arg type"));
                 }
-                if t.is_heap() {
+                let param_index = arg_index + 1;
+                let is_mut_param = mut_flags
+                    .and_then(|flags| flags.get(param_index))
+                    .copied()
+                    .unwrap_or(false);
+                if let Type::Struct(sid) = t {
+                    let lvalue = matches!(
+                        arg,
+                        Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                    );
+                    let large_mut = is_mut_param && self.structs.owned_field_count(sid) >= 4;
+                    if lvalue && (!is_mut_param || large_mut) {
+                        // Non-mut or large-mut: borrow the caller's block.
+                    } else {
+                        if !o {
+                            v = self.emit_clone(v, t);
+                        }
+                        temps.push((v, t));
+                    }
+                } else if t.is_heap() {
                     if !o {
                         v = self.emit_clone(v, t);
                     }
@@ -31765,12 +31961,32 @@ impl<'a> FunctionLowerer<'a> {
         let mut temps = Vec::new();
         // Use first candidate's param types after self for expected types.
         let expected_args = &with_self[0].1[1..];
-        for (arg, expected) in args.iter().zip(expected_args.iter()) {
+        let mut_flags = self.mut_param_fns.get(&with_self[0].0);
+        for (arg_index, (arg, expected)) in args.iter().zip(expected_args.iter()).enumerate() {
             let (mut v, t, o) = self.lower_expr(arg)?;
             if t != *expected {
                 return Err(IrError::new("native IR: iface method arg type"));
             }
-            if t.is_heap() {
+            let param_index = arg_index + 1;
+            let is_mut_param = mut_flags
+                .and_then(|flags| flags.get(param_index))
+                .copied()
+                .unwrap_or(false);
+            if let Type::Struct(sid) = t {
+                let lvalue = matches!(
+                    arg,
+                    Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                );
+                let large_mut = is_mut_param && self.structs.owned_field_count(sid) >= 4;
+                if lvalue && (!is_mut_param || large_mut) {
+                    // Non-mut or large-mut: borrow the caller's block.
+                } else {
+                    if !o {
+                        v = self.emit_clone(v, t);
+                    }
+                    temps.push((v, t));
+                }
+            } else if t.is_heap() {
                 if !o {
                     v = self.emit_clone(v, t);
                 }
@@ -33569,6 +33785,93 @@ mod tests {
                 .count(),
             2,
             "both owned Bags dropped once at scope exit"
+        );
+    }
+
+    #[test]
+    fn kick_clones_struct_arg_and_stub_drops_worker_copy() {
+        let source = r#"
+            struct Label { a: string, b: string }
+            fn label_len(l: Label) -> int {
+                return str_len(l.a)
+            }
+            fn main() {
+                let l = Label { a: "aa", b: "bb" }
+                crew t {
+                    let j = t.kick(label_len(l))
+                    print_int(j.join())
+                }
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let main = module.functions.iter().find(|f| f.name == "main").unwrap();
+        let main_insts = main
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .collect::<Vec<_>>();
+        assert!(
+            main_insts
+                .iter()
+                .any(|i| matches!(i, Inst::StructClone { .. })),
+            "kick must clone the struct into the spawn pack"
+        );
+        let stub = module
+            .functions
+            .iter()
+            .find(|f| f.name.starts_with("__mako_kick_"))
+            .expect("kick trampoline");
+        let stub_drops = stub
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .filter(|i| matches!(i, Inst::DropStruct { .. }))
+            .count();
+        assert_eq!(
+            stub_drops, 1,
+            "trampoline must drop the worker's cloned struct after the call"
+        );
+    }
+
+    #[test]
+    fn moves_owned_field_from_call_result_without_clone() {
+        // Issue #49 / unique-owner field extract: `let db = result.db` must
+        // transfer the string by zeroing the source slot, not StringClone.
+        let source = r#"
+            struct ExecResult { db: string, text: string }
+            fn build_result() -> ExecResult {
+                return ExecResult { db: "main", text: "ok" }
+            }
+            fn main() {
+                let result = build_result()
+                let db = result.db
+                print(db)
+            }
+        "#;
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let module = lower(&program).unwrap();
+        let main = module.functions.iter().find(|f| f.name == "main").unwrap();
+        let insts = main
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .collect::<Vec<_>>();
+        assert!(
+            insts
+                .iter()
+                .any(|i| matches!(i, Inst::StructFieldStore { .. })),
+            "field move must zero the source slot"
+        );
+        assert!(
+            insts.iter().any(|i| matches!(i, Inst::NullHeap { .. })),
+            "zeroed field must be a null heap value"
+        );
+        assert!(
+            !insts.iter().any(|i| matches!(i, Inst::StringClone { .. })),
+            "unique-owner field extract must not clone"
         );
     }
 

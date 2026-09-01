@@ -716,6 +716,16 @@ fn inc(mut n: int) -> int {
 ```
 
 A shared local cannot be passed into a `mut` parameter while the share is live.
+Two arguments of the same call cannot alias when one of them is `mut`
+(`f(h, h)`, `h.stamp(h)`, `f(h.inner, h)`, `f(xs[0], xs[0])`, generic
+`swap(h, h)`). Two non-mut borrows of the same value are allowed.
+Distinct values (`swap(a, b)`) are allowed.
+
+Owning structs are borrowed at the call boundary (pointer, no per-field
+RC clone). A `mut` struct with four or more owned fields is mutated in
+place; smaller `mut` structs keep clone-at-entry. Returning, storing, or
+appending a borrowed struct clones owned fields. Kick of a Send struct
+deep-clones those fields into the task box and drops the worker copy.
 
 #### Lambdas
 
@@ -1518,9 +1528,28 @@ A `let` binding names a value in the current task. Scalars and POD are
 stack-like. Heap-backed values follow the ownership category of their type:
 owning slices, maps, strings, and struct Own fields free at scope exit /
 reassign / `?` / break-continue / **match** Own payloads (SAFE-003–006). Live
-Own **moves** into a new freer; aliases and field/index borrows **clone** (one
-freer per allocation). Prefer `string_view` for zero-copy reads; `make([]T, 0, n)`
-when you will grow.
+Own **moves** into a new freer; aliases and index borrows **clone** (one
+freer per allocation). Field extraction from a **unique owning struct local**
+(call/method result, struct literal, or a nested struct moved out of one)
+is a **move**: the source field is zeroed so parent and destination
+destructors stay disjoint. Re-reading that field path is a compile error.
+Cloning a unique owner's field aliases the parent destructor and is
+rejected. Shared, indexed, and other borrowed sources still clone.
+Prefer `string_view` for zero-copy reads; `make([]T, 0, n)` when you will grow.
+
+Owning struct parameters (`fn f(db: Database)` and large `mut db`) are
+**borrows** on the C backend: the callee receives a pointer, does not
+RC-clone owned fields at entry, and does not drop the caller's struct at
+exit. Field reads go through the pointer. Small `mut` structs (fewer than
+four owned fields) still clone at entry so `w = f(w)` keeps value
+semantics. Native already treats struct params as borrows.
+
+A borrow must not become a second owner. Returning the param, storing it
+in a struct/bag/tuple/`Some`/`Ok`, selecting it in `if`/`match`, or
+appending it to an array **clones** owned fields so the caller and the
+destination destructors stay disjoint. In-place mutation through a `mut`
+pointer does not clone. Indexed mut arguments pass an element pointer
+(`*_get_ptr`) so writes land in the array.
 
 ```mko
 {
@@ -1563,21 +1592,22 @@ print_int(x)
 
 #### Partial Moves (Struct Fields)
 
-A field access on a `hold` struct moves only that field path:
+A field access on a `hold` struct moves only that **non-Copy** field path.
+Copy fields (`int`, `bool`, `float`, …) may be re-read without moving.
 
 ```mko
-hold let p = Point { x: 1, y: 2 }
-let x = p.x         // moves only field x
-print_int(p.y)      // y still usable
-// print_int(p.x)   // COMPILE ERROR: field x already moved
+hold let b = Box { label: "x", n: 1 }
+let s = b.label     // moves only field label
+print_int(b.n)      // n is Copy — still usable
+// print(b.label)   // COMPILE ERROR: field label already moved
 ```
 
 Nested paths are tracked individually:
 
 ```mko
-hold let o = Outer { inner: Inner { a: 1, b: 2 }, n: 9 }
+hold let o = Outer { inner: Inner { a: "one", b: "two" }, n: 9 }
 let a = o.inner.a   // moves path "inner.a" only
-print_int(o.inner.b) // OK
+print(o.inner.b)    // OK
 ```
 
 #### Copy Types Under Hold

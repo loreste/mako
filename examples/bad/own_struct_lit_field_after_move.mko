@@ -1,0 +1,21 @@
+// Must fail: owned field already moved out of a unique struct local
+struct Detail {
+    label string
+}
+
+struct QueryResult {
+    code int
+    text string
+    detail Detail
+}
+
+fn main() {
+    let result = QueryResult{
+        code: 200,
+        text: "rows",
+        detail: Detail{label: "disk"},
+    }
+    let text = result.text
+    print(result.text)
+    print(text)
+}

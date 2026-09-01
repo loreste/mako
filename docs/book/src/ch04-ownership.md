@@ -112,6 +112,15 @@ fn main() {
 
 ### Move into function calls
 
+Owning structs passed into a function are borrowed, not cloned. A
+read-only `fn f(db: Database)` does not retain every owned field; a
+large `mut db` mutates the caller's value in place. Small `mut` structs
+(fewer than four owned fields) still clone at entry so `w = f(w)` is a
+value update. Returning that param, storing it in another struct, or
+appending it clones so the new owner does not share the caller's
+destructor. A `mut` parameter cannot alias another argument of the same
+call (`f(h, h)`). Kick clones owned struct fields for the worker.
+
 Passing a `hold` value to a function is a consuming use:
 
 ```mko
@@ -159,17 +168,17 @@ When a struct is under `hold`, you can move individual fields independently.
 Only the moved field becomes dead:
 
 ```mko
-struct Point {
-    x: int,
-    y: int,
+struct Box {
+    label: string
+    n: int
 }
 
 fn main() {
-    hold let p = Point { x: 1, y: 2 }
-    let px = p.x        // moves only p.x
-    print_int(px)       // OK
-    print_int(p.y)      // OK -- p.y was never moved
-    // print_int(p.x)   // compile error: p.x was moved
+    hold let p = Box { label: "x", n: 2 }
+    let s = p.label     // moves only p.label
+    print(s)            // OK
+    print_int(p.n)      // OK -- n is Copy and was never moved
+    // print(p.label)   // compile error: p.label was moved
 }
 ```
 

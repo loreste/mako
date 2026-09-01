@@ -1,0 +1,16 @@
+// Must fail: two mut parameters cannot alias the same place.
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+fn swap_labels(mut x: Heavy, mut y: Heavy) {
+    x.a = y.a
+}
+
+fn main() {
+    let mut h = Heavy { a: "h", b: "b", c: "c", d: make([]int, 0, 1) }
+    swap_labels(h, h)
+}

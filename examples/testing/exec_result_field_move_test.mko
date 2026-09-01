@@ -1,0 +1,143 @@
+// Issue #49: `db = result.db` after `result = db_exec(...)` must destroy the
+// previous Database before overwrite. User structs have no own_free_fn, so
+// skipping field destruction leaked ~400KB/query.
+
+struct Table {
+    name string
+    rows []int
+}
+
+struct Database {
+    tables []Table
+}
+
+struct ExecResult {
+    db Database
+    text string
+}
+
+struct Holder {
+    db Database
+}
+
+fn db_exec(n: int) -> ExecResult {
+    let mut rows = make([]int, 0, n)
+    let mut i = 0
+    while i < n {
+        rows = append(rows, i)
+        i = i + 1
+    }
+    let t = Table{name: "t", rows: rows}
+    let mut tables = make([]Table, 0, 1)
+    tables = append(tables, t)
+    return ExecResult{
+        db: Database{tables: tables},
+        text: "ok",
+    }
+}
+
+fn TestExecResultFieldMoveReassign() {
+    let mut db = Database{tables: make([]Table, 0, 1)}
+    let mut out = ""
+    let mut q = 0
+    while q < 8 {
+        let result = db_exec(64)
+        db = result.db
+        out = result.text
+        q = q + 1
+    }
+    assert(out == "ok")
+    assert(len(db.tables) == 1)
+    assert(db.tables[0].name == "t")
+    assert(len(db.tables[0].rows) == 64)
+    assert(db.tables[0].rows[63] == 63)
+}
+
+fn TestExecResultFieldMoveTakesDb() {
+    let mut db = Database{tables: make([]Table, 0, 1)}
+    let mut out = ""
+    let mut q = 0
+    while q < 4 {
+        let result = db_exec_keep(db, 32)
+        db = result.db
+        out = result.text
+        q = q + 1
+    }
+    assert(out == "ok")
+    assert(len(db.tables) == 1)
+    assert(len(db.tables[0].rows) == 32)
+}
+
+fn db_exec_keep(db: Database, n: int) -> ExecResult {
+    let keep = len(db.tables)
+    let mut rows = make([]int, 0, n)
+    let mut i = 0
+    while i < n {
+        rows = append(rows, i + keep)
+        i = i + 1
+    }
+    let t = Table{name: "kept", rows: rows}
+    let mut tables = make([]Table, 0, 1)
+    tables = append(tables, t)
+    return ExecResult{
+        db: Database{tables: tables},
+        text: "ok",
+    }
+}
+
+fn TestExecResultPartialMoveDbOnly() {
+    let result = db_exec(16)
+    let db = result.db
+    assert(len(db.tables) == 1)
+    assert(len(db.tables[0].rows) == 16)
+}
+
+fn TestExecResultPartialMoveTextOnly() {
+    let result = db_exec(16)
+    let text = result.text
+    assert(text == "ok")
+}
+
+fn TestExecResultDiscardWhole() {
+    let result = db_exec(16)
+    assert(result.text == "ok")
+}
+
+fn TestExecResultNestedFieldAssign() {
+    let mut h = Holder{db: Database{tables: make([]Table, 0, 1)}}
+    let mut q = 0
+    while q < 4 {
+        let result = db_exec(8)
+        h.db = result.db
+        q = q + 1
+    }
+    assert(len(h.db.tables) == 1)
+    assert(len(h.db.tables[0].rows) == 8)
+}
+
+fn TestExecResultManyQueries() {
+    let mut db = Database{tables: make([]Table, 0, 1)}
+    let mut out = ""
+    let mut q = 0
+    while q < 32 {
+        let result = db_exec(32)
+        db = result.db
+        out = result.text
+        q = q + 1
+    }
+    assert(out == "ok")
+    assert(len(db.tables) == 1)
+    assert(len(db.tables[0].rows) == 32)
+}
+
+fn TestExecResultEmptyThenGrow() {
+    let mut db = Database{tables: make([]Table, 0, 1)}
+    let result0 = db_exec(0)
+    db = result0.db
+    assert(len(db.tables) == 1)
+    assert(len(db.tables[0].rows) == 0)
+    let result1 = db_exec(4)
+    db = result1.db
+    assert(len(db.tables[0].rows) == 4)
+    assert(db.tables[0].rows[3] == 3)
+}

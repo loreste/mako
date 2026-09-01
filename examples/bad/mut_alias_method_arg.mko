@@ -1,0 +1,18 @@
+// Must fail: mut self and a mut extra-arg cannot alias the same place.
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: []int
+}
+
+on Heavy {
+    fn stamp_other(mut self, mut other: Heavy) {
+        self.a = other.a
+    }
+}
+
+fn main() {
+    let mut h = Heavy { a: "h", b: "b", c: "c", d: make([]int, 0, 1) }
+    h.stamp_other(h)
+}

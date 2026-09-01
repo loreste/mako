@@ -86,6 +86,30 @@ expect_failure fan-capture env MAKO_CACHE="$CACHE/fan-capture" \
   "$MAKO" check "$ROOT/examples/bad/fan_capture.mko"
 expect_failure iface-signature-mismatch env MAKO_CACHE="$CACHE/iface-signature-mismatch" \
   "$MAKO" check "$ROOT/examples/bad/iface_signature_mismatch.mko"
+expect_failure own-field-after-move env MAKO_CACHE="$CACHE/own-field-after-move" \
+  "$MAKO" check "$ROOT/examples/bad/own_field_after_move.mko"
+expect_failure own-nested-field-after-move env MAKO_CACHE="$CACHE/own-nested-field-after-move" \
+  "$MAKO" check "$ROOT/examples/bad/own_nested_field_after_move.mko"
+expect_failure own-struct-lit-field-after-move env MAKO_CACHE="$CACHE/own-struct-lit-field-after-move" \
+  "$MAKO" check "$ROOT/examples/bad/own_struct_lit_field_after_move.mko"
+expect_failure own-field-after-assign env MAKO_CACHE="$CACHE/own-field-after-assign" \
+  "$MAKO" check "$ROOT/examples/bad/own_field_after_assign.mko"
+expect_failure own-related-field-after-move env MAKO_CACHE="$CACHE/own-related-field-after-move" \
+  "$MAKO" check "$ROOT/examples/bad/own_related_field_after_move.mko"
+expect_failure mut-alias-same-arg env MAKO_CACHE="$CACHE/mut-alias-same-arg" \
+  "$MAKO" check "$ROOT/examples/bad/mut_alias_same_arg.mko"
+expect_failure mut-alias-method-arg env MAKO_CACHE="$CACHE/mut-alias-method-arg" \
+  "$MAKO" check "$ROOT/examples/bad/mut_alias_method_arg.mko"
+expect_failure mut-alias-mut-and-borrow env MAKO_CACHE="$CACHE/mut-alias-mut-and-borrow" \
+  "$MAKO" check "$ROOT/examples/bad/mut_alias_mut_and_borrow.mko"
+expect_failure mut-alias-field-and-whole env MAKO_CACHE="$CACHE/mut-alias-field-and-whole" \
+  "$MAKO" check "$ROOT/examples/bad/mut_alias_field_and_whole.mko"
+expect_failure mut-alias-same-index env MAKO_CACHE="$CACHE/mut-alias-same-index" \
+  "$MAKO" check "$ROOT/examples/bad/mut_alias_same_index.mko"
+expect_failure mut-alias-generic env MAKO_CACHE="$CACHE/mut-alias-generic" \
+  "$MAKO" check "$ROOT/examples/bad/mut_alias_generic.mko"
+expect_failure mut-alias-method-field env MAKO_CACHE="$CACHE/mut-alias-method-field" \
+  "$MAKO" check "$ROOT/examples/bad/mut_alias_method_field.mko"
 
 "${CC:-cc}" -std=c11 -pthread -I"$ROOT/runtime" \
   "$ROOT/scripts/refcount-safety-probe.c" -o "$TMP/refcount-safety-probe"

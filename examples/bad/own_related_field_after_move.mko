@@ -1,0 +1,23 @@
+// Must fail: related nested path after the parent field was moved
+struct Database {
+    name string
+}
+
+struct ExecResult {
+    db Database
+    text string
+}
+
+fn db_exec() -> ExecResult {
+    return ExecResult{
+        db: Database{name: "main"},
+        text: "ok",
+    }
+}
+
+fn main() {
+    let result = db_exec()
+    let db = result.db
+    print(result.db.name)
+    print(db.name)
+}

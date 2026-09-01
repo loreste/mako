@@ -34,3 +34,58 @@ fn TestOwnedFieldMoveIntoExistingLocal() {
     assert(text == "replacement")
     assert(result.detail.label == "kept")
 }
+
+fn TestOwnedNestedFieldPathMove() {
+    let result = query_result("rows", "disk")
+    let label = result.detail.label
+
+    assert(label == "disk")
+    assert(result.code == 200)
+}
+
+fn TestOwnedMovedNestedStructFieldMove() {
+    let result = query_result("rows", "disk")
+    let detail = result.detail
+    let label = detail.label
+
+    assert(label == "disk")
+    assert(result.code == 200)
+}
+
+fn TestOrdinaryStructFieldMoves() {
+    let result = QueryResult{
+        code: 200,
+        text: "rows",
+        detail: Detail{label: "disk"},
+    }
+    let text = result.text
+    let label = result.detail.label
+
+    assert(text == "rows")
+    assert(label == "disk")
+    assert(result.code == 200)
+}
+
+fn TestOwnedFieldMoveLeavesSibling() {
+    let result = query_result("rows", "disk")
+    let text = result.text
+    assert(text == "rows")
+    assert(result.detail.label == "disk")
+    assert(result.code == 200)
+}
+
+fn TestOwnedFieldMoveDiscardResult() {
+    let result = query_result("gone", "drop")
+    assert(result.code == 200)
+}
+
+fn TestOwnedFieldMoveLoopRebind() {
+    let mut last = ""
+    let mut i = 0
+    while i < 5 {
+        let result = query_result("n", "x")
+        last = result.text
+        i = i + 1
+    }
+    assert(last == "n")
+}
