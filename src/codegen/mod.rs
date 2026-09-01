@@ -34891,18 +34891,12 @@ impl Codegen {
                     let (fty, v) = self.emit_expr(fexpr);
                     // Heapify POD stack/view slices stored in struct fields.
                     let v = self.ensure_slice_owned(&fty, v);
-                    // Move a live owner into the field, but *clone* a borrow.
+                    // Move a fresh/live owner into the field, but clone a borrowed alias.
                     // A bare move of a parameter stored the caller's buffer in
                     // the returned struct (`st_0.s = s`), so the struct outlived
                     // a borrow it did not own — safe only because the caller was
                     // then forced to leak the original.
-                    let v = if Self::own_free_fn(&fty).is_some()
-                        || !self.struct_own_field_frees(&fty).is_empty()
-                    {
-                        self.clone_own_val(&fty, &v)
-                    } else {
-                        v
-                    };
+                    let v = self.prepare_own_store_rhs(fexpr, &fty, v);
                     self.line(&format!("{tmp}.{fname} = {v};"));
                 }
                 (cty, tmp)
