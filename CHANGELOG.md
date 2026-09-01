@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.6.14 - 2026-08-31 (nested struct-array ownership)
+
+- Make nested struct-array clones retain their copy-on-write backing buffer
+  instead of recursively allocating copies at function boundaries.
+- On the final release, recursively destroy owned fields in every struct element
+  before freeing the backing buffer.
+- Document the clone/free symmetry, last-owner rule, and remaining balanced RC
+  cost for read-only by-value struct parameters.
+
 ## 0.6.13 - 2026-08-31 (LLVM error propagation ABI)
 
 - Split error-tracing bridges by backend ABI: Cranelift/native keeps pointer
@@ -70,7 +79,7 @@ strict C11 CI builds.
 - Hardened slice backing refcounts against overflow, underflow, and retaining a
   released allocation; invalid transitions now abort instead of wrapping.
 
-**Next:** v0.6.13 → v0.7 consolidation — no new features. Freeze COW spec,
+**Next:** v0.6.14 → v0.7 consolidation — no new features. Freeze COW spec,
 property-based ownership testing, channel model-check, Unicode conformance
 suites, C runtime modularization, application benchmarks, CI automation,
 external review. See [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md).

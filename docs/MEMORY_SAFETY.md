@@ -145,7 +145,29 @@ See [LONG_RUNNING.md](LONG_RUNNING.md).
 
 ---
 
-## Consolidation (v0.6.13 → v0.7)
+## Nested struct-array ownership
+
+Arrays of structs use copy-on-write backing storage. A by-value clone retains the
+single backing allocation in O(1); it does not recursively clone every element.
+Mutation must detach before writing whenever the backing reference count is not
+unique.
+
+Dropping an alias only decrements the backing reference count. The final owner
+recursively destroys every element's owned fields—including strings, nested
+arrays, maps, and nested structs—before releasing the backing allocation. The
+uniqueness check and release are paired so element destructors run exactly once.
+Element destruction must never run for a non-final alias.
+
+Read-only by-value struct parameters can still perform balanced retain/release
+operations for their owned fields. That is CPU/refcount traffic, not retained
+memory; removing it requires a separately specified borrow ABI and is not assumed
+by the current ownership model.
+
+Regression coverage: `examples/testing/struct_clone_nested_if_test.mko` stresses
+repeated nested clone/drop cycles. The full sanitizer sweep and native memory
+safety gate execute the ownership suite in CI.
+
+## Consolidation (v0.6.14 → v0.7)
 
 The next phase freezes the COW slice representation as a normative spec,
 adds property-based ownership fuzzing, model-checks the channel state machine,

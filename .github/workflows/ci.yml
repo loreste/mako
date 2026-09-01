@@ -564,6 +564,13 @@ jobs:
           MAKO_BACKEND: c
         run: |
           ./target/release/mako test --sanitize address examples/testing/discarded_bag_drop_test.mko
+      - name: Check nested struct-array recursive cleanup
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          MAKO_TEST_TIMEOUT_SECS: "120"
+          MAKO_BACKEND: c
+        run: |
+          ./target/release/mako test --sanitize address examples/testing/struct_clone_nested_if_test.mko
       - name: Check borrowed bag discard
         env:
           ASAN_OPTIONS: detect_leaks=0
