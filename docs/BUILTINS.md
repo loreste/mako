@@ -189,6 +189,11 @@ let o = str_to_owned(v)           // owned clone
 | `maps_values` | `maps_values(m: map[K]V) -> []V` | Values as a slice (incl. `[][]T` for slice-valued maps, `[]map[…]` for nested maps) |
 | `maps_clear` | `maps_clear(m: map[K]V) -> void` | Remove all entries |
 | `maps_clone` | `maps_clone(m: map[K]V) -> map[K]V` | Shallow copy (nested maps / channel maps: outer entries, inner pointers) |
+
+Indexed nested-map values are borrowed views into the parent map. Mutating a view
+(`let mut row = outer["a"]["row"]`) updates the stored map; the view does not
+take ownership or perform an independent destructor. Keep the parent alive for
+the entire view lifetime.
 | `maps_equal` | `maps_equal(a: map[K]V, b: map[K]V) -> int` | Same keys/values (structs/enums structural; nested maps & channel maps: pointer identity on inners) |
 | `maps_copy` | `maps_copy(dst: map[K]V, src: map[K]V) -> void` | Copy entries into `dst` |
 

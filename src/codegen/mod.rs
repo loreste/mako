@@ -15094,7 +15094,16 @@ impl Codegen {
                 let (val, field_value_owned) = if clone_ident_own {
                     (self.clone_own_val(&ty, &val), false)
                 } else if *ownership != Ownership::Share && self.current_arena.is_none() {
-                    if matches!(init, Expr::Field { .. } | Expr::Index { .. })
+                    if matches!(init, Expr::Index { .. })
+                        && ty.starts_with("MakoMap")
+                        && ty.ends_with('*')
+                    {
+                        // Map index results are borrowed views into the parent
+                        // map. Keep the pointer so mutations propagate through
+                        // nested maps; never register an independent destructor
+                        // for the view (the parent owns the allocation).
+                        (val, false)
+                    } else if matches!(init, Expr::Field { .. } | Expr::Index { .. })
                         && (Self::own_free_fn(&ty).is_some()
                             || !self.struct_own_field_frees(&ty).is_empty())
                     {
