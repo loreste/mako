@@ -4260,10 +4260,12 @@ impl Codegen {
                         .unwrap_or(0)
             }
             Stmt::While { cond, body, .. } => {
-                Self::count_ident_in_expr(cond, name) + Self::count_ident_in_stmts(&body.stmts, name)
+                Self::count_ident_in_expr(cond, name)
+                    + Self::count_ident_in_stmts(&body.stmts, name)
             }
             Stmt::For { iter, body, .. } => {
-                Self::count_ident_in_expr(iter, name) + Self::count_ident_in_stmts(&body.stmts, name)
+                Self::count_ident_in_expr(iter, name)
+                    + Self::count_ident_in_stmts(&body.stmts, name)
             }
             Stmt::CFor {
                 init,
@@ -4304,9 +4306,17 @@ impl Codegen {
     fn count_ident_in_expr(e: &Expr, name: &str) -> usize {
         match e {
             Expr::Ident(n) => usize::from(n == name),
-            Expr::Call { callee, args } | Expr::Method { receiver: callee, args, .. } => {
+            Expr::Call { callee, args }
+            | Expr::Method {
+                receiver: callee,
+                args,
+                ..
+            } => {
                 Self::count_ident_in_expr(callee, name)
-                    + args.iter().map(|a| Self::count_ident_in_expr(a, name)).sum::<usize>()
+                    + args
+                        .iter()
+                        .map(|a| Self::count_ident_in_expr(a, name))
+                        .sum::<usize>()
             }
             Expr::Binary { left, right, .. } => {
                 Self::count_ident_in_expr(left, name) + Self::count_ident_in_expr(right, name)
@@ -4641,7 +4651,7 @@ impl Codegen {
                 if self.own_drop_live.contains(&mn) {
                     // Last use of a unique owner moves; any other mention in
                     // the function clones so a later read cannot UAF.
-                    if self.ident_reused_in_fn(n) {
+                    if c_ty == "MakoString" || self.ident_reused_in_fn(n) {
                         self.clone_own_val(c_ty, &val)
                     } else {
                         self.note_own_drop_moved(&mn);
@@ -11977,10 +11987,7 @@ impl Codegen {
                 );
                 let _ = writeln!(self.out, "        }}");
             } else {
-                self.write_map_hit_replace(
-                    &format!("mako_eq_{key_c}(m->keys[i], key)"),
-                    &vty,
-                );
+                self.write_map_hit_replace(&format!("mako_eq_{key_c}(m->keys[i], key)"), &vty);
             }
             let _ = writeln!(self.out, "        i = (i + 1) & mask;");
             let _ = writeln!(self.out, "    }}");
