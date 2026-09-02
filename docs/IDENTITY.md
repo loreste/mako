@@ -1,6 +1,6 @@
 # Makori syntax identity
 
-**Product tip:** **0.6.5**. Preferred surface: [LANGUAGE.md](LANGUAGE.md) · [GUIDE.md](GUIDE.md).
+**Product tip:** **0.6.24**. Preferred surface: [LANGUAGE.md](LANGUAGE.md) · [GUIDE.md](GUIDE.md).
 
 **Makori is its own unique language with its own unique syntax.**
 

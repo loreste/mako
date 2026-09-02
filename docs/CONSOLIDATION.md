@@ -1,4 +1,4 @@
-# Consolidation plan: v0.6.23 → v0.7
+# Consolidation plan: v0.6.24 → v0.7
 
 **Product tip:** **0.6.23**. This document tracks the hardening and specification
 work required before v0.7.

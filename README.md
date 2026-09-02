@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.23).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.24).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -163,7 +163,7 @@ message inspection, site history, reports, alerts, and traffic metrics.
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
 
-## New in 0.6.23
+## New in 0.6.24
 
 Channel handles now retain/release atomically across owning struct copies, preventing cross-task use-after-free when sessions or clients are returned by value (issue #51). Native nullary enum call temporaries are also released exactly once. The v0.6.22 owned-field and pointer-ABI fixes remain intact.
 

@@ -2,7 +2,7 @@
 
 **Product version:** **0.6.24** (`Cargo.toml` / `makori version`);
 release tag **v0.6.24**.
-**Tree status:** `examples/testing` inventory **439** `*_test.mko` files
+**Tree status:** `examples/testing` inventory **445** `*_test.mko` files
 (2026-08-30): CI/claims gates pass across the release matrix.
 **Versioning:** small patches preferred — [VERSIONING.md](VERSIONING.md).
 **Backends:** default **native** for debug/test; use explicit `--backend c` as

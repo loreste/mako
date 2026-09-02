@@ -9,7 +9,7 @@ and buffer overflows — but not general leak freedom. Edge cases are still
 being found and fixed. This is not yet equivalent to a formally verified
 memory model.
 
-**Product version:** **0.6.5**.
+**Product version:** **0.6.24**.
 
 Mako treats safety as a **compiler and runtime contract**, not a style guide.
 The goal: make memory corruption and common backend footguns hard to ship —

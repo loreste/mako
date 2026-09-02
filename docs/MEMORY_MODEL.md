@@ -1,6 +1,6 @@
 # Makori concurrency memory model
 
-**SAFE-010 · RT-001 · RT-004** · Product tip **0.6.5**
+**SAFE-010 · RT-001 · RT-004** · Product tip **0.6.24**
 
 Safe Mako targets **memory safety by construction** and data-race freedom for
 ordinary locals,
