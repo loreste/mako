@@ -4,7 +4,7 @@ Last inventory: **2026-09-01** · product **mako0.6.23** (tip; release tag **v0.
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings · `s[i]`) · **441** `examples/testing`
+const-fn depth (match/while/for/strings · `s[i]`) · **442** `examples/testing`
 `*_test.mko` files · **2026-08-31:** release claims gate passed · `cargo test` **362 passed, 0 failed** ·
 tooling, stdlib, memory-safety, and performance gates passed locally ·
 CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard failures/quarantines · [The Makori Book](book/).

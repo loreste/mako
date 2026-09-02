@@ -4201,29 +4201,61 @@ impl Codegen {
         }
     }
 
-    /// Destroy owned fields of a live struct local before its C value is
-    /// overwritten. User structs have no `own_free_fn`; skipping this leaks
-    /// nested arrays/strings on `db = result.db` (issue #49).
-    fn emit_destroy_owned_struct_local(&mut self, mn: &str, cty: &str) {
+    /// True when two owned field values do not share backing storage.
+    fn owning_field_replaced_cond(fty: &str, old: &str, new: &str) -> String {
+        if fty == "MakoString"
+            || fty.starts_with("MakoArr_")
+            || matches!(
+                fty,
+                "MakoIntArray"
+                    | "MakoByteArray"
+                    | "MakoStrArray"
+                    | "MakoFloatArray"
+                    | "MakoBoolArray"
+            )
+        {
+            format!("{old}.data != {new}.data")
+        } else if fty.ends_with('*') {
+            format!("{old} != {new}")
+        } else {
+            "1".into()
+        }
+    }
+
+    /// Assign `dest = val`, then free dest's previous owned fields only when
+    /// the replacement does not share their backing. Issue #51: dest-destroy
+    /// of `db` before `db = result.db` UAFs when `result.db` still aliases
+    /// nested `[]Table` / `[]Index` storage.
+    fn emit_assign_owning_struct(&mut self, dest: &str, cty: &str, val: &str) {
         let fields = self.struct_own_field_frees(cty);
         if fields.is_empty() {
+            self.emit_line(format_args!("{dest} = {val};"));
             return;
         }
-        let cond = self.own_cond_flags.contains(mn);
-        if !self.own_drop_live.contains(mn) && !cond {
-            return;
+        let old = self.fresh("old_st");
+        self.emit_line(format_args!("{cty} {old} = {dest};"));
+        self.emit_line(format_args!("{dest} = {val};"));
+        for (path, free_fn) in fields {
+            let fty = self.struct_field_c_type(cty, &path).unwrap_or_default();
+            let cond = Self::owning_field_replaced_cond(
+                &fty,
+                &format!("{old}.{path}"),
+                &format!("{dest}.{path}"),
+            );
+            self.emit_line(format_args!("if ({cond}) {{ {free_fn}({old}.{path}); }}"));
         }
-        if cond {
-            self.emit_line(format_args!("if ({mn}__own) {{"));
-            self.indent += 1;
-        }
-        for (field, free_fn) in fields {
-            self.emit_line(format_args!("{free_fn}({mn}.{field});"));
-        }
-        if cond {
-            self.indent -= 1;
-            self.emit_line(format_args!("}}"));
-        }
+    }
+
+    /// Assign `dest = val` for a single owning value (array/string/map), then
+    /// free the previous value only when backing storage changed. Always-free
+    /// before assign UAFs `db.tables = replace_table(db.tables, …)` when the
+    /// callee returns the same slice header (issue #51).
+    fn emit_assign_owned_value(&mut self, dest: &str, cty: &str, val: &str, free_fn: &str) {
+        let old = self.fresh("old_own");
+        self.emit_line(format_args!("{cty} {old} = {dest};"));
+        self.emit_line(format_args!("{dest} = {val};"));
+        let cond = Self::owning_field_replaced_cond(cty, &old, dest);
+        self.emit_line(format_args!("if ({cond}) {{ {free_fn}({old}); }}"));
     }
 
     /// Emit free of one Own local (respects conditional `__own` freer flag).
@@ -14873,13 +14905,16 @@ impl Codegen {
                 let (val, field_value_owned) = if clone_ident_own {
                     (self.clone_own_val(&ty, &val), false)
                 } else if *ownership != Ownership::Share && self.current_arena.is_none() {
-                    if let Some(moved) = self.prepare_owned_field_move(init, &ty, &val) {
-                        (moved, true)
-                    } else if matches!(init, Expr::Field { .. })
+                    if matches!(init, Expr::Field { .. } | Expr::Index { .. })
                         && (Self::own_free_fn(&ty).is_some()
                             || !self.struct_own_field_frees(&ty).is_empty())
                     {
+                        // Index GET is a shallow header copy. Binding it without
+                        // cloning aliases the container, so `t.name = s` dest-destroy
+                        // UAFs `arr[i].name` (issue #51, FayDB `let table = db.tables[tidx]`).
                         (self.clone_own_val(&ty, &val), true)
+                    } else if let Some(moved) = self.prepare_owned_field_move(init, &ty, &val) {
+                        (moved, true)
                     } else {
                         (val, false)
                     }
@@ -14904,7 +14939,7 @@ impl Codegen {
                 // A fresh struct value owns each nested owning field. Register its
                 // destructor as an invariant of the declaration so later ownership
                 // bookkeeping cannot accidentally omit call-returned structs.
-                // Indexed struct values remain borrows into their container.
+                // Indexed struct values that were not cloned above remain borrows.
                 let owns_struct_fields = *ownership != Ownership::Share
                     && self.current_arena.is_none()
                     && !self.struct_own_field_frees(&ty).is_empty()
@@ -15317,15 +15352,13 @@ impl Codegen {
                 let val = self.prepare_own_store_rhs(value, &cty_for_rhs, val);
                 if let Some(cty) = borrowed_struct_ty {
                     // Pointer-backed owning struct parameters borrow the caller's
-                    // storage. A whole-value assignment must replace that storage,
-                    // not the local pointer, and must release the previous fields
-                    // exactly once before overwriting them.
+                    // storage. Replace that storage, then free previous fields
+                    // only when the replacement does not share their backing.
                     if self.current_arena.is_none() {
-                        for (field, free_fn) in self.struct_own_field_frees(&cty) {
-                            self.emit_line(format_args!("{free_fn}((*{mn}).{field});"));
-                        }
+                        self.emit_assign_owning_struct(&format!("(*{mn})"), &cty, &val);
+                    } else {
+                        self.emit_line(format_args!("*{mn} = {val};"));
                     }
-                    self.emit_line(format_args!("*{mn} = {val};"));
                     return;
                 }
                 let cond_own = self.own_cond_flags.contains(&mn);
@@ -15363,28 +15396,30 @@ impl Codegen {
                     } else {
                         None
                     };
-                    // Struct reassignment must destroy the destination's previous
-                    // owned fields before overwriting its C value. The replacement
-                    // has already been moved or cloned above, so this cannot
-                    // invalidate the incoming value.
-                    if self.current_arena.is_none() {
-                        let old_fields = self.struct_own_field_frees(&cty_for_rhs);
-                        if !old_fields.is_empty() && (self.own_drop_live.contains(&mn) || cond_own)
-                        {
-                            if cond_own {
-                                self.emit_line(format_args!("if ({mn}__own) {{"));
-                                self.indent += 1;
-                            }
-                            for (field, free_fn) in old_fields {
-                                self.emit_line(format_args!("{free_fn}({mn}.{field});"));
-                            }
-                            if cond_own {
-                                self.indent -= 1;
-                                self.emit_line(format_args!("}}"));
-                            }
+                    // Struct reassignment: overwrite first, then free previous
+                    // owned fields only when backing storage actually changed.
+                    if self.current_arena.is_none()
+                        && !self.struct_own_field_frees(&cty_for_rhs).is_empty()
+                        && (self.own_drop_live.contains(&mn) || cond_own)
+                    {
+                        if cond_own {
+                            self.emit_line(format_args!("if ({mn}__own) {{"));
+                            self.indent += 1;
                         }
-                    }
-                    if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                        if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                            self.emit_assign_owning_struct(
+                                &format!("(*{cell})"),
+                                &cty_for_rhs,
+                                &val,
+                            );
+                        } else {
+                            self.emit_assign_owning_struct(&mn, &cty_for_rhs, &val);
+                        }
+                        if cond_own {
+                            self.indent -= 1;
+                            self.emit_line(format_args!("}}"));
+                        }
+                    } else if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
                         self.emit_line(format_args!("*{cell} = {val};"));
                     } else {
                         self.emit_line(format_args!("{mn} = {val};"));
@@ -15503,13 +15538,29 @@ impl Codegen {
                                 return;
                             }
                         }
-                        // User structs have no own_free_fn. Destroy owned fields
-                        // before overwrite so `db = result.db` cannot leak the
-                        // previous Database (issue #49). Returning a borrowed
-                        // struct param clones first, so dest-destroy is safe.
+                        // User structs have no own_free_fn. Overwrite, then free
+                        // previous owned fields only when backing storage changed
+                        // (issue #49 leak vs issue #51 alias UAF).
                         if !self.struct_own_field_frees(&cty).is_empty() {
-                            self.emit_destroy_owned_struct_local(&mn, &cty);
-                            if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                            if self.own_drop_live.contains(&mn) || cond_own {
+                                if cond_own {
+                                    self.emit_line(format_args!("if ({mn}__own) {{"));
+                                    self.indent += 1;
+                                }
+                                if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+                                    self.emit_assign_owning_struct(
+                                        &format!("(*{cell})"),
+                                        &cty,
+                                        &val,
+                                    );
+                                } else {
+                                    self.emit_assign_owning_struct(&mn, &cty, &val);
+                                }
+                                if cond_own {
+                                    self.indent -= 1;
+                                    self.emit_line(format_args!("}}"));
+                                }
+                            } else if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
                                 self.emit_line(format_args!("*{cell} = {val};"));
                             } else {
                                 self.emit_line(format_args!("{mn} = {val};"));
@@ -15704,7 +15755,13 @@ impl Codegen {
                         );
                         if !consumes_old_field {
                             if let Some(field_free) = Self::own_free_fn(&vty) {
-                                self.emit_line(format_args!("{field_free}({ptr}->{field});"));
+                                self.emit_assign_owned_value(
+                                    &format!("{ptr}->{field}"),
+                                    &vty,
+                                    &v,
+                                    &field_free,
+                                );
+                                return;
                             }
                         }
                         self.emit_line(format_args!("{ptr}->{field} = {v};"));
@@ -15744,34 +15801,58 @@ impl Codegen {
                     let mn = mangle(base_name);
                     if !consumes_old_field {
                         if let Some(field_free) = Self::own_free_fn(&vty) {
-                            // Always free old field value before reassignment.
-                            // Struct fields are zero-initialized, and free functions
-                            // handle null/empty (e.g. mako_arr_*_free checks cap > 0).
+                            let dest = format!("{b}{arrow}{field}");
                             if self.own_cond_flags.contains(&mn) {
-                                self.emit_line(format_args!(
-                                    "if ({mn}__own) {field_free}({b}{arrow}{field});"
-                                ));
+                                self.emit_line(format_args!("if ({mn}__own) {{"));
+                                self.indent += 1;
+                                self.emit_assign_owned_value(&dest, &vty, &v, &field_free);
+                                self.indent -= 1;
+                                self.emit_line(format_args!("}} else {{"));
+                                self.indent += 1;
+                                self.emit_line(format_args!("{dest} = {v};"));
+                                self.indent -= 1;
+                                self.emit_line(format_args!("}}"));
                                 self.emit_line(format_args!("{mn}__own = 1;"));
                             } else {
-                                self.emit_line(format_args!("{field_free}({b}{arrow}{field});"));
+                                self.emit_assign_owned_value(&dest, &vty, &v, &field_free);
                             }
-                        } else {
-                            for (path, field_free) in self.struct_own_field_frees(&vty) {
-                                if self.own_cond_flags.contains(&mn) {
-                                    self.emit_line(format_args!(
-                                        "if ({mn}__own) {field_free}({b}{arrow}{field}.{path});"
-                                    ));
-                                } else {
-                                    self.emit_line(format_args!(
-                                        "{field_free}({b}{arrow}{field}.{path});"
-                                    ));
-                                }
-                            }
-                            if self.own_cond_flags.contains(&mn)
-                                && !self.struct_own_field_frees(&vty).is_empty()
+                            if Self::own_free_fn(&bty).is_some()
+                                || !self.struct_own_field_frees(&bty).is_empty()
                             {
-                                self.emit_line(format_args!("{mn}__own = 1;"));
+                                self.register_own_drop(&mn, &bty);
+                                self.scope_drop_safe.insert(mn);
                             }
+                            return;
+                        } else if !self.struct_own_field_frees(&vty).is_empty() {
+                            if self.own_cond_flags.contains(&mn) {
+                                self.emit_line(format_args!("if ({mn}__own) {{"));
+                                self.indent += 1;
+                                self.emit_assign_owning_struct(
+                                    &format!("{b}{arrow}{field}"),
+                                    &vty,
+                                    &v,
+                                );
+                                self.indent -= 1;
+                                self.emit_line(format_args!("}} else {{"));
+                                self.indent += 1;
+                                self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
+                                self.indent -= 1;
+                                self.emit_line(format_args!("}}"));
+                                self.emit_line(format_args!("{mn}__own = 1;"));
+                            } else {
+                                self.emit_assign_owning_struct(
+                                    &format!("{b}{arrow}{field}"),
+                                    &vty,
+                                    &v,
+                                );
+                            }
+                            if Self::own_free_fn(&bty).is_some()
+                                || !self.struct_own_field_frees(&bty).is_empty()
+                            {
+                                self.register_own_drop(&mn, &bty);
+                                self.scope_drop_safe.insert(mn);
+                            }
+                            return;
                         }
                     }
                     if Self::own_free_fn(&bty).is_some()
@@ -35022,24 +35103,15 @@ impl Codegen {
                             }
                             if let Some(sn) = sty.strip_prefix("MakoArr_") {
                                 let sn = sn.to_string();
-                                // Struct/enum array append consumes an owning element just
-                                // as nested-array append does. Identifier sources move into
-                                // the array; temporaries transfer directly. A borrowed
-                                // struct param must clone — moving `(*p)` aliases the caller.
-                                if let Expr::Ident(n) = &args[1] {
-                                    if self.ident_is_user_struct_borrow(n) {
-                                        v = self.clone_own_val(&vty, &v);
-                                    } else {
-                                        self.note_own_drop_moved(&mangle(n));
-                                    }
-                                }
+                                // Struct/enum array append takes ownership of the element.
+                                // Live identifier sources move; index/field borrows clone
+                                // (same as `prepare_own_store_rhs`). A shallow `arr[i]`
+                                // store aliases element strings with the source array, so
+                                // later `src = dst` FieldAssign UAFs (issue #51).
+                                v = self.prepare_own_store_rhs(&args[1], &vty, v);
                                 // Nested [][]T: heapify stack POD lits before store.
                                 if sn.starts_with("arr_") {
                                     v = self.ensure_slice_owned(&vty, v);
-                                    // Transfer ownership of an owning local into the outer array.
-                                    if let Expr::Ident(n) = &args[1] {
-                                        self.note_own_drop_moved(&mangle(n));
-                                    }
                                 }
                                 if let Some(arena) = self.current_arena.clone() {
                                     self.line(&format!(
@@ -41866,6 +41938,132 @@ fn main() {
     }
 
     #[test]
+    fn let_indexed_owning_struct_clones_owned_fields() {
+        let source = r#"
+struct Table { name: string rows: []int }
+struct Database { tables: []Table label: string a: string b: string }
+
+fn exec_update(mut db: Database) -> Database {
+    let mut table = db.tables[0]
+    table.name = "n"
+    return db
+}
+
+fn main() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    db.tables = append(db.tables, Table { name: "t", rows: make([]int, 0, 1) })
+    db = exec_update(db)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        let exec = generated
+            .split("Database exec_update(")
+            .last()
+            .expect("generated exec_update");
+        let name_at = exec.find("table.name").expect("table.name assign");
+        let before = &exec[..name_at];
+        assert!(
+            before.contains("mako_arr_Table_get") && before.contains("mako_str_clone"),
+            "let of indexed owning struct must clone before field assign:\n{before}"
+        );
+    }
+
+    #[test]
+    fn field_assign_owning_array_frees_only_when_data_changes() {
+        let source = r#"
+struct Table { name: string }
+struct Database { tables: []Table label: string a: string b: string }
+
+fn replace_table(tables: []Table, idx: int, table: Table) -> []Table {
+    let mut out = tables
+    out[idx] = table
+    return out
+}
+
+fn exec_update(mut db: Database) -> Database {
+    let mut table = db.tables[0]
+    table.name = "n"
+    db.tables = replace_table(db.tables, 0, table)
+    return db
+}
+
+fn main() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    db.tables = append(db.tables, Table { name: "t" })
+    db = exec_update(db)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        let exec = generated
+            .split("Database exec_update(")
+            .last()
+            .expect("generated exec_update");
+        assert!(
+            exec.contains("old_own_") && exec.contains(".data !="),
+            "array field reassign must skip free when .data still aliases:\n{exec}"
+        );
+    }
+
+    #[test]
+    fn appending_indexed_owning_struct_clones_owned_fields() {
+        let source = r#"
+struct Index { name: string keys: []string }
+struct Table { indexes: []Index }
+struct Database { tables: []Table label: string a: string b: string }
+
+fn exec_create_index(mut db: Database) -> Database {
+    let mut indexes = make([]Index, 0, 2)
+    indexes = append(indexes, db.tables[0].indexes[0])
+    db.tables[0].indexes = indexes
+    return db
+}
+
+fn main() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    db.tables = append(db.tables, Table { indexes: make([]Index, 0, 1) })
+    db.tables[0].indexes = append(db.tables[0].indexes, Index { name: "pk", keys: make([]string, 0, 1) })
+    db = exec_create_index(db)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        let exec = generated
+            .split("Database exec_create_index(")
+            .last()
+            .expect("generated exec_create_index");
+        let append_at = exec.find("mako_arr_Index_append").expect("append of Index");
+        let before_append = &exec[..append_at];
+        assert!(
+            before_append.contains("mako_arr_Index_get"),
+            "append source must be an indexed Index:\n{before_append}"
+        );
+        assert!(
+            before_append.contains("mako_str_clone"),
+            "indexed owning struct append must clone owned fields before store:\n{before_append}"
+        );
+    }
+
+    #[test]
     fn storing_borrowed_owning_struct_in_array_clones_fields() {
         let source = r#"
 struct Heavy { a: string b: string c: string d: []int }
@@ -41923,6 +42121,10 @@ fn main() {
         assert!(
             generated.contains("mako_str_clone") && generated.contains("identity_heavy"),
             "returning a borrowed owning struct must clone fields:\n{generated}"
+        );
+        assert!(
+            generated.contains("old_st_") && generated.contains(".data !="),
+            "reassign of a borrowed owning struct must free previous fields only when backing changed:\n{generated}"
         );
     }
 

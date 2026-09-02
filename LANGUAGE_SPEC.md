@@ -728,11 +728,21 @@ Two arguments of the same call cannot alias when one of them is `mut`
 `swap(h, h)`). Two non-mut borrows of the same value are allowed.
 Distinct values (`swap(a, b)`) are allowed.
 
+Reassigning an owning struct (`db = result.db`) overwrites the destination
+first and frees previous owned fields only when their backing storage
+changed, so a replacement that still aliases nested tables is not
+use-after-freed.
+
 Owning structs are borrowed at the call boundary (pointer, no per-field
 RC clone). A `mut` struct with four or more owned fields is mutated in
 place; smaller `mut` structs keep clone-at-entry. Returning, storing, or
-appending a borrowed struct clones owned fields. Kick of a Send struct
-deep-clones those fields into the task box and drops the worker copy.
+appending a borrowed struct clones owned fields. Appending an indexed
+owning element (`append(dst, src[i])`) also clones, so later replacement
+of `src` cannot free strings the destination still holds. Replacing an
+owning array field (`db.tables = replace_table(db.tables, i, t)`)
+overwrites first and frees the previous array only when `.data` changed.
+Kick of a Send struct deep-clones those fields into the task box and
+drops the worker copy.
 
 #### Lambdas
 
@@ -1554,13 +1564,16 @@ semantics. Native already treats struct params as borrows.
 A borrow must not become a second owner. Returning the param, storing it
 in a struct/bag/tuple/`Some`/`Ok`, selecting it in `if`/`match`, or
 appending it to an array **clones** owned fields so the caller and the
-destination destructors stay disjoint. In-place mutation through a `mut`
-pointer does not clone. Indexed mut arguments pass an element pointer
-(`*_get_ptr`) so writes land in the array.
+destination destructors stay disjoint. Appending an indexed owning
+element (`append(dst, src[i])`) or binding one (`let t = src[i]`) clones
+the same way: a shallow header copy would alias `src`'s destructor.
+In-place mutation through a `mut` pointer does not clone. Indexed mut
+arguments pass an element pointer (`*_get_ptr`) so writes land in the
+array.
 
-Whole-value assignment to a pointer-backed owning-struct parameter replaces the
-caller's value: the old owned fields are destroyed exactly once before the new
-value is written through the pointer. A container store from such a parameter
+Whole-value assignment to a pointer-backed owning-struct parameter
+overwrites the caller's value, then destroys previous owned fields only
+when their backing storage changed. A container store from such a parameter
 first makes one deep ownership-preserving clone. Opaque pointer handles are not
 struct borrows and remain by-value across calls.
 

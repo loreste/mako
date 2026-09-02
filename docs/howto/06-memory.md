@@ -40,7 +40,16 @@ the engine can call parse/plan/exec helpers without RC-amplifying a
 60-field Database on every call. Small `mut` structs still clone at
 entry so `w = f(w)` stays a value update. Returning that param, storing
 it in another struct, or appending it clones so the new owner does not
-share the caller's destructor. Two arguments cannot alias when one is
+share the caller's destructor. Reassigning `db = result.db` overwrites
+first and frees the previous owned fields only when their backing
+storage actually changed, so a replacement that still aliases nested
+tables cannot use-after-free them. Copy-append of an indexed owning
+struct (`append(dst, table.indexes[i])`) clones the element so replacing
+`table.indexes` cannot free strings the new array still holds. Binding
+one (`let mut table = db.tables[i]`) clones too, so `table.name = s`
+cannot free the live array element's string. Replacing an owning array
+field (`db.tables = replace_table(db.tables, i, t)`) frees the previous
+array only when `.data` changed. Two arguments cannot alias when one is
 `mut` (`swap(h, h)` is a type error; `sum(h, h)` with two reads is
 fine). Kick of a Send struct clones owned fields into the worker and
 drops that copy after the call.

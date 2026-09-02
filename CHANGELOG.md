@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Assigning an owning struct (`db = result.db`, `*db = f(db)`) overwrites
+  first and frees previous owned fields only when backing storage changed.
+  Dest-destroy-before-assign used-after-free'd nested `[]Table` / `[]Index`
+  strings when the replacement still aliased them (issue #51).
+- Appending an indexed owning struct (`append(dst, src[i])`) clones the
+  element's owned fields. A shallow header copy aliased `Index.name` with
+  the source array, so `table.indexes = dst` then `db = f(db)` used-after-free'd
+  those strings (issue #51, FayDB `exec_create_index`).
+- Field-assign of an owning array (`db.tables = replace_table(db.tables, …)`)
+  overwrites first and frees the previous array only when `.data` changed, so
+  an in-place slot update that returns the same header is not freed out from
+  under the replacement (issue #51, FayDB `exec_update`).
+- Binding an indexed owning struct (`let mut table = db.tables[i]`) clones
+  owned fields. A shallow header copy made `table.name = s` free the live
+  array element's string (issue #51). Coverage:
+  `owning_struct_exec_reassign_test.mko`.
+
 ## 0.6.23 - 2026-09-01 (concurrent handle lifetime safety)
 
 - Native builds now require the compiler and installed runtime headers to come

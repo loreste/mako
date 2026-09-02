@@ -1,0 +1,195 @@
+// Issue #51: `db = exec(db)` / `holder.db = result.db` after a mut borrow
+// must not free the live Database while the replacement still aliases it.
+
+struct Index {
+    name: string
+    keys: []string
+}
+
+struct Table {
+    name: string
+    rows: []int
+    indexes: []Index
+}
+
+struct Database {
+    tables: []Table
+    label: string
+    a: string
+    b: string
+}
+
+struct ExecResult {
+    db: Database
+    text: string
+}
+
+fn db_exec(mut db: Database, sql: string) -> ExecResult {
+    let mut result = ExecResult { db: db, text: "" }
+    result.db.label = sql
+    result.text = "ok"
+    return result
+}
+
+fn TestExecReassignSameDb() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    db.tables = append(db.tables, Table { name: "t", rows: make([]int, 0, 1), indexes: make([]Index, 0, 1) })
+    db.tables[0].rows = append(db.tables[0].rows, 7)
+    db.tables[0].indexes = append(db.tables[0].indexes, Index { name: "pk", keys: make([]string, 0, 1) })
+    db.tables[0].indexes[0].keys = append(db.tables[0].indexes[0].keys, "id")
+    let result = db_exec(db, "SELECT 1")
+    db = result.db
+    assert(result.text == "ok")
+    assert(db.label == "SELECT 1")
+    assert(db.a == "aa")
+    assert(db.b == "bb")
+    assert(len(db.tables) == 1)
+    assert(db.tables[0].name == "t")
+    assert(len(db.tables[0].rows) == 1)
+    assert(db.tables[0].rows[0] == 7)
+    assert(len(db.tables[0].indexes) == 1)
+    assert(db.tables[0].indexes[0].name == "pk")
+    assert(db.tables[0].indexes[0].keys[0] == "id")
+}
+
+fn TestExecReassignLoop() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    db.tables = append(db.tables, Table { name: "t", rows: make([]int, 0, 1), indexes: make([]Index, 0, 1) })
+    let mut i = 0
+    while i < 8 {
+        let result = db_exec(db, "SELECT 1")
+        db = result.db
+        i = i + 1
+    }
+    assert(db.label == "SELECT 1")
+    assert(len(db.tables) == 1)
+    assert(db.tables[0].name == "t")
+}
+
+struct Holder {
+    db: Database
+    n: int
+}
+
+fn TestHolderFieldReassignFromExec() {
+    let mut h = Holder {
+        db: Database {
+            tables: make([]Table, 0, 1),
+            label: "orig",
+            a: "aa",
+            b: "bb",
+        },
+        n: 1,
+    }
+    h.db.tables = append(h.db.tables, Table { name: "t", rows: make([]int, 0, 1), indexes: make([]Index, 0, 1) })
+    let result = db_exec(h.db, "SELECT 1")
+    h.db = result.db
+    assert(h.db.label == "SELECT 1")
+    assert(h.n == 1)
+    assert(len(h.db.tables) == 1)
+    assert(h.db.tables[0].name == "t")
+}
+
+fn identity_db(mut db: Database) -> Database {
+    return db
+}
+
+fn TestPointerParamReassignIdentity() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    db.tables = append(db.tables, Table { name: "t", rows: make([]int, 0, 1), indexes: make([]Index, 0, 1) })
+    db = identity_db(db)
+    assert(db.label == "orig")
+    assert(len(db.tables) == 1)
+    assert(db.tables[0].name == "t")
+}
+
+fn db_wal(mut db: Database, stmt: string) -> Database {
+    db.label = stmt
+    return db
+}
+
+// FayDB exec_create_index: copy-append each Index, replace the field, then
+// `db = db_wal(db)` clone-on-escape. A shallow `arr[i]` append aliases
+// Index.name with the old array; FieldAssign then frees those strings.
+fn exec_create_index(mut db: Database) -> Database {
+    let nidx = len(db.tables[0].indexes)
+    let mut indexes = make([]Index, 0, nidx + 1)
+    let mut ii = 0
+    while ii < nidx {
+        indexes = append(indexes, db.tables[0].indexes[ii])
+        ii = ii + 1
+    }
+    indexes = append(indexes, Index { name: "new", keys: make([]string, 0, 1) })
+    db.tables[0].indexes = indexes
+    db = db_wal(db, "CREATE INDEX")
+    return db
+}
+
+fn replace_table(tables: []Table, idx: int, table: Table) -> []Table {
+    if idx < 0 or idx >= len(tables) {
+        return tables
+    }
+    let mut out = tables
+    out[idx] = table
+    return out
+}
+
+fn exec_update_name(mut db: Database, name: string) -> Database {
+    let mut table = db.tables[0]
+    table.name = name
+    db.tables = replace_table(db.tables, 0, table)
+    db = db_wal(db, "UPDATE")
+    return db
+}
+
+fn TestReplaceTableSlotReassign() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    db.tables = append(db.tables, Table { name: "t", rows: make([]int, 0, 1), indexes: make([]Index, 0, 1) })
+    db.tables[0].indexes = append(db.tables[0].indexes, Index { name: "pk", keys: make([]string, 0, 1) })
+    db = exec_update_name(db, "renamed")
+    assert(db.label == "UPDATE")
+    assert(len(db.tables) == 1)
+    assert(db.tables[0].name == "renamed")
+    assert(len(db.tables[0].indexes) == 1)
+    assert(db.tables[0].indexes[0].name == "pk")
+}
+
+fn TestCopyAppendReplaceIndexes() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    db.tables = append(db.tables, Table { name: "t", rows: make([]int, 0, 1), indexes: make([]Index, 0, 1) })
+    db.tables[0].indexes = append(db.tables[0].indexes, Index { name: "pk", keys: make([]string, 0, 1) })
+    db.tables[0].indexes[0].keys = append(db.tables[0].indexes[0].keys, "id")
+    db = exec_create_index(db)
+    assert(db.label == "CREATE INDEX")
+    assert(len(db.tables) == 1)
+    assert(db.tables[0].name == "t")
+    assert(len(db.tables[0].indexes) == 2)
+    assert(db.tables[0].indexes[0].name == "pk")
+    assert(db.tables[0].indexes[0].keys[0] == "id")
+    assert(db.tables[0].indexes[1].name == "new")
+}
