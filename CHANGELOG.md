@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `crew.kick(f(ch, …))` RC-clones channel (and other owned pointer-handle)
+  arguments into the task box. A raw pointer pack let the worker's by-value
+  drop free the parent's `req_ch`, so FayDB thread-per-connection pgwire
+  SIGSEGV'd after the first worker returned (musl product path, issue #51
+  multi-thread). Coverage: `kick_chan_retain_test.mko`.
 - Assigning an owning struct (`db = result.db`, `*db = f(db)`) overwrites
   first and frees previous owned fields only when backing storage changed.
   Dest-destroy-before-assign used-after-free'd nested `[]Table` / `[]Index`

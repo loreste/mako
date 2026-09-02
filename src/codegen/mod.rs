@@ -37414,7 +37414,20 @@ impl Codegen {
                                         self.emit_line(format_args!("*{boxn} = {v};"));
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if pty.contains('*') || aty.contains('*') {
-                                        self.line(&format!("{arg_name}[{i}] = (intptr_t){v};"));
+                                        // Owned pointer handles (chan, maps, builders) are
+                                        // dropped by the callee. Pack a clone so the parent
+                                        // keep-alive is not freed when the worker returns.
+                                        let ptr_ty =
+                                            if pty.contains('*') { pty } else { aty.as_str() };
+                                        if let Some(clone_fn) = Self::own_clone_fn(ptr_ty)
+                                            .or_else(|| Self::own_clone_fn(&aty))
+                                        {
+                                            self.line(&format!(
+                                                "{arg_name}[{i}] = (intptr_t){clone_fn}({v});"
+                                            ));
+                                        } else {
+                                            self.line(&format!("{arg_name}[{i}] = (intptr_t){v};"));
+                                        }
                                     } else {
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){v};"));
                                     }
@@ -42496,6 +42509,41 @@ fn main() {
         assert!(
             generated.contains("mako_str_free") && generated.contains("__kick_"),
             "kick helper must drop the worker's cloned struct after the call:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn kick_channel_arg_clones_handle_for_worker() {
+        let source = r#"
+struct Label { a: int }
+fn take_ch(ch: chan[int]) -> int {
+    return ch.recv()
+}
+fn take_pch(ch: chan[Label]) -> int {
+    let _ = ch
+    return 0
+}
+fn main() {
+    let ch = chan_new(1)
+    let pch = make(chan[Label], 1)
+    crew t {
+        let j = t.kick(take_ch(ch))
+        let k = t.kick(take_pch(pch))
+        let _ = j.join()
+        let _ = k.join()
+    }
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        assert!(
+            generated.contains("mako_chan_clone("),
+            "kick of chan[int] must RC-clone the handle:\n{generated}"
+        );
+        assert!(
+            generated.contains("mako_chan_ptr_clone("),
+            "kick of chan[struct] must RC-clone the handle:\n{generated}"
         );
     }
 }

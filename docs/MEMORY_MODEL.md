@@ -99,7 +99,7 @@ captured by two tasks.
 - Copy scalars (int family, bool, float, Uuid/ULID POD)
 - Deep-POD structs / POD enums
 - `string` (heap-cloned at boundary)
-- Channels, Sync handles (RC/clone as defined)
+- Channels (RC-cloned at the kick boundary so the worker drop keeps the parent mailbox), Sync handles (RC/clone as defined)
 - Option / Result / tuple of Send (heap-boxed when needed)
 
 **Rejected:** arrays, maps, non-POD structs, `Arena`, nested `Crew`.

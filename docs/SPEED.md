@@ -174,7 +174,7 @@ channel send/recv is measured as a regression budget, not a speed claim.
 | `Option` / `Result` / tuples of sendables | boxed payloads |
 | POD enums (unit or POD payloads); `chan[Enum]` | boxed / ptr ring |
 | `ShareInt` | atomic RC + **auto-clone** onto the heap |
-| `chan[T]` | handle shared (channel is the sync point) |
+| `chan[T]` | handle **RC-cloned** onto the task (worker drop must not free the parent) |
 
 **Not OK as kick args:** arrays, maps, arenas, non-POD structs (e.g. map/slice fields).
 Prefer channels for large or mutating results:

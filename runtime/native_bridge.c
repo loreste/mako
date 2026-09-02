@@ -370,6 +370,18 @@ MakoChan *mako_native_chan_new(int64_t capacity) {
     return mako_chan_new(capacity);
 }
 
+MakoChan *mako_native_chan_clone(MakoChan *c) {
+    return mako_chan_clone(c);
+}
+
+MakoChanStr *mako_native_chan_str_clone(MakoChanStr *c) {
+    return mako_chan_str_clone(c);
+}
+
+MakoChanPtr *mako_native_chan_ptr_clone(MakoChanPtr *c) {
+    return mako_chan_ptr_clone(c);
+}
+
 int64_t mako_native_chan_send(MakoChan *c, int64_t v) {
     return mako_chan_send(c, v);
 }

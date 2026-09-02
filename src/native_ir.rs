@@ -5997,6 +5997,22 @@ impl<'a> FunctionLowerer<'a> {
                 if owned {
                     self.emit_drop(original, ty);
                 }
+            } else if matches!(ty, Type::ChanI | Type::ChanS | Type::ChanF | Type::ChanP(_)) {
+                // Worker by-value drop frees the handle. RC-clone so the
+                // parent's mailbox survives the task (C backend does this too).
+                let clone_fn = match ty {
+                    Type::ChanS => "mako_native_chan_str_clone",
+                    Type::ChanP(_) => "mako_native_chan_ptr_clone",
+                    _ => "mako_native_chan_clone",
+                };
+                let cloned = self.value();
+                self.emit(Inst::Call {
+                    out: Some(cloned),
+                    function: clone_fn.into(),
+                    args: vec![v],
+                    ret: Some(ty),
+                });
+                v = cloned;
             }
             let idx = self.const_int(i as i64, Type::I64);
             // Pack slots are pointer-sized. Consumable headers and structs are

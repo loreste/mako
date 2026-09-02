@@ -86,7 +86,8 @@ force an explicit choice: a loud name, an unsafe boundary, or a failing return.
 
 `crew.kick(f(args…))` only accepts **Send** argument types: Copy scalars
 (including float and **Uuid**/ULID POD), **deep-POD structs**, `string` (heap-cloned),
-channels, `ShareInt` / `AtomicInt` (RC clone), locked handles (`CMap` / `Mutex` /
+channels (RC-cloned so the worker drop cannot free the parent's mailbox),
+`ShareInt` / `AtomicInt` (RC clone), locked handles (`CMap` / `Mutex` /
 `RWMutex`), and **Option/Result/tuple of Send** payloads (heap-boxed across spawn).  
 Rejected: arrays, maps, non-POD structs, `Arena`, nested `Crew`
 (`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`).
