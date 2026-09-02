@@ -2392,21 +2392,21 @@ impl Codegen {
             "MakoStrArray" => Some("mako_str_array_clone".into()),
             "MakoFloatArray" => Some("mako_float_array_clone".into()),
             "MakoBoolArray" => Some("mako_bool_array_clone".into()),
-            "MakoMapSI*" => Some("mako_map_si_clone".into()),
-            "MakoMapII*" => Some("mako_map_ii_clone".into()),
-            "MakoMapSS*" => Some("mako_map_ss_clone".into()),
-            "MakoMapIF*" => Some("mako_map_if_clone".into()),
-            "MakoMapSF*" => Some("mako_map_sf_clone".into()),
-            "MakoMapFI*" => Some("mako_map_fi_clone".into()),
-            "MakoMapFS*" => Some("mako_map_fs_clone".into()),
-            "MakoMapFF*" => Some("mako_map_ff_clone".into()),
-            "MakoMapIB*" => Some("mako_map_ib_clone".into()),
-            "MakoMapSB*" => Some("mako_map_sb_clone".into()),
-            "MakoMapFB*" => Some("mako_map_fb_clone".into()),
-            "MakoMapBI*" => Some("mako_map_bi_clone".into()),
-            "MakoMapBS*" => Some("mako_map_bs_clone".into()),
-            "MakoMapBF*" => Some("mako_map_bf_clone".into()),
-            "MakoMapBB*" => Some("mako_map_bb_clone".into()),
+            "MakoMapSI*" => Some("mako_maps_clone_si".into()),
+            "MakoMapII*" => Some("mako_maps_clone_ii".into()),
+            "MakoMapSS*" => Some("mako_maps_clone_ss".into()),
+            "MakoMapIF*" => Some("mako_maps_clone_if".into()),
+            "MakoMapSF*" => Some("mako_maps_clone_sf".into()),
+            "MakoMapFI*" => Some("mako_maps_clone_fi".into()),
+            "MakoMapFS*" => Some("mako_maps_clone_fs".into()),
+            "MakoMapFF*" => Some("mako_maps_clone_ff".into()),
+            "MakoMapIB*" => Some("mako_maps_clone_ib".into()),
+            "MakoMapSB*" => Some("mako_maps_clone_sb".into()),
+            "MakoMapFB*" => Some("mako_maps_clone_fb".into()),
+            "MakoMapBI*" => Some("mako_maps_clone_bi".into()),
+            "MakoMapBS*" => Some("mako_maps_clone_bs".into()),
+            "MakoMapBF*" => Some("mako_maps_clone_bf".into()),
+            "MakoMapBB*" => Some("mako_maps_clone_bb".into()),
             // Struct arrays: O(1) RC retain clone. Per-type inline function
             // generated alongside the struct definition.
             other if other.starts_with("MakoArr_") => {
@@ -2423,12 +2423,12 @@ impl Codegen {
                 if let Some((ks, rest)) = body.split_once('_') {
                     let ks = ks.to_ascii_lowercase();
                     if ks == "k" {
-                        Some(format!("mako_map_k_{rest}_clone"))
+                        Some(format!("mako_maps_clone_k_{rest}"))
                     } else {
-                        Some(format!("mako_map_{ks}_{rest}_clone"))
+                        Some(format!("mako_maps_clone_{ks}_{rest}"))
                     }
                 } else {
-                    Some(format!("mako_map_{}_clone", body.to_ascii_lowercase()))
+                    Some(format!("mako_maps_clone_{}", body.to_ascii_lowercase()))
                 }
             }
             _ => None,
