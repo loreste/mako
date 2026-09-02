@@ -6710,33 +6710,18 @@ impl Codegen {
         }
         let _ = writeln!(self.out, "    mako_rc_release(a.data);");
         let _ = writeln!(self.out, "}}");
+        // O(1) RC retain, matching []int / nested struct arrays. Deep-copying
+        // every element here is why FayDB `ExecResult { db: db }` OOM'd a 100K-row
+        // table (issue #51). Append already COWs when `mako_rc_shared`.
         let _ = writeln!(
             self.out,
             "static inline {arr} mako_arr_{c_name}_clone({arr} a) {{"
         );
         let _ = writeln!(
             self.out,
-            "    if (a.len == 0) {{ {arr} e = {{0}}; return e; }}"
+            "    if (a.cap > 0 && a.data) mako_rc_retain(a.data);"
         );
-        let _ = writeln!(
-            self.out,
-            "    {arr} out = mako_arr_{c_name}_make((int64_t)a.len, (int64_t)a.len);"
-        );
-        let _ = writeln!(
-            self.out,
-            "    memcpy(out.data, a.data, a.len * sizeof(a.data[0]));"
-        );
-        if !struct_field_clones.is_empty() {
-            let _ = writeln!(self.out, "    for (size_t i = 0; i < out.len; i++) {{");
-            for (fname, clone_fn) in &struct_field_clones {
-                let _ = writeln!(
-                    self.out,
-                    "        out.data[i].{fname} = {clone_fn}(out.data[i].{fname});"
-                );
-            }
-            let _ = writeln!(self.out, "    }}");
-        }
-        let _ = writeln!(self.out, "    return out;");
+        let _ = writeln!(self.out, "    return a;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -42418,6 +42403,54 @@ fn main() {
         assert!(
             wrap.contains("mako_int_array_clone(cloned_"),
             "nested return must clone borrowed slice field:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn top_level_struct_array_clone_is_rc_retain() {
+        let source = r#"
+struct Column { name: string values: []string }
+struct Table { name: string columns: []Column rows: int }
+struct Database { tables: []Table label: string a: string b: string }
+struct ExecResult { db: Database text: string }
+fn db_exec(mut db: Database, sql: string) -> ExecResult {
+    return ExecResult { db: db, text: sql }
+}
+fn main() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    let r = db_exec(db, "SELECT 1")
+    db = r.db
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        let clone_fn = generated
+            .split("static inline MakoArr_Table mako_arr_Table_clone(")
+            .nth(1)
+            .expect("mako_arr_Table_clone");
+        let clone_body = clone_fn.split("static inline").next().expect("clone body");
+        assert!(
+            clone_body.contains("mako_rc_retain(a.data)"),
+            "[]Table clone must O(1) RC-retain, not deep-copy rows:\n{clone_body}"
+        );
+        assert!(
+            !clone_body.contains("mako_arr_Table_make"),
+            "[]Table clone must not allocate a new outer buffer:\n{clone_body}"
+        );
+        assert!(
+            generated.contains("ExecResult db_exec(Database *db")
+                || generated.contains("ExecResult db_exec(Database * db"),
+            "mut Database must pass by pointer:\n{generated}"
+        );
+        assert!(
+            generated.contains("mako_arr_Table_clone("),
+            "wrapping Database into ExecResult still calls array clone:\n{generated}"
         );
     }
 

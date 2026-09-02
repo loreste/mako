@@ -1,0 +1,73 @@
+// Issue #51: wrapping a borrowed Database into ExecResult must not deep-copy
+// every table/column/row. []struct clone is an O(1) RC retain; append COWs.
+
+struct Column {
+    name: string
+    values: []string
+}
+
+struct Table {
+    name: string
+    columns: []Column
+    rows: int
+}
+
+struct Database {
+    tables: []Table
+    label: string
+    a: string
+    b: string
+}
+
+struct ExecResult {
+    db: Database
+    text: string
+}
+
+fn db_exec(mut db: Database, sql: string) -> ExecResult {
+    return ExecResult { db: db, text: sql }
+}
+
+fn TestWrapBorrowedDatabaseKeepsRows() {
+    let mut values = make([]string, 0, 4096)
+    let mut i = 0
+    while i < 4096 {
+        values = append(values, "row")
+        i = i + 1
+    }
+    let col = Column { name: "c", values: values }
+    let mut cols = make([]Column, 0, 1)
+    cols = append(cols, col)
+    let t = Table { name: "t", columns: cols, rows: 4096 }
+    let mut tables = make([]Table, 0, 1)
+    tables = append(tables, t)
+    let mut db = Database { tables: tables, label: "orig", a: "aa", b: "bb" }
+    let mut q = 0
+    while q < 64 {
+        let r = db_exec(db, "SELECT 1")
+        db = r.db
+        q = q + 1
+    }
+    assert(len(db.tables) == 1)
+    assert(db.tables[0].rows == 4096)
+    assert(len(db.tables[0].columns[0].values) == 4096)
+    assert(db.tables[0].columns[0].values[4095] == "row")
+}
+
+fn TestWrapThenAppendStillUnique() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    let r = db_exec(db, "ok")
+    db = r.db
+    db.tables = append(db.tables, Table {
+        name: "n",
+        columns: make([]Column, 0, 0),
+        rows: 0,
+    })
+    assert(len(db.tables) == 1)
+    assert(db.tables[0].name == "n")
+}

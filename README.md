@@ -211,11 +211,11 @@ payloads. The Ubuntu leak gate covers this boundary explicitly.
 
 ## New in 0.6.16
 
-Top-level struct slices now own independent outer buffers while retaining or
-deep-copying every owned element field. Final-owner destruction recursively
-releases strings, nested slices, maps, builders, and nested structs exactly
-once. Mutable owning parameters retain caller storage for their scope, and
-shared `StrBuilder` handles use atomic lifetime management.
+Top-level struct slices clone by O(1) RC retain of the outer buffer (same as
+`[]int`). Final-owner destruction recursively releases strings, nested slices,
+maps, builders, and nested structs exactly once. Append copy-on-write detaches
+when the buffer is shared. Mutable owning parameters retain caller storage for
+their scope, and shared `StrBuilder` handles use atomic lifetime management.
 
 ## New in 0.6.15
 

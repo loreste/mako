@@ -148,8 +148,10 @@ See [LONG_RUNNING.md](LONG_RUNNING.md).
 
 ## Nested struct-array ownership
 
-Top-level arrays of structs use independent outer buffers. A by-value clone copies the
-outer buffer and clones or retains every owned element field.
+Top-level arrays of structs clone by O(1) RC retain of the outer buffer, the
+same as `[]int` and nested struct arrays. A deep copy of every element's owned
+fields on clone is what OOM-killed FayDB pgwire on `COUNT(*)` of a 100K-row
+table (issue #51: `ExecResult { db: db }` inside `db_exec`).
 Nested refcounted slices use O(1) retains, while maps receive independent table
 storage. Append detachment copies owned fields before releasing the old buffer.
 Appending a new owning struct/enum element consumes an identifier source or

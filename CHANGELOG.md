@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Top-level `[]struct` clone is an O(1) RC retain of the outer buffer, matching
+  `[]int` and nested struct arrays. The previous deep copy of every element's
+  owned fields made `ExecResult { db: db }` (FayDB `db_exec`) allocate a second
+  copy of every table/column on each query — 100K rows went to ~24 GiB and the
+  kernel OOM-killed pgwire (issue #51). Append still COWs when the buffer is
+  shared. Coverage: `top_level_struct_array_clone_is_rc_retain`,
+  `struct_array_clone_rc_test.mko`.
 - `crew.kick(f(ch, …))` RC-clones channel handles (atomic retain, not a
   mailbox copy) into the task box. A raw pointer pack let the worker's
   by-value drop free the parent's `req_ch`. Maps/arrays are not cloned on
