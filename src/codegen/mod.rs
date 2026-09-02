@@ -2366,6 +2366,18 @@ impl Codegen {
         }
     }
 
+    /// O(1) atomic retain for kick-packed pointer handles. Not map/array
+    /// deep clones — those are not Send and would copy the payload on spawn.
+    fn kick_rc_clone_fn(c_ty: &str) -> Option<&'static str> {
+        match c_ty {
+            "MakoChan*" => Some("mako_chan_clone"),
+            "MakoChanStr*" => Some("mako_chan_str_clone"),
+            "MakoChanPtr*" => Some("mako_chan_ptr_clone"),
+            "MakoStrBuilder*" => Some("mako_str_builder_clone"),
+            _ => None,
+        }
+    }
+
     /// Clone function for an owned C type (mirrors `own_free_fn`).
     /// Used to deep-clone `mut` struct param fields at function entry.
     fn own_clone_fn(c_ty: &str) -> Option<String> {
@@ -37414,13 +37426,12 @@ impl Codegen {
                                         self.emit_line(format_args!("*{boxn} = {v};"));
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if pty.contains('*') || aty.contains('*') {
-                                        // Owned pointer handles (chan, maps, builders) are
-                                        // dropped by the callee. Pack a clone so the parent
-                                        // keep-alive is not freed when the worker returns.
+                                        // RC retain only (chan / str_builder). Maps and arrays
+                                        // are not Send; a deep clone here would be O(n) on spawn.
                                         let ptr_ty =
                                             if pty.contains('*') { pty } else { aty.as_str() };
-                                        if let Some(clone_fn) = Self::own_clone_fn(ptr_ty)
-                                            .or_else(|| Self::own_clone_fn(&aty))
+                                        if let Some(clone_fn) = Self::kick_rc_clone_fn(ptr_ty)
+                                            .or_else(|| Self::kick_rc_clone_fn(&aty))
                                         {
                                             self.line(&format!(
                                                 "{arg_name}[{i}] = (intptr_t){clone_fn}({v});"
