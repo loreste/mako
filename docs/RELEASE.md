@@ -8,7 +8,20 @@ release tag **v0.6.23**.
 **Backends:** default **native** for debug/test; use explicit `--backend c` as
 the oracle for C-only modes and `--backend llvm --release` for optimizing builds
 (see [BUILD.md § Backend policy](BUILD.md)).
-**Train:** **0.6.23** concurrent handle lifetime safety;
+**Train:** **0.6.23** concurrent handle lifetime safety; 
+
+### Compiler/runtime compatibility
+
+The compiler and native runtime are released as one versioned unit. Keep
+`$PREFIX/bin/mako` and `$PREFIX/share/mako/runtime` from the same release.
+Mixing a newer compiler with older headers can produce undeclared
+`mako_chan_clone`, `mako_chan_str_clone`, or `mako_chan_ptr_clone` errors.
+Repair an installation with:
+
+```bash
+mako update --from .
+mako doctor
+```
 C/native backend coverage and sanitizer gates must remain green.
 **Modes:** native/LLVM refuse unsupported sanitize/static/cross/wasm/emit-c
 modes — use explicit `--backend c` (see [BUILD.md § Modes matrix](BUILD.md)).

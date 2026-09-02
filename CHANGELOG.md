@@ -4,6 +4,11 @@
 
 ## 0.6.23 - 2026-09-01 (concurrent handle lifetime safety)
 
+- Native builds now require the compiler and installed runtime headers to come
+  from the same release. If `mako_chan_*_clone` is reported as undeclared,
+  update the installed runtime with `mako update --from .` (or reinstall the
+  matching release); do not mix a newer compiler with an older runtime.
+
 - Make int, string, and aggregate channel handles atomically reference-counted. Struct copies retain channel fields, final release uses acquire/release ordering, and retain-after-release/refcount overflow abort instead of wrapping. This prevents a returned or copied client/session struct from freeing a channel while another task is blocked in `recv` (issue #51).
 - Fix native calls with bare nullary enum arguments (`classify(Point)`): fresh enum blocks are no longer mistaken for borrowed identifier lvalues and now drop exactly once after the call.
 
