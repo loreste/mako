@@ -2983,6 +2983,8 @@ struct FunctionLowerer<'a> {
     /// Outer `let mut` int captures redirected through a heap cell pointer (i64).
     /// Loads/stores of the name go through `mako_native_i64_cell_{load,store}`.
     mut_i64_cells: HashMap<String, Value>,
+    /// Function body for ident last-use (clone if mentioned more than once).
+    fn_body: AstBlock,
 }
 
 struct LoopFrame {
@@ -3077,6 +3079,7 @@ impl<'a> FunctionLowerer<'a> {
             job_crews: HashMap::new(),
             return_as_yield: false,
             mut_i64_cells: HashMap::new(),
+            fn_body: source.body.clone(),
         })
     }
 
@@ -3982,12 +3985,38 @@ impl<'a> FunctionLowerer<'a> {
                         } else {
                             self.emit_clone(val, Type::Struct(sid))
                         };
+                        let old = self.value();
+                        self.emit(Inst::Call {
+                            out: Some(old),
+                            function: "mako_native_ptr_slice_get".into(),
+                            args: vec![slice, idx],
+                            ret: Some(Type::Struct(sid)),
+                        });
                         self.emit(Inst::Call {
                             out: None,
                             function: "mako_native_ptr_slice_set".into(),
                             args: vec![slice, idx, owned_elem],
                             ret: None,
                         });
+                        let is_diff = self.value();
+                        self.emit(Inst::Binary {
+                            out: is_diff,
+                            op: BinOp::Ne,
+                            left: old,
+                            right: owned_elem,
+                            ty: Type::I64,
+                        });
+                        let drop_bb = self.new_block();
+                        let cont_bb = self.new_block();
+                        self.terminate(Terminator::Branch {
+                            condition: is_diff,
+                            then_block: drop_bb,
+                            else_block: cont_bb,
+                        })?;
+                        self.current = drop_bb;
+                        self.emit_drop(old, Type::Struct(sid));
+                        self.terminate(Terminator::Jump(cont_bb))?;
+                        self.current = cont_bb;
                     }
                     Type::PtrSlice(vk) => {
                         let ety = vk.to_type();
@@ -4099,12 +4128,27 @@ impl<'a> FunctionLowerer<'a> {
                                 ));
                             }
                         };
+                        let old = if matches!(ty, Type::MapSPtr(_)) && vt.is_heap() {
+                            let o = self.value();
+                            self.emit(Inst::Call {
+                                out: Some(o),
+                                function: "mako_native_map_si_get_ptr".into(),
+                                args: vec![slice, idx],
+                                ret: Some(Type::I64),
+                            });
+                            Some(o)
+                        } else {
+                            None
+                        };
                         self.emit(Inst::Call {
                             out: None,
                             function: "mako_native_map_si_set_ptr".into(),
                             args: vec![slice, idx, val_i64],
                             ret: None,
                         });
+                        if let Some(old) = old {
+                            self.emit_drop_replaced_ptr(old, val_i64, vt)?;
+                        }
                         if io {
                             self.emit(Inst::DropString { value: idx });
                         }
@@ -4173,12 +4217,27 @@ impl<'a> FunctionLowerer<'a> {
                             }
                         } else {
                             let key = self.map_i_key(idx, it, io)?;
+                            let old = if vt.is_heap() {
+                                let o = self.value();
+                                self.emit(Inst::Call {
+                                    out: Some(o),
+                                    function: "mako_native_map_ii_get_ptr".into(),
+                                    args: vec![slice, key],
+                                    ret: Some(Type::I64),
+                                });
+                                Some(o)
+                            } else {
+                                None
+                            };
                             self.emit(Inst::Call {
                                 out: None,
                                 function: "mako_native_map_ii_set_ptr".into(),
                                 args: vec![slice, key, v],
                                 ret: None,
                             });
+                            if let Some(old) = old {
+                                self.emit_drop_replaced_ptr(old, v, vt)?;
+                            }
                         }
                     }
                     Type::MapSS => {
@@ -4259,6 +4318,13 @@ impl<'a> FunctionLowerer<'a> {
                 let (mut val, vt, mut vo) = self.lower_expr(value)?;
                 if vt != field_ty {
                     return Err(IrError::new("native IR: field assignment type mismatch"));
+                }
+                if let Expr::Ident(n) = value {
+                    if vo && field_ty.is_heap() && self.ident_reused_in_fn(n) {
+                        val = self.emit_clone(val, field_ty);
+                    } else if vo && field_ty.is_heap() {
+                        self.heap_owned.insert(n.clone(), false);
+                    }
                 }
                 if field_ty.is_shared_handle() {
                     vo = self.take_bare_string_local(value, vo);
@@ -16488,10 +16554,17 @@ impl<'a> FunctionLowerer<'a> {
         Ok(())
     }
 
+    fn ident_reused_in_fn(&self, name: &str) -> bool {
+        crate::codegen::Codegen::ident_mentions_in_block(&self.fn_body, name) > 1
+    }
+
     fn take_bare_string_local(&mut self, expr: &Expr, already_owned: bool) -> bool {
         let Expr::Ident(name) = expr else {
             return already_owned;
         };
+        if self.ident_reused_in_fn(name) {
+            return false;
+        }
         // Slice locals alias their backing storage. Ordinary assignments must
         // clone so later appends preserve value semantics.
         if matches!(
@@ -32233,6 +32306,55 @@ impl<'a> FunctionLowerer<'a> {
             }),
             _ => {}
         }
+    }
+
+    /// Drop `old` when it is a distinct heap pointer from `new` (map/slot replace).
+    fn emit_drop_replaced_ptr(
+        &mut self,
+        old: Value,
+        new: Value,
+        ty: Type,
+    ) -> Result<(), IrError> {
+        if !ty.is_heap() {
+            return Ok(());
+        }
+        let zero = self.const_int(0, Type::I64);
+        let nz = self.value();
+        self.emit(Inst::Binary {
+            out: nz,
+            op: BinOp::Ne,
+            left: old,
+            right: zero,
+            ty: Type::I64,
+        });
+        let diff = self.value();
+        self.emit(Inst::Binary {
+            out: diff,
+            op: BinOp::Ne,
+            left: old,
+            right: new,
+            ty: Type::I64,
+        });
+        let both = self.value();
+        self.emit(Inst::Binary {
+            out: both,
+            op: BinOp::And,
+            left: nz,
+            right: diff,
+            ty: Type::I1,
+        });
+        let drop_bb = self.new_block();
+        let cont = self.new_block();
+        self.terminate(Terminator::Branch {
+            condition: both,
+            then_block: drop_bb,
+            else_block: cont,
+        })?;
+        self.current = drop_bb;
+        self.emit_drop(old, ty);
+        self.terminate(Terminator::Jump(cont))?;
+        self.current = cont;
+        Ok(())
     }
 
     /// Take ownership of a value stored into an aggregate field: move an owned

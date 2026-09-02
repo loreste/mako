@@ -16,7 +16,17 @@
   under the replacement (issue #51, FayDB `exec_update`).
 - Binding an indexed owning struct (`let mut table = db.tables[i]`) clones
   owned fields. A shallow header copy made `table.name = s` free the live
-  array element's string (issue #51). Coverage:
+  array element's string (issue #51).
+- Index assignment of owning values (`xs[i] = v`) dest-destroys the previous
+  element's owned fields when backing storage changed, so replacing a struct
+  or string slot no longer leaks the old allocation. Native `[]struct` stores
+  drop the previous heap element when the pointer changes.
+- Map overwrite (`m[k] = v`) dest-destroys the previous owning value when
+  backing storage changed. Native `map[int]T` / `map[string]T` heap values
+  drop the previous pointer when it changes.
+- Storing a unique owning ident clones when the name is used again in the
+  function and moves (zeroing the source) on last use, so `t.name = acc;
+  t.name = acc` cannot use-after-free. Coverage:
   `owning_struct_exec_reassign_test.mko`.
 
 ## 0.6.23 - 2026-09-01 (concurrent handle lifetime safety)

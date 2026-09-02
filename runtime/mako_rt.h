@@ -866,7 +866,9 @@ static inline MakoString mako_str_array_get(MakoStrArray a, int64_t i) {
 
 static inline void mako_str_array_set(MakoStrArray a, int64_t i, MakoString v) {
     if (i < 0 || (size_t)i >= a.len) mako_abort("string slice index out of bounds");
-    a.data[i] = mako_str_clone(v);
+    MakoString old = a.data[i];
+    a.data[i] = v;
+    if (old.data != v.data) mako_str_free(old);
 }
 
 static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
@@ -1187,7 +1189,9 @@ static inline MakoIntArray mako_arr_arr_int_get(MakoArr_arr_int a, int64_t i) {
 }
 static inline void mako_arr_arr_int_set(MakoArr_arr_int a, int64_t i, MakoIntArray v) {
     if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    MakoIntArray old = a.data[i];
     a.data[i] = v;
+    if (old.data != v.data) mako_int_array_free(old);
 }
 static inline MakoArr_arr_int mako_arr_arr_int_append(MakoArr_arr_int s, MakoIntArray v) {
     if (s.len + 1 > s.cap) {
@@ -1277,7 +1281,9 @@ static inline MakoStrArray mako_arr_arr_string_get(MakoArr_arr_string a, int64_t
 }
 static inline void mako_arr_arr_string_set(MakoArr_arr_string a, int64_t i, MakoStrArray v) {
     if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    MakoStrArray old = a.data[i];
     a.data[i] = v;
+    if (old.data != v.data) mako_str_array_free(old);
 }
 static inline MakoArr_arr_string mako_arr_arr_string_append(MakoArr_arr_string s, MakoStrArray v) {
     if (s.len + 1 > s.cap) {
@@ -1362,7 +1368,9 @@ static inline MakoFloatArray mako_arr_arr_float_get(MakoArr_arr_float a, int64_t
 }
 static inline void mako_arr_arr_float_set(MakoArr_arr_float a, int64_t i, MakoFloatArray v) {
     if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    MakoFloatArray old = a.data[i];
     a.data[i] = v;
+    if (old.data != v.data) mako_float_array_free(old);
 }
 static inline MakoArr_arr_float mako_arr_arr_float_append(MakoArr_arr_float s, MakoFloatArray v) {
     if (s.len + 1 > s.cap) {
@@ -1447,7 +1455,9 @@ static inline MakoBoolArray mako_arr_arr_bool_get(MakoArr_arr_bool a, int64_t i)
 }
 static inline void mako_arr_arr_bool_set(MakoArr_arr_bool a, int64_t i, MakoBoolArray v) {
     if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    MakoBoolArray old = a.data[i];
     a.data[i] = v;
+    if (old.data != v.data) mako_bool_array_free(old);
 }
 static inline MakoArr_arr_bool mako_arr_arr_bool_append(MakoArr_arr_bool s, MakoBoolArray v) {
     if (s.len + 1 > s.cap) {
@@ -1532,7 +1542,9 @@ static inline MakoByteArray mako_arr_arr_byte_get(MakoArr_arr_byte a, int64_t i)
 }
 static inline void mako_arr_arr_byte_set(MakoArr_arr_byte a, int64_t i, MakoByteArray v) {
     if (i < 0 || (size_t)i >= a.len) mako_abort("nested slice index out of bounds");
+    MakoByteArray old = a.data[i];
     a.data[i] = v;
+    if (old.data != v.data) mako_byte_array_free(old);
 }
 static inline MakoArr_arr_byte mako_arr_arr_byte_append(MakoArr_arr_byte s, MakoByteArray v) {
     if (s.len + 1 > s.cap) {

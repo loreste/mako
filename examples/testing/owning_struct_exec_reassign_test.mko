@@ -174,6 +174,70 @@ fn TestReplaceTableSlotReassign() {
     assert(db.tables[0].indexes[0].name == "pk")
 }
 
+fn TestStringIdentReusedOnFieldAssign() {
+    let mut acc = "orig"
+    let mut t = Index { name: "t", keys: make([]string, 0, 1) }
+    t.name = acc
+    t.name = acc
+    assert(t.name == "orig")
+    assert(acc == "orig")
+}
+
+fn TestReplaceStringSlotFreesOld() {
+    let mut xs = ["old"]
+    xs[0] = "new"
+    assert(xs[0] == "new")
+    xs[0] = "newer"
+    assert(xs[0] == "newer")
+    xs[0] = xs[0]
+    assert(xs[0] == "newer")
+}
+
+fn TestReplaceStructSlotFreesOld() {
+    let mut xs = make([]Index, 0, 2)
+    xs = append(xs, Index { name: "old", keys: make([]string, 0, 1) })
+    xs = append(xs, Index { name: "b", keys: make([]string, 0, 1) })
+    xs[0] = Index { name: "new", keys: make([]string, 0, 1) }
+    assert(xs[0].name == "new")
+    xs[0] = xs[1]
+    assert(xs[0].name == "b")
+    assert(xs[1].name == "b")
+    xs[0] = xs[0]
+    assert(xs[0].name == "b")
+}
+
+fn TestReplaceMapStructValueFreesOld() {
+    let mut m = make(map[string]Index)
+    m["k"] = Index { name: "old", keys: make([]string, 0, 1) }
+    m["k"] = Index { name: "new", keys: make([]string, 0, 1) }
+    assert(m["k"].name == "new")
+    m["k"] = m["k"]
+    assert(m["k"].name == "new")
+}
+
+fn TestReplaceMapIntStructValueFreesOld() {
+    let mut m = make(map[int]Index)
+    m[1] = Index { name: "old", keys: make([]string, 0, 1) }
+    m[1] = Index { name: "new", keys: make([]string, 0, 1) }
+    assert(m[1].name == "new")
+}
+
+fn TestReplaceMapStringValueFreesOld() {
+    let mut m = make(map[string]string)
+    m["k"] = "old"
+    m["k"] = "new"
+    assert(m["k"] == "new")
+}
+
+fn TestReplaceNestedIntSlotFreesOld() {
+    let mut rows = make([][]int, 0, 1)
+    rows = append(rows, [1, 2])
+    rows[0] = [3, 4]
+    assert(len(rows[0]) == 2)
+    assert(rows[0][0] == 3)
+    assert(rows[0][1] == 4)
+}
+
 fn TestCopyAppendReplaceIndexes() {
     let mut db = Database {
         tables: make([]Table, 0, 1),

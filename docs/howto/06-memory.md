@@ -49,7 +49,11 @@ struct (`append(dst, table.indexes[i])`) clones the element so replacing
 one (`let mut table = db.tables[i]`) clones too, so `table.name = s`
 cannot free the live array element's string. Replacing an owning array
 field (`db.tables = replace_table(db.tables, i, t)`) frees the previous
-array only when `.data` changed. Two arguments cannot alias when one is
+array only when `.data` changed. Replacing an array slot (`xs[i] = v`)
+or map slot (`m[k] = v`) frees the previous element's owned fields when
+backing storage changed. Storing a unique owning ident (`t.name = acc`)
+clones when `acc` is used again and moves on last use.
+Two arguments cannot alias when one is
 `mut` (`swap(h, h)` is a type error; `sum(h, h)` with two reads is
 fine). Kick of a Send struct clones owned fields into the worker and
 drops that copy after the call.

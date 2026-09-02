@@ -741,7 +741,11 @@ owning element (`append(dst, src[i])`) also clones, so later replacement
 of `src` cannot free strings the destination still holds. Replacing an
 owning array field (`db.tables = replace_table(db.tables, i, t)`)
 overwrites first and frees the previous array only when `.data` changed.
-Kick of a Send struct deep-clones those fields into the task box and
+Index assignment (`xs[i] = v`) dest-destroys the previous element's owned
+fields the same way, so replacing a slot does not leak or alias the old
+value. Map overwrite (`m[k] = v`) dest-destroys the previous owning value
+the same way. Storing a unique owning ident clones when the name is used
+again and moves (zeroing the source) on last use. Kick of a Send struct deep-clones those fields into the task box and
 drops the worker copy.
 
 #### Lambdas

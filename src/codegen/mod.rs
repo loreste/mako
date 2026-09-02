@@ -212,6 +212,8 @@ pub struct Codegen {
     /// `[]map[K]V`, `[]Result[T,E]`, nested `[][]…`). Distinct from `used_maps`
     /// so helpers emit even when the slice is never a map value.
     used_arr_elems: std::collections::HashSet<String>,
+    /// Body of the function currently being emitted (for ident last-use).
+    current_fn_body: Option<Block>,
 }
 
 pub use crate::overflow::OverflowMode;
@@ -301,6 +303,7 @@ impl Codegen {
             used_maps: std::collections::HashSet::new(),
             used_maps_joined: std::collections::HashSet::new(),
             used_arr_elems: std::collections::HashSet::new(),
+            current_fn_body: None,
         }
     }
 
@@ -4201,6 +4204,166 @@ impl Codegen {
         }
     }
 
+    fn ident_reused_in_fn(&self, name: &str) -> bool {
+        let Some(body) = &self.current_fn_body else {
+            return true;
+        };
+        Self::ident_mentions_in_block(body, name) > 1
+    }
+
+    pub(crate) fn ident_mentions_in_block(body: &Block, name: &str) -> usize {
+        Self::count_ident_in_stmts(&body.stmts, name)
+    }
+
+    fn count_ident_in_stmts(stmts: &[Stmt], name: &str) -> usize {
+        stmts
+            .iter()
+            .map(|s| Self::count_ident_in_stmt(s, name))
+            .sum()
+    }
+
+    fn count_ident_in_stmt(stmt: &Stmt, name: &str) -> usize {
+        match stmt {
+            Stmt::Let { init, .. } | Stmt::LetMulti { init, .. } => {
+                Self::count_ident_in_expr(init, name)
+            }
+            Stmt::LetCommaOk { base, index, .. } => {
+                Self::count_ident_in_expr(base, name) + Self::count_ident_in_expr(index, name)
+            }
+            Stmt::Assign { name: n, value } => {
+                usize::from(n == name) + Self::count_ident_in_expr(value, name)
+            }
+            Stmt::IndexAssign { base, index, value } => {
+                Self::count_ident_in_expr(base, name)
+                    + Self::count_ident_in_expr(index, name)
+                    + Self::count_ident_in_expr(value, name)
+            }
+            Stmt::FieldAssign { base, value, .. } => {
+                Self::count_ident_in_expr(base, name) + Self::count_ident_in_expr(value, name)
+            }
+            Stmt::Expr(e) | Stmt::Return(Some(e)) => Self::count_ident_in_expr(e, name),
+            Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => 0,
+            Stmt::If {
+                init,
+                cond,
+                then_block,
+                else_block,
+            } => {
+                init.as_ref()
+                    .map(|s| Self::count_ident_in_stmt(s, name))
+                    .unwrap_or(0)
+                    + Self::count_ident_in_expr(cond, name)
+                    + Self::count_ident_in_stmts(&then_block.stmts, name)
+                    + else_block
+                        .as_ref()
+                        .map(|b| Self::count_ident_in_stmts(&b.stmts, name))
+                        .unwrap_or(0)
+            }
+            Stmt::While { cond, body, .. } => {
+                Self::count_ident_in_expr(cond, name) + Self::count_ident_in_stmts(&body.stmts, name)
+            }
+            Stmt::For { iter, body, .. } => {
+                Self::count_ident_in_expr(iter, name) + Self::count_ident_in_stmts(&body.stmts, name)
+            }
+            Stmt::CFor {
+                init,
+                cond,
+                post,
+                body,
+                ..
+            } => {
+                Self::count_ident_in_stmt(init, name)
+                    + Self::count_ident_in_expr(cond, name)
+                    + Self::count_ident_in_stmt(post, name)
+                    + Self::count_ident_in_stmts(&body.stmts, name)
+            }
+            Stmt::Defer { body }
+            | Stmt::Crew { body, .. }
+            | Stmt::Arena { body, .. }
+            | Stmt::Unsafe { body } => Self::count_ident_in_stmts(&body.stmts, name),
+            Stmt::Select {
+                timeout_ms,
+                arms,
+                default_arm,
+            } => {
+                Self::count_ident_in_expr(timeout_ms, name)
+                    + arms
+                        .iter()
+                        .map(|(ch, b)| {
+                            usize::from(ch == name) + Self::count_ident_in_stmts(&b.stmts, name)
+                        })
+                        .sum::<usize>()
+                    + default_arm
+                        .as_ref()
+                        .map(|b| Self::count_ident_in_stmts(&b.stmts, name))
+                        .unwrap_or(0)
+            }
+        }
+    }
+
+    fn count_ident_in_expr(e: &Expr, name: &str) -> usize {
+        match e {
+            Expr::Ident(n) => usize::from(n == name),
+            Expr::Call { callee, args } | Expr::Method { receiver: callee, args, .. } => {
+                Self::count_ident_in_expr(callee, name)
+                    + args.iter().map(|a| Self::count_ident_in_expr(a, name)).sum::<usize>()
+            }
+            Expr::Binary { left, right, .. } => {
+                Self::count_ident_in_expr(left, name) + Self::count_ident_in_expr(right, name)
+            }
+            Expr::Unary { expr, .. }
+            | Expr::Field { base: expr, .. }
+            | Expr::Try(expr)
+            | Expr::Join(expr) => Self::count_ident_in_expr(expr, name),
+            Expr::Index { base, index } => {
+                Self::count_ident_in_expr(base, name) + Self::count_ident_in_expr(index, name)
+            }
+            Expr::Array(xs) => xs.iter().map(|x| Self::count_ident_in_expr(x, name)).sum(),
+            Expr::StructLit { fields, update, .. } => {
+                fields
+                    .iter()
+                    .map(|(_, v)| Self::count_ident_in_expr(v, name))
+                    .sum::<usize>()
+                    + update
+                        .as_ref()
+                        .map(|u| Self::count_ident_in_expr(u, name))
+                        .unwrap_or(0)
+            }
+            Expr::Block(b) => Self::count_ident_in_stmts(&b.stmts, name),
+            Expr::IfExpr {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                Self::count_ident_in_expr(cond, name)
+                    + Self::count_ident_in_stmts(&then_block.stmts, name)
+                    + Self::count_ident_in_stmts(&else_block.stmts, name)
+            }
+            Expr::Lambda { body, .. } => Self::count_ident_in_expr(body, name),
+            Expr::Match { scrutinee, arms } => {
+                Self::count_ident_in_expr(scrutinee, name)
+                    + arms
+                        .iter()
+                        .map(|a| {
+                            a.guard
+                                .as_ref()
+                                .map(|g| Self::count_ident_in_expr(g, name))
+                                .unwrap_or(0)
+                                + Self::count_ident_in_expr(&a.body, name)
+                        })
+                        .sum::<usize>()
+            }
+            Expr::Kick { crew, expr } => {
+                usize::from(crew == name) + Self::count_ident_in_expr(expr, name)
+            }
+            Expr::Fan { collection, mapper } => {
+                Self::count_ident_in_expr(collection, name)
+                    + Self::count_ident_in_expr(mapper, name)
+            }
+            _ => 0,
+        }
+    }
+
     /// True when two owned field values do not share backing storage.
     fn owning_field_replaced_cond(fty: &str, old: &str, new: &str) -> String {
         if fty == "MakoString"
@@ -4220,6 +4383,45 @@ impl Codegen {
         } else {
             "1".into()
         }
+    }
+
+    /// After `dest = val` of an array/map element, free `old`'s owned storage
+    /// when it does not share backing with `val`. Used by generated `*_set`.
+    fn write_elem_dest_destroy(&mut self, old: &str, new: &str, cty: &str, indent: &str) {
+        let fields = self.struct_own_field_frees(cty);
+        if !fields.is_empty() {
+            for (path, free_fn) in fields {
+                let fty = self.struct_field_c_type(cty, &path).unwrap_or_default();
+                let cond = Self::owning_field_replaced_cond(
+                    &fty,
+                    &format!("{old}.{path}"),
+                    &format!("{new}.{path}"),
+                );
+                let _ = writeln!(
+                    self.out,
+                    "{indent}if ({cond}) {{ {free_fn}({old}.{path}); }}"
+                );
+            }
+            return;
+        }
+        if let Some(ff) = Self::own_free_fn(cty) {
+            let cond = Self::owning_field_replaced_cond(cty, old, new);
+            let _ = writeln!(self.out, "{indent}if ({cond}) {{ {ff}({old}); }}");
+        }
+    }
+
+    /// Overwrite `m->vals[i]` then dest-destroy the previous owning value.
+    fn write_map_val_replace(&mut self, cty: &str) {
+        let _ = writeln!(self.out, "            {cty} old = m->vals[i];");
+        let _ = writeln!(self.out, "            m->vals[i] = val;");
+        self.write_elem_dest_destroy("old", "val", cty, "            ");
+        let _ = writeln!(self.out, "            return;");
+    }
+
+    fn write_map_hit_replace(&mut self, key_eq: &str, cty: &str) {
+        let _ = writeln!(self.out, "        else if ({key_eq}) {{");
+        self.write_map_val_replace(cty);
+        let _ = writeln!(self.out, "        }}");
     }
 
     /// Assign `dest = val`, then free dest's previous owned fields only when
@@ -4437,9 +4639,17 @@ impl Codegen {
             Expr::Ident(n) => {
                 let mn = mangle(n);
                 if self.own_drop_live.contains(&mn) {
-                    // Real owner — transfer into destination.
-                    self.note_own_drop_moved(&mn);
-                    val
+                    // Last use of a unique owner moves; any other mention in
+                    // the function clones so a later read cannot UAF.
+                    if self.ident_reused_in_fn(n) {
+                        self.clone_own_val(c_ty, &val)
+                    } else {
+                        self.note_own_drop_moved(&mn);
+                        let moved = self.fresh("ident_move");
+                        self.emit_line(format_args!("{c_ty} {moved} = {val};"));
+                        self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
+                        moved
+                    }
                 } else if self.locals.contains_key(n) {
                     // Alias of another live owner (or field-bound name) — clone.
                     self.clone_own_val(c_ty, &val)
@@ -5587,7 +5797,9 @@ impl Codegen {
             self.out,
             "    if (i < 0 || (size_t)i >= a.len) mako_abort(\"enum slice index out of bounds\");"
         );
+        let _ = writeln!(self.out, "    {c_ty} old = a.data[i];");
         let _ = writeln!(self.out, "    a.data[i] = v;");
+        self.write_elem_dest_destroy("old", "v", c_ty, "    ");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -5746,10 +5958,7 @@ impl Codegen {
                 self.out,
                 "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
             );
-            let _ = writeln!(
-                self.out,
-                "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
-            );
+            self.write_map_hit_replace(&key_eq, c_ty);
             let _ = writeln!(self.out, "        i = (i + 1) & mask;");
             let _ = writeln!(self.out, "    }}");
             let _ = writeln!(self.out, "}}");
@@ -6543,7 +6752,9 @@ impl Codegen {
             self.out,
             "    if (i < 0 || (size_t)i >= a.len) mako_abort(\"struct slice index out of bounds\");"
         );
+        let _ = writeln!(self.out, "    {c_name} old = a.data[i];");
         let _ = writeln!(self.out, "    a.data[i] = v;");
+        self.write_elem_dest_destroy("old", "v", &c_name, "    ");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -6741,7 +6952,9 @@ impl Codegen {
             self.out,
             "    if (i < 0 || (size_t)i >= a.len) mako_abort(\"nested slice index out of bounds\");"
         );
+        let _ = writeln!(self.out, "    {elem_c} old = a.data[i];");
         let _ = writeln!(self.out, "    a.data[i] = v;");
+        self.write_elem_dest_destroy("old", "v", elem_c, "    ");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -8120,10 +8333,7 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        let _ = writeln!(
-            self.out,
-            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
-        );
+        self.write_map_hit_replace(&key_eq, &val_c);
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -8466,10 +8676,7 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        let _ = writeln!(
-            self.out,
-            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
-        );
+        self.write_map_hit_replace(&key_eq, &val_c);
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -8807,10 +9014,7 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        let _ = writeln!(
-            self.out,
-            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
-        );
+        self.write_map_hit_replace(&key_eq, &val_c);
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -9191,10 +9395,7 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        let _ = writeln!(
-            self.out,
-            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
-        );
+        self.write_map_hit_replace(&key_eq, &val_c);
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -9750,10 +9951,7 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        let _ = writeln!(
-            self.out,
-            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
-        );
+        self.write_map_hit_replace(&key_eq, &val_c);
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -10095,10 +10293,7 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        let _ = writeln!(
-            self.out,
-            "        else if ({key_eq}) {{ m->vals[i] = val; return; }}"
-        );
+        self.write_map_hit_replace(&key_eq, &val_c);
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -10374,10 +10569,7 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        let _ = writeln!(
-            self.out,
-            "        else if (m->keys[i] == key) {{ m->vals[i] = val; return; }}"
-        );
+        self.write_map_hit_replace("m->keys[i] == key", &c_name);
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -10564,10 +10756,8 @@ impl Codegen {
             self.out,
             "        else if (m->keys[i].len == key.len && memcmp(m->keys[i].data, key.data, key.len) == 0) {{"
         );
-        let _ = writeln!(
-            self.out,
-            "            mako_str_free(key); m->vals[i] = val; return;"
-        );
+        let _ = writeln!(self.out, "            mako_str_free(key);");
+        self.write_map_val_replace(&c_name);
         let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
@@ -10988,10 +11178,7 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        let _ = writeln!(
-            self.out,
-            "        else if (mako_f64_key_eq(m->keys[i], key)) {{ m->vals[i] = val; return; }}"
-        );
+        self.write_map_hit_replace("mako_f64_key_eq(m->keys[i], key)", &c_name);
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -11268,10 +11455,7 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        let _ = writeln!(
-            self.out,
-            "        else if (m->keys[i] == key) {{ m->vals[i] = val; return; }}"
-        );
+        self.write_map_hit_replace("m->keys[i] == key", &c_name);
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -11793,9 +11977,9 @@ impl Codegen {
                 );
                 let _ = writeln!(self.out, "        }}");
             } else {
-                let _ = writeln!(
-                    self.out,
-                    "        else if (mako_eq_{key_c}(m->keys[i], key)) {{ m->vals[i] = val; return; }}"
+                self.write_map_hit_replace(
+                    &format!("mako_eq_{key_c}(m->keys[i], key)"),
+                    &vty,
                 );
             }
             let _ = writeln!(self.out, "        i = (i + 1) & mask;");
@@ -13639,6 +13823,7 @@ impl Codegen {
         self.chan_ptr_elems.clear();
         self.current_result_err_enum = f.ret.as_ref().and_then(|t| self.result_err_enum_c(t));
         self.current_fn_ret = f.ret.clone();
+        self.current_fn_body = Some(f.body.clone());
         self.push_share_scope();
         let is_mut_self_fn = self.mut_self_fns.contains(&f.name);
         for (pi, p) in f.params.iter().enumerate() {
@@ -42060,6 +42245,47 @@ fn main() {
         assert!(
             before_append.contains("mako_str_clone"),
             "indexed owning struct append must clone owned fields before store:\n{before_append}"
+        );
+    }
+
+    #[test]
+    fn map_set_destroys_replaced_owned_fields() {
+        let source = r#"
+struct Index { name: string keys: []string }
+fn main() {
+    let mut m = make(map[string]Index)
+    m["k"] = Index { name: "old", keys: make([]string, 0, 1) }
+    m["k"] = Index { name: "new", keys: make([]string, 0, 1) }
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        assert!(
+            generated.contains("Index old = m->vals[i]")
+                && generated.contains("old.name")
+                && generated.contains(".data !="),
+            "map set must dest-destroy replaced owned fields:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn struct_array_set_destroys_replaced_owned_fields() {
+        let source = r#"
+struct Index { name: string keys: []string }
+fn main() {
+    let mut xs = make([]Index, 1, 1)
+    xs[0] = Index { name: "new", keys: make([]string, 0, 1) }
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        assert!(
+            generated.contains("Index old = a.data[i]")
+                && generated.contains("old.name")
+                && generated.contains(".data !="),
+            "struct array set must dest-destroy replaced owned fields:\n{generated}"
         );
     }
 
