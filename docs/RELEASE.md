@@ -1,14 +1,14 @@
 # Makori release & cross-platform guide
 
-**Product version:** **0.6.23** (`Cargo.toml` / `makori version`);
-release tag **v0.6.23**.
+**Product version:** **0.6.24** (`Cargo.toml` / `makori version`);
+release tag **v0.6.24**.
 **Tree status:** `examples/testing` inventory **439** `*_test.mko` files
 (2026-08-30): CI/claims gates pass across the release matrix.
 **Versioning:** small patches preferred — [VERSIONING.md](VERSIONING.md).
 **Backends:** default **native** for debug/test; use explicit `--backend c` as
 the oracle for C-only modes and `--backend llvm --release` for optimizing builds
 (see [BUILD.md § Backend policy](BUILD.md)).
-**Train:** **0.6.23** concurrent handle lifetime safety; 
+**Train:** **0.6.24** safe crew channel packing;
 
 ### Compiler/runtime compatibility
 

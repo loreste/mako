@@ -4380,3 +4380,7 @@ STATUS north-star / MVP: **100%** (homebrew-core publish remains an external blo
 `--native-source <FILE>` arguments for explicitly compiling and linking
 regular `.c` files. Paths are validated, passed without a shell, included in
 incremental and direct native link paths, and rejected for WebAssembly.
+## 0.6.24 - 2026-09-02 (safe crew channel packing)
+
+- `crew.kick` retains reference-counted channel handles without deep-cloning
+  unrelated payloads. Added C and native regression coverage.
