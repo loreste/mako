@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.26
+
+- Fix ownership transfer when moving an owned field out of a call-result struct; prevents RC leaks in repeated `db = result.db` assignments.
+
 ## Unreleased
 
 - Top-level `[]struct` clone is an O(1) RC retain of the outer buffer, matching
