@@ -4467,6 +4467,24 @@ impl Codegen {
                 &format!("{dest}.{path}"),
             );
             self.emit_line(format_args!("if ({cond}) {{ {free_fn}({old}.{path}); }}"));
+            // A returned struct may carry an RC-retained alias of the old
+            // array field. The backing pointer is unchanged, so the normal
+            // replacement predicate skips cleanup; release the superseded
+            // owner reference while retaining the returned alias.
+            if fty.starts_with("MakoArr_")
+                || matches!(
+                    fty.as_str(),
+                    "MakoIntArray"
+                        | "MakoByteArray"
+                        | "MakoStrArray"
+                        | "MakoFloatArray"
+                        | "MakoBoolArray"
+                )
+            {
+                self.emit_line(format_args!(
+                    "if (!({cond}) && {old}.{path}.data == {dest}.{path}.data && {old}.{path}.data && mako_rc_shared({old}.{path}.data)) mako_rc_release({old}.{path}.data);"
+                ));
+            }
         }
     }
 
