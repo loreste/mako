@@ -15152,11 +15152,11 @@ impl Codegen {
                     // A nested struct moved out of a unique owner is itself a
                     // unique owner — further field extracts must move, not clone.
                     if !self.struct_own_field_frees(&ty).is_empty() {
-                        self.call_result_owners.insert(name.to_string());
+                        self.call_result_owners.insert(mangle(name));
                     }
                 }
                 if transient_call_result_struct {
-                    self.call_result_owners.insert(name.to_string());
+                    self.call_result_owners.insert(mangle(name));
                 }
 
                 // A fresh struct value owns each nested owning field. Register its
