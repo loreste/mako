@@ -4721,7 +4721,14 @@ impl Codegen {
         }
         let owner = Self::field_move_owner(value)?;
         let owner = mangle(&owner);
-        if !self.own_drop_live.contains(&owner) || self.share_live.contains(&owner) {
+        // Call results are owning structs even when their destructor is
+        // registered through the deferred call-result path rather than the
+        // ordinary local-owner set. Treat them as movable here so extracting
+        // an owned field transfers the RC owner instead of leaking it.
+        if (!self.own_drop_live.contains(&owner)
+            && !self.call_result_owners.contains(&owner))
+            || self.share_live.contains(&owner)
+        {
             return None;
         }
 
