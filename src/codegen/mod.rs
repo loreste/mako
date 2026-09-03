@@ -15155,13 +15155,6 @@ impl Codegen {
                         self.call_result_owners.insert(mangle(name));
                     }
                 }
-                    if transient_call_result_struct {
-                        let owner = mangle(name);
-                        self.call_result_owners.insert(owner.clone());
-                        // Make the owner visible to field extraction before
-                        // deferred call-result cleanup runs.
-                        self.own_drop_live.insert(owner);
-                    }
 
                 // A fresh struct value owns each nested owning field. Register its
                 // destructor as an invariant of the declaration so later ownership
@@ -15175,6 +15168,9 @@ impl Codegen {
                 if owns_struct_fields {
                     self.register_own_drop(name, &ty);
                     self.scope_drop_safe.insert(name.to_string());
+                    if transient_call_result_struct {
+                        self.call_result_owners.insert(mangle(name));
+                    }
                 }
                 if *ownership == Ownership::Share {
                     self.register_share_local(name);
