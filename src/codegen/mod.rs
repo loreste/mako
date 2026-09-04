@@ -4854,21 +4854,12 @@ impl Codegen {
             Expr::Ident(n) => {
                 self.note_own_drop_moved(&mangle(n));
             }
-            // `return AdminResult { servers: out, ... }` — transfer each field that is an
-            // owning local so SAFE free does not free after the struct is returned.
-            Expr::StructLit { fields, update, .. } => {
-                for (_fname, fexpr) in fields {
-                    self.transfer_own_on_return(fexpr);
-                }
-                if let Some(base) = update {
-                    self.transfer_own_on_return(base);
-                }
-            }
-            Expr::StructLitPos { values, .. } => {
-                for v in values {
-                    self.transfer_own_on_return(v);
-                }
-            }
+            // Struct literals handle move/clone in `prepare_own_store_rhs`
+            // during emission. Moved fields already called
+            // `note_own_drop_moved`; cloned fields still need their
+            // scope-exit free. Recursing here would disarm the cloned
+            // locals and leak them (issue #53 ASan regression).
+            Expr::StructLit { .. } | Expr::StructLitPos { .. } => {}
             Expr::Tuple(values) | Expr::Array(values) => {
                 for v in values {
                     self.transfer_own_on_return(v);
