@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.27
 
 - Nested `arr[i].field = append(arr[i].field, v)` dest-destroys the previous
   slice header. The append helpers leave the old backing for the caller;
@@ -9,6 +9,11 @@
   append no longer frees the old header (same contract as `[]string`/`[]int`).
   Coverage: `nested_indexed_field_append_destroys_old_array`,
   `nested_field_append_dest_destroy_test.mko`.
+- Fix struct-return `transfer_own_on_return` double-disarming cloned locals in
+  struct literal returns, leaking one RC per cloned field per return (issue #53
+  ASan regression). Struct literal emission handles move/clone via
+  `prepare_own_store_rhs`; `transfer_own_on_return` no longer recurses into
+  struct literal fields.
 
 ## 0.6.26
 

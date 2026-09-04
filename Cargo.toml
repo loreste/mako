@@ -1,6 +1,6 @@
 [package]
 name = "makori"
-version = "0.6.26"
+version = "0.6.27"
 edition = "2021"
 description = "Makori — compiled language for backend development (no GC, native binaries, structured concurrency)"
 license = "MIT"
