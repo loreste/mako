@@ -1,0 +1,56 @@
+// Issue #53: nested `arr[i].field = append(arr[i].field, v)` must dest-destroy
+// the previous slice header. Skipping that leaked one full column copy per
+// FayDB INSERT/DELETE.
+
+struct Column {
+    values: []string
+}
+
+struct Table {
+    columns: []Column
+    xmin: []int
+}
+
+struct Database {
+    tables: []Table
+    label: string
+    a: string
+    b: string
+}
+
+fn wrap(mut db: Database) -> Database {
+    return db
+}
+
+fn ins(mut db: Database) -> Database {
+    db.tables[0].columns[0].values = append(db.tables[0].columns[0].values, "x")
+    db.tables[0].xmin = append(db.tables[0].xmin, 1)
+    return db
+}
+
+fn TestNestedFieldAppendAfterRetainDoesNotGrowUnbound() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    db.tables = append(db.tables, Table { columns: make([]Column, 0, 1), xmin: make([]int, 0, 8) })
+    db.tables[0].columns = append(db.tables[0].columns, Column { values: make([]string, 0, 8) })
+    let mut i = 0
+    while i < 32 {
+        db.tables[0].columns[0].values = append(db.tables[0].columns[0].values, "seed")
+        i = i + 1
+    }
+    // Retain-clone owned arrays (ExecResult { db: db } shape).
+    db = wrap(db)
+    i = 0
+    while i < 64 {
+        db = wrap(ins(db))
+        i = i + 1
+    }
+    assert_eq(len(db.tables[0].columns[0].values), 96)
+    assert_eq(len(db.tables[0].xmin), 64)
+    assert_eq_str(db.tables[0].columns[0].values[0], "seed")
+    assert_eq_str(db.tables[0].columns[0].values[95], "x")
+}

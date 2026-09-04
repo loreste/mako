@@ -6820,7 +6820,9 @@ impl Codegen {
             }
             let _ = writeln!(self.out, "        }}");
         }
-        let _ = writeln!(self.out, "        mako_arr_{c_name}_free(s);");
+        // Caller dest-destroys the old header (same contract as
+        // mako_str_array_append / mako_slice_append). Freeing here plus
+        // field-assign dest-destroy double-freed unique growth.
         let _ = writeln!(self.out, "        s.data = nd;");
         let _ = writeln!(self.out, "        s.cap = ncap;");
         let _ = writeln!(self.out, "    }}");
@@ -15964,28 +15966,18 @@ impl Codegen {
                         self.emit_line(format_args!("int64_t {tmp} = {idx};"));
                         let sn = sn.to_string();
                         let ptr = format!("mako_arr_{sn}_get_ptr({a}, {tmp})");
-                        let consumes_old_field = matches!(
-                            value,
-                            Expr::Call { callee, args }
-                                if matches!(callee.as_ref(), Expr::Ident(name) if name == "append")
-                                    && matches!(
-                                        args.first(),
-                                        Some(Expr::Field {
-                                            base: source_base,
-                                            field: source_field,
-                                        }) if source_field == field && source_base.as_ref() == base
-                                    )
-                        );
-                        if !consumes_old_field {
-                            if let Some(field_free) = Self::own_free_fn(&vty) {
-                                self.emit_assign_owned_value(
-                                    &format!("{ptr}->{field}"),
-                                    &vty,
-                                    &v,
-                                    &field_free,
-                                );
-                                return;
-                            }
+                        // Issue #53: `arr[i].values = append(arr[i].values, x)` COWs
+                        // without freeing the old header (str/int append leave that
+                        // to the caller). Skipping dest-destroy leaked ~one full
+                        // column copy per FayDB INSERT/DELETE.
+                        if let Some(field_free) = Self::own_free_fn(&vty) {
+                            self.emit_assign_owned_value(
+                                &format!("{ptr}->{field}"),
+                                &vty,
+                                &v,
+                                &field_free,
+                            );
+                            return;
                         }
                         self.emit_line(format_args!("{ptr}->{field} = {v};"));
                         return;
@@ -16004,26 +15996,9 @@ impl Codegen {
                 } else {
                     "."
                 };
-                let consumes_old_field = matches!(
-                    value,
-                    Expr::Call { callee, args }
-                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "append")
-                            && matches!(
-                                args.first(),
-                                Some(Expr::Field {
-                                    base: source_base,
-                                    field: source_field,
-                                }) if source_field == field
-                                    && matches!(
-                                        (base, source_base.as_ref()),
-                                        (Expr::Ident(lhs), Expr::Ident(rhs)) if lhs == rhs
-                                    )
-                            )
-                );
                 if let Expr::Ident(base_name) = base {
                     let mn = mangle(base_name);
-                    if !consumes_old_field {
-                        if let Some(field_free) = Self::own_free_fn(&vty) {
+                    if let Some(field_free) = Self::own_free_fn(&vty) {
                             let dest = format!("{b}{arrow}{field}");
                             if self.own_cond_flags.contains(&mn) {
                                 self.emit_line(format_args!("if ({mn}__own) {{"));
@@ -16077,7 +16052,6 @@ impl Codegen {
                             }
                             return;
                         }
-                    }
                     if Self::own_free_fn(&bty).is_some()
                         || !self.struct_own_field_frees(&bty).is_empty()
                     {
@@ -16085,31 +16059,7 @@ impl Codegen {
                         self.scope_drop_safe.insert(mn);
                     }
                 }
-                // SAFE-042: when append consumes the old field value, release
-                // the old backing if the data pointer changed (same pattern as
-                // the variable self_consuming_call fix).
-                let is_field_slice = consumes_old_field
-                    && self.current_arena.is_none()
-                    && matches!(
-                        vty.as_str(),
-                        "MakoIntArray"
-                            | "MakoByteArray"
-                            | "MakoStrArray"
-                            | "MakoFloatArray"
-                            | "MakoBoolArray"
-                    );
-                if is_field_slice {
-                    let op = self.fresh("old_data");
-                    let oc = self.fresh("old_cap");
-                    self.emit_line(format_args!("void *{op} = {b}{arrow}{field}.data;"));
-                    self.emit_line(format_args!("size_t {oc} = {b}{arrow}{field}.cap;"));
-                    self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
-                    self.emit_line(format_args!(
-                        "if ({op} != {b}{arrow}{field}.data && {oc} > 0 && {op}) mako_rc_release({op});"
-                    ));
-                } else {
-                    self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
-                }
+                self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
             }
             Stmt::Expr(e) => {
                 let (ty, val) = self.emit_expr(e);
@@ -42295,6 +42245,48 @@ fn main() {
         assert!(
             before_append.contains("mako_str_clone"),
             "indexed owning struct append must clone owned fields before store:\n{before_append}"
+        );
+    }
+
+    #[test]
+    fn nested_indexed_field_append_destroys_old_array() {
+        let source = r#"
+struct Column { values: []string }
+struct Table { columns: []Column xmin: []int }
+struct Database { tables: []Table label: string a: string b: string }
+
+fn ins(mut db: Database) -> Database {
+    db.tables[0].columns[0].values = append(db.tables[0].columns[0].values, "x")
+    db.tables[0].xmin = append(db.tables[0].xmin, 1)
+    return db
+}
+
+fn main() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "aa",
+        b: "bb",
+    }
+    db.tables = append(db.tables, Table { columns: make([]Column, 0, 1), xmin: make([]int, 0, 1) })
+    db.tables[0].columns = append(db.tables[0].columns, Column { values: make([]string, 0, 1) })
+    db = ins(db)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        let ins = generated
+            .split("Database ins(")
+            .last()
+            .expect("generated ins");
+        assert!(
+            ins.contains("old_own_") && ins.contains(".data !="),
+            "nested arr[i].field = append(...) must dest-destroy the old header (issue #53):\n{ins}"
+        );
+        assert!(
+            ins.contains("mako_str_array_free") || ins.contains("mako_int_array_free"),
+            "nested field append must free replaced slice headers:\n{ins}"
         );
     }
 

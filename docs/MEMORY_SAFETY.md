@@ -3,7 +3,8 @@
 String-slice COW detachment deep-clones owned string elements because the caller
 retains responsibility for releasing the old header. This prevents detached
 arrays from becoming duplicate owners of the same string allocation on macOS and
-Linux.
+Linux. Nested `arr[i].field = append(arr[i].field, v)` dest-destroys that old
+header (issue #53); skipping it leaked one full column copy per FayDB DML.
 
 There is no garbage collector. Memory frees when ownership says so — scope
 exit, move, drop — or when you use explicit share (RC) or arenas. Not when a

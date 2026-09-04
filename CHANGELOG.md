@@ -1,10 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Nested `arr[i].field = append(arr[i].field, v)` dest-destroys the previous
+  slice header. The append helpers leave the old backing for the caller;
+  skipping dest-destroy leaked one full column/`xmin` copy per FayDB
+  INSERT/DELETE (~63 MB/op on a 23.5K-row table, issue #53). Struct-array
+  append no longer frees the old header (same contract as `[]string`/`[]int`).
+  Coverage: `nested_indexed_field_append_destroys_old_array`,
+  `nested_field_append_dest_destroy_test.mko`.
+
 ## 0.6.26
 
 - Fix ownership transfer when moving an owned field out of a call-result struct; prevents RC leaks in repeated `db = result.db` assignments.
 
-## Unreleased
+## 0.6.25
 
 - Top-level `[]struct` clone is an O(1) RC retain of the outer buffer, matching
   `[]int` and nested struct arrays. The previous deep copy of every element's

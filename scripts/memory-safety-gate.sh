@@ -58,6 +58,7 @@ fixtures=(
   examples/testing/owning_struct_param_borrow_adversarial_test.mko
   examples/testing/owning_struct_exec_reassign_test.mko
   examples/testing/struct_array_clone_rc_test.mko
+  examples/testing/nested_field_append_dest_destroy_test.mko
   # Builder families that free escape temps — a double-free here aborts on the
   # success path in a plain build, which this gate previously did not cover.
   examples/testing/llm_test.mko
