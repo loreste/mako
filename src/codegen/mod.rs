@@ -99,6 +99,9 @@ pub struct Codegen {
     /// move (memset source) instead of deep-cloning, because the caller receives
     /// the return value before accessing the pointer again.
     ptr_param_locals: std::collections::HashSet<String>,
+    /// True when emitting a `return` statement's expression. Enables ptr-param
+    /// move optimizations that are only safe at function exit.
+    in_return_expr: bool,
     /// Mangled local → `own_drop_scopes` index where the binding was introduced.
     /// Own free entries must be recorded in that scope (not a nested if/match arm),
     /// or arm-exit free double-frees / use-after-frees outer muts (`out = b` in `if`).
@@ -258,6 +261,7 @@ impl Codegen {
             call_result_owners: std::collections::HashSet::new(),
             scope_drop_safe: std::collections::HashSet::new(),
             ptr_param_locals: std::collections::HashSet::new(),
+            in_return_expr: false,
             own_bind_scope: std::collections::HashMap::new(),
             own_cond_flags: std::collections::HashSet::new(),
             loop_drop_bases: Vec::new(),
@@ -4696,12 +4700,11 @@ impl Codegen {
                         self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
                         moved
                     }
-                } else if self.ptr_param_locals.contains(&mn) {
-                    // Pointer-passed mut param: the caller lent us exclusive
-                    // access. Move the pointee into the return struct so the
-                    // caller receives ownership through the return value.
-                    // Zero the source fields so the caller's pointer doesn't
-                    // double-free them after reading the return.
+                } else if self.in_return_expr && self.ptr_param_locals.contains(&mn) {
+                    // Pointer-passed mut param in a return expression: the
+                    // function is exiting so the caller cannot access *db after
+                    // this. Move the pointee into the return struct — zero the
+                    // source to prevent the caller's pointer from double-freeing.
                     let moved = self.fresh("ptr_move");
                     self.emit_line(format_args!("{c_ty} {moved} = {val};"));
                     self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
@@ -16100,7 +16103,9 @@ impl Codegen {
                 self.restore_drop_state(snap);
             }
             Stmt::Return(Some(e)) => {
+                self.in_return_expr = true;
                 let (ty, val) = self.emit_expr(e);
+                self.in_return_expr = false;
                 let (ty, val) = Self::coerce_user_struct_value(&ty, val);
                 // SAFE: returning a struct field or a borrowed struct param must
                 // clone — the caller owns the result, the source still owns its
