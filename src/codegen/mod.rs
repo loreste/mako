@@ -35502,6 +35502,19 @@ impl Codegen {
                             } else {
                                 mangle(&resolved)
                             };
+                            // Issue #53: register untracked owned arg temps
+                            // produced by inline allocating calls (append, make,
+                            // etc.) for scope-exit free. Immediate free is unsafe
+                            // because append may return the same backing pointer.
+                            for (i, (aty, v)) in arg_tys.iter().zip(arg_vals.iter()).enumerate() {
+                                if Self::own_free_fn(aty).is_some()
+                                    && !self.own_drop_live.contains(v)
+                                    && matches!(args.get(i), Some(Expr::Call { .. }))
+                                {
+                                    self.register_own_drop(v, aty);
+                                    self.scope_drop_safe.insert(v.clone());
+                                }
+                            }
                             let call = format!("{call_name}({})", arg_vals.join(", "));
                             let tmp = self.fresh("r");
                             if name == "main" {
