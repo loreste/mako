@@ -13876,7 +13876,7 @@ impl Codegen {
             } else {
                 self.type_expr_c(&p.ty)
             };
-            if is_ptr && p.mutable {
+            if is_ptr {
                 self.ptr_param_locals.insert(mangle(&p.name));
             }
             self.locals.insert(p.name.clone(), pty);
@@ -16114,7 +16114,14 @@ impl Codegen {
                     self.clone_own_val(&ty, &val)
                 } else if let Expr::Ident(n) = e {
                     let mn = mangle(n);
-                    if self.ident_is_user_struct_borrow(n)
+                    if self.ptr_param_locals.contains(&mn) {
+                        // Returning a ptr-passed param: move (copy + zero source)
+                        // instead of deep-cloning. Safe because we're exiting.
+                        let moved = self.fresh("ptr_move");
+                        self.emit_line(format_args!("{ty} {moved} = {val};"));
+                        self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
+                        moved
+                    } else if self.ident_is_user_struct_borrow(n)
                         || (Self::own_free_fn(&ty).is_some() && !self.own_drop_live.contains(&mn))
                     {
                         self.clone_own_val(&ty, &val)
