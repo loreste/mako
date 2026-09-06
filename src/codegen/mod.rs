@@ -94,6 +94,11 @@ pub struct Codegen {
     /// ordinary scope exit. Other legacy entries retain the conservative
     /// closed-scope behavior until their alias metadata is made path-sensitive.
     scope_drop_safe: std::collections::HashSet<String>,
+    /// Mangled names of mut struct params passed by pointer in the current function.
+    /// These are borrowed from the caller — returning them in a struct literal can
+    /// move (memset source) instead of deep-cloning, because the caller receives
+    /// the return value before accessing the pointer again.
+    ptr_param_locals: std::collections::HashSet<String>,
     /// Mangled local → `own_drop_scopes` index where the binding was introduced.
     /// Own free entries must be recorded in that scope (not a nested if/match arm),
     /// or arm-exit free double-frees / use-after-frees outer muts (`out = b` in `if`).
@@ -252,6 +257,7 @@ impl Codegen {
             own_drop_live: std::collections::HashSet::new(),
             call_result_owners: std::collections::HashSet::new(),
             scope_drop_safe: std::collections::HashSet::new(),
+            ptr_param_locals: std::collections::HashSet::new(),
             own_bind_scope: std::collections::HashMap::new(),
             own_cond_flags: std::collections::HashSet::new(),
             loop_drop_bases: Vec::new(),
@@ -4690,6 +4696,16 @@ impl Codegen {
                         self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
                         moved
                     }
+                } else if self.ptr_param_locals.contains(&mn) {
+                    // Pointer-passed mut param: the caller lent us exclusive
+                    // access. Move the pointee into the return struct so the
+                    // caller receives ownership through the return value.
+                    // Zero the source fields so the caller's pointer doesn't
+                    // double-free them after reading the return.
+                    let moved = self.fresh("ptr_move");
+                    self.emit_line(format_args!("{c_ty} {moved} = {val};"));
+                    self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
+                    moved
                 } else if self.locals.contains_key(n) {
                     // Alias of another live owner (or field-bound name) — clone.
                     self.clone_own_val(c_ty, &val)
@@ -13843,19 +13859,23 @@ impl Codegen {
         // Per-function channel metadata (must not leak across functions with same local names).
         self.chan_float.clear();
         self.chan_ptr_elems.clear();
+        self.ptr_param_locals.clear();
         self.current_result_err_enum = f.ret.as_ref().and_then(|t| self.result_err_enum_c(t));
         self.current_fn_ret = f.ret.clone();
         self.current_fn_body = Some(f.body.clone());
         self.push_share_scope();
         let is_mut_self_fn = self.mut_self_fns.contains(&f.name);
         for (pi, p) in f.params.iter().enumerate() {
-            let pty = if (pi == 0 && p.name == "self" && is_mut_self_fn)
-                || self.param_passed_by_ptr(&f.name, pi)
-            {
+            let is_ptr = (pi == 0 && p.name == "self" && is_mut_self_fn)
+                || self.param_passed_by_ptr(&f.name, pi);
+            let pty = if is_ptr {
                 format!("{}*", self.type_expr_c(&p.ty))
             } else {
                 self.type_expr_c(&p.ty)
             };
+            if is_ptr && p.mutable {
+                self.ptr_param_locals.insert(mangle(&p.name));
+            }
             self.locals.insert(p.name.clone(), pty);
             // Params live for the whole function body (scope 0 after push_share_scope).
             self.note_own_bind_scope(&mangle(&p.name));
