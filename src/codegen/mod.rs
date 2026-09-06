@@ -16521,8 +16521,10 @@ impl Codegen {
                         self.emit_line(format_args!("if (!({lv})) {{"));
                     }
                     self.indent += 1;
+                    self.push_share_scope();
                     let (_, rv) = self.emit_expr(right);
                     self.emit_line(format_args!("{tmp} = {rv};"));
+                    self.pop_share_scope();
                     self.indent -= 1;
                     self.line("}");
                     return ("bool".into(), tmp);
@@ -35506,13 +35508,21 @@ impl Codegen {
                             // produced by inline allocating calls (append, make,
                             // etc.) for scope-exit free. Immediate free is unsafe
                             // because append may return the same backing pointer.
-                            for (i, (aty, v)) in arg_tys.iter().zip(arg_vals.iter()).enumerate() {
+                            // Capture each into a declared temp so the free
+                            // references a variable that exists in the C scope.
+                            for i in 0..arg_vals.len() {
+                                let aty = &arg_tys[i];
                                 if Self::own_free_fn(aty).is_some()
-                                    && !self.own_drop_live.contains(v)
+                                    && !self.own_drop_live.contains(&arg_vals[i])
                                     && matches!(args.get(i), Some(Expr::Call { .. }))
                                 {
-                                    self.register_own_drop(v, aty);
-                                    self.scope_drop_safe.insert(v.clone());
+                                    let cap = self.fresh("trs");
+                                    let cty = aty.clone();
+                                    self.line(&format!("{cty} {cap} = {};", arg_vals[i]));
+                                    self.note_own_bind_scope(&cap);
+                                    self.register_own_drop(&cap, &cty);
+                                    self.scope_drop_safe.insert(cap.clone());
+                                    arg_vals[i] = cap;
                                 }
                             }
                             let call = format!("{call_name}({})", arg_vals.join(", "));
