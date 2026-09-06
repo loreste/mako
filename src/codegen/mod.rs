@@ -42431,7 +42431,7 @@ fn main() {
     }
 
     #[test]
-    fn returning_borrowed_struct_param_inside_struct_clones_owned_fields() {
+    fn returning_borrowed_struct_param_inside_struct_moves_owned_fields() {
         let source = r#"
             struct Heavy { a: string b: string c: string d: []int }
             struct Reply { value: Heavy text: string }
@@ -42455,14 +42455,9 @@ fn main() {
             wrap.starts_with("Heavy *h"),
             "owning param must borrow:\n{generated}"
         );
-        assert_eq!(
-            wrap.matches("mako_str_clone(cloned_").count(),
-            3,
-            "nested return must clone every borrowed string field once:\n{generated}"
-        );
         assert!(
-            wrap.contains("mako_int_array_clone(cloned_"),
-            "nested return must clone borrowed slice field:\n{generated}"
+            wrap.contains("ptr_move_") && wrap.contains("memset(&(*h), 0,"),
+            "nested return must move ptr param instead of cloning:\n{generated}"
         );
     }
 
@@ -42515,7 +42510,7 @@ fn main() {
     }
 
     #[test]
-    fn cloned_struct_channel_fields_retain_shared_channel_lifetime() {
+    fn moved_struct_channel_fields_retain_shared_channel_lifetime() {
         let source = r#"
             struct Client {
                 req: chan[int]
@@ -42549,8 +42544,8 @@ fn main() {
             "owning param must borrow:\n{generated}"
         );
         assert!(
-            rpc.contains("mako_chan_clone(cloned_") && rpc.contains("mako_chan_str_clone(cloned_"),
-            "returned struct copy must retain channel fields:\n{generated}"
+            rpc.contains("ptr_move_") && rpc.contains("memset(&(*client), 0,"),
+            "returned struct must move ptr param instead of cloning:\n{generated}"
         );
     }
 
