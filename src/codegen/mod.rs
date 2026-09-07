@@ -4700,6 +4700,10 @@ impl Codegen {
                         self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
                         moved
                     }
+                } else if self.in_return_expr && self.ptr_param_locals.contains(&mn) {
+                    // Ptr-passed param in return: move by copying struct then
+                    // zeroing each owned field in source individually.
+                    self.emit_ptr_param_field_move(c_ty, &val)
                 } else if self.locals.contains_key(n) {
                     // Alias of another live owner (or field-bound name) — clone.
                     self.clone_own_val(c_ty, &val)
@@ -4720,6 +4724,32 @@ impl Codegen {
                 val
             }
         }
+    }
+
+    /// Move an owning struct from a ptr-passed parameter by copying it and
+    /// then zeroing each owned field in the source individually. Unlike bulk
+    /// memset, per-field zeroing is safe: strings check `!s.data`, RC slices
+    /// check `!(a.cap > 0 && a.data)`, so the source's destructor becomes a
+    /// no-op for transferred fields without calling free/release.
+    fn emit_ptr_param_field_move(&mut self, c_ty: &str, val: &str) -> String {
+        let fields = self.struct_own_field_frees(c_ty);
+        if fields.is_empty() {
+            // No owned fields — plain copy is fine.
+            return val.to_string();
+        }
+        let moved = self.fresh("fmove");
+        self.emit_line(format_args!("{c_ty} {moved} = {val};"));
+        // Zero each owned field in the source so its destructor skips them.
+        for (path, free_fn) in &fields {
+            // Strings: zero .data + .len
+            if free_fn == "mako_str_free" {
+                self.emit_line(format_args!("{val}.{path}.data = 0; {val}.{path}.len = 0;"));
+            } else {
+                // RC slices / nested structs: zero the whole field.
+                self.emit_line(format_args!("memset(&{val}.{path}, 0, sizeof({val}.{path}));"));
+            }
+        }
+        moved
     }
 
     /// Move an owned field out of a unique owning local without allocating.
@@ -16105,7 +16135,12 @@ impl Codegen {
                     self.clone_own_val(&ty, &val)
                 } else if let Expr::Ident(n) = e {
                     let mn = mangle(n);
-                    if self.ident_is_user_struct_borrow(n)
+                    if self.ptr_param_locals.contains(&mn)
+                        && self.c_ty_owns_fields(&ty)
+                    {
+                        // Ptr-passed param: field-by-field move.
+                        self.emit_ptr_param_field_move(&ty, &val)
+                    } else if self.ident_is_user_struct_borrow(n)
                         || (Self::own_free_fn(&ty).is_some() && !self.own_drop_live.contains(&mn))
                     {
                         self.clone_own_val(&ty, &val)
