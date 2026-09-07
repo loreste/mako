@@ -15174,9 +15174,15 @@ impl Codegen {
                         // Exception: field of a ptr-passed param can be moved
                         // (zero source fields) instead of cloned, since the
                         // param's destructor will see zeroed fields and skip free.
-                        let is_ptr_param_field = matches!(init, Expr::Field { base, .. }
-                            if matches!(base.as_ref(), Expr::Ident(n) if self.ptr_param_locals.contains(&mangle(n))));
-                        if is_ptr_param_field {
+                        // Only field-move for mut bindings of struct types
+                        // with owned sub-fields (not plain strings). The mut
+                        // flag signals intent to take ownership. Non-mut field
+                        // reads must not zero the source — other code may read it.
+                        let is_movable_ptr_field = *mutable
+                            && !self.struct_own_field_frees(&ty).is_empty()
+                            && matches!(init, Expr::Field { base, .. }
+                                if matches!(base.as_ref(), Expr::Ident(n) if self.ptr_param_locals.contains(&mangle(n))));
+                        if is_movable_ptr_field {
                             (self.emit_ptr_param_field_move(&ty, &val), true)
                         } else {
                             (self.clone_own_val(&ty, &val), true)
