@@ -4700,10 +4700,6 @@ impl Codegen {
                         self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
                         moved
                     }
-                } else if self.in_return_expr && self.ptr_param_locals.contains(&mn) {
-                    // Ptr-passed param in return: move by copying struct then
-                    // zeroing each owned field in source individually.
-                    self.emit_ptr_param_field_move(c_ty, &val)
                 } else if self.locals.contains_key(n) {
                     // Alias of another live owner (or field-bound name) — clone.
                     self.clone_own_val(c_ty, &val)
@@ -16137,12 +16133,7 @@ impl Codegen {
                     self.clone_own_val(&ty, &val)
                 } else if let Expr::Ident(n) = e {
                     let mn = mangle(n);
-                    if self.ptr_param_locals.contains(&mn)
-                        && self.c_ty_owns_fields(&ty)
-                    {
-                        // Ptr-passed param: field-by-field move.
-                        self.emit_ptr_param_field_move(&ty, &val)
-                    } else if self.ident_is_user_struct_borrow(n)
+                    if self.ident_is_user_struct_borrow(n)
                         || (Self::own_free_fn(&ty).is_some() && !self.own_drop_live.contains(&mn))
                     {
                         self.clone_own_val(&ty, &val)
