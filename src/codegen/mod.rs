@@ -15169,10 +15169,18 @@ impl Codegen {
                         && (Self::own_free_fn(&ty).is_some()
                             || !self.struct_own_field_frees(&ty).is_empty())
                     {
-                        // Index GET is a shallow header copy. Binding it without
-                        // cloning aliases the container, so `t.name = s` dest-destroy
-                        // UAFs `arr[i].name` (issue #51, FayDB `let table = db.tables[tidx]`).
-                        (self.clone_own_val(&ty, &val), true)
+                        // Field/index GET is a shallow header copy. Binding it
+                        // without cloning aliases the container.
+                        // Exception: field of a ptr-passed param can be moved
+                        // (zero source fields) instead of cloned, since the
+                        // param's destructor will see zeroed fields and skip free.
+                        let is_ptr_param_field = matches!(init, Expr::Field { base, .. }
+                            if matches!(base.as_ref(), Expr::Ident(n) if self.ptr_param_locals.contains(&mangle(n))));
+                        if is_ptr_param_field {
+                            (self.emit_ptr_param_field_move(&ty, &val), true)
+                        } else {
+                            (self.clone_own_val(&ty, &val), true)
+                        }
                     } else if let Some(moved) = self.prepare_owned_field_move(init, &ty, &val) {
                         (moved, true)
                     } else {
