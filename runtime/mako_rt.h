@@ -86,12 +86,6 @@ static inline void mako_rc_alloc_backtrace(void) {
 static inline _Atomic uint32_t *mako_rc_of(void *data) {
     return (_Atomic uint32_t *)((char *)data - MAKO_RC_HEADER);
 }
-static _Atomic int64_t mako_rc_alloc_total = 0;
-static _Atomic int64_t mako_rc_alloc_count = 0;
-static _Atomic int64_t mako_rc_free_count = 0;
-static _Atomic int64_t mako_str_alloc_total = 0;
-static _Atomic int64_t mako_str_alloc_count = 0;
-static _Atomic int64_t mako_str_free_count = 0;
 static inline void *mako_rc_alloc(size_t data_bytes) {
     if (data_bytes > SIZE_MAX - MAKO_RC_HEADER) {
         fprintf(stderr, "mako: size overflow in rc_alloc (%zu bytes)\n", data_bytes);
@@ -107,8 +101,6 @@ static inline void *mako_rc_alloc(size_t data_bytes) {
     _Atomic uint32_t *rc = (_Atomic uint32_t *)block;
     atomic_init(rc, 1);
     *(uint32_t *)(block + 4) = 0;
-    atomic_fetch_add_explicit(&mako_rc_alloc_total, (int64_t)data_bytes, memory_order_relaxed);
-    atomic_fetch_add_explicit(&mako_rc_alloc_count, 1, memory_order_relaxed);
     return block + MAKO_RC_HEADER;
 }
 static inline void *mako_rc_calloc(size_t data_bytes) {
@@ -143,7 +135,7 @@ static inline int mako_rc_release(void *data) {
         fprintf(stderr, "mako: slice refcount underflow\n");
         abort();
     }
-    if (prev == 1) { free((char *)data - MAKO_RC_HEADER); atomic_fetch_add_explicit(&mako_rc_free_count, 1, memory_order_relaxed); return 1; }
+    if (prev == 1) { free((char *)data - MAKO_RC_HEADER); return 1; }
     return 0;
 }
 static inline int mako_rc_shared(void *data) {
@@ -336,7 +328,6 @@ static inline int mako_str_is_empty_singleton(MakoString s) {
 static inline void mako_str_free(MakoString s) {
     if (!s.data || s.data == &mako_str_empty_byte) return;
     free(s.data);
-    atomic_fetch_add_explicit(&mako_str_free_count, 1, memory_order_relaxed);
 }
 
 /* Create an owned MakoString by copying a C string. NULL/empty → shared empty. */
@@ -351,8 +342,6 @@ static inline MakoString mako_str_from_cstr(const char *s) {
         abort();
     }
     memcpy(d, s, n + 1);
-    atomic_fetch_add_explicit(&mako_str_alloc_total, (int64_t)n, memory_order_relaxed);
-    atomic_fetch_add_explicit(&mako_str_alloc_count, 1, memory_order_relaxed);
     MakoString out = {d, n};
     return out;
 }
@@ -1862,8 +1851,6 @@ static inline MakoString mako_str_slice(MakoString s, int64_t low, int64_t high)
     char *d = (char *)malloc(n + 1);
     if (n) memcpy(d, s.data + (size_t)low, n);
     d[n] = 0;
-    atomic_fetch_add_explicit(&mako_str_alloc_total, (int64_t)n, memory_order_relaxed);
-    atomic_fetch_add_explicit(&mako_str_alloc_count, 1, memory_order_relaxed);
     MakoString out = {d, n};
     return out;
 }
@@ -2979,8 +2966,6 @@ static inline MakoString mako_str_clone(MakoString s) {
     }
     memcpy(d, s.data, s.len);
     d[s.len] = 0;
-    atomic_fetch_add_explicit(&mako_str_alloc_total, (int64_t)s.len, memory_order_relaxed);
-    atomic_fetch_add_explicit(&mako_str_alloc_count, 1, memory_order_relaxed);
     return (MakoString){d, s.len};
 }
 
