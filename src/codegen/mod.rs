@@ -4700,15 +4700,6 @@ impl Codegen {
                         self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
                         moved
                     }
-                } else if self.in_return_expr && self.ptr_param_locals.contains(&mn) {
-                    // Pointer-passed mut param in a return expression: the
-                    // function is exiting so the caller cannot access *db after
-                    // this. Move the pointee into the return struct — zero the
-                    // source to prevent the caller's pointer from double-freeing.
-                    let moved = self.fresh("ptr_move");
-                    self.emit_line(format_args!("{c_ty} {moved} = {val};"));
-                    self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
-                    moved
                 } else if self.locals.contains_key(n) {
                     // Alias of another live owner (or field-bound name) — clone.
                     self.clone_own_val(c_ty, &val)
@@ -16114,14 +16105,7 @@ impl Codegen {
                     self.clone_own_val(&ty, &val)
                 } else if let Expr::Ident(n) = e {
                     let mn = mangle(n);
-                    if self.ptr_param_locals.contains(&mn) {
-                        // Returning a ptr-passed param: move (copy + zero source)
-                        // instead of deep-cloning. Safe because we're exiting.
-                        let moved = self.fresh("ptr_move");
-                        self.emit_line(format_args!("{ty} {moved} = {val};"));
-                        self.emit_line(format_args!("memset(&{val}, 0, sizeof({val}));"));
-                        moved
-                    } else if self.ident_is_user_struct_borrow(n)
+                    if self.ident_is_user_struct_borrow(n)
                         || (Self::own_free_fn(&ty).is_some() && !self.own_drop_live.contains(&mn))
                     {
                         self.clone_own_val(&ty, &val)
