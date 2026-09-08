@@ -1,0 +1,42 @@
+#[derive(json)]
+struct ControlResponse {
+    ok: bool
+    message: string
+}
+
+fn TestJsonAllControlBytesInKeysAndValues() {
+    let escaped = ["\\u0000", "\\u0001", "\\u0002", "\\u0003", "\\u0004", "\\u0005", "\\u0006", "\\u0007", "\\b", "\\t", "\\n", "\\u000b", "\\f", "\\r", "\\u000e", "\\u000f", "\\u0010", "\\u0011", "\\u0012", "\\u0013", "\\u0014", "\\u0015", "\\u0016", "\\u0017", "\\u0018", "\\u0019", "\\u001a", "\\u001b", "\\u001c", "\\u001d", "\\u001e", "\\u001f"]
+    let mut i = 0
+    while i < 32 {
+        let b = str_builder()
+        builder_write_byte(b, byte(i))
+        let value = builder_string(b)
+        let expected = "{\"" + escaped[i] + "\":\"" + escaped[i] + "\",\"n\":1}"
+        assert_eq_str(json_si(value, value, "n", 1), expected)
+        assert_eq_str(ControlResponse_to_json(false, value), "{\"ok\":false,\"message\":\"" + escaped[i] + "\"}")
+        i = i + 1
+    }
+}
+
+fn TestJsonControlExpansionAndUtf8() {
+    let b = str_builder()
+    let expected = str_builder()
+    let mut i = 0
+    while i < 4096 {
+        builder_write_byte(b, byte(0))
+        builder_write(expected, "\\u0000")
+        i = i + 1
+    }
+    builder_write(b, "café 日本語 \" \\")
+    builder_write(expected, "café 日本語 \\\" \\\\")
+    let value = builder_string(b)
+    let encoded = builder_string(expected)
+    assert_eq_str(ControlResponse_to_json(true, value), "{\"ok\":true,\"message\":\"" + encoded + "\"}")
+    assert_eq_str(ControlResponse_to_json(false, ""), "{\"ok\":false,\"message\":\"\"}")
+}
+
+fn main() {
+    TestJsonAllControlBytesInKeysAndValues()
+    TestJsonControlExpansionAndUtf8()
+    print("PASS\n")
+}

@@ -2524,22 +2524,41 @@ static inline MakoString mako_metrics_export_prom(void) {
 
 /* ---- JSON seed (escape + wrap object with one string field) ---- */
 static inline MakoString mako_json_escape(MakoString s) {
+    if (s.len > (SIZE_MAX - 8) / 2) mako_abort("json_escape: size overflow");
     size_t cap = s.len * 2 + 8;
     char *d = (char *)malloc(cap);
     if (!d) mako_abort("json_escape: out of memory");
     size_t j = 0;
     for (size_t i = 0; i < s.len; i++) {
-        char c = s.data[i];
+        unsigned char c = (unsigned char)s.data[i];
+        /* A control byte can expand to six bytes (\u00XX), plus the NUL.
+         * Keep the common case single-pass without reserving 6x up front. */
+        if (cap - j <= 6) {
+            if (cap > SIZE_MAX / 2) mako_abort("json_escape: size overflow");
+            cap *= 2;
+            char *grown = (char *)realloc(d, cap);
+            if (!grown) { free(d); mako_abort("json_escape: out of memory"); }
+            d = grown;
+        }
         if (c == '"' || c == '\\') {
-            if (j + 2 >= cap) { cap *= 2; d = (char *)realloc(d, cap); }
             d[j++] = '\\';
             d[j++] = c;
-        } else if (c == '\n') {
-            if (j + 2 >= cap) { cap *= 2; d = (char *)realloc(d, cap); }
+        } else if (c < 0x20) {
             d[j++] = '\\';
-            d[j++] = 'n';
+            switch (c) {
+                case '\b': d[j++] = 'b'; break;
+                case '\f': d[j++] = 'f'; break;
+                case '\n': d[j++] = 'n'; break;
+                case '\r': d[j++] = 'r'; break;
+                case '\t': d[j++] = 't'; break;
+                default: {
+                    static const char hex[] = "0123456789abcdef";
+                    d[j++] = 'u'; d[j++] = '0'; d[j++] = '0';
+                    d[j++] = hex[c >> 4]; d[j++] = hex[c & 15];
+                    break;
+                }
+            }
         } else {
-            if (j + 1 >= cap) { cap *= 2; d = (char *)realloc(d, cap); }
             d[j++] = c;
         }
     }
