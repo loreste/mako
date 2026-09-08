@@ -1,12 +1,12 @@
 # Makori roadmap
 
-**Product version:** **0.6.5** (tip) · release tag **v0.6.5** · Last sync: **2026-08-30**.
-**Suite:** **423** `examples/testing` `*_test.mko` files · **2026-08-26:**
-C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) ·
-`cargo test` **156 passed, 0 failed** · tooling, stdlib, memory-safety, and performance gates passed locally.
+**Product version:** **0.6.29** (tip) · release tag **v0.6.29** · Last sync: **2026-09-08**.
+**Suite:** **448** `examples/testing` `*_test.mko` files · **2026-09-08:**
+C **448 passed, 0 failed** · native **448 passed, 0 failed** (per-file sweep) ·
+`cargo test` **402 passed, 0 failed** · tooling, stdlib, memory-safety, and performance gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.6.5`**; tip train **0.6.5**.
+**Release:** tag **`v0.6.29`**; tip train **0.6.29**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Makori Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -49,7 +49,11 @@ C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) �
 | **0.5.15** | Tooling polish: doctor, installers, release metadata, version reporting, fmt/lint/doc stability | **Shipped** |
 | **0.6.0** | Pipe operator, prove contracts, and live function syntax foundation | **Shipped** |
 | **0.6.1** | Native LLM bridge and release-platform hardening | **Shipped** |
-| **0.6.2** | Copy-on-write slice ownership and memory-safety hardening | **Tip** |
+| **0.6.2** | Copy-on-write slice ownership and memory-safety hardening | **Shipped** |
+| **0.6.3–0.6.18** | Stdlib expansion, Go syntax parity, channel/struct ownership hardening | **Shipped** |
+| **0.6.19–0.6.24** | Scope-exit destructors, deep-clone owned fields, channel RC retain/release | **Shipped** |
+| **0.6.25–0.6.27** | O(1) RC array clone, dest-destroy fixes, struct-return transfer_own leak | **Shipped** |
+| **0.6.28–0.6.29** | Position-aware last-use move, MakoString move at last use, inline-call arg temp fixes | **Tip** |
 | **0.6.x** | Further patches on 0.6 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after the 0.x series |
 
@@ -83,6 +87,10 @@ C **423 passed, 0 failed** · native **423 passed, 0 failed** (per-file sweep) �
 0.6.0       pipe operator + prove contracts + live fn foundation
 0.6.1       native LLM bridge + release-platform hardening
 0.6.2       copy-on-write slice ownership + memory-safety hardening
+0.6.3–18    stdlib expansion, Go syntax parity, ownership hardening
+0.6.19–24   scope-exit destructors, deep-clone, channel RC
+0.6.25–27   O(1) RC array clone, dest-destroy, struct-return fixes
+0.6.28–29   position-aware last-use move, string move at last use
 0.6.x       patches
 1.0         stability freeze
 ```
@@ -466,7 +474,7 @@ Avoid stuffing large language features into 0.5.x patches; open **0.6** if neede
 
 ---
 
-## 0.6.23 → 0.7 — Consolidation
+## 0.6.29 → 0.7 — Consolidation
 
 **Theme:** no new features — freeze, specify, verify, audit.
 
