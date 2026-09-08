@@ -889,14 +889,21 @@ static inline void mako_str_array_set(MakoStrArray a, int64_t i, MakoString v) {
 static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
     /* COW: if shared or at capacity, allocate new refcounted backing. */
     if (MAKO_UNLIKELY(s.len + 1 > s.cap || mako_rc_shared(s.data))) {
-        MakoString *old_data = s.data;
+        int shared = mako_rc_shared(s.data);
         size_t ncap = s.cap;
         if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
         MakoString *nd = (MakoString *)mako_rc_alloc(ncap * sizeof(MakoString));
-        /* The caller still owns and releases the old header. Every detached
-         * backing therefore needs independent element ownership. */
-        for (size_t i = 0; i < s.len; i++) nd[i] = mako_str_clone(old_data[i]);
+        if (shared) {
+            /* Shared backing: COW detach — clone every element so both
+             * owners have independent string lifetimes. */
+            for (size_t i = 0; i < s.len; i++) nd[i] = mako_str_clone(s.data[i]);
+        } else {
+            /* Sole owner growing: move elements (memcpy), not clone.
+             * The caller releases the old backing block; the string data
+             * pointers now live exclusively in the new backing. */
+            if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoString));
+        }
         s.data = nd;
         s.cap = ncap;
     }
@@ -5013,48 +5020,61 @@ static inline void mako_map_ss_free(MakoMapSS *m) {
 }
 
 /* ---- Debug / abort (early — used by slice/array helpers) ---- */
-/* ---- Mako call stack (lightweight, for panic traces) ---- */
+/* ---- Function tracing (MAKO_TRACE=1 or MAKO_STACK=1) ---- */
+static int mako_trace_flag = -1;
+static inline int mako_trace_active(void) {
+    if (MAKO_UNLIKELY(mako_trace_flag < 0)) {
+        const char *t = getenv("MAKO_TRACE");
+        const char *s = getenv("MAKO_STACK");
+        mako_trace_flag = ((t && t[0] == '1') || (s && s[0] == '1')) ? 1 : 0;
+    }
+    return mako_trace_flag;
+}
+
+/* ---- Mako call stack (for panic traces + MAKO_TRACE output) ----
+ * Zero cost when MAKO_TRACE and MAKO_STACK are unset: a single
+ * well-predicted branch per function call. */
 #define MAKO_CALLSTACK_MAX 64
 typedef struct { const char *fn_name; const char *file; int line; } MakoFrame;
 static __thread MakoFrame mako_callstack[MAKO_CALLSTACK_MAX];
 static __thread int mako_callstack_depth = 0;
 
 static inline void mako_fn_enter(const char *fn_name, const char *file, int line) {
-    if (mako_callstack_depth < MAKO_CALLSTACK_MAX) {
-        mako_callstack[mako_callstack_depth].fn_name = fn_name;
-        mako_callstack[mako_callstack_depth].file = file;
-        mako_callstack[mako_callstack_depth].line = line;
+    if (MAKO_UNLIKELY(mako_trace_active())) {
+        if (mako_callstack_depth < MAKO_CALLSTACK_MAX) {
+            mako_callstack[mako_callstack_depth].fn_name = fn_name;
+            mako_callstack[mako_callstack_depth].file = file;
+            mako_callstack[mako_callstack_depth].line = line;
+        }
+        mako_callstack_depth++;
     }
-    mako_callstack_depth++;
 }
 
 static inline void mako_fn_exit(void) {
-    if (mako_callstack_depth > 0) mako_callstack_depth--;
-}
-
-/* ---- Function tracing (MAKO_TRACE=1) ---- */
-static int mako_trace_flag = -1;
-static inline int mako_trace_active(void) {
-    if (mako_trace_flag < 0) {
-        const char *v = getenv("MAKO_TRACE");
-        mako_trace_flag = (v && v[0] == '1') ? 1 : 0;
+    if (MAKO_UNLIKELY(mako_trace_active())) {
+        if (mako_callstack_depth > 0) mako_callstack_depth--;
     }
-    return mako_trace_flag;
 }
 
 static inline void mako_trace_enter(const char *fn_name, const char *file, int line) {
     mako_fn_enter(fn_name, file, line);
-    if (mako_trace_active()) {
-        fprintf(stderr, "[trace] → %s (%s:%d)\n", fn_name, file, line);
-        fflush(stderr);
+    if (MAKO_UNLIKELY(mako_trace_active())) {
+        const char *t = getenv("MAKO_TRACE");
+        if (t && t[0] == '1') {
+            fprintf(stderr, "[trace] → %s (%s:%d)\n", fn_name, file, line);
+            fflush(stderr);
+        }
     }
 }
 
 static inline void mako_trace_exit(const char *fn_name) {
     mako_fn_exit();
-    if (mako_trace_active()) {
-        fprintf(stderr, "[trace] ← %s\n", fn_name);
-        fflush(stderr);
+    if (MAKO_UNLIKELY(mako_trace_active())) {
+        const char *t = getenv("MAKO_TRACE");
+        if (t && t[0] == '1') {
+            fprintf(stderr, "[trace] ← %s\n", fn_name);
+            fflush(stderr);
+        }
     }
 }
 

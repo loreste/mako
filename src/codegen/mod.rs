@@ -344,7 +344,28 @@ impl Codegen {
             let esc = escape_c(&s);
             return format!("mako_str_view(\"{esc}\", {})", s.len());
         }
-        self.emit_expr(expr).1
+        let (ty, v) = self.emit_expr(expr);
+        // Register owned string temps for scope-exit free so they don't
+        // leak when used as inline arguments to builtins (issue #55).
+        // Any call result or concat that isn't already tracked is likely
+        // an owned temp. Idents/fields/indexes are borrows — skip those.
+        if ty == "MakoString"
+            && !self.own_drop_live.contains(&v)
+            && matches!(
+                expr,
+                Expr::Call { .. }
+                    | Expr::Binary { .. }
+                    | Expr::StringInterp(_)
+            )
+        {
+            let cap = self.fresh("sa");
+            self.emit_line(format_args!("MakoString {cap} = {v};"));
+            self.note_own_bind_scope(&cap);
+            self.register_own_drop(&cap, "MakoString");
+            self.scope_drop_safe.insert(cap.clone());
+            return cap;
+        }
+        v
     }
 
     /// True when any scalar-key map of this value monomorph is used.
@@ -3365,6 +3386,7 @@ impl Codegen {
                 name,
                 "read_file"
                     | "str_repeat"
+                    | "string"
                     | "csv_join_row"
                     | "auth_bearer"
                     | "auth_basic_header"
@@ -3438,6 +3460,8 @@ impl Codegen {
     fn expr_is_owned_print_temp(expr: &Expr) -> bool {
         match expr {
             Expr::StringInterp(_) | Expr::Match { .. } | Expr::IfExpr { .. } => true,
+            // String slice s[low:high] allocates a new buffer.
+            Expr::Slice { .. } => true,
             Expr::Binary {
                 op: crate::ast::BinOp::Add,
                 ..
@@ -4709,7 +4733,10 @@ impl Codegen {
                 if self.own_drop_live.contains(&mn) {
                     // Last use of a unique owner moves; any future mention
                     // in the function clones so a later read cannot UAF.
-                    if self.ident_used_after_current(n) {
+                    // Strings are excluded: the .data pointer may be held
+                    // by a C function argument after the struct is zeroed
+                    // (use-after-free in read_file / fs_path_cstr paths).
+                    if c_ty == "MakoString" || self.ident_used_after_current(n) {
                         self.clone_own_val(c_ty, &val)
                     } else {
                         self.note_own_drop_moved(&mn);
@@ -4865,18 +4892,9 @@ impl Codegen {
                 ));
             }
             "MakoStrArray" => {
-                // Deep clone: allocate new array and clone each string element.
-                // COW RC retain causes OOM — every mutation triggers full detach
-                // copy, worse than upfront clone for mutation-heavy workloads.
-                self.emit_line(format_args!("MakoStrArray {tmp};"));
+                // O(1) RC retain. COW detach happens in set_cow/append.
                 self.emit_line(format_args!(
-                    "{tmp}.len = {val}.len; {tmp}.cap = {val}.len;"
-                ));
-                self.emit_line(format_args!(
-                    "{tmp}.data = (MakoString*)mako_rc_alloc(sizeof(MakoString) * ({val}.len ? {val}.len : 1));"
-                ));
-                self.emit_line(format_args!(
-                    "for (int64_t _i = 0; _i < {val}.len; _i++) {{ {tmp}.data[_i] = mako_str_clone({val}.data[_i]); }}"
+                    "MakoStrArray {tmp} = mako_str_array_clone({val});"
                 ));
             }
             own_ty if Self::own_clone_fn(own_ty).is_some() => {
@@ -15279,6 +15297,12 @@ impl Codegen {
                             && Self::own_free_fn(&ty).is_none()
                             && !self.struct_own_field_frees(&ty).is_empty();
                         if !is_struct_borrow {
+                            // Transfer ownership from init temp if it was
+                            // already registered (issue #55). The let name
+                            // becomes the sole owner.
+                            if self.own_drop_live.contains(&val) {
+                                self.note_own_drop_moved(&val);
+                            }
                             self.register_own_drop(name, &ty);
                             if self.expr_is_scope_drop_safe(init, &ty) {
                                 self.scope_drop_safe.insert(name.to_string());
@@ -15996,7 +16020,7 @@ impl Codegen {
                 } else if bty == "MakoStrArray" {
                     let tmp = self.fresh("iass");
                     self.emit_line(format_args!("int64_t {tmp} = {i};"));
-                    self.line(&format!("mako_str_array_set({b}, {tmp}, {v});"));
+                    self.line(&format!("{b} = mako_str_array_set_cow({b}, {tmp}, {v});"));
                 } else if bty == "MakoBoolArray" {
                     let tmp = self.fresh("iass");
                     self.emit_line(format_args!("int64_t {tmp} = {i};"));
