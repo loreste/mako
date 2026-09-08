@@ -222,6 +222,8 @@ pub struct Codegen {
     used_arr_elems: std::collections::HashSet<String>,
     /// Body of the function currently being emitted (for ident last-use).
     current_fn_body: Option<Block>,
+    /// Index of the top-level statement currently being emitted.
+    current_stmt_idx: usize,
 }
 
 pub use crate::overflow::OverflowMode;
@@ -314,6 +316,7 @@ impl Codegen {
             used_maps_joined: std::collections::HashSet::new(),
             used_arr_elems: std::collections::HashSet::new(),
             current_fn_body: None,
+            current_stmt_idx: 0,
         }
     }
 
@@ -4233,6 +4236,19 @@ impl Codegen {
         Self::ident_mentions_in_block(body, name) > 1
     }
 
+    /// Position-aware last-use: true if `name` appears in any top-level
+    /// statement *after* the one currently being emitted.
+    fn ident_used_after_current(&self, name: &str) -> bool {
+        let Some(body) = &self.current_fn_body else {
+            return true;
+        };
+        let after = self.current_stmt_idx + 1;
+        if after >= body.stmts.len() {
+            return false;
+        }
+        Self::count_ident_in_stmts(&body.stmts[after..], name) > 0
+    }
+
     pub(crate) fn ident_mentions_in_block(body: &Block, name: &str) -> usize {
         Self::count_ident_in_stmts(&body.stmts, name)
     }
@@ -4689,9 +4705,9 @@ impl Codegen {
             Expr::Ident(n) => {
                 let mn = mangle(n);
                 if self.own_drop_live.contains(&mn) {
-                    // Last use of a unique owner moves; any other mention in
-                    // the function clones so a later read cannot UAF.
-                    if c_ty == "MakoString" || self.ident_reused_in_fn(n) {
+                    // Last use of a unique owner moves; any future mention
+                    // in the function clones so a later read cannot UAF.
+                    if self.ident_used_after_current(n) {
                         self.clone_own_val(c_ty, &val)
                     } else {
                         self.note_own_drop_moved(&mn);
@@ -4701,8 +4717,19 @@ impl Codegen {
                         moved
                     }
                 } else if self.locals.contains_key(n) {
-                    // Alias of another live owner (or field-bound name) — clone.
-                    self.clone_own_val(c_ty, &val)
+                    // Ptr-param at last use in a return expr: move the
+                    // struct and zero each owned field so the caller's
+                    // destructor skips them. Memory-safe: zeroed fields
+                    // free as no-ops (string .data==NULL, slice .cap==0).
+                    if self.in_return_expr
+                        && self.ptr_param_locals.contains(&mn)
+                        && !self.ident_used_after_current(n)
+                        && !self.struct_own_field_frees(c_ty).is_empty()
+                    {
+                        self.emit_ptr_param_field_move(c_ty, &val)
+                    } else {
+                        self.clone_own_val(c_ty, &val)
+                    }
                 } else {
                     // Codegen temp not tracked for free — destination becomes sole freer.
                     val
@@ -14012,6 +14039,7 @@ impl Codegen {
             stmts.len()
         };
         for (i, stmt) in stmts[..emit_count].iter().enumerate() {
+            self.current_stmt_idx = i;
             self.emit_source_line(&f.body, i);
             self.emit_stmt(stmt);
         }
@@ -42457,7 +42485,7 @@ fn main() {
     }
 
     #[test]
-    fn returning_borrowed_struct_param_inside_struct_clones_owned_fields() {
+    fn returning_borrowed_struct_param_inside_struct_moves_owned_fields() {
         let source = r#"
             struct Heavy { a: string b: string c: string d: []int }
             struct Reply { value: Heavy text: string }
@@ -42481,14 +42509,9 @@ fn main() {
             wrap.starts_with("Heavy *h"),
             "owning param must borrow:\n{generated}"
         );
-        assert_eq!(
-            wrap.matches("mako_str_clone(cloned_").count(),
-            3,
-            "nested return must clone every borrowed string field once:\n{generated}"
-        );
         assert!(
-            wrap.contains("mako_int_array_clone(cloned_"),
-            "nested return must clone borrowed slice field:\n{generated}"
+            wrap.contains("fmove_") && wrap.contains("(*h).a.data = 0"),
+            "ptr-param last-use on return must move, not clone:\n{generated}"
         );
     }
 
@@ -42541,7 +42564,7 @@ fn main() {
     }
 
     #[test]
-    fn cloned_struct_channel_fields_retain_shared_channel_lifetime() {
+    fn moved_struct_channel_fields_retain_shared_channel_lifetime() {
         let source = r#"
             struct Client {
                 req: chan[int]
@@ -42575,8 +42598,8 @@ fn main() {
             "owning param must borrow:\n{generated}"
         );
         assert!(
-            rpc.contains("mako_chan_clone(cloned_") && rpc.contains("mako_chan_str_clone(cloned_"),
-            "returned struct copy must retain channel fields:\n{generated}"
+            rpc.contains("fmove_") && rpc.contains("memset(&(*client)"),
+            "ptr-param last-use on return must move channel fields:\n{generated}"
         );
     }
 
