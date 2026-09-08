@@ -4847,7 +4847,7 @@ impl Codegen {
                 ));
             }
             "MakoStrArray" => {
-                // O(1) RC retain — shared backing with COW on mutation.
+                // O(1) RC retain — shared backing with COW on set/append.
                 self.emit_line(format_args!(
                     "MakoStrArray {tmp} = mako_str_array_clone({val});"
                 ));
@@ -15949,7 +15949,7 @@ impl Codegen {
                 } else if bty == "MakoStrArray" {
                     let tmp = self.fresh("iass");
                     self.emit_line(format_args!("int64_t {tmp} = {i};"));
-                    self.line(&format!("mako_str_array_set({b}, {tmp}, {v});"));
+                    self.line(&format!("{b} = mako_str_array_set_cow({b}, {tmp}, {v});"));
                 } else if bty == "MakoBoolArray" {
                     let tmp = self.fresh("iass");
                     self.emit_line(format_args!("int64_t {tmp} = {i};"));

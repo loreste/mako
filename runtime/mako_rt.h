@@ -864,6 +864,21 @@ static inline MakoString mako_str_array_get(MakoStrArray a, int64_t i) {
     return a.data[i];
 }
 
+static inline MakoStrArray mako_str_array_set_cow(MakoStrArray s, int64_t i, MakoString v) {
+    if (i < 0 || (size_t)i >= s.len) mako_abort("string slice index out of bounds");
+    /* COW: if shared, detach before mutating */
+    if (mako_rc_shared(s.data)) {
+        MakoString *nd = (MakoString *)mako_rc_alloc(s.cap * sizeof(MakoString));
+        for (size_t j = 0; j < s.len; j++) nd[j] = mako_str_clone(s.data[j]);
+        mako_rc_release(s.data);
+        s.data = nd;
+    }
+    MakoString old = s.data[i];
+    s.data[i] = v;
+    if (old.data != v.data) mako_str_free(old);
+    return s;
+}
+/* Legacy non-COW set — only safe when caller is sole owner */
 static inline void mako_str_array_set(MakoStrArray a, int64_t i, MakoString v) {
     if (i < 0 || (size_t)i >= a.len) mako_abort("string slice index out of bounds");
     MakoString old = a.data[i];
