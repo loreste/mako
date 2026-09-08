@@ -4978,7 +4978,7 @@ impl Codegen {
     fn fresh(&mut self, prefix: &str) -> String {
         let id = self.tmp;
         self.tmp += 1;
-        format!("{prefix}_{id}")
+        format!("__mako_{prefix}_{id}")
     }
 
     fn emit_byte_array_lit(&mut self, elems: &[Expr]) -> (String, String) {
@@ -41886,7 +41886,7 @@ mod ownership_tests {
         let mut codegen = Codegen::new();
 
         assert!(codegen.emit_discarded_bag(&expr, None, "MakoResultFloat", "make_result()"));
-        assert!(codegen.out.contains("MakoResultFloat discard_"));
+        assert!(codegen.out.contains("MakoResultFloat __mako_discard_"));
         assert!(codegen.out.contains(".err);"));
         assert!(!codegen.out.contains("err_kind"));
     }
@@ -41914,8 +41914,8 @@ mod ownership_tests {
 
         assert!(codegen.emit_discarded_bag(&expr, None, "MakoOptionInt", "make_option()"));
 
-        assert!(codegen.out.contains("mako_arr_Point_free(*bagp_"));
-        assert!(codegen.out.contains("free(bagp_"));
+        assert!(codegen.out.contains("mako_arr_Point_free(*__mako_bagp_"));
+        assert!(codegen.out.contains("free(__mako_bagp_"));
     }
 
     #[test]
@@ -42430,12 +42430,12 @@ fn main() {
         );
         assert!(
             generated.contains("mako_arr_Heavy_set")
-                && generated.contains("Heavy cloned_")
-                && generated.contains("mako_str_clone(cloned_"),
+                && generated.contains("Heavy __mako_cloned_")
+                && generated.contains("mako_str_clone(__mako_cloned_"),
             "container store must clone borrowed owned fields:\n{generated}"
         );
         assert_eq!(
-            generated.matches("mako_str_clone(cloned_").count(),
+            generated.matches("mako_str_clone(__mako_cloned_").count(),
             3,
             "each borrowed string field must be cloned exactly once:\n{generated}"
         );
@@ -42468,7 +42468,7 @@ fn main() {
             "returning a borrowed owning struct must clone fields:\n{generated}"
         );
         assert!(
-            generated.contains("old_st_") && generated.contains(".data !="),
+            generated.contains("__mako_old_st_") && generated.contains(".data !="),
             "reassign of a borrowed owning struct must free previous fields only when backing changed:\n{generated}"
         );
     }
@@ -42499,12 +42499,12 @@ fn main() {
             "owning param must borrow:\n{generated}"
         );
         assert_eq!(
-            wrap.matches("mako_str_clone(cloned_").count(),
+            wrap.matches("mako_str_clone(__mako_cloned_").count(),
             3,
             "nested return must clone every borrowed string field once:\n{generated}"
         );
         assert!(
-            wrap.contains("mako_int_array_clone(cloned_"),
+            wrap.contains("mako_int_array_clone(__mako_cloned_"),
             "nested return must clone borrowed slice field:\n{generated}"
         );
     }
@@ -42558,7 +42558,7 @@ fn main() {
     }
 
     #[test]
-    fn cloned_struct_channel_fields_retain_shared_channel_lifetime() {
+    fn __mako_cloned_struct_channel_fields_retain_shared_channel_lifetime() {
         let source = r#"
             struct Client {
                 req: chan[int]
@@ -42592,7 +42592,7 @@ fn main() {
             "owning param must borrow:\n{generated}"
         );
         assert!(
-            rpc.contains("mako_chan_clone(cloned_") && rpc.contains("mako_chan_str_clone(cloned_"),
+            rpc.contains("mako_chan_clone(__mako_cloned_") && rpc.contains("mako_chan_str_clone(__mako_cloned_"),
             "returned struct copy must retain channel fields:\n{generated}"
         );
     }

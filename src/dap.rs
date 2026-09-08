@@ -53,12 +53,14 @@ pub(crate) fn run_stdio() -> Result<(), ()> {
     let mut child_stdin = child.stdin.take().expect("piped stdin");
     let child_stdout = child.stdout.take().expect("piped stdout");
 
-    // Pump child stdout → client stdout verbatim.
+    // Pump child stdout → client stdout, filtering codegen temporaries
+    // from `variables` responses so the user sees only their Mako names.
     let pump = std::thread::spawn(move || {
         let mut reader = BufReader::new(child_stdout);
         let mut out = std::io::stdout();
         while let Ok(Some(msg)) = read_frame(&mut reader) {
-            if write_frame(&mut out, &msg).is_err() {
+            let filtered = filter_dap_variables(&msg);
+            if write_frame(&mut out, &filtered).is_err() {
                 break;
             }
         }
@@ -377,6 +379,31 @@ fn write_frame(out: &mut impl Write, body: &[u8]) -> std::io::Result<()> {
     out.flush()
 }
 
+/// Filter codegen temporaries (`__mako_*`) from DAP `variables` responses
+/// so the debugger only shows user-declared Mako variable names.
+fn filter_dap_variables(msg: &[u8]) -> Vec<u8> {
+    let Ok(mut v) = serde_json::from_slice::<Value>(msg) else {
+        return msg.to_vec();
+    };
+    let is_variables_resp = v.get("type").and_then(Value::as_str) == Some("response")
+        && v.get("command").and_then(Value::as_str) == Some("variables");
+    if !is_variables_resp {
+        return msg.to_vec();
+    }
+    if let Some(vars) = v
+        .get_mut("body")
+        .and_then(|b| b.get_mut("variables"))
+        .and_then(Value::as_array_mut)
+    {
+        vars.retain(|var| {
+            var.get("name")
+                .and_then(Value::as_str)
+                .map_or(true, |n| !n.starts_with("__mako_"))
+        });
+    }
+    serde_json::to_vec(&v).unwrap_or_else(|_| msg.to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,5 +466,27 @@ mod tests {
     fn launch_without_program_is_an_error() {
         let req = json!({"type": "request", "command": "launch", "arguments": {}});
         assert!(handle_launch(&req).is_err());
+    }
+
+    #[test]
+    fn variables_response_hides_mako_temporaries() {
+        let resp = json!({
+            "type": "response",
+            "command": "variables",
+            "body": {
+                "variables": [
+                    {"name": "db", "value": "Database{...}"},
+                    {"name": "__mako_st_0", "value": "..."},
+                    {"name": "sql", "value": "\"SELECT 1\""},
+                    {"name": "__mako_cloned_2", "value": "..."},
+                ]
+            }
+        });
+        let filtered = filter_dap_variables(resp.to_string().as_bytes());
+        let v: Value = serde_json::from_slice(&filtered).unwrap();
+        let vars = v["body"]["variables"].as_array().unwrap();
+        assert_eq!(vars.len(), 2);
+        assert_eq!(vars[0]["name"], "db");
+        assert_eq!(vars[1]["name"], "sql");
     }
 }
