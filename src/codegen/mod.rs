@@ -4847,16 +4847,9 @@ impl Codegen {
                 ));
             }
             "MakoStrArray" => {
-                // Deep clone: allocate new array and clone each string element.
-                self.emit_line(format_args!("MakoStrArray {tmp};"));
+                // O(1) RC retain — shared backing with COW on mutation.
                 self.emit_line(format_args!(
-                    "{tmp}.len = {val}.len; {tmp}.cap = {val}.len;"
-                ));
-                self.emit_line(format_args!(
-                    "{tmp}.data = (MakoString*)mako_rc_alloc(sizeof(MakoString) * ({val}.len ? {val}.len : 1));"
-                ));
-                self.emit_line(format_args!(
-                    "for (int64_t _i = 0; _i < {val}.len; _i++) {{ {tmp}.data[_i] = mako_str_clone({val}.data[_i]); }}"
+                    "MakoStrArray {tmp} = mako_str_array_clone({val});"
                 ));
             }
             own_ty if Self::own_clone_fn(own_ty).is_some() => {
