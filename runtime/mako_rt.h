@@ -7062,8 +7062,7 @@ static inline void mako_nursery_note_err(MakoNursery *n, MakoString msg) {
     n->err_count++;
     if (n->first_err) return;
     size_t len = msg.len;
-    /* Plain malloc — freed with free() in mako_nursery_free_err. */
-    char *d = (char *)malloc(len + 1);
+    char *d = mako_str_rc_alloc(len + 1);
     if (!d) return;
     if (len && msg.data) memcpy(d, msg.data, len);
     d[len] = 0;
@@ -9884,8 +9883,7 @@ static inline char *mako_env_cstr(MakoString s) {
     for (size_t i = 0; i < s.len; i++) {
         if (s.data[i] == '\0') return NULL;
     }
-    /* Plain malloc — callers free() this directly (C interop, not MakoString). */
-    char *d = (char *)malloc(s.len + 1);
+    char *d = mako_str_rc_alloc(s.len + 1);
     if (!d) return NULL;
     if (s.len) memcpy(d, s.data, s.len);
     d[s.len] = 0;
