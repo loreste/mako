@@ -4847,9 +4847,18 @@ impl Codegen {
                 ));
             }
             "MakoStrArray" => {
-                // O(1) RC retain — shared backing with COW on set/append.
+                // Deep clone: allocate new array and clone each string element.
+                // COW RC retain causes OOM — every mutation triggers full detach
+                // copy, worse than upfront clone for mutation-heavy workloads.
+                self.emit_line(format_args!("MakoStrArray {tmp};"));
                 self.emit_line(format_args!(
-                    "MakoStrArray {tmp} = mako_str_array_clone({val});"
+                    "{tmp}.len = {val}.len; {tmp}.cap = {val}.len;"
+                ));
+                self.emit_line(format_args!(
+                    "{tmp}.data = (MakoString*)mako_rc_alloc(sizeof(MakoString) * ({val}.len ? {val}.len : 1));"
+                ));
+                self.emit_line(format_args!(
+                    "for (int64_t _i = 0; _i < {val}.len; _i++) {{ {tmp}.data[_i] = mako_str_clone({val}.data[_i]); }}"
                 ));
             }
             own_ty if Self::own_clone_fn(own_ty).is_some() => {
@@ -15949,7 +15958,7 @@ impl Codegen {
                 } else if bty == "MakoStrArray" {
                     let tmp = self.fresh("iass");
                     self.emit_line(format_args!("int64_t {tmp} = {i};"));
-                    self.line(&format!("{b} = mako_str_array_set_cow({b}, {tmp}, {v});"));
+                    self.line(&format!("mako_str_array_set({b}, {tmp}, {v});"));
                 } else if bty == "MakoBoolArray" {
                     let tmp = self.fresh("iass");
                     self.emit_line(format_args!("int64_t {tmp} = {i};"));
