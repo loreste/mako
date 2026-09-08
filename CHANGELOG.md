@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.29
+
+- COW string array (`MakoStrArray`): clone is O(1) RC retain; `set` copies the
+  backing buffer only when the refcount is shared, matching `[]int`/`[]struct`
+  semantics.
+- Register inline-call arg temps (`append`, `make`, etc.) for scope-exit free
+  (issue #53). Immediate free was unsafe because append may return the same
+  backing pointer.
+- Fix scope-exit free for temps inside short-circuit `||`/`&&` bodies: push/pop
+  a share scope so owned temps are freed before the if-block closes (issue #53).
+
 ## 0.6.27
 
 - Nested `arr[i].field = append(arr[i].field, v)` dest-destroys the previous
