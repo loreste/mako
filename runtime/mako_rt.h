@@ -5013,9 +5013,67 @@ static inline void mako_map_ss_free(MakoMapSS *m) {
 }
 
 /* ---- Debug / abort (early — used by slice/array helpers) ---- */
+/* ---- Mako call stack (lightweight, for panic traces) ---- */
+#define MAKO_CALLSTACK_MAX 64
+typedef struct { const char *fn_name; const char *file; int line; } MakoFrame;
+static __thread MakoFrame mako_callstack[MAKO_CALLSTACK_MAX];
+static __thread int mako_callstack_depth = 0;
+
+static inline void mako_fn_enter(const char *fn_name, const char *file, int line) {
+    if (mako_callstack_depth < MAKO_CALLSTACK_MAX) {
+        mako_callstack[mako_callstack_depth].fn_name = fn_name;
+        mako_callstack[mako_callstack_depth].file = file;
+        mako_callstack[mako_callstack_depth].line = line;
+    }
+    mako_callstack_depth++;
+}
+
+static inline void mako_fn_exit(void) {
+    if (mako_callstack_depth > 0) mako_callstack_depth--;
+}
+
+/* ---- Function tracing (MAKO_TRACE=1) ---- */
+static int mako_trace_flag = -1;
+static inline int mako_trace_active(void) {
+    if (mako_trace_flag < 0) {
+        const char *v = getenv("MAKO_TRACE");
+        mako_trace_flag = (v && v[0] == '1') ? 1 : 0;
+    }
+    return mako_trace_flag;
+}
+
+static inline void mako_trace_enter(const char *fn_name, const char *file, int line) {
+    mako_fn_enter(fn_name, file, line);
+    if (mako_trace_active()) {
+        fprintf(stderr, "[trace] → %s (%s:%d)\n", fn_name, file, line);
+        fflush(stderr);
+    }
+}
+
+static inline void mako_trace_exit(const char *fn_name) {
+    mako_fn_exit();
+    if (mako_trace_active()) {
+        fprintf(stderr, "[trace] ← %s\n", fn_name);
+        fflush(stderr);
+    }
+}
+
 static inline void mako_abort(const char *msg) {
-    fprintf(stderr, "error: %s\n", msg ? msg : "runtime abort");
-    fprintf(stderr, "  help: lldb/gdb the binary (debug builds use clang -g); see docs/DEBUG.md\n");
+    fprintf(stderr, "\nerror: %s\n", msg ? msg : "runtime abort");
+    /* Print Mako-level stack trace. */
+    int depth = mako_callstack_depth < MAKO_CALLSTACK_MAX
+                    ? mako_callstack_depth : MAKO_CALLSTACK_MAX;
+    if (depth > 0) {
+        fprintf(stderr, "\nstack trace:\n");
+        for (int i = depth - 1; i >= 0; i--) {
+            fprintf(stderr, "  %d: %s\n       at %s:%d\n",
+                    depth - i,
+                    mako_callstack[i].fn_name ? mako_callstack[i].fn_name : "?",
+                    mako_callstack[i].file ? mako_callstack[i].file : "?",
+                    mako_callstack[i].line);
+        }
+    }
+    fprintf(stderr, "\nhelp: lldb ./binary  or  MAKO_TRACE=1 ./binary — see docs/DEBUG.md\n");
     abort();
 }
 
@@ -5033,11 +5091,23 @@ static inline void mako_abort(const char *msg) {
 
 /* Abort with file:line (prefer this from generated code). */
 static inline void mako_abort_at(const char *file, int line, const char *msg) {
-    fprintf(stderr, "error: %s\n", msg ? msg : "runtime abort");
+    fprintf(stderr, "\nerror: %s\n", msg ? msg : "runtime abort");
     if (file && line > 0) {
         fprintf(stderr, "  --> %s:%d\n", file, line);
     }
-    fprintf(stderr, "  help: lldb ./binary  or  gdb ./binary — see docs/DEBUG.md\n");
+    int depth = mako_callstack_depth < MAKO_CALLSTACK_MAX
+                    ? mako_callstack_depth : MAKO_CALLSTACK_MAX;
+    if (depth > 0) {
+        fprintf(stderr, "\nstack trace:\n");
+        for (int i = depth - 1; i >= 0; i--) {
+            fprintf(stderr, "  %d: %s\n       at %s:%d\n",
+                    depth - i,
+                    mako_callstack[i].fn_name ? mako_callstack[i].fn_name : "?",
+                    mako_callstack[i].file ? mako_callstack[i].file : "?",
+                    mako_callstack[i].line);
+        }
+    }
+    fprintf(stderr, "\nhelp: lldb ./binary  or  MAKO_TRACE=1 ./binary — see docs/DEBUG.md\n");
     abort();
 }
 
@@ -5055,6 +5125,21 @@ static inline MakoString mako_dbg_str(const char *file, int line, const char *ex
             (int)s.len, s.data ? s.data : "");
     fflush(stderr);
     return s;
+}
+
+static inline double mako_dbg_float(const char *file, int line, const char *expr, double v) {
+    fprintf(stderr, "[dbg] %s:%d: %s = %g\n",
+            file ? file : "?", line, expr ? expr : "?", v);
+    fflush(stderr);
+    return v;
+}
+
+static inline int64_t mako_dbg_bool(const char *file, int line, const char *expr, int64_t v) {
+    fprintf(stderr, "[dbg] %s:%d: %s = %s\n",
+            file ? file : "?", line, expr ? expr : "?",
+            v ? "true" : "false");
+    fflush(stderr);
+    return v;
 }
 
 static inline int64_t mako_array_len(MakoIntArray a) {

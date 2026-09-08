@@ -131,6 +131,7 @@ pub struct Codegen {
     pub bounds_checks_always: bool,
     /// Current function return TypeExpr (for exotic `?` cross-conversion).
     current_fn_ret: Option<TypeExpr>,
+    current_fn_name: String,
     /// Integer overflow: Wrap (C default), Trap (abort), Ignore (same as wrap).
     pub overflow_mode: OverflowMode,
     /// Source path for `#line` directives (debug mapping).
@@ -274,6 +275,7 @@ impl Codegen {
             generic_templates: HashMap::new(),
             bounds_checks_always: false,
             current_fn_ret: None,
+            current_fn_name: String::new(),
             overflow_mode: OverflowMode::Wrap,
             source_file: None,
             last_emitted_line: 0,
@@ -13900,6 +13902,7 @@ impl Codegen {
         self.ptr_param_locals.clear();
         self.current_result_err_enum = f.ret.as_ref().and_then(|t| self.result_err_enum_c(t));
         self.current_fn_ret = f.ret.clone();
+        self.current_fn_name = f.name.clone();
         self.current_fn_body = Some(f.body.clone());
         self.push_share_scope();
         let is_mut_self_fn = self.mut_self_fns.contains(&f.name);
@@ -14015,6 +14018,16 @@ impl Codegen {
             ));
         }
 
+        // Emit function-entry trace (call stack + optional MAKO_TRACE output).
+        {
+            let (src, line) = self.current_source_loc();
+            let fn_name = escape_c(&f.name);
+            let src_c = escape_c(&src);
+            self.emit_line(format_args!(
+                "mako_trace_enter(\"{fn_name}\", \"{src_c}\", {line});"
+            ));
+        }
+
         let ret_void =
             f.ret.is_none() || matches!(f.ret.as_ref(), Some(TypeExpr::Named(n)) if n == "void");
         let stmts = &f.body.stmts;
@@ -14045,6 +14058,8 @@ impl Codegen {
                 let val = self.ensure_slice_owned(&ty, val);
                 self.emit_defers();
                 self.pop_share_scope();
+                let fn_name = escape_c(&self.current_fn_name);
+                self.emit_line(format_args!("mako_trace_exit(\"{fn_name}\");"));
                 self.emit_line(format_args!("return {val};"));
             }
         } else if !ret_void && !stmts.iter().any(|s| matches!(s, Stmt::Return(_))) {
@@ -14065,6 +14080,12 @@ impl Codegen {
         } else if !stmts.iter().any(|s| matches!(s, Stmt::Return(_))) {
             self.emit_defers();
             self.pop_share_scope();
+        }
+        // Trace exit for functions that fall off the end without explicit return.
+        if !stmts.iter().any(|s| matches!(s, Stmt::Return(_))) && !implicit_return {
+            let fn_name = escape_c(&self.current_fn_name);
+            self.indent = 1;
+            self.emit_line(format_args!("mako_trace_exit(\"{fn_name}\");"));
         }
         self.indent = 0;
         self.out.push_str("}\n\n");
@@ -16137,6 +16158,8 @@ impl Codegen {
                 while !self.share_scopes.is_empty() {
                     self.pop_share_scope();
                 }
+                let fn_name = escape_c(&self.current_fn_name);
+                self.emit_line(format_args!("mako_trace_exit(\"{fn_name}\");"));
                 self.line("return;");
                 self.restore_drop_state(snap);
             }
@@ -16194,6 +16217,8 @@ impl Codegen {
                 while !self.share_scopes.is_empty() {
                     self.pop_share_scope();
                 }
+                let fn_name = escape_c(&self.current_fn_name);
+                self.emit_line(format_args!("mako_trace_exit(\"{fn_name}\");"));
                 self.emit_line(format_args!("return {val};"));
                 self.restore_drop_state(snap);
             }
@@ -17209,16 +17234,44 @@ impl Codegen {
                             );
                         }
                         "dbg" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let (ty, v) = self.emit_expr(&args[0]);
                             let expr_lit = match &args[0] {
                                 Expr::Ident(n) => n.as_str(),
                                 _ => "expr",
                             };
-                            let tmp = self.fresh("dbg");
-                            self.line(&format!(
-                                "int64_t {tmp} = mako_dbg_int(__FILE__, __LINE__, \"{expr_lit}\", {v});"
-                            ));
-                            return ("int64_t".into(), tmp);
+                            let expr_lit = escape_c(expr_lit);
+                            // Type-aware dbg: dispatch to the right printer.
+                            match ty.as_str() {
+                                "MakoString" => {
+                                    let tmp = self.fresh("dbg");
+                                    self.line(&format!(
+                                        "MakoString {tmp} = mako_dbg_str(__FILE__, __LINE__, \"{expr_lit}\", {v});"
+                                    ));
+                                    return ("MakoString".into(), tmp);
+                                }
+                                "double" => {
+                                    let tmp = self.fresh("dbg");
+                                    self.line(&format!(
+                                        "double {tmp} = mako_dbg_float(__FILE__, __LINE__, \"{expr_lit}\", {v});"
+                                    ));
+                                    return ("double".into(), tmp);
+                                }
+                                "bool" => {
+                                    let tmp = self.fresh("dbg");
+                                    self.line(&format!(
+                                        "int64_t {tmp} = mako_dbg_bool(__FILE__, __LINE__, \"{expr_lit}\", (int64_t){v});"
+                                    ));
+                                    return ("bool".into(), tmp);
+                                }
+                                _ => {
+                                    // Default: int or any other type → int printer.
+                                    let tmp = self.fresh("dbg");
+                                    self.line(&format!(
+                                        "int64_t {tmp} = mako_dbg_int(__FILE__, __LINE__, \"{expr_lit}\", {v});"
+                                    ));
+                                    return ("int64_t".into(), tmp);
+                                }
+                            }
                         }
                         "dbg_str" => {
                             let (_, v) = self.emit_expr(&args[0]);

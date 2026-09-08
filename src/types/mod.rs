@@ -17929,20 +17929,8 @@ impl TypeChecker {
                             }
                         }
                         "dbg" if args.len() == 1 => {
+                            // Generic dbg: accepts any type, returns same type.
                             let t = self.check_expr(&args[0])?;
-                            if !matches!(
-                                t,
-                                Type::Int
-                                    | Type::Int64
-                                    | Type::Int32
-                                    | Type::Int8
-                                    | Type::Byte
-                                    | Type::Bool
-                            ) {
-                                return Err(TypeError::new(
-                                    "dbg(x) expects an integer (use dbg_str for strings)",
-                                ));
-                            }
                             return Ok(t);
                         }
                         "dbg_str" if args.len() == 1 => {
