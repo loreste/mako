@@ -1,8 +1,8 @@
-# Mako language reference (for tools / LLMs)
+# Makori language reference (for tools / LLMs)
 #
 # https://mako-lang.com
 # https://github.com/loreste/mako
-# Version: 0.5.7
+# Version: 0.6.30
 #
 # Compile paths:
 #   native (default): .mko -> IR -> Cranelift -> native binary (no C compiler needed)
@@ -15,7 +15,7 @@
 1. OVERVIEW
 ================================================================================
 
-Mako is a compiled, statically typed language. Source files end in .mko.
+Makori (formerly Mako) is a compiled, statically typed language. Source files end in .mko.
 Debug builds use -O0; release uses -O3 -flto.
 
 Preferred surface:
@@ -47,7 +47,7 @@ curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-rele
 make install    # installs to ~/.local/bin/mako + ~/.local/share/mako/runtime
 
 # Verify:
-mako --version    # prints "mako version mako0.5.7 <os>/<arch>"
+mako --version    # prints "mako version mako0.6.30 <os>/<arch>"
 
 # macOS: fully self-contained — no clang/Xcode needed.
 # Linux: needs gcc or clang for linking.
@@ -2676,9 +2676,102 @@ Edge ALPN
   solid. If you turn h2 back on, use a build that splits DATA frames.
 
 ================================================================================
-34. END
+34. OWNERSHIP MODEL (0.6.29+)
+================================================================================
+
+Mako uses compile-time ownership tracking with no garbage collector:
+
+- Owned values (strings, arrays, maps, structs with owned fields) are freed
+  at scope exit automatically.
+- `mut` params are passed by pointer. The caller retains ownership.
+- Last-use move: when an owned local is used for the last time, the compiler
+  moves it (zero-copy) instead of cloning. This includes strings (0.6.29+).
+- O(1) array clone: []struct clone is an RC retain, not a deep copy.
+  Append COWs when the buffer is shared.
+- Scope-exit destructors run for all owned locals, including struct fields
+  and call-result temporaries.
+- No use-after-free: the codegen tracks liveness and prevents moved values
+  from being read.
+
+Common ownership patterns:
+
+  // Struct with owned fields — freed automatically at scope exit
+  let db = Database { tables: make([]Table, 0, 1), name: "mydb" }
+
+  // Return transfers ownership to caller (moved, not copied)
+  fn make_db() -> Database {
+      let db = Database { tables: make([]Table, 0, 1), name: "new" }
+      return db
+  }
+
+  // mut param: caller keeps ownership, callee borrows via pointer
+  fn add_table(mut db: Database, t: Table) {
+      db.tables = append(db.tables, t)
+  }
+
+  // append always returns new header — always reassign
+  xs = append(xs, value)
+
+================================================================================
+35. DEBUGGING AND TRACING (0.6.29+)
+================================================================================
+
+dbg(x)
+  Works on any type (int, float, bool, string). Prints to stderr:
+    [dbg] file.mko:42: x = value
+  Returns the value unchanged, so it can be used inline:
+    let y = dbg(compute())
+
+MAKO_TRACE=1 ./binary
+  Prints function entry/exit with source locations to stderr:
+    [trace] → main (app.mko:10)
+    [trace] → db_exec (db.mko:25)
+    [trace] ← db_exec
+    [trace] ← main
+  Zero overhead when not enabled (env var checked once, cached).
+
+Panic stack traces
+  When a program aborts (index out of bounds, nil deref, assert failure),
+  the runtime prints a Mako-level stack trace:
+    error: slice index out of bounds
+
+    stack trace:
+      1: process_row
+           at db.mko:47
+      2: run_query
+           at db.mko:31
+      3: main
+           at app.mko:12
+
+    help: lldb ./binary  or  MAKO_TRACE=1 ./binary — see docs/DEBUG.md
+
+Other tools:
+  mako debug file.mko           — interactive lldb with Mako data formatters
+  mako dap                      — DAP adapter for VS Code (filters codegen noise)
+  mako check --json=v1          — structured JSON diagnostics
+  --sanitize address|thread     — ASan/TSan builds
+  stack_trace()                 — print call stack at any point
+  error_chain(err)              — print error with source-location trace
+
+================================================================================
+36. KEY RULES FOR GENERATING MAKO CODE
+================================================================================
+
+1.  No semicolons. Statements are newline-terminated.
+2.  No parentheses around conditions. Write `if x > 0 {` not `if (x > 0) {`.
+3.  Braces required. Even single-line if/for bodies need { }.
+4.  Always qualify imports. `pull "io"` then `io.read_file(...)`.
+5.  Structs are value types. `let a = b` copies. `mut` params pass by pointer.
+6.  Owned fields are freed at scope exit. Don't manual-free strings or arrays.
+7.  `append` returns a new header. Always `xs = append(xs, v)`.
+8.  Errors must be handled. Unused Result is a compile error. Use ? or match.
+9.  No null. Use Option[T] — Some(v) or None.
+10. Test functions: fn TestFoo() { assert(...) } in *_test.mko files.
+
+================================================================================
+37. END
 ================================================================================
 
 # https://mako-lang.com
 # https://github.com/loreste/mako
-# 0.2.2
+# 0.6.30

@@ -1,12 +1,12 @@
 # Makori roadmap
 
-**Product version:** **0.6.29** (tip) · release tag **v0.6.29** · Last sync: **2026-09-08**.
+**Product version:** **0.6.30** (tip) · release tag **v0.6.30** · Last sync: **2026-09-08**.
 **Suite:** **448** `examples/testing` `*_test.mko` files · **2026-09-08:**
 C **448 passed, 0 failed** · native **448 passed, 0 failed** (per-file sweep) ·
 `cargo test` **402 passed, 0 failed** · tooling, stdlib, memory-safety, and performance gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.6.29`**; tip train **0.6.29**.
+**Release:** tag **`v0.6.30`**; tip train **0.6.30**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Makori Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -53,7 +53,7 @@ C **448 passed, 0 failed** · native **448 passed, 0 failed** (per-file sweep) �
 | **0.6.3–0.6.18** | Stdlib expansion, Go syntax parity, channel/struct ownership hardening | **Shipped** |
 | **0.6.19–0.6.24** | Scope-exit destructors, deep-clone owned fields, channel RC retain/release | **Shipped** |
 | **0.6.25–0.6.27** | O(1) RC array clone, dest-destroy fixes, struct-return transfer_own leak | **Shipped** |
-| **0.6.28–0.6.29** | Position-aware last-use move, MakoString move at last use, inline-call arg temp fixes | **Tip** |
+| **0.6.28–0.6.30** | Position-aware last-use move, MakoString move at last use, inline-call arg temp fixes | **Tip** |
 | **0.6.x** | Further patches on 0.6 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after the 0.x series |
 
@@ -474,7 +474,7 @@ Avoid stuffing large language features into 0.5.x patches; open **0.6** if neede
 
 ---
 
-## 0.6.29 → 0.7 — Consolidation
+## 0.6.30 → 0.7 — Consolidation
 
 **Theme:** no new features — freeze, specify, verify, audit.
 

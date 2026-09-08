@@ -1,13 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.6.30
 
 - Escape every JSON control byte in shared runtime string serialization,
   including `#[derive(json)]` output and object keys. Tabs and carriage returns
   use `\t`/`\r`, other controls use JSON short escapes or `\u00xx`; UTF-8 is
-  preserved. Check allocation growth and size overflow for expanding input.
-  Coverage: `json_control_escape_test.mko` (all 32 controls, embedded NUL,
-  keys and values, generated bool/string payloads, and repeated expansion).
+  preserved (#54).
+- Mako-level stack traces on panic: `mako_abort` prints function names and
+  source locations instead of just "use lldb".
+- Function tracing: `MAKO_TRACE=1 ./binary` prints entry/exit with source
+  locations. Zero overhead when disabled.
+- Generic `dbg()`: accepts any type (int, float, bool, string), prints
+  `[dbg] file:line: name = value` to stderr, returns value unchanged.
+- Debugger (DAP): codegen temporaries prefixed `__mako_` and filtered from
+  the variables pane — only user variable names visible.
+- Position-aware last-use move: owned locals (including strings) are moved
+  instead of deep-copied when no further use exists after the current
+  statement.
+- Updated `llms.txt` and `llms-full.txt` with ownership model, debugging,
+  key rules for generating correct Mako code, and common patterns.
 
 ## 0.6.29
 
