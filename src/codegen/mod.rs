@@ -2542,7 +2542,7 @@ impl Codegen {
     /// Compile-time length for string and array literals.
     fn expr_is_fresh_own(init: &Expr) -> bool {
         match init {
-            Expr::Array(_) | Expr::Make { .. } | Expr::Convert { .. } => true,
+            Expr::Array(_) | Expr::Make { .. } | Expr::Convert { .. } | Expr::ChanOpen { .. } => true,
             // Struct lits may own string/slice fields — free fields on drop.
             Expr::StructLit { .. } | Expr::StructLitPos { .. } => true,
             // Owned strings: `str_from_cstr` / f-string finish / concat.
@@ -2607,14 +2607,13 @@ impl Codegen {
         // a builtin handing back a freshly allocated handle that `own_free_fn`
         // knows how to release. Without it the scope-exit drop is never
         // emitted and every builder leaks its struct and buffer.
-        matches!(name, "env_keys" | "read_dir" | "str_builder")
+        matches!(name, "env_keys" | "read_dir" | "str_builder" | "str_split")
     }
 
     fn builtin_returns_borrowed_string(name: &str) -> bool {
         matches!(
             name,
             "arena_text"
-                | "buf_to_string"
                 | "bytes_as_str"
                 | "dbg_str"
                 | "diameter_conn_pop"
@@ -2676,6 +2675,7 @@ impl Codegen {
         "buf_read_bytes",
         "buf_read_line",
         "buf_read_str",
+        "buf_to_string",
         "builder_string",
         "bytes_buffer_string",
         "cache_get",
@@ -3405,6 +3405,7 @@ impl Codegen {
         match init {
             Expr::Array(_)
             | Expr::Make { .. }
+            | Expr::ChanOpen { .. }
             | Expr::StructLit { .. }
             | Expr::StructLitPos { .. }
             | Expr::String(_)
@@ -3450,6 +3451,9 @@ impl Codegen {
                             && Self::own_free_fn(c_ty).is_some()
                             && !c_ty.starts_with("MakoEnum_"))
             ),
+            // Method calls (e.g. ch.recv()) that return a leaf owned value
+            // are freshly allocated — safe to reclaim at scope exit.
+            Expr::Method { .. } => Self::own_free_fn(c_ty).is_some(),
             _ => false,
         }
     }
@@ -14071,7 +14075,19 @@ impl Codegen {
                 // Materialize before free — index/expr strings may reference locals
                 // that own_drop frees (free-before-return UAF).
                 let val = self.materialize_return_val(&ty, val);
-                self.transfer_own_on_return(e);
+                // SAFE-003/004: only transfer when the return value can carry
+                // a pointer out of this frame. Scalar returns (int, float,
+                // bool) cannot alias owned locals — those locals are still
+                // ours to free. Without this gate the implicit-return path
+                // leaks every owned local whose name appears anywhere inside
+                // the returned expression (issue #55).
+                let ret_is_scalar = matches!(
+                    ty.as_str(),
+                    "int64_t" | "double" | "bool" | "uint8_t" | "void"
+                );
+                if !ret_is_scalar {
+                    self.transfer_own_on_return(e);
+                }
                 // Stack/view POD slices must be heap-copied before leaving the frame.
                 let val = self.ensure_slice_owned(&ty, val);
                 self.emit_defers();
@@ -14197,6 +14213,22 @@ impl Codegen {
                 let (t, v) = self.emit_expr(other);
                 let tmp = self.fresh("iter");
                 self.line(&format!("{t} {tmp} = {v};"));
+                // Register owned iter temps for scope-exit free (issue #55).
+                // Only for freshly-allocating expressions (Call/Method); Field
+                // and Ident are borrows — freeing the copy would destroy the
+                // source (pointer-sharing via C struct copy).
+                if self.current_arena.is_none()
+                    && Self::own_free_fn(&t).is_some()
+                    && Self::expr_is_fresh_own(other)
+                    && !matches!(other, Expr::Field { .. } | Expr::Index { .. })
+                {
+                    if self.own_drop_live.contains(&v) {
+                        self.note_own_drop_moved(&v);
+                    }
+                    self.note_own_bind_scope(&tmp);
+                    self.register_own_drop(&tmp, &t);
+                    self.scope_drop_safe.insert(tmp.clone());
+                }
                 (t, tmp)
             }
         };
@@ -17794,28 +17826,28 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "str_trim" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg(&args[0]);
+                            let b = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("tr");
                             self.line(&format!("MakoString {tmp} = mako_str_trim({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "str_trim_space" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("trs");
                             self.line(&format!("MakoString {tmp} = mako_str_trim_space({a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "str_trim_left" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg(&args[0]);
+                            let b = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("trl");
                             self.line(&format!("MakoString {tmp} = mako_str_trim_left({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "str_trim_right" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg(&args[0]);
+                            let b = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("trr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_str_trim_right({a}, {b});"
@@ -17823,13 +17855,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "str_to_lower" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("stl");
                             self.line(&format!("MakoString {tmp} = mako_str_to_lower({a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "str_to_upper" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("stu");
                             self.line(&format!("MakoString {tmp} = mako_str_to_upper({a});"));
                             return ("MakoString".into(), tmp);
@@ -17852,8 +17884,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "str_split" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, sep) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg(&args[0]);
+                            let sep = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("ssp");
                             self.line(&format!("MakoStrArray {tmp} = mako_str_split({s}, {sep});"));
                             return ("MakoStrArray".into(), tmp);
@@ -20450,7 +20482,7 @@ impl Codegen {
                         }
                         "buf_write_bytes" | "buf_write_str" => {
                             let (_, b) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg(&args[1]);
                             self.line(&format!("mako_{name}({b}, {s});"));
                             return ("void".into(), "/*void*/".into());
                         }
@@ -20753,14 +20785,14 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "env_get_or" => {
-                            let (_, n) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg(&args[0]);
+                            let d = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("eg");
                             self.line(&format!("MakoString {tmp} = mako_env_get_or({n}, {d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "env_has" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("eh");
                             self.line(&format!("int64_t {tmp} = mako_env_has({n});"));
                             return ("int64_t".into(), tmp);
@@ -20907,20 +20939,20 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "env_get" => {
-                            let (_, k) = self.emit_expr(&args[0]);
+                            let k = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("eg");
                             self.line(&format!("MakoString {tmp} = mako_env_get({k});"));
                             return ("MakoString".into(), tmp);
                         }
                         "env_set" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg(&args[0]);
+                            let v = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("es");
                             self.line(&format!("int64_t {tmp} = mako_env_set({k}, {v});"));
                             return ("int64_t".into(), tmp);
                         }
                         "env_unset" => {
-                            let (_, k) = self.emit_expr(&args[0]);
+                            let k = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("eu");
                             self.line(&format!("int64_t {tmp} = mako_env_unset({k});"));
                             return ("int64_t".into(), tmp);
@@ -21045,13 +21077,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "parse_int" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("pi");
                             self.line(&format!("MakoResultInt {tmp} = mako_parse_int({s});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "parse_float" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("pf");
                             self.line(&format!("double {tmp} = mako_parse_float({s});"));
                             return ("double".into(), tmp);
@@ -35644,7 +35676,7 @@ impl Codegen {
                             } else {
                                 mangle(&resolved)
                             };
-                            // Issue #53: register untracked owned arg temps
+                            // Issue #53/#55: register untracked owned arg temps
                             // produced by inline allocating calls (append, make,
                             // etc.) for scope-exit free. Immediate free is unsafe
                             // because append may return the same backing pointer.
