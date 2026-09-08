@@ -1,19 +1,39 @@
-# Mako
+# Makori (formerly Mako)
 
 > Site: https://mako-lang.com
 > Longer reference: https://mako-lang.com/llms-full.txt
 > Repo: https://github.com/loreste/mako
 
-Version **0.5.7** (alpha). Compiled language, `.mko` sources, native (Cranelift) + C + LLVM backends, no GC.
-Ownership model actively hardened. Safety validated through sanitizer testing
-but not proven complete — `unsafe`, the C runtime, and FFI are outside the model.
+Version **0.6.29** (alpha). Compiled language, `.mko` sources, native (Cranelift) + C + LLVM backends, no GC.
+Ownership model actively hardened — O(1) RC array clone, position-aware
+last-use move, scope-exit destructors. Safety validated under ASan, UBSan,
+TSan with zero errors across 448 test files. `unsafe`, the C runtime, and
+FFI are outside the safety model.
 
 Write new code with: `fn`, `let`, `on Type {}`, `pack` / `pull` / `export`,
 `hold` / `share` / `arena`, `crew` / `kick` / `join` / `fan`, `match`,
 `switch` / `case`. Older dual forms (`func`, `:=`, `import`, `package`) still
 parse; do not prefer them. See docs/IDENTITY.md if you care about the style bar.
 
-Short facts:
+> **Renamed from Mako.** The language is now called **Makori**. The `mako`
+> command still works as a backward-compatible alias, and `.mko` file extension
+> is unchanged.
+
+## Key rules for generating Mako code
+
+1. **No semicolons.** Statements are newline-terminated.
+2. **No parentheses around conditions.** Write `if x > 0 {` not `if (x > 0) {`.
+3. **Braces required.** Even single-line if/for bodies need `{ }`.
+4. **Always qualify imports.** `pull "io"` then `io.read_file(...)`, never bare `read_file`.
+5. **Structs are value types.** `let a = b` copies. `mut` params pass by pointer.
+6. **Owned fields are freed at scope exit.** Strings, arrays, maps in structs are
+   automatically freed. Don't manual-free.
+7. **`append` returns a new header.** Always `xs = append(xs, v)`.
+8. **Errors must be handled.** Unused `Result` is a compile error. Use `?` or `match`.
+9. **No null.** Use `Option[T]` — `Some(v)` or `None`.
+10. **Test functions:** `fn TestFoo() { assert(...) }` in `*_test.mko` files.
+
+## Short facts
 
 - Generics: `fn id[T](x: T) -> T`, `struct Pair[T]`, `enum Box[T]`,
   bounds `fn f[T: Iface](x: T)` — all monomorphized. Write `Pair[int] { … }`.
@@ -56,16 +76,65 @@ Short facts:
 - Const fn: `const fn f(n: int) -> int` with match/while/for/break/continue/strings
 - First-class functions: `fn` values, closures capture POD + string + struct by value
 - Iterator protocol: struct with `fn next(self) -> Option[T]` usable in for-range
-- Shutdown helpers, tracing, leak checks, crash reporting in the runtime
 - Release: `-O3 -flto`. WASM: `wasm32-wasip1`
 - Stdlib: HTTP (incl. HTTP/2), TLS, SQL, crypto, regex, UUID/ULID, channels,
   SIP signaling, SMTP, templates, domain storage (BTree/LSM/WAL/Bloom),
-  Go-equivalent application packs (see docs/STDLIB.md) — not unsafe/go/debug/*
+  Go-equivalent application packs (see docs/STDLIB.md)
 - Speed: wyhash maps, zero-copy string comparisons, compile-time constant folding,
   stack-based f-strings, condvar channel select, atomic HTTP conn tracking
 
 HTTP/2 note: DATA frames larger than 16384 are split automatically. Empty
 string `""` is a singleton — do not raw-free it.
+
+## Debugging & tracing
+
+- `dbg(x)` — works on any type (int, float, bool, string). Prints
+  `[dbg] file.mko:42: x = value` to stderr and returns the value unchanged.
+  Use inline: `let y = dbg(compute())`.
+- `dbg_str(s)` — string-specific variant (still works).
+- `MAKO_TRACE=1 ./binary` — prints function entry/exit with source locations.
+  Zero overhead when not enabled.
+- Panics print a Mako-level stack trace with function names and source locations.
+- `mako debug file.mko` — interactive lldb session with Mako data formatters.
+- `mako dap` — DAP adapter for VS Code. Debugger shows user variable names
+  only (codegen temporaries are filtered).
+- `mako check --json=v1` — structured JSON diagnostics for editor integration.
+- `--sanitize address|thread` — ASan/TSan builds.
+- `stack_trace()` — print current call stack at any point.
+- `error_chain(err)` — print error with full source-location trace.
+
+## Ownership model (0.6.29)
+
+Mako uses compile-time ownership tracking with no garbage collector:
+
+- **Owned values** (strings, arrays, maps, structs with owned fields) are freed
+  at scope exit automatically.
+- **`mut` params** are passed by pointer. The caller retains ownership.
+- **Last-use move**: when an owned local is used for the last time, the compiler
+  moves it (zero-copy) instead of cloning. This includes strings.
+- **O(1) array clone**: `[]struct` clone is an RC retain, not a deep copy.
+  Append COWs when the buffer is shared.
+- **Scope-exit destructors** run for all owned locals, including struct fields
+  and call-result temporaries.
+- **No use-after-free**: the codegen tracks liveness and prevents moved values
+  from being read.
+
+Common patterns:
+```mko
+// Struct with owned fields — freed automatically
+let db = Database { tables: make([]Table, 0, 1), name: "mydb" }
+
+// Return transfers ownership to caller
+fn make_db() -> Database {
+    let db = Database { tables: make([]Table, 0, 1), name: "new" }
+    return db  // moved, not copied
+}
+
+// mut param: caller keeps ownership, callee borrows via pointer
+fn add_table(mut db: Database, t: Table) {
+    db.tables = append(db.tables, t)
+}
+```
 
 ## Install
 
@@ -88,7 +157,7 @@ mako build main.mko
 
 ```mko
 fn main() {
-    print("hello from mako")
+    print("hello from makori")
     print(fib(10))
 }
 
@@ -100,64 +169,109 @@ fn fib(n: int) -> int {
 }
 ```
 
-## Example style
+## Common patterns
 
+### HTTP server
 ```mko
-pull "strings"
+pull "net/http"
 
-export struct Point {
-    x: int
-    y: int
+fn main() {
+    let mux = http.new_mux()
+    mux.handle("/", fn(w: http.ResponseWriter, r: http.Request) {
+        w.write("hello world")
+    })
+    http.listen_and_serve(":8080", mux)
 }
+```
 
-on Point {
-    fn distance(self) -> int {
-        return self.x + self.y
+### JSON parse + serialize
+```mko
+pull "encoding/json"
+
+struct User { name: string  age: int }
+
+fn main() {
+    let u = json.unmarshal[User]("{\"name\":\"alice\",\"age\":30}")
+    print(u.name)
+    let s = json.marshal(u)
+    print(s)
+}
+```
+
+### Concurrency
+```mko
+fn main() {
+    let ch = make(chan[int], 10)
+    crew t {
+        let job = t.kick(fn() -> int {
+            return expensive_work()
+        })
+        ch.send(42)
+        let result = job.join()
+        print(result)
     }
+    let val = ch.recv()
+    print(val)
 }
+```
 
-fn divmod(a: int, b: int) -> (int, int) {
-    return (a / b, a % b)
+### Error handling
+```mko
+fn parse_port(s: string) -> Result[int, string] {
+    let n = str_to_int(s)?
+    if n < 1 || n > 65535 {
+        return Err("port out of range")
+    }
+    return Ok(n)
 }
 
 fn main() {
-    let p = Point { x: 3, y: 4 }
-    print(p.distance())
-
-    let q, r = divmod(17, 5)
-
-    let xs = [1, 2, 3, 4]
-    let ys = fan(xs, fn(x) { x * x })
-
-    crew t {
-        let job = t.kick(work())
-        print(job.join())
+    match parse_port("8080") {
+        Ok(n) => print(n)
+        Err(e) => print(f"error: {e}")
     }
 }
 ```
 
-## Core
+### Struct methods
+```mko
+export struct Point { x: int  y: int }
 
-- Types: int, int8, int32, int64, uint64, float, bool, string, byte, void
-- Composite: []T, map[K]V (see maps above), chan[T], Option[T], Result[T, E], (T, U)
-- Decl: fn, struct, enum, actor, interface, const, export
-- Control: if/else, if-expr, if-init, while, for/in/range, switch, match, defer
-- Ownership: hold, share, arena
-- Concurrency: crew, kick, join, go, fan, channels, select
-- Errors: Result, Ok/Err, Option, ?, match
-- Units: pack, pull, export (always qualify: pkg.fn / pkg.Type)
-- Equality: `==`/`!=` on strings, structs, enums (structural)
-- Tests: `fn TestFoo() { assert_eq(1, 1) }` in `*_test.mko`
+on Point {
+    fn distance(self) -> float {
+        return sqrt(float(self.x * self.x + self.y * self.y))
+    }
+
+    fn translate(mut self, dx: int, dy: int) {
+        self.x += dx
+        self.y += dy
+    }
+}
+```
+
+### Tests
+```mko
+fn TestAddition() {
+    assert_eq(2 + 2, 4)
+}
+
+fn TestStringConcat() {
+    let s = "hello" + " " + "world"
+    assert(s == "hello world")
+}
+```
 
 ## Commands
 
 ```bash
-mako build file.mko
-mako build --release file.mko
-mako run file.mko
-mako test path/
-mako fmt file.mko -w
-mako check file.mko
+mako build file.mko              # debug build
+mako build --release file.mko    # optimized (-O3 -flto)
+mako run file.mko                # build + run
+mako test path/                  # run test functions
+mako fmt file.mko -w             # format in place
+mako check file.mko              # typecheck only
+mako debug file.mko              # lldb session
+mako dap                         # DAP adapter (editors)
 mako build --target wasm32-wasip1 file.mko -o out.wasm
 ```
 
