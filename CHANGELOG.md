@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Escape every JSON control byte in shared runtime string serialization,
+  including `#[derive(json)]` output and object keys. Tabs and carriage returns
+  use `\t`/`\r`, other controls use JSON short escapes or `\u00xx`; UTF-8 is
+  preserved. Check allocation growth and size overflow for expanding input.
+  Coverage: `json_control_escape_test.mko` (all 32 controls, embedded NUL,
+  keys and values, generated bool/string payloads, and repeated expansion).
+
 ## 0.6.29
 
 - COW string array (`MakoStrArray`): clone is O(1) RC retain; `set` copies the

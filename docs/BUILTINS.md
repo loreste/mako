@@ -520,6 +520,12 @@ separate surface:
 
 ## 14. JSON
 
+JSON string serialization (including `#[derive(json)]` and object keys)
+escapes quotes, backslashes, and every control byte U+0000–U+001F. Standard
+short escapes are used for backspace, tab, newline, form feed, and carriage
+return; the remaining controls use `\u00xx`. Embedded NUL bytes are escaped,
+not treated as string terminators. UTF-8 bytes are preserved.
+
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `json_object` | `json_object(key: string, value: string) -> string` | Create a JSON object with one key-value pair |
