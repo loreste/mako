@@ -362,8 +362,7 @@ impl Codegen {
             self.emit_line(format_args!("MakoString {cap} = {v};"));
             self.note_own_bind_scope(&cap);
             self.register_own_drop(&cap, "MakoString");
-            // ponytail: no scope_drop_safe — double-free when pop_share_scope
-            // fires both first-pass (scope_drop_safe) and second-pass (own_drop).
+            self.scope_drop_safe.insert(cap.clone());
             return cap;
         }
         v
@@ -3478,6 +3477,12 @@ impl Codegen {
             // Method calls (e.g. ch.recv()) that return a leaf owned value
             // are freshly allocated — safe to reclaim at scope exit.
             Expr::Method { .. } => Self::own_free_fn(c_ty).is_some(),
+            // Transient call/method result field extraction produces an owned value.
+            Expr::Field { base, .. } => {
+                matches!(base.as_ref(), Expr::Call { .. } | Expr::Method { .. })
+                    && (Self::own_free_fn(c_ty).is_some()
+                        || !self.struct_own_field_frees(c_ty).is_empty())
+            }
             _ => false,
         }
     }
@@ -4133,31 +4138,34 @@ impl Codegen {
     }
 
     /// SAFE-006: free owns/shares from loop-body scopes before break/continue.
+    /// Does **not** clear tracking — the non-break path still frees at scope exit.
+    /// Only the break/continue C branch executes these frees.
     fn emit_loop_exit_cleanup(&mut self) {
         let base = self.loop_drop_bases.last().copied().unwrap_or(0);
         // Free owns in scopes from base..end (inner first).
         for i in (base..self.own_drop_scopes.len()).rev() {
             let entries = self.own_drop_scopes[i].clone();
-            self.emit_own_drops_for_scope(entries);
-            self.own_drop_scopes[i].clear();
+            for (name, free_fn) in entries.into_iter().rev() {
+                if self.own_drop_live.contains(&name) {
+                    self.emit_free_one(&name, &free_fn);
+                }
+            }
         }
         for i in (base..self.fn_env_scopes.len()).rev() {
             let names = self.fn_env_scopes[i].clone();
             for name in names.into_iter().rev() {
-                if self.fn_env_live.remove(&name) {
+                if self.fn_env_live.contains(&name) {
                     self.emit_line(format_args!("mako_fn_drop(&{name});"));
                 }
             }
-            self.fn_env_scopes[i].clear();
         }
         for i in (base..self.share_scopes.len()).rev() {
             let names = self.share_scopes[i].clone();
             for name in names.into_iter().rev() {
-                if self.share_live.remove(&name) {
+                if self.share_live.contains(&name) {
                     self.emit_line(format_args!("mako_share_drop({name});"));
                 }
             }
-            self.share_scopes[i].clear();
         }
     }
 
@@ -4576,8 +4584,7 @@ impl Codegen {
         let old = self.fresh("old_own");
         self.emit_line(format_args!("{cty} {old} = {dest};"));
         self.emit_line(format_args!("{dest} = {val};"));
-        let cond = Self::owning_field_replaced_cond(cty, &old, dest);
-        self.emit_line(format_args!("if ({cond}) {{ {free_fn}({old}); }}"));
+        self.emit_reassign_free(cty, &old, dest, free_fn);
     }
 
     /// Emit free of one Own local (respects conditional `__own` freer flag).
@@ -5076,6 +5083,7 @@ impl Codegen {
         for (expr, val) in elems.iter().zip(&vals) {
             if Self::expr_is_owned_print_temp(expr) {
                 self.emit_line(format_args!("mako_str_free({val});"));
+                self.note_own_drop_moved(val);
             }
         }
         ("MakoStrArray".into(), tmp)
@@ -16787,8 +16795,14 @@ impl Codegen {
                         self.emit_line(format_args!("MakoString {rtmp} = {rv};"));
                         self.emit_line(format_args!("MakoString {tmp} = {fn_name}({lv}, {rtmp});"));
                         self.emit_line(format_args!("mako_str_free({rtmp});"));
+                        if self.own_drop_live.contains(&rv) {
+                            self.note_own_drop_moved(&rv);
+                        }
                     } else {
                         self.emit_line(format_args!("MakoString {tmp} = {fn_name}({lv}, {rv});"));
+                    }
+                    if left_is_fresh && self.own_drop_live.contains(&lv) {
+                        self.note_own_drop_moved(&lv);
                     }
                     return ("MakoString".into(), tmp);
                 }
@@ -16967,6 +16981,7 @@ impl Codegen {
                                     self.emit_line(format_args!("mako_print_str({v});"));
                                     if Self::expr_is_owned_print_temp(&args[0]) {
                                         self.emit_line(format_args!("mako_str_free({v});"));
+                                        self.note_own_drop_moved(&v);
                                     }
                                 }
                                 "int64_t" | "/*auto*/" => {
@@ -18333,6 +18348,8 @@ impl Codegen {
                             // Take always consumes: success → channel owns; must not free local.
                             if let Expr::Ident(n) = &args[1] {
                                 self.note_own_drop_moved(&mangle(n));
+                            } else if self.own_drop_live.contains(&value) {
+                                self.note_own_drop_moved(&value);
                             }
                             return (
                                 "int64_t".into(),
@@ -18345,6 +18362,8 @@ impl Codegen {
                             // Consumes on success or frees on failure — never double-free local.
                             if let Expr::Ident(n) = &args[1] {
                                 self.note_own_drop_moved(&mangle(n));
+                            } else if self.own_drop_live.contains(&value) {
+                                self.note_own_drop_moved(&value);
                             }
                             return (
                                 "int64_t".into(),
@@ -25547,6 +25566,9 @@ impl Codegen {
                             ));
                             if free_q {
                                 self.line(&format!("mako_str_free({qtmp});"));
+                                if self.own_drop_live.contains(&q) {
+                                    self.note_own_drop_moved(&q);
+                                }
                             }
                             return ("MakoString".into(), tmp);
                         }
@@ -35406,7 +35428,17 @@ impl Codegen {
                         "append" => {
                             let (sty, s) = self.emit_expr(&args[0]);
                             let (vty, mut v) = if sty == "MakoStrArray" {
-                                ("MakoString".into(), self.emit_str_arg(&args[1]))
+                                let sv = self.emit_str_arg(&args[1]);
+                                // Issue #55: indexed/field string borrows share
+                                // the pointer with the source array. Clone so
+                                // freeing the source doesn't invalidate this
+                                // element in the destination array.
+                                let sv = if matches!(&args[1], Expr::Index { .. } | Expr::Field { .. }) {
+                                    format!("mako_str_clone({sv})")
+                                } else {
+                                    sv
+                                };
+                                ("MakoString".into(), sv)
                             } else {
                                 let (vty, v) = self.emit_expr(&args[1]);
                                 Self::coerce_user_struct_value(&vty, v)
@@ -35436,6 +35468,7 @@ impl Codegen {
                                 }
                                 if Self::expr_is_owned_print_temp(&args[1]) {
                                     self.emit_line(format_args!("mako_str_free({v});"));
+                                    self.note_own_drop_moved(&v);
                                 }
                                 return ("MakoStrArray".into(), tmp);
                             }
@@ -38625,6 +38658,54 @@ impl Codegen {
                 } else {
                     "."
                 };
+                // Issue #55: transient call-result structs with owned fields.
+                // Materialize the struct, free non-extracted fields, zero the
+                // extracted field so the caller owns it without double-free.
+                let is_transient_struct = self.current_arena.is_none()
+                    && matches!(base.as_ref(), Expr::Call { .. } | Expr::Method { .. })
+                    && !self.struct_own_field_frees(&bty).is_empty();
+                if is_transient_struct {
+                    let frees = self.struct_own_field_frees(&bty);
+                    let fty_lookup = self
+                        .structs
+                        .get(deref_bty)
+                        .or_else(|| self.structs.get(&bty))
+                        .or_else(|| {
+                            self.structs
+                                .values()
+                                .find(|s| s.c_name == deref_bty || s.c_name == bty)
+                        });
+                    let fty = fty_lookup
+                        .and_then(|info| {
+                            info.fields
+                                .iter()
+                                .find(|(n, _)| n == field)
+                                .map(|(_, t)| t.clone())
+                        })
+                        .unwrap_or_else(|| "int64_t".into());
+                    // Materialize into a named temp so fields are addressable.
+                    let stmp = self.fresh("crf");
+                    self.emit_line(format_args!("{bty} {stmp} = {b};"));
+                    // Move the target field out.
+                    let fval = self.fresh("cfv");
+                    self.emit_line(format_args!("{fty} {fval} = {stmp}.{field};"));
+                    // Zero the extracted field so subsequent free skips it.
+                    self.emit_line(format_args!(
+                        "memset(&{stmp}.{field}, 0, sizeof({stmp}.{field}));"
+                    ));
+                    // Free the remaining owned fields of the transient struct.
+                    for (path, ff) in &frees {
+                        self.emit_line(format_args!("{ff}({stmp}.{path});"));
+                    }
+                    if Self::own_free_fn(&fty).is_some()
+                        || !self.struct_own_field_frees(&fty).is_empty()
+                    {
+                        self.note_own_bind_scope(&fval);
+                        self.register_own_drop(&fval, &fty);
+                        self.scope_drop_safe.insert(fval.clone());
+                    }
+                    return (fty, fval);
+                }
                 if let Some(info) = self
                     .structs
                     .get(deref_bty)
