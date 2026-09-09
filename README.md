@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.30).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.31).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -162,6 +162,14 @@ message inspection, site history, reports, alerts, and traffic metrics.
 - Package security model is not independently audited
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
+
+## New in 0.6.31
+
+- **Loop-exit ownership cleanup:** `emit_loop_exit_cleanup` along `break` and `continue` branches no longer mutates or clears compiler tracking scopes. Loop body fallthrough preserves scope drop tracking for per-iteration temporaries (e.g. UDP receive buffers and per-request strings, issue #56).
+- **Temporary string argument tracking & double-free prevention:** Restored `scope_drop_safe` for owned string temporaries in `emit_str_arg` while disarming immediate-free drops in `append`, string array literals, `print`, channel send-take operations, and binary string concatenation (issue #55).
+- **Transient struct field extraction:** Added proper scope drop tracking and cleanup when extracting owned fields from temporary call/method structs (e.g. `call().field`), freeing non-extracted fields and transferring ownership of the extracted field.
+- **Nested field array append reassign:** Fixed `emit_assign_owned_value` to release only the old slice backing buffer without deep-freeing string elements live in the newly grown slice.
+- **JSON control byte escaping:** Fixed shared runtime string serialization to escape every JSON control byte in `#[derive(json)]` output and object keys (issue #54).
 
 ## New in 0.6.30
 
