@@ -362,7 +362,8 @@ impl Codegen {
             self.emit_line(format_args!("MakoString {cap} = {v};"));
             self.note_own_bind_scope(&cap);
             self.register_own_drop(&cap, "MakoString");
-            self.scope_drop_safe.insert(cap.clone());
+            // ponytail: no scope_drop_safe — double-free when pop_share_scope
+            // fires both first-pass (scope_drop_safe) and second-pass (own_drop).
             return cap;
         }
         v
