@@ -4787,6 +4787,8 @@ impl<'a> FunctionLowerer<'a> {
         });
 
         // Chain: if which == i → arm i else …
+        let saved_locals = self.locals.clone();
+        let saved_owned = self.heap_owned.clone();
         let done = self.new_block();
         let mut next_check = self.current;
         for (i, (_, body)) in arms.iter().enumerate() {
@@ -4808,11 +4810,11 @@ impl<'a> FunctionLowerer<'a> {
                 else_block: else_bb,
             })?;
             self.current = arm_bb;
-            let owned_before = self.heap_owned.clone();
-            let locals_before = self.locals.clone();
+            self.locals = saved_locals.clone();
+            self.heap_owned = saved_owned.clone();
             self.lower_block(body)?;
             if self.block().terminator.is_none() {
-                self.drop_loop_body_scope(&owned_before, &locals_before);
+                self.drop_loop_body_scope(&saved_owned, &saved_locals);
                 self.terminate(Terminator::Jump(done))?;
             }
             next_check = else_bb;
@@ -4820,17 +4822,19 @@ impl<'a> FunctionLowerer<'a> {
         // Default / timeout (which == -1)
         self.current = next_check;
         if let Some(body) = default_arm {
-            let owned_before = self.heap_owned.clone();
-            let locals_before = self.locals.clone();
+            self.locals = saved_locals.clone();
+            self.heap_owned = saved_owned.clone();
             self.lower_block(body)?;
             if self.block().terminator.is_none() {
-                self.drop_loop_body_scope(&owned_before, &locals_before);
+                self.drop_loop_body_scope(&saved_owned, &saved_locals);
                 self.terminate(Terminator::Jump(done))?;
             }
         } else if self.block().terminator.is_none() {
             self.terminate(Terminator::Jump(done))?;
         }
         self.current = done;
+        self.locals = saved_locals;
+        self.heap_owned = saved_owned;
         Ok(())
     }
 
@@ -6208,14 +6212,25 @@ impl<'a> FunctionLowerer<'a> {
             });
             Some(ret_v)
         };
-        // The packed struct is the task's owned clone. Drop it after the
-        // callee returns (the callee borrows and must not free it).
+        // The packed args are the task's owned clones. Drop them after the
+        // callee returns (the callee borrows and must not free them).
         for (arg, pty) in call_args.iter().zip(params.iter()) {
-            if let Type::Struct(id) = *pty {
-                emit(Inst::DropStruct {
-                    value: *arg,
-                    struct_id: id,
-                });
+            match *pty {
+                Type::Struct(id) => {
+                    emit(Inst::DropStruct {
+                        value: *arg,
+                        struct_id: id,
+                    });
+                }
+                Type::ChanI | Type::ChanS | Type::ChanF | Type::ChanP(_) => {
+                    emit(Inst::Call {
+                        out: None,
+                        function: "mako_native_chan_drop".into(),
+                        args: vec![*arg],
+                        ret: None,
+                    });
+                }
+                _ => {}
             }
         }
         let ret_raw = match (ret, ret_v) {

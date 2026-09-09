@@ -5183,13 +5183,26 @@ static inline int mako_trace_active(void) {
     return mako_trace_flag;
 }
 
+static inline unsigned long mako_trace_tid(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    return (unsigned long)GetCurrentThreadId();
+#elif defined(MAKO_WASI) || defined(__wasi__)
+    return 1;
+#else
+    return (unsigned long)(uintptr_t)pthread_self();
+#endif
+}
+
 static inline void mako_trace_json_emit(const char *name, const char *cat, int64_t start_ns, int64_t dur_ns) {
+#if defined(MAKO_WASI) || defined(__wasi__)
+    (void)name; (void)cat; (void)start_ns; (void)dur_ns;
+#else
     if (MAKO_LIKELY(!mako_trace_mode_json || !mako_trace_json_file)) return;
     pthread_mutex_lock(&mako_trace_json_mu);
     if (mako_trace_json_file) {
         double ts_us = (double)(start_ns - mako_trace_json_base_ns) / 1000.0;
         double dur_us = (double)dur_ns / 1000.0;
-        unsigned long tid = (unsigned long)(uintptr_t)pthread_self();
+        unsigned long tid = mako_trace_tid();
         fprintf(mako_trace_json_file, "%s{\"name\":\"%s\",\"cat\":\"%s\",\"ph\":\"X\",\"ts\":%.2f,\"dur\":%.2f,\"pid\":1,\"tid\":%lu}",
                 mako_trace_json_first ? "" : ",\n",
                 name ? name : "fn", cat ? cat : "fn", ts_us, dur_us, tid);
@@ -5197,6 +5210,7 @@ static inline void mako_trace_json_emit(const char *name, const char *cat, int64
         fflush(mako_trace_json_file);
     }
     pthread_mutex_unlock(&mako_trace_json_mu);
+#endif
 }
 
 /* ---- Mako call stack (for panic traces + MAKO_TRACE output) ----
