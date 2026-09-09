@@ -5131,11 +5131,14 @@ static int mako_trace_mode_tree = 0;
 static int mako_trace_mode_json = 0;
 static int mako_trace_mode_chan = 0;
 static FILE *mako_trace_json_file = NULL;
+#if !defined(MAKO_WASI) && !defined(__wasi__)
 static pthread_mutex_t mako_trace_json_mu = MAKO_MUTEX_INIT;
+#endif
 static int64_t mako_trace_json_base_ns = 0;
 static bool mako_trace_json_first = true;
 
 static void mako_trace_json_finish(void) {
+#if !defined(MAKO_WASI) && !defined(__wasi__)
     pthread_mutex_lock(&mako_trace_json_mu);
     if (mako_trace_json_file) {
         fprintf(mako_trace_json_file, "\n]\n");
@@ -5144,6 +5147,7 @@ static void mako_trace_json_finish(void) {
         mako_trace_json_file = NULL;
     }
     pthread_mutex_unlock(&mako_trace_json_mu);
+#endif
 }
 
 static inline void mako_trace_init_modes(void) {
@@ -5161,6 +5165,7 @@ static inline void mako_trace_init_modes(void) {
     if ((c && c[0] == '1') || (cc && cc[0] == '1')) {
         mako_trace_mode_chan = 1;
     }
+#if !defined(MAKO_WASI) && !defined(__wasi__)
     if (j && j[0]) {
         mako_trace_mode_json = 1;
         pthread_mutex_lock(&mako_trace_json_mu);
@@ -5174,6 +5179,9 @@ static inline void mako_trace_init_modes(void) {
         }
         pthread_mutex_unlock(&mako_trace_json_mu);
     }
+#else
+    (void)j;
+#endif
 }
 
 static inline int mako_trace_active(void) {
