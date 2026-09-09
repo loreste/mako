@@ -368,6 +368,29 @@ impl Codegen {
         v
     }
 
+    /// Like `emit_str_arg` but also captures Slice and Method results.
+    /// Safe only for builtins that borrow (read) the string — never for
+    /// `append` or anything that stores the pointer.
+    fn emit_str_arg_borrow(&mut self, expr: &Expr) -> String {
+        let v = self.emit_str_arg(expr);
+        // emit_str_arg already captures Call/Binary/StringInterp.
+        // Add Slice and Method for borrow-only call sites (issue #55).
+        if !self.own_drop_live.contains(&v)
+            && matches!(
+                expr,
+                Expr::Slice { .. } | Expr::Method { .. }
+            )
+        {
+            let cap = self.fresh("sb");
+            self.emit_line(format_args!("MakoString {cap} = {v};"));
+            self.note_own_bind_scope(&cap);
+            self.register_own_drop(&cap, "MakoString");
+            self.scope_drop_safe.insert(cap.clone());
+            return cap;
+        }
+        v
+    }
+
     /// True when any scalar-key map of this value monomorph is used.
     fn want_scalar_val(&self, val_tag: &str) -> bool {
         self.want_map("i", val_tag)
@@ -17473,8 +17496,8 @@ impl Codegen {
                             return ("void".into(), "/*void*/".into());
                         }
                         "assert_eq_str" => {
-                            let a = self.emit_str_arg(&args[0]);
-                            let b = self.emit_str_arg(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             self.line(&format!("mako_assert_eq_str({a}, {b});"));
                             return ("void".into(), "/*void*/".into());
                         }
@@ -39913,12 +39936,19 @@ impl Codegen {
                 }
             } else if ty.contains('*') {
                 unpack.push_str(&format!("{ty} {local} = ({ty})a[{i}];\n"));
-                call_args.push(local);
+                call_args.push(local.clone());
+                // Issue #55: kick clones RC handles; drop the clone after call.
+                if let Some(ff) = Self::kick_rc_clone_fn(ty) {
+                    let free_fn = ff.replace("_clone", "_free");
+                    cleanup.push_str(&format!("{free_fn}({local});\n"));
+                }
             } else {
                 unpack.push_str(&format!("{ty} {local} = ({ty})a[{i}];\n"));
                 call_args.push(local);
             }
         }
+        // Free the arg-pack array once all values are unpacked into locals.
+        unpack.push_str("free(a);\n");
         let ret_ty = self
             .fn_rets
             .get(fname)
