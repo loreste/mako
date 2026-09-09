@@ -5056,6 +5056,10 @@ static inline void mako_fn_exit(void) {
     }
 }
 
+#if defined(NDEBUG) && !defined(MAKO_ENABLE_TRACE)
+#define mako_trace_enter(fn_name, file, line) ((void)0)
+#define mako_trace_exit(fn_name) ((void)0)
+#else
 static inline void mako_trace_enter(const char *fn_name, const char *file, int line) {
     mako_fn_enter(fn_name, file, line);
     if (MAKO_UNLIKELY(mako_trace_active())) {
@@ -5077,6 +5081,7 @@ static inline void mako_trace_exit(const char *fn_name) {
         }
     }
 }
+#endif
 
 static inline void mako_abort(const char *msg) {
     fprintf(stderr, "\nerror: %s\n", msg ? msg : "runtime abort");

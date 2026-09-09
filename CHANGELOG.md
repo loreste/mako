@@ -23,6 +23,9 @@
 - Disarm temporaries in binary string concat (`+` / `mako_str_concat_own`) and
   GraphQL query resolution (`graphql_schema_resolve`), preventing double-free
   when temporary values are both freed/reallocated immediately and tracked for scope drop.
+- Zero-cost function tracing in release builds: `mako_trace_enter` and `mako_trace_exit`
+  are no-ops under `NDEBUG` unless `MAKO_ENABLE_TRACE` is set, eliminating call-stack
+  and TLS check overhead on hot paths and satisfying the 1.5× performance contract.
 
 ## 0.6.30
 
