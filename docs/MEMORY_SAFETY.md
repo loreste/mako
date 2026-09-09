@@ -5,6 +5,12 @@ retains responsibility for releasing the old header. This prevents detached
 arrays from becoming duplicate owners of the same string allocation on macOS and
 Linux. Nested `arr[i].field = append(arr[i].field, v)` dest-destroys that old
 header (issue #53); skipping it leaked one full column copy per FayDB DML.
+Loop-exit cleanup (`emit_loop_exit_cleanup`) for `break` and `continue` emits
+frees for live variables along the exit branch without clearing compiler tracking
+scopes, ensuring loop body fallthrough preserves scope drop tracking for
+per-iteration temporaries (e.g. UDP receive buffers, issue #56). Temporary
+string arguments passed to builtins are tracked for scope-exit cleanup with
+immediate frees disarmed on moves and dest-destroys, eliminating double-frees (issue #55).
 
 There is no garbage collector. Memory frees when ownership says so — scope
 exit, move, drop — or when you use explicit share (RC) or arenas. Not when a
@@ -74,7 +80,8 @@ storage. The ordinary unique-write path pays no refcount or locking cost.
 |-------|----------|
 | **Typecheck / NLL** | Use-after-move, kick Send, capture rules |
 | **Codegen drops** | Free on all exits (SAFE-006 matrix) |
-| **Loop scope cleanup** | All loop variants (string range, channel range, map range, iterator) release owned temporaries per iteration — not just integer range, slice, while, and cfor (SAFE-042) |
+| **Loop scope cleanup** | All loop variants (string range, channel range, map range, iterator) release owned temporaries per iteration — not just integer range, slice, while, and cfor (SAFE-042). Loop-exit cleanup for `break`/`continue` preserves compiler tracking scopes for fallthrough statements, preventing leaks when a break is not taken (issue #56). |
+| **Argument temporaries** | Builtin argument temporaries (`scope_drop_safe`) are tracked for scope-exit cleanup with immediate frees disarmed on moves and dest-destroys, eliminating double-frees and leaks (issue #55). |
 | **Append COW release** | `self_consuming_call` path releases old slice backing when append grows, preventing refcount leaks that cause `mako_rc_shared` to always return true and force exponential capacity growth (SAFE-042) |
 | **JSON extractor safety** | Fixed use-after-free in `json_get_float`/`json_get_bool` where `strlen(pat)` was called after `free(pat)` |
 | **PQC resource pairing** | Every `EVP_PKEY_CTX_new`/`EVP_PKEY`/`BIO_new`/`X509_new`/`EVP_MD_CTX_new` in `mako_pqc.h` is paired with its free on all paths (success and error) |

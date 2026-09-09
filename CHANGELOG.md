@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.31
+
+- Fix conditional loop exit ownership drop: `emit_loop_exit_cleanup` along `break`
+  and `continue` branches no longer mutates or clears compiler tracking scopes
+  (`own_drop_scopes`, `fn_env_scopes`, `share_scopes`). Preserves tracking for
+  subsequent statements in the loop body so per-iteration temporaries (such as
+  UDP receive buffers and string allocations) are freed on non-taken breaks (issue #56).
+- Fix temporary string argument leaks in builtin calls: restore `scope_drop_safe`
+  registration in `emit_str_arg` while disarming immediate-free drops in
+  `MakoStrArray` `append`, `emit_str_array_lit`, `print`, and channel send-take
+  operations (`chan_str_send_take`/`chan_str_try_send_take`) to eliminate double-free
+  hazards (issue #55).
+- Fix transient struct field extraction: register extracted owned struct fields
+  for scope drop when evaluating transient struct expressions (e.g. `call().field`),
+  preventing memory leaks when chaining field accesses or extracting owned fields
+  (issue #55).
+- Fix nested struct field array append reassign: `emit_assign_owned_value` routes
+  through `emit_reassign_free`, releasing only the old slice backing buffer
+  without double-freeing string elements that were moved into the newly grown slice
+  during `append`.
+- Disarm temporaries in binary string concat (`+` / `mako_str_concat_own`) and
+  GraphQL query resolution (`graphql_schema_resolve`), preventing double-free
+  when temporary values are both freed/reallocated immediately and tracked for scope drop.
+
 ## 0.6.30
 
 - Escape every JSON control byte in shared runtime string serialization,

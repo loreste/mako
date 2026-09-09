@@ -1,0 +1,43 @@
+fn TestLoopBreakLeak() {
+    let mut i = 0
+    while i < 10 {
+        let s = string(i)
+        if len(s) == 0 {
+            break
+        }
+        i = i + 1
+    }
+}
+
+fn TestLoopBreakTaken() {
+    let mut i = 0
+    while i < 10 {
+        let s = string(i)
+        if i == 5 {
+            break
+        }
+        i = i + 1
+    }
+    assert_eq(i, 5)
+}
+
+fn TestLoopContinueTaken() {
+    let mut i = 0
+    let mut sum = 0
+    while i < 10 {
+        let s = string(i)
+        i = i + 1
+        if i % 2 == 0 {
+            continue
+        }
+        sum = sum + len(s)
+    }
+    assert(sum > 0)
+}
+
+fn main() {
+    TestLoopBreakLeak()
+    TestLoopBreakTaken()
+    TestLoopContinueTaken()
+    print("ok")
+}

@@ -1,0 +1,128 @@
+// Issue #53: extract-modify-writeback on struct with owned fields.
+// Matches FayDB column_append → column_share → indexed write-back.
+
+struct Column {
+    name: string
+    type_name: string
+    ref_table: string
+    default_val: string
+    values: []string
+    patch_rows: []int
+    n: int
+}
+
+struct Table {
+    columns: []Column
+    xmin: []int
+    rows: int
+}
+
+struct Database {
+    tables: []Table
+}
+
+struct ExecResult {
+    db: Database
+    text: string
+}
+
+fn column_share(col: Column, values: []string, n: int) -> Column {
+    return Column{
+        name: col.name,
+        type_name: col.type_name,
+        ref_table: col.ref_table,
+        default_val: col.default_val,
+        values: values,
+        patch_rows: col.patch_rows,
+        n: n,
+    }
+}
+
+fn column_append_val(col: Column, v: string) -> Column {
+    let n = col.n + 1
+    return column_share(col, append(col.values, v), n)
+}
+
+fn db_insert(mut db: Database, tidx: int, val: string, xid: int) -> ExecResult {
+    let ncols = len(db.tables[tidx].columns)
+    let mut ci = 0
+    while ci < ncols {
+        let mut col = db.tables[tidx].columns[ci]
+        col = column_append_val(col, val)
+        db.tables[tidx].columns[ci] = col
+        ci = ci + 1
+    }
+    db.tables[tidx].xmin = append(db.tables[tidx].xmin, xid)
+    db.tables[tidx].rows = db.tables[tidx].rows + 1
+    return ExecResult{db: db, text: "INSERT 1"}
+}
+
+fn TestExtractModifyWritebackNoLeak() {
+    let mut db = Database{tables: make([]Table, 0, 1)}
+    let mut cols = make([]Column, 0, 3)
+    cols = append(cols, Column{name: "id", type_name: "int", ref_table: "", default_val: "0", values: make([]string, 0, 64), patch_rows: make([]int, 0, 1), n: 0})
+    cols = append(cols, Column{name: "name", type_name: "text", ref_table: "", default_val: "", values: make([]string, 0, 64), patch_rows: make([]int, 0, 1), n: 0})
+    cols = append(cols, Column{name: "email", type_name: "text", ref_table: "users", default_val: "", values: make([]string, 0, 64), patch_rows: make([]int, 0, 1), n: 0})
+    db.tables = append(db.tables, Table{columns: cols, xmin: make([]int, 0, 64), rows: 0})
+
+    // Seed 20 rows
+    let mut i = 0
+    while i < 20 {
+        let result = db_insert(db, 0, "seed", i)
+        db = result.db
+        i = i + 1
+    }
+
+    let _ = alloc_track_reset()
+    let mark = leak_mark()
+
+    // 100 INSERTs through extract-modify-writeback
+    i = 0
+    while i < 100 {
+        let result = db_insert(db, 0, "row", i + 100)
+        db = result.db
+        i = i + 1
+    }
+
+    let leaked = leak_bytes_since(mark)
+    assert_eq(db.tables[0].rows, 120)
+    assert_eq(db.tables[0].columns[0].n, 120)
+
+    if leaked > 0 {
+        print("FAIL: extract-modify-writeback leaked bytes: ")
+        print_int(leaked)
+        exit(1)
+    }
+    print("PASS: extract-modify-writeback — 0 leaks, 100 ops x 3 cols")
+}
+
+fn TestDirectTransientStructFieldExtract() {
+    let mut db = Database{tables: make([]Table, 0, 1)}
+    let mut cols = make([]Column, 0, 1)
+    cols = append(cols, Column{name: "id", type_name: "int", ref_table: "", default_val: "0", values: make([]string, 0, 64), patch_rows: make([]int, 0, 1), n: 0})
+    db.tables = append(db.tables, Table{columns: cols, xmin: make([]int, 0, 64), rows: 0})
+
+    let _ = alloc_track_reset()
+    let mark = leak_mark()
+
+    let mut i = 0
+    while i < 50 {
+        db = db_insert(db, 0, "row", i).db
+        i = i + 1
+    }
+
+    let leaked = leak_bytes_since(mark)
+    assert_eq(db.tables[0].rows, 50)
+    if leaked > 0 {
+        print("FAIL: direct transient extract leaked bytes: ")
+        print_int(leaked)
+        exit(1)
+    }
+    print("PASS: direct transient extract — 0 leaks")
+}
+
+fn main() {
+    TestExtractModifyWritebackNoLeak()
+    TestDirectTransientStructFieldExtract()
+    print("ok")
+}

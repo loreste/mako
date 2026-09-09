@@ -348,15 +348,20 @@ impl Codegen {
         // Register owned string temps for scope-exit free so they don't
         // leak when used as inline arguments to builtins (issue #55).
         // Any call result or concat that isn't already tracked is likely
-        // an owned temp. Idents/fields/indexes are borrows — skip those.
+        // an owned temp. Idents/fields/indexes and borrowed builtin calls are
+        // borrows — skip those to avoid double-frees.
+        let is_owned_str_expr = match expr {
+            Expr::Call { .. } | Expr::Method { .. } => self.expr_is_scope_drop_safe(expr, &ty),
+            Expr::Binary {
+                op: crate::ast::BinOp::Add,
+                ..
+            } => true,
+            Expr::StringInterp(_) | Expr::Slice { .. } => true,
+            _ => false,
+        };
         if ty == "MakoString"
             && !self.own_drop_live.contains(&v)
-            && matches!(
-                expr,
-                Expr::Call { .. }
-                    | Expr::Binary { .. }
-                    | Expr::StringInterp(_)
-            )
+            && is_owned_str_expr
         {
             let cap = self.fresh("sa");
             self.emit_line(format_args!("MakoString {cap} = {v};"));
@@ -372,23 +377,7 @@ impl Codegen {
     /// Safe only for builtins that borrow (read) the string — never for
     /// `append` or anything that stores the pointer.
     fn emit_str_arg_borrow(&mut self, expr: &Expr) -> String {
-        let v = self.emit_str_arg(expr);
-        // emit_str_arg already captures Call/Binary/StringInterp.
-        // Add Slice and Method for borrow-only call sites (issue #55).
-        if !self.own_drop_live.contains(&v)
-            && matches!(
-                expr,
-                Expr::Slice { .. } | Expr::Method { .. }
-            )
-        {
-            let cap = self.fresh("sb");
-            self.emit_line(format_args!("MakoString {cap} = {v};"));
-            self.note_own_bind_scope(&cap);
-            self.register_own_drop(&cap, "MakoString");
-            self.scope_drop_safe.insert(cap.clone());
-            return cap;
-        }
-        v
+        self.emit_str_arg(expr)
     }
 
     /// True when any scalar-key map of this value monomorph is used.
@@ -4122,8 +4111,9 @@ impl Codegen {
                 ));
             }
             _ => {
+                let cond = Self::owning_field_replaced_cond(c_ty, old, new);
                 self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data) {free_fn}({old});"
+                    "if ({cond}) {free_fn}({old});"
                 ));
             }
         }
@@ -35428,17 +35418,7 @@ impl Codegen {
                         "append" => {
                             let (sty, s) = self.emit_expr(&args[0]);
                             let (vty, mut v) = if sty == "MakoStrArray" {
-                                let sv = self.emit_str_arg(&args[1]);
-                                // Issue #55: indexed/field string borrows share
-                                // the pointer with the source array. Clone so
-                                // freeing the source doesn't invalidate this
-                                // element in the destination array.
-                                let sv = if matches!(&args[1], Expr::Index { .. } | Expr::Field { .. }) {
-                                    format!("mako_str_clone({sv})")
-                                } else {
-                                    sv
-                                };
-                                ("MakoString".into(), sv)
+                                ("MakoString".into(), self.emit_str_arg(&args[1]))
                             } else {
                                 let (vty, v) = self.emit_expr(&args[1]);
                                 Self::coerce_user_struct_value(&vty, v)
@@ -38695,7 +38675,9 @@ impl Codegen {
                     ));
                     // Free the remaining owned fields of the transient struct.
                     for (path, ff) in &frees {
-                        self.emit_line(format_args!("{ff}({stmp}.{path});"));
+                        if path != field && !path.starts_with(&format!("{field}.")) {
+                            self.emit_line(format_args!("{ff}({stmp}.{path});"));
+                        }
                     }
                     if Self::own_free_fn(&fty).is_some()
                         || !self.struct_own_field_frees(&fty).is_empty()

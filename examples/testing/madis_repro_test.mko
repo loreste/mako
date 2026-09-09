@@ -1,0 +1,30 @@
+fn my_split(s: string) -> []string {
+    let mut res = ["", ""]
+    res[0] = s[0:5]
+    res[1] = s[5:10]
+    return res
+}
+
+fn my_trim(s: string) -> string {
+    return s[1:len(s)]
+}
+
+fn TestCopyOverwrite() {
+    let mut i = 0
+    while i < 10 {
+        let wire = "hello world " + string(i)
+        let original = my_split(wire)
+        let mut edited = original
+        edited[0] = "carol"
+        edited = append(edited, "dave-" + string(i))
+        assert_eq(len(original), 2)
+        assert_eq(len(edited), 3)
+        assert_eq_str(my_trim("hello"), "ello")
+        i = i + 1
+    }
+}
+
+fn main() {
+    TestCopyOverwrite()
+    print("ok")
+}

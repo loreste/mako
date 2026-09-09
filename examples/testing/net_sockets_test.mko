@@ -15,6 +15,31 @@ fn TestUdpLoopback() {
     }
 }
 
+fn TestUdpConditionalBreak() {
+    let srv = udp_bind(0)
+    if srv >= 0 {
+        let port = udp_local_port(srv)
+        assert(port > 0)
+        let cli = udp_bind(0)
+        assert(cli >= 0)
+
+        var count = 0
+        while count < 5 {
+            assert_eq(udp_send_to(cli, "127.0.0.1", port, "pkt"), 3)
+            let msg = udp_recv(srv, 64)
+            if len(msg) == 0 {
+                break
+            }
+            assert_eq_str(msg, "pkt")
+            count = count + 1
+        }
+        assert_eq(count, 5)
+
+        let _ = udp_close(cli)
+        let _ = udp_close(srv)
+    }
+}
+
 fn TestUnixSocketPair() {
     let a = unix_socket_pair()
     if a >= 0 {
