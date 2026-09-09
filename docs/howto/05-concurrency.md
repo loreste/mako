@@ -245,6 +245,23 @@ fn work(n: int) -> int {
 }
 ```
 
+### Crew Cancellation Policies
+
+Crews support declarative cancellation policies using the `crew:<policy>` modifier or `crew(fail_fast=true)`:
+
+- `crew:all` (default): joins all tasks; remaining tasks are cancelled on block exit.
+- `crew:race` / `crew:any`: the first child task to finish triggers cancellation of all remaining tasks in the crew.
+- `crew:fail_fast` / `crew(fail_fast=true)`: if any child task fails, the remaining sibling tasks are cancelled immediately.
+
+```mko
+// Race two tasks; first completion cancels the slower task
+crew:race t {
+    let fast = t.kick(fetch_primary())
+    let slow = t.kick(fetch_backup())
+    let res = fast.join()
+}
+```
+
 After `t.cancel()`, subsequent `t.kick(...)` calls still return a handle but
 the work may not actually execute on a new thread.
 

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.6.32
+
+- Structured crew cancellation policies: first-class language support for `crew:all`,
+  `crew:race`, `crew:any`, `crew:fail_fast`, and `crew(fail_fast=true)`. First task to
+  complete in a race cancels remaining sibling tasks and joins all; fail-fast cancels
+  immediately upon child error, guaranteeing 100% structured concurrency with zero orphan tasks.
+- Deep developer tracing and execution tree (`MAKO_TRACE=tree`): hierarchical call tree
+  with automatic nesting indentation, ANSI duration color-coding (green/yellow/red),
+  source file and line mapping, and nanosecond/microsecond duration metrics.
+- Google Chrome Trace / Perfetto export (`MAKO_TRACE_JSON=<path>`): timeline event
+  export capturing complete event phases (`ph="X"`), monotonic timestamps, execution
+  durations, thread IDs (`tid`), and process IDs (`pid`) for flamecharts in `chrome://tracing`
+  and Perfetto UI (`ui.perfetto.dev`).
+- Concurrency and channel tracing (`MAKO_TRACE_CHAN=1` / `MAKO_TRACE_CONCURRENCY=1`):
+  real-time channel operation telemetry logging channel pointer addresses, sent/received
+  payloads, and buffer fill level `(len/cap)`.
+- Zero-allocation small channels: inline 4-slot ring buffer (`inline_buf[4]`) in `MakoChan`
+  eliminates dynamic heap allocation for small and unbuffered rendezvous channels.
+- Struct literal `memset` elision: codegen analyzes field completeness and completely
+  elides redundant `memset(..., 0, ...)` overhead when all struct fields are explicitly initialized.
+- Channel drop memory safety fix: `mako_native_chan_drop` delegates directly to
+  `mako_chan_free`, correctly distinguishing inline buffers from heap buffers and
+  preventing invalid interior pointer frees in native Cranelift channel drops.
+- Zero-cost release contract: all developer tracing hooks compile down to `((void)0)`
+  no-op macros under `-DNDEBUG`, ensuring zero runtime cost and zero binary bloat in production.
+- Benchmark verification: beats or matches Rust across all standard performance kernels
+  under strict 1.5× gate (`fib30x5` at 0.20×, `struct1m` at 0.92×, `slice100k` at 0.62×,
+  `map50k` at 0.16×, `string20k` at 0.62×).
+
 ## 0.6.31
 
 - Fix conditional loop exit ownership drop: `emit_loop_exit_cleanup` along `break`
@@ -26,6 +55,9 @@
 - Zero-cost function tracing in release builds: `mako_trace_enter` and `mako_trace_exit`
   are no-ops under `NDEBUG` unless `MAKO_ENABLE_TRACE` is set, eliminating call-stack
   and TLS check overhead on hot paths and satisfying the 1.5× performance contract.
+- Structured crew cancellation policies: support `crew:all`, `crew:race`, `crew:any`,
+  and `crew:fail_fast` (or `crew(fail_fast=true)`), enabling declarative cancellation
+  propagation when racing tasks or stopping on first failure.
 
 ## 0.6.30
 

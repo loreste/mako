@@ -3,7 +3,7 @@
 This guide covers the implemented Mako debugging tools, from quick inline
 prints to source-level debugger sessions (DAP and lldb) and sanitizer runs.
 
-**Product tip:** **0.6.31**.
+**Product tip:** **0.6.32**.
 
 ---
 
@@ -14,15 +14,16 @@ prints to source-level debugger sessions (DAP and lldb) and sanitizer runs.
 3. [lldb data formatters](#lldb-data-formatters)
 4. [Debug vs release builds](#debug-vs-release-builds)
 5. [Inline debugging: dbg and dbg_str](#inline-debugging-dbg-and-dbg_str)
-6. [Running with lldb (manual)](#running-with-lldb-manual)
-7. [Address sanitizer](#address-sanitizer)
-8. [Thread sanitizer](#thread-sanitizer)
-9. [Compiler error messages](#compiler-error-messages)
-10. [Common error patterns](#common-error-patterns)
-11. [Inspecting generated code with --emit-c](#inspecting-generated-code-with---emit-c)
-12. [Tooling integration with mako check --json](#tooling-integration-with-mako-check---json)
-13. [Testing and test failures](#testing-and-test-failures)
-14. [Example debugging session](#example-debugging-session)
+6. [Deep developer tracing and observability](#deep-developer-tracing-and-observability)
+7. [Running with lldb (manual)](#running-with-lldb-manual)
+8. [Address sanitizer](#address-sanitizer)
+9. [Thread sanitizer](#thread-sanitizer)
+10. [Compiler error messages](#compiler-error-messages)
+11. [Common error patterns](#common-error-patterns)
+12. [Inspecting generated code with --emit-c](#inspecting-generated-code-with---emit-c)
+13. [Tooling integration with mako check --json](#tooling-integration-with-mako-check---json)
+14. [Testing and test failures](#testing-and-test-failures)
+15. [Example debugging session](#example-debugging-session)
 
 ---
 
@@ -213,6 +214,81 @@ fn main() {
   Cross-reference with `--emit-c` if the line numbers seem off.
 - Remove or gate `dbg` calls before shipping. They are for development only.
 - You can nest: `print_int(dbg(a) + dbg(b))` prints both values, then their sum.
+
+---
+
+## Deep developer tracing and observability
+
+Makori includes built-in, zero-dependency developer tracing and structured observability. In debug mode (`-O0` or without `NDEBUG`), the runtime instruments function call trees, concurrency channels, and emits standards-compliant Chrome Trace / Perfetto timelines without changing user source code. In release mode (`-O3 -DNDEBUG`), all trace hooks compile down to strictly zero-cost no-op macros.
+
+### 1. Hierarchical call tree (`MAKO_TRACE=tree`)
+
+Set `MAKO_TRACE=tree` (or `MAKO_TRACE=1`) to visualize call hierarchy with automatic indentation, ANSI colors, source line coordinates, and microsecond-level execution times:
+
+```bash
+MAKO_TRACE=tree mako run main.mko
+# Or in tests:
+MAKO_TRACE=tree mako test examples/testing/crew_policy_test.mko
+```
+
+Output:
+```text
+[trace] → TestCrewAllPolicy (examples/testing/crew_policy_test.mko:12)
+[trace]   → double_it (examples/testing/crew_policy_test.mko:4)
+[trace]   ← double_it (6.0 µs)
+[trace]   → double_it (examples/testing/crew_policy_test.mko:4)
+[trace]   ← double_it (19.0 µs)
+[trace] ← TestCrewAllPolicy (140.0 µs)
+```
+
+Duration color coding automatically flags slow functions:
+- Green: `< 1 ms`
+- Yellow: `1 ms - 50 ms`
+- Red: `> 50 ms`
+
+### 2. Chrome Trace / Perfetto timeline export (`MAKO_TRACE_JSON`)
+
+To generate interactive flame charts and execution timelines, set `MAKO_TRACE_JSON=<filepath>`:
+
+```bash
+MAKO_TRACE_JSON=trace.json mako run main.mko
+```
+
+The runtime records function entries, exits, precise nanosecond monotonic timestamps, thread IDs (`tid`), and process IDs (`pid`), writing a standard Chrome Trace Event array (`[\n{"name":...,"ph":"X","ts":...,"dur":...,"tid":...}\n]`).
+
+Open `trace.json` in:
+- Google Chrome: Navigate to `chrome://tracing` and drag-and-drop `trace.json`.
+- [Perfetto UI](https://ui.perfetto.dev/): Click "Open trace file" to inspect multi-threaded execution tracks with full zoom, scroll, and timing breakdown.
+
+### 3. Concurrency & channel event tracing (`MAKO_TRACE_CHAN=1`)
+
+To debug channel deadlocks, backpressure, or message flow across concurrent tasks, set `MAKO_TRACE_CHAN=1` (or `MAKO_TRACE_CONCURRENCY=1`):
+
+```bash
+MAKO_TRACE_CHAN=1 mako run worker_pool.mko
+```
+
+Output:
+```text
+[chan] send chan=0x135f05c70 val=1 (len=0/0)
+[chan] recv chan=0x135f05c70 val=1 (len=0/0)
+[chan] send chan=0x135f05c70 val=42 (len=1/4)
+```
+
+Traces show:
+- Channel memory address (`chan=...`)
+- Sent or received value (`val=...`)
+- Real-time buffer fill level and capacity `(len/cap)`
+
+### 4. Structured concurrency cancellation policies
+
+Mako nursery crews support explicit cancellation and joining policies directly in language syntax:
+
+| Policy | Syntax | Behavior |
+|--------|--------|----------|
+| `crew:all` (default) | `crew:all c { ... }` or `crew c { ... }` | Waits for all kicked tasks to complete successfully. |
+| `crew:race` / `crew:any` | `crew:race c { ... }` / `crew:any c { ... }` | First task to finish wins; all other tasks in the crew are cooperatively cancelled and joined. |
+| `crew:fail_fast` | `crew:fail_fast c { ... }` or `crew c(fail_fast=true) { ... }` | On first task error, cancels the entire crew immediately. |
 
 ---
 

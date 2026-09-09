@@ -1313,11 +1313,58 @@ impl Parser {
             }
             TokenKind::Crew => {
                 self.bump();
-                let name = self.expect_ident()?;
+                let mut policy = CrewPolicy::All;
+                if matches!(self.peek_kind(), TokenKind::Colon | TokenKind::Dot) {
+                    self.bump();
+                    let p = self.expect_ident()?;
+                    match p.as_str() {
+                        "race" => policy = CrewPolicy::Race,
+                        "any" => policy = CrewPolicy::Any,
+                        "all" => policy = CrewPolicy::All,
+                        "fail_fast" => policy = CrewPolicy::FailFast,
+                        _ => {
+                            return Err(self.err(format!(
+                                "unknown crew policy `{p}`, expected `race`, `any`, `all`, or `fail_fast`"
+                            )))
+                        }
+                    }
+                }
+                let parse_opts = |p: &mut Parser, policy: &mut CrewPolicy| -> Result<(), ParseError> {
+                    p.bump();
+                    let opt = p.expect_ident()?;
+                    if opt == "fail_fast" {
+                        p.expect(TokenKind::Assign)?;
+                        let v = p.parse_expr()?;
+                        if matches!(v, Expr::Bool(true)) {
+                            *policy = CrewPolicy::FailFast;
+                        }
+                    } else {
+                        return Err(p.err(format!(
+                            "unknown crew option `{opt}`, expected `fail_fast`"
+                        )));
+                    }
+                    p.expect(TokenKind::RParen)?;
+                    Ok(())
+                };
+                if matches!(self.peek_kind(), TokenKind::LParen) {
+                    parse_opts(self, &mut policy)?;
+                }
+                let name = if matches!(self.peek_kind(), TokenKind::LBrace) {
+                    "t".to_string()
+                } else {
+                    self.expect_ident()?
+                };
+                if matches!(self.peek_kind(), TokenKind::LParen) {
+                    parse_opts(self, &mut policy)?;
+                }
                 self.crew_stack.push(name.clone());
                 let body = self.parse_block();
                 self.crew_stack.pop();
-                Ok(Stmt::Crew { name, body: body? })
+                Ok(Stmt::Crew {
+                    name,
+                    policy,
+                    body: body?,
+                })
             }
             TokenKind::Arena => {
                 self.bump();

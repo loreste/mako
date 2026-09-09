@@ -1,6 +1,6 @@
 # Makori ABI And Plugin Seed
 
-**Product tip:** **0.6.31**.
+**Product tip:** **0.6.32**.
 
 Makori's current FFI is `extern "C"` plus the runtime C headers. The plugin ABI
 gives native dynamic plugins and future WASM plugins one stable handshake.

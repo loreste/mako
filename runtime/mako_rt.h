@@ -186,7 +186,11 @@ static inline int64_t mako_wrap_mod_i64(int64_t a, int64_t b) {
 
 /* ---- Lightweight runtime observability ---- */
 #ifndef MAKO_RUNTIME_METRICS
+#if defined(NDEBUG)
+#define MAKO_RUNTIME_METRICS 0
+#else
 #define MAKO_RUNTIME_METRICS 1
+#endif
 #endif
 
 static atomic_llong mako_rt_tasks_spawned = 0;
@@ -202,9 +206,89 @@ static atomic_int mako_rt_select_waiters = 0;
 static atomic_llong mako_rt_lock_waits = 0;
 static atomic_llong mako_rt_lock_wait_ns = 0;
 
-/* Time helpers defined later — needed by channel wait instrumentation. */
-static inline int64_t mako_now_ms(void);
-static inline int64_t mako_now_ns(void);
+/* ---- Time helpers (monotonic + wall clock) ---- */
+static inline int64_t mako_wall_ns(void) {
+    struct timespec ts;
+#if defined(CLOCK_REALTIME)
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    }
+#endif
+    struct timeval tv;
+    mako_gettimeofday(&tv, NULL);
+    return (int64_t)tv.tv_sec * 1000000000LL + (int64_t)tv.tv_usec * 1000LL;
+}
+
+static inline int64_t mako_wall_ms(void) {
+    return mako_wall_ns() / 1000000LL;
+}
+
+static inline int64_t mako_wall_us(void) {
+    return mako_wall_ns() / 1000LL;
+}
+
+static inline int64_t mako_mono_ns(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    LARGE_INTEGER freq, now;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    return (int64_t)((now.QuadPart * 1000000000LL) / freq.QuadPart);
+#else
+    struct timespec ts;
+#if defined(CLOCK_MONOTONIC_RAW)
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) == 0) {
+        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    }
+#endif
+#if defined(CLOCK_MONOTONIC)
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    }
+#endif
+    struct timeval tv;
+    mako_gettimeofday(&tv, NULL);
+    return (int64_t)tv.tv_sec * 1000000000LL + (int64_t)tv.tv_usec * 1000LL;
+#endif
+}
+
+static inline int64_t mako_mono_us(void) {
+    return mako_mono_ns() / 1000LL;
+}
+
+static inline int64_t mako_mono_ms(void) {
+    return mako_mono_ns() / 1000000LL;
+}
+
+/* Clock resolution in ns (best-effort). */
+static inline int64_t mako_mono_res_ns(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    LARGE_INTEGER freq;
+    QueryPerformanceFrequency(&freq);
+    if (freq.QuadPart <= 0) return 1000;
+    return 1000000000LL / freq.QuadPart;
+#else
+    struct timespec ts;
+#if defined(CLOCK_MONOTONIC_RAW)
+    if (clock_getres(CLOCK_MONOTONIC_RAW, &ts) == 0) {
+        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    }
+#endif
+#if defined(CLOCK_MONOTONIC)
+    if (clock_getres(CLOCK_MONOTONIC, &ts) == 0) {
+        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    }
+#endif
+    return 1000; /* 1 µs fallback */
+#endif
+}
+
+static inline int64_t mako_now_ms(void) {
+    return mako_wall_ms();
+}
+
+static inline int64_t mako_now_ns(void) {
+    return mako_mono_ns();
+}
 
 static inline void mako_rt_counter_inc(atomic_llong *counter) {
 #if MAKO_RUNTIME_METRICS
@@ -5019,32 +5103,122 @@ static inline void mako_map_ss_free(MakoMapSS *m) {
     free(m);
 }
 
-/* ---- Debug / abort (early — used by slice/array helpers) ---- */
-/* ---- Function tracing (MAKO_TRACE=1 or MAKO_STACK=1) ---- */
+/* ---- Debug / abort / tracing / timeline profiling ---- */
+static inline int mako_color_enabled(void) {
+    static int cached = -1;
+    if (MAKO_LIKELY(cached >= 0)) return cached;
+    const char *nc = getenv("NO_COLOR");
+    if (nc && nc[0]) {
+        cached = 0;
+        return 0;
+    }
+    const char *mc = getenv("MAKO_COLOR");
+    if (mc && mc[0] == '1') {
+        cached = 1;
+        return 1;
+    }
+#if defined(_WIN32) || defined(_WIN64)
+    cached = _isatty(_fileno(stderr)) ? 1 : 0;
+#else
+    cached = isatty(fileno(stderr)) ? 1 : 0;
+#endif
+    return cached;
+}
+
+/* ---- Function tracing and Chrome Trace (Perfetto) JSON export ---- */
 static int mako_trace_flag = -1;
+static int mako_trace_mode_tree = 0;
+static int mako_trace_mode_json = 0;
+static int mako_trace_mode_chan = 0;
+static FILE *mako_trace_json_file = NULL;
+static pthread_mutex_t mako_trace_json_mu = MAKO_MUTEX_INIT;
+static int64_t mako_trace_json_base_ns = 0;
+static bool mako_trace_json_first = true;
+
+static void mako_trace_json_finish(void) {
+    pthread_mutex_lock(&mako_trace_json_mu);
+    if (mako_trace_json_file) {
+        fprintf(mako_trace_json_file, "\n]\n");
+        fflush(mako_trace_json_file);
+        fclose(mako_trace_json_file);
+        mako_trace_json_file = NULL;
+    }
+    pthread_mutex_unlock(&mako_trace_json_mu);
+}
+
+static inline void mako_trace_init_modes(void) {
+    if (MAKO_LIKELY(mako_trace_flag >= 0)) return;
+    const char *t = getenv("MAKO_TRACE");
+    const char *s = getenv("MAKO_STACK");
+    const char *j = getenv("MAKO_TRACE_JSON");
+    const char *c = getenv("MAKO_TRACE_CHAN");
+    const char *cc = getenv("MAKO_TRACE_CONCURRENCY");
+    mako_trace_flag = ((t && t[0]) || (s && s[0] == '1') || (j && j[0]) ||
+                       (c && c[0] == '1') || (cc && cc[0] == '1')) ? 1 : 0;
+    if (t && (strcmp(t, "tree") == 0 || strcmp(t, "1") == 0 || strcmp(t, "all") == 0)) {
+        mako_trace_mode_tree = 1;
+    }
+    if ((c && c[0] == '1') || (cc && cc[0] == '1')) {
+        mako_trace_mode_chan = 1;
+    }
+    if (j && j[0]) {
+        mako_trace_mode_json = 1;
+        pthread_mutex_lock(&mako_trace_json_mu);
+        if (!mako_trace_json_file) {
+            mako_trace_json_file = fopen(j, "w");
+            if (mako_trace_json_file) {
+                mako_trace_json_base_ns = mako_mono_ns();
+                fprintf(mako_trace_json_file, "[\n");
+                atexit(mako_trace_json_finish);
+            }
+        }
+        pthread_mutex_unlock(&mako_trace_json_mu);
+    }
+}
+
 static inline int mako_trace_active(void) {
     if (MAKO_UNLIKELY(mako_trace_flag < 0)) {
-        const char *t = getenv("MAKO_TRACE");
-        const char *s = getenv("MAKO_STACK");
-        mako_trace_flag = ((t && t[0] == '1') || (s && s[0] == '1')) ? 1 : 0;
+        mako_trace_init_modes();
     }
     return mako_trace_flag;
 }
 
+static inline void mako_trace_json_emit(const char *name, const char *cat, int64_t start_ns, int64_t dur_ns) {
+    if (MAKO_LIKELY(!mako_trace_mode_json || !mako_trace_json_file)) return;
+    pthread_mutex_lock(&mako_trace_json_mu);
+    if (mako_trace_json_file) {
+        double ts_us = (double)(start_ns - mako_trace_json_base_ns) / 1000.0;
+        double dur_us = (double)dur_ns / 1000.0;
+        unsigned long tid = (unsigned long)(uintptr_t)pthread_self();
+        fprintf(mako_trace_json_file, "%s{\"name\":\"%s\",\"cat\":\"%s\",\"ph\":\"X\",\"ts\":%.2f,\"dur\":%.2f,\"pid\":1,\"tid\":%lu}",
+                mako_trace_json_first ? "" : ",\n",
+                name ? name : "fn", cat ? cat : "fn", ts_us, dur_us, tid);
+        mako_trace_json_first = false;
+        fflush(mako_trace_json_file);
+    }
+    pthread_mutex_unlock(&mako_trace_json_mu);
+}
+
 /* ---- Mako call stack (for panic traces + MAKO_TRACE output) ----
- * Zero cost when MAKO_TRACE and MAKO_STACK are unset: a single
- * well-predicted branch per function call. */
-#define MAKO_CALLSTACK_MAX 64
-typedef struct { const char *fn_name; const char *file; int line; } MakoFrame;
+ * Zero cost when MAKO_TRACE and MAKO_STACK are unset. */
+#define MAKO_CALLSTACK_MAX 128
+typedef struct {
+    const char *fn_name;
+    const char *file;
+    int line;
+    int64_t start_ns;
+} MakoFrame;
 static __thread MakoFrame mako_callstack[MAKO_CALLSTACK_MAX];
 static __thread int mako_callstack_depth = 0;
 
 static inline void mako_fn_enter(const char *fn_name, const char *file, int line) {
     if (MAKO_UNLIKELY(mako_trace_active())) {
-        if (mako_callstack_depth < MAKO_CALLSTACK_MAX) {
-            mako_callstack[mako_callstack_depth].fn_name = fn_name;
-            mako_callstack[mako_callstack_depth].file = file;
-            mako_callstack[mako_callstack_depth].line = line;
+        int d = mako_callstack_depth;
+        if (d < MAKO_CALLSTACK_MAX) {
+            mako_callstack[d].fn_name = fn_name;
+            mako_callstack[d].file = file;
+            mako_callstack[d].line = line;
+            mako_callstack[d].start_ns = mako_mono_ns();
         }
         mako_callstack_depth++;
     }
@@ -5059,43 +5233,93 @@ static inline void mako_fn_exit(void) {
 #if defined(NDEBUG) && !defined(MAKO_ENABLE_TRACE)
 #define mako_trace_enter(fn_name, file, line) ((void)0)
 #define mako_trace_exit(fn_name) ((void)0)
+#define mako_chan_trace_send(c, val) ((void)0)
+#define mako_chan_trace_recv(c, val) ((void)0)
 #else
 static inline void mako_trace_enter(const char *fn_name, const char *file, int line) {
     mako_fn_enter(fn_name, file, line);
     if (MAKO_UNLIKELY(mako_trace_active())) {
-        const char *t = getenv("MAKO_TRACE");
-        if (t && t[0] == '1') {
-            fprintf(stderr, "[trace] → %s (%s:%d)\n", fn_name, file, line);
+        if (mako_trace_mode_tree) {
+            int depth = mako_callstack_depth > 1 ? mako_callstack_depth - 1 : 0;
+            if (depth > 24) depth = 24;
+            if (mako_color_enabled()) {
+                fprintf(stderr, "[trace] %*s\033[36m→ %s\033[0m \033[90m(%s:%d)\033[0m\n",
+                        depth * 2, "", fn_name ? fn_name : "?", file ? file : "?", line);
+            } else {
+                fprintf(stderr, "[trace] %*s→ %s (%s:%d)\n",
+                        depth * 2, "", fn_name ? fn_name : "?", file ? file : "?", line);
+            }
             fflush(stderr);
         }
     }
 }
 
 static inline void mako_trace_exit(const char *fn_name) {
-    mako_fn_exit();
     if (MAKO_UNLIKELY(mako_trace_active())) {
-        const char *t = getenv("MAKO_TRACE");
-        if (t && t[0] == '1') {
-            fprintf(stderr, "[trace] ← %s\n", fn_name);
+        int d = mako_callstack_depth > 0 ? mako_callstack_depth - 1 : 0;
+        int64_t start = (d < MAKO_CALLSTACK_MAX) ? mako_callstack[d].start_ns : 0;
+        int64_t dur_ns = start > 0 ? (mako_mono_ns() - start) : 0;
+        if (mako_trace_mode_json) {
+            mako_trace_json_emit(fn_name, "fn", start, dur_ns);
+        }
+        if (mako_trace_mode_tree) {
+            int depth = d > 24 ? 24 : d;
+            if (mako_color_enabled()) {
+                const char *color = dur_ns >= 50000000LL ? "\033[31m" : (dur_ns >= 1000000LL ? "\033[33m" : "\033[32m");
+                if (dur_ns >= 1000000LL) {
+                    fprintf(stderr, "[trace] %*s\033[36m← %s\033[0m %s(%.2f ms)\033[0m\n",
+                            depth * 2, "", fn_name ? fn_name : "?", color, (double)dur_ns / 1e6);
+                } else if (dur_ns >= 1000LL) {
+                    fprintf(stderr, "[trace] %*s\033[36m← %s\033[0m %s(%.1f µs)\033[0m\n",
+                            depth * 2, "", fn_name ? fn_name : "?", color, (double)dur_ns / 1e3);
+                } else {
+                    fprintf(stderr, "[trace] %*s\033[36m← %s\033[0m %s(%lld ns)\033[0m\n",
+                            depth * 2, "", fn_name ? fn_name : "?", color, (long long)dur_ns);
+                }
+            } else {
+                if (dur_ns >= 1000000LL) {
+                    fprintf(stderr, "[trace] %*s← %s (%.2f ms)\n",
+                            depth * 2, "", fn_name ? fn_name : "?", (double)dur_ns / 1e6);
+                } else if (dur_ns >= 1000LL) {
+                    fprintf(stderr, "[trace] %*s← %s (%.1f µs)\n",
+                            depth * 2, "", fn_name ? fn_name : "?", (double)dur_ns / 1e3);
+                } else {
+                    fprintf(stderr, "[trace] %*s← %s (%lld ns)\n",
+                            depth * 2, "", fn_name ? fn_name : "?", (long long)dur_ns);
+                }
+            }
             fflush(stderr);
         }
     }
+    mako_fn_exit();
 }
 #endif
 
 static inline void mako_abort(const char *msg) {
-    fprintf(stderr, "\nerror: %s\n", msg ? msg : "runtime abort");
+    if (mako_color_enabled()) {
+        fprintf(stderr, "\n\033[1;31merror:\033[0m %s\n", msg ? msg : "runtime abort");
+    } else {
+        fprintf(stderr, "\nerror: %s\n", msg ? msg : "runtime abort");
+    }
     /* Print Mako-level stack trace. */
     int depth = mako_callstack_depth < MAKO_CALLSTACK_MAX
                     ? mako_callstack_depth : MAKO_CALLSTACK_MAX;
     if (depth > 0) {
         fprintf(stderr, "\nstack trace:\n");
         for (int i = depth - 1; i >= 0; i--) {
-            fprintf(stderr, "  %d: %s\n       at %s:%d\n",
-                    depth - i,
-                    mako_callstack[i].fn_name ? mako_callstack[i].fn_name : "?",
-                    mako_callstack[i].file ? mako_callstack[i].file : "?",
-                    mako_callstack[i].line);
+            if (mako_color_enabled()) {
+                fprintf(stderr, "  %d: \033[1m%s\033[0m\n       at \033[90m%s:%d\033[0m\n",
+                        depth - i,
+                        mako_callstack[i].fn_name ? mako_callstack[i].fn_name : "?",
+                        mako_callstack[i].file ? mako_callstack[i].file : "?",
+                        mako_callstack[i].line);
+            } else {
+                fprintf(stderr, "  %d: %s\n       at %s:%d\n",
+                        depth - i,
+                        mako_callstack[i].fn_name ? mako_callstack[i].fn_name : "?",
+                        mako_callstack[i].file ? mako_callstack[i].file : "?",
+                        mako_callstack[i].line);
+            }
         }
     }
     fprintf(stderr, "\nhelp: lldb ./binary  or  MAKO_TRACE=1 ./binary — see docs/DEBUG.md\n");
@@ -5116,53 +5340,90 @@ static inline void mako_abort(const char *msg) {
 
 /* Abort with file:line (prefer this from generated code). */
 static inline void mako_abort_at(const char *file, int line, const char *msg) {
-    fprintf(stderr, "\nerror: %s\n", msg ? msg : "runtime abort");
-    if (file && line > 0) {
-        fprintf(stderr, "  --> %s:%d\n", file, line);
+    if (mako_color_enabled()) {
+        fprintf(stderr, "\n\033[1;31merror:\033[0m %s\n", msg ? msg : "runtime abort");
+        if (file && line > 0) {
+            fprintf(stderr, "  \033[90m--> %s:%d\033[0m\n", file, line);
+        }
+    } else {
+        fprintf(stderr, "\nerror: %s\n", msg ? msg : "runtime abort");
+        if (file && line > 0) {
+            fprintf(stderr, "  --> %s:%d\n", file, line);
+        }
     }
     int depth = mako_callstack_depth < MAKO_CALLSTACK_MAX
                     ? mako_callstack_depth : MAKO_CALLSTACK_MAX;
     if (depth > 0) {
         fprintf(stderr, "\nstack trace:\n");
         for (int i = depth - 1; i >= 0; i--) {
-            fprintf(stderr, "  %d: %s\n       at %s:%d\n",
-                    depth - i,
-                    mako_callstack[i].fn_name ? mako_callstack[i].fn_name : "?",
-                    mako_callstack[i].file ? mako_callstack[i].file : "?",
-                    mako_callstack[i].line);
+            if (mako_color_enabled()) {
+                fprintf(stderr, "  %d: \033[1m%s\033[0m\n       at \033[90m%s:%d\033[0m\n",
+                        depth - i,
+                        mako_callstack[i].fn_name ? mako_callstack[i].fn_name : "?",
+                        mako_callstack[i].file ? mako_callstack[i].file : "?",
+                        mako_callstack[i].line);
+            } else {
+                fprintf(stderr, "  %d: %s\n       at %s:%d\n",
+                        depth - i,
+                        mako_callstack[i].fn_name ? mako_callstack[i].fn_name : "?",
+                        mako_callstack[i].file ? mako_callstack[i].file : "?",
+                        mako_callstack[i].line);
+            }
         }
     }
     fprintf(stderr, "\nhelp: lldb ./binary  or  MAKO_TRACE=1 ./binary — see docs/DEBUG.md\n");
     abort();
 }
 
-/* dbg!(x) — print file:line + int value to stderr (debug builds). */
+/* dbg!(x) — print file:line + value to stderr (with ANSI syntax highlights). */
 static inline int64_t mako_dbg_int(const char *file, int line, const char *expr, int64_t v) {
-    fprintf(stderr, "[dbg] %s:%d: %s = %lld\n",
-            file ? file : "?", line, expr ? expr : "?", (long long)v);
+    if (mako_color_enabled()) {
+        fprintf(stderr, "\033[35m[dbg]\033[0m \033[90m%s:%d:\033[0m \033[1m%s\033[0m = \033[36m%lld\033[0m\n",
+                file ? file : "?", line, expr ? expr : "?", (long long)v);
+    } else {
+        fprintf(stderr, "[dbg] %s:%d: %s = %lld\n",
+                file ? file : "?", line, expr ? expr : "?", (long long)v);
+    }
     fflush(stderr);
     return v;
 }
 
 static inline MakoString mako_dbg_str(const char *file, int line, const char *expr, MakoString s) {
-    fprintf(stderr, "[dbg] %s:%d: %s = \"%.*s\"\n",
-            file ? file : "?", line, expr ? expr : "?",
-            (int)s.len, s.data ? s.data : "");
+    if (mako_color_enabled()) {
+        fprintf(stderr, "\033[35m[dbg]\033[0m \033[90m%s:%d:\033[0m \033[1m%s\033[0m = \033[32m\"%.*s\"\033[0m\n",
+                file ? file : "?", line, expr ? expr : "?",
+                (int)s.len, s.data ? s.data : "");
+    } else {
+        fprintf(stderr, "[dbg] %s:%d: %s = \"%.*s\"\n",
+                file ? file : "?", line, expr ? expr : "?",
+                (int)s.len, s.data ? s.data : "");
+    }
     fflush(stderr);
     return s;
 }
 
 static inline double mako_dbg_float(const char *file, int line, const char *expr, double v) {
-    fprintf(stderr, "[dbg] %s:%d: %s = %g\n",
-            file ? file : "?", line, expr ? expr : "?", v);
+    if (mako_color_enabled()) {
+        fprintf(stderr, "\033[35m[dbg]\033[0m \033[90m%s:%d:\033[0m \033[1m%s\033[0m = \033[36m%g\033[0m\n",
+                file ? file : "?", line, expr ? expr : "?", v);
+    } else {
+        fprintf(stderr, "[dbg] %s:%d: %s = %g\n",
+                file ? file : "?", line, expr ? expr : "?", v);
+    }
     fflush(stderr);
     return v;
 }
 
 static inline int64_t mako_dbg_bool(const char *file, int line, const char *expr, int64_t v) {
-    fprintf(stderr, "[dbg] %s:%d: %s = %s\n",
-            file ? file : "?", line, expr ? expr : "?",
-            v ? "true" : "false");
+    if (mako_color_enabled()) {
+        fprintf(stderr, "\033[35m[dbg]\033[0m \033[90m%s:%d:\033[0m \033[1m%s\033[0m = \033[33m%s\033[0m\n",
+                file ? file : "?", line, expr ? expr : "?",
+                v ? "true" : "false");
+    } else {
+        fprintf(stderr, "[dbg] %s:%d: %s = %s\n",
+                file ? file : "?", line, expr ? expr : "?",
+                v ? "true" : "false");
+    }
     fflush(stderr);
     return v;
 }
@@ -5247,6 +5508,7 @@ typedef struct {
     size_t tail;
     size_t count;     /* buffered depth, or 0/1 handoff for unbuffered */
     size_t peak_depth;
+    int64_t inline_buf[4];
     bool closed;
     int waiters_send; /* threads blocked in send */
     int waiters_recv; /* threads blocked in recv (for unbuffered try_send) */
@@ -5261,19 +5523,58 @@ static inline size_t mako_chan_alloc_slots(size_t cap) {
 }
 
 static inline void mako_chan_observe_depth(MakoChan *c, size_t depth) {
-    if (depth > c->peak_depth) {
+#if MAKO_RUNTIME_METRICS
+    if (MAKO_UNLIKELY(depth > c->peak_depth)) {
         c->peak_depth = depth;
         mako_rt_observe_channel_depth(depth);
     }
+#else
+    (void)c;
+    (void)depth;
+#endif
 }
+
+#if !defined(NDEBUG) || defined(MAKO_ENABLE_TRACE)
+static inline void mako_chan_trace_send(MakoChan *c, int64_t val) {
+    if (MAKO_UNLIKELY(mako_trace_active() && mako_trace_mode_chan)) {
+        if (mako_color_enabled()) {
+            fprintf(stderr, "[chan] \033[35msend\033[0m chan=%p val=%lld (len=%zu/%zu)\n",
+                    (void *)c, (long long)val, c ? c->count : 0, c ? c->cap : 0);
+        } else {
+            fprintf(stderr, "[chan] send chan=%p val=%lld (len=%zu/%zu)\n",
+                    (void *)c, (long long)val, c ? c->count : 0, c ? c->cap : 0);
+        }
+        fflush(stderr);
+    }
+}
+
+static inline void mako_chan_trace_recv(MakoChan *c, int64_t val) {
+    if (MAKO_UNLIKELY(mako_trace_active() && mako_trace_mode_chan)) {
+        if (mako_color_enabled()) {
+            fprintf(stderr, "[chan] \033[35mrecv\033[0m chan=%p val=%lld (len=%zu/%zu)\n",
+                    (void *)c, (long long)val, c ? c->count : 0, c ? c->cap : 0);
+        } else {
+            fprintf(stderr, "[chan] recv chan=%p val=%lld (len=%zu/%zu)\n",
+                    (void *)c, (long long)val, c ? c->count : 0, c ? c->cap : 0);
+        }
+        fflush(stderr);
+    }
+}
+#endif
 
 static inline MakoChan *mako_chan_new(int64_t capacity) {
     if (capacity < 0) capacity = 0;
     size_t cap = (size_t)capacity;
     size_t slots = mako_chan_alloc_slots(cap);
     MakoChan *c = (MakoChan *)calloc(1, sizeof(MakoChan));
+    if (!c) mako_abort("channel: out of memory");
     atomic_init(&c->refs, 1);
-    c->buf = (int64_t *)calloc(slots, sizeof(int64_t));
+    if (slots <= 4) {
+        c->buf = c->inline_buf;
+    } else {
+        c->buf = (int64_t *)calloc(slots, sizeof(int64_t));
+        if (!c->buf) mako_abort("channel: out of memory");
+    }
     c->cap = cap;
     pthread_mutex_init(&c->mu, NULL);
     pthread_cond_init(&c->can_send, NULL);
@@ -5323,7 +5624,10 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
         }
         int64_t ok = (c->count == 0) ? 1 : 0; /* 0 if closed with handoff stuck */
         pthread_mutex_unlock(&c->mu);
-        if (ok) mako_select_notify();
+        if (ok) {
+            mako_select_notify();
+            mako_chan_trace_send(c, v);
+        }
         return ok;
     }
     while (c->count == c->cap && !c->closed) {
@@ -5346,6 +5650,7 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
     if (c->waiters_recv > 0) pthread_cond_signal(&c->can_recv);
     pthread_mutex_unlock(&c->mu);
     mako_select_notify();
+    mako_chan_trace_send(c, v);
     return 1;
 }
 
@@ -5397,13 +5702,13 @@ static inline int64_t mako_chan_cap(MakoChan *c) {
 
 static inline int64_t mako_chan_recv(MakoChan *c) {
     pthread_mutex_lock(&c->mu);
-    c->waiters_recv++;
     while (c->count == 0 && !c->closed) {
+        c->waiters_recv++;
         int64_t t0 = mako_now_ns();
         pthread_cond_wait(&c->can_recv, &c->mu);
+        c->waiters_recv--;
         mako_rt_note_lock_wait(mako_now_ns() - t0);
     }
-    c->waiters_recv--;
     if (c->count == 0 && c->closed) {
         pthread_mutex_unlock(&c->mu);
         return 0; /* closed empty */
@@ -5429,17 +5734,18 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
         else pthread_cond_signal(&c->can_send);
     }
     pthread_mutex_unlock(&c->mu);
+    mako_chan_trace_recv(c, v);
     return v;
 }
 
 /* Recv until close: returns 1 and writes *out, or 0 if channel closed and empty. */
 static inline int64_t mako_chan_recv_ok(MakoChan *c, int64_t *out) {
     pthread_mutex_lock(&c->mu);
-    c->waiters_recv++;
     while (c->count == 0 && !c->closed) {
+        c->waiters_recv++;
         pthread_cond_wait(&c->can_recv, &c->mu);
+        c->waiters_recv--;
     }
-    c->waiters_recv--;
     if (c->count == 0 && c->closed) {
         pthread_mutex_unlock(&c->mu);
         return 0;
@@ -5484,7 +5790,7 @@ static inline void mako_chan_free(MakoChan *c) {
     pthread_mutex_destroy(&c->mu);
     pthread_cond_destroy(&c->can_send);
     pthread_cond_destroy(&c->can_recv);
-    free(c->buf);
+    if (c->buf && c->buf != c->inline_buf) free(c->buf);
     free(c);
 }
 
@@ -5614,7 +5920,7 @@ static inline void mako_select_sync_ensure(void) {
 
 /* Called by chan_send / try_send after enqueue — wakes select waiters. */
 static inline void mako_select_notify(void) {
-    if (atomic_load_explicit(&mako_rt_select_waiters, memory_order_relaxed) <= 0) {
+    if (MAKO_LIKELY(atomic_load_explicit(&mako_rt_select_waiters, memory_order_relaxed) <= 0)) {
         return;
     }
     mako_select_sync_ensure();
@@ -7134,11 +7440,17 @@ static inline int mako_sched_enqueue(MakoTaskFn fn, void *arg, MakoTask *task) {
  * then joins them — no orphaned threads. Tasks observe cancellation via
  * mako_nursery_cancelled() and should exit cooperatively.
  */
+#define MAKO_NURSERY_ALL 0
+#define MAKO_NURSERY_RACE 1
+#define MAKO_NURSERY_ANY 2
+#define MAKO_NURSERY_FAIL_FAST 3
+
 typedef struct {
     MakoTask **tasks;
     size_t len;
     size_t cap;
     atomic_bool cancelled;
+    int policy;
     /* Structured child errors: first Err message from joined Result jobs. */
     char *first_err;   /* heap C string, or NULL */
     size_t first_err_len;
@@ -7151,10 +7463,15 @@ static inline MakoNursery mako_nursery_new(void) {
     n.len = 0;
     n.cap = 0;
     atomic_init(&n.cancelled, false);
+    n.policy = MAKO_NURSERY_ALL;
     n.first_err = NULL;
     n.first_err_len = 0;
     n.err_count = 0;
     return n;
+}
+
+static inline void mako_nursery_set_policy(MakoNursery *n, int policy) {
+    if (n) n->policy = policy;
 }
 
 static inline void mako_nursery_cancel(MakoNursery *n) {
@@ -7169,6 +7486,9 @@ static inline int64_t mako_nursery_cancelled(MakoNursery *n) {
 static inline void mako_nursery_note_err(MakoNursery *n, MakoString msg) {
     if (!n) return;
     n->err_count++;
+    if (n->policy == MAKO_NURSERY_FAIL_FAST) {
+        mako_nursery_cancel(n);
+    }
     if (n->first_err) return;
     size_t len = msg.len;
     char *d = (char *)malloc(len + 1);
@@ -7445,6 +7765,28 @@ static inline void mako_detached_join_all(void) {
 static inline void mako_nursery_cancel_join(MakoNursery *n) {
     mako_nursery_cancel(n);
     mako_nursery_join_all(n);
+}
+
+/* Race policy join: wait until at least one task completes (or cancelled), then cancel remaining tasks and join all. */
+static inline void mako_nursery_race_join(MakoNursery *n) {
+    if (!n) return;
+    if (n->len > 0) {
+        while (!atomic_load_explicit(&n->cancelled, memory_order_acquire)) {
+            bool any_done = false;
+            for (size_t i = 0; i < n->len; i++) {
+                MakoTask *t = n->tasks[i];
+                if (t && (atomic_load_explicit(&t->done, memory_order_acquire) ||
+                          atomic_load_explicit(&t->joined, memory_order_acquire))) {
+                    any_done = true;
+                    break;
+                }
+            }
+            if (any_done) break;
+            struct timespec step = {0, 100000}; /* 100 µs */
+            nanosleep(&step, NULL);
+        }
+    }
+    mako_nursery_cancel_join(n);
 }
 
 /* Drain crew with timeout: cancel, then join each task (sleep-poll).
@@ -10081,92 +10423,6 @@ static inline MakoStrArray mako_env_keys(void) {
  * Prefer mono_* for all elapsed-time / low-latency measurements.
  */
 
-/* Wall-clock nanoseconds (CLOCK_REALTIME). */
-static inline int64_t mako_wall_ns(void) {
-    struct timespec ts;
-#if defined(CLOCK_REALTIME)
-    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
-        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
-    }
-#endif
-    struct timeval tv;
-    mako_gettimeofday(&tv, NULL);
-    return (int64_t)tv.tv_sec * 1000000000LL + (int64_t)tv.tv_usec * 1000LL;
-}
-
-static inline int64_t mako_wall_ms(void) {
-    return mako_wall_ns() / 1000000LL;
-}
-
-static inline int64_t mako_wall_us(void) {
-    return mako_wall_ns() / 1000LL;
-}
-
-/* Monotonic nanoseconds. Prefer CLOCK_MONOTONIC_RAW (no NTP slew) when available. */
-static inline int64_t mako_mono_ns(void) {
-#if defined(_WIN32)
-    LARGE_INTEGER freq, now;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&now);
-    /* ns = counter * 1e9 / freq */
-    return (int64_t)((now.QuadPart * 1000000000LL) / freq.QuadPart);
-#else
-    struct timespec ts;
-#if defined(CLOCK_MONOTONIC_RAW)
-    if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) == 0) {
-        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
-    }
-#endif
-#if defined(CLOCK_MONOTONIC)
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
-    }
-#endif
-    struct timeval tv;
-    mako_gettimeofday(&tv, NULL);
-    return (int64_t)tv.tv_sec * 1000000000LL + (int64_t)tv.tv_usec * 1000LL;
-#endif
-}
-
-static inline int64_t mako_mono_us(void) {
-    return mako_mono_ns() / 1000LL;
-}
-
-static inline int64_t mako_mono_ms(void) {
-    return mako_mono_ns() / 1000000LL;
-}
-
-/* Clock resolution in ns (best-effort). */
-static inline int64_t mako_mono_res_ns(void) {
-#if defined(_WIN32)
-    LARGE_INTEGER freq;
-    QueryPerformanceFrequency(&freq);
-    if (freq.QuadPart <= 0) return 1000;
-    return 1000000000LL / freq.QuadPart;
-#else
-    struct timespec ts;
-#if defined(CLOCK_MONOTONIC_RAW)
-    if (clock_getres(CLOCK_MONOTONIC_RAW, &ts) == 0) {
-        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
-    }
-#endif
-#if defined(CLOCK_MONOTONIC)
-    if (clock_getres(CLOCK_MONOTONIC, &ts) == 0) {
-        return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
-    }
-#endif
-    return 1000; /* 1 µs fallback */
-#endif
-}
-
-/* Compat: now_ms = wall ms (logs, unix conversion). now_ns = mono ns (latency). */
-static inline int64_t mako_now_ms(void) {
-    return mako_wall_ms();
-}
-
-static inline int64_t mako_now_ns(void) {
-    return mako_mono_ns();
-}
 
 /* ---- Stack traces (symbolized when execinfo available) ---- */
 static inline MakoString mako_stack_trace(void) {

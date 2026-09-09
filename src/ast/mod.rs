@@ -269,6 +269,15 @@ impl Block {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CrewPolicy {
+    #[default]
+    All,
+    Race,
+    Any,
+    FailFast,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Let {
@@ -354,9 +363,10 @@ pub enum Stmt {
     Defer {
         body: Block,
     },
-    /// Structured concurrency scope: `crew name { ... }`
+    /// Structured concurrency scope: `crew name { ... }` or `crew.race name { ... }`
     Crew {
         name: String,
+        policy: CrewPolicy,
         body: Block,
     },
     /// Region allocator: `arena name { ... }` — freed on exit

@@ -1774,6 +1774,8 @@ crew t {
 | Operation      | Description                                     |
 |----------------|-------------------------------------------------|
 | `crew t { }`   | Create a structured concurrency scope named `t` |
+| `crew:race t { }` | Race policy: first completed task cancels remaining tasks |
+| `crew:fail_fast t { }` | Fail-fast policy: child failure immediately cancels siblings |
 | `t.kick(expr)` | Spawn `expr` as a concurrent job; returns `Job[T]` |
 | `job.join()`   | Block until job completes; returns the result   |
 | `t.cancel()`   | Cooperatively cancel all jobs in the crew       |
@@ -1781,6 +1783,13 @@ crew t {
 
 Jobs cannot outlive their `crew` block. If the crew block exits before all
 jobs complete, remaining jobs are cancelled and joined.
+
+#### Crew Cancellation Policies
+
+Crews support structured cancellation policies via modifiers or options:
+- `crew t { … }` / `crew:all t { … }` (default): joins all tasks on scope exit; remaining tasks are cancelled.
+- `crew:race t { … }` / `crew:any t { … }`: racing tasks; first completed task triggers cancellation of remaining tasks in the crew nursery.
+- `crew:fail_fast t { … }` / `crew t(fail_fast=true) { … }`: immediately cancel the nursery if any child task fails or yields an error.
 
 ### 7.2 Channels
 

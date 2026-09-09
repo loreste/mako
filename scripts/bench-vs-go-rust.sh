@@ -4,6 +4,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+export MAKO_RUNTIME="$ROOT/runtime"
 mkdir -p out
 
 BIN="$(cargo metadata --format-version 1 --no-deps 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['target_directory'])")/release/mako"
@@ -25,7 +26,7 @@ rss_of() {
 }
 
 echo "=== Build ==="
-"$BIN" build --release --no-incremental examples/bench/micro.mko -o out/bench_micro
+"$BIN" build --release --no-incremental --backend c examples/bench/micro.mko -o out/bench_micro
 if command -v go >/dev/null 2>&1; then
   go build -ldflags="-s -w" -o out/bench_micro_go examples/bench/micro_go.go
 fi

@@ -16440,13 +16440,22 @@ impl Codegen {
                 self.indent -= 1;
                 self.line("}");
             }
-            Stmt::Crew { name, body } => {
+            Stmt::Crew { name, policy, body } => {
                 self.locals.insert(name.clone(), "MakoNursery".into());
                 self.emit_line(format_args!("MakoNursery {name} = mako_nursery_new();"));
+                match policy {
+                    CrewPolicy::Race => self.emit_line(format_args!("mako_nursery_set_policy(&{name}, MAKO_NURSERY_RACE);")),
+                    CrewPolicy::Any => self.emit_line(format_args!("mako_nursery_set_policy(&{name}, MAKO_NURSERY_ANY);")),
+                    CrewPolicy::FailFast => self.emit_line(format_args!("mako_nursery_set_policy(&{name}, MAKO_NURSERY_FAIL_FAST);")),
+                    CrewPolicy::All => {},
+                }
                 self.crew_stack.push(name.clone());
                 self.emit_body(body);
                 self.crew_stack.pop();
-                self.emit_line(format_args!("mako_nursery_cancel_join(&{name});"));
+                match policy {
+                    CrewPolicy::Race => self.emit_line(format_args!("mako_nursery_race_join(&{name});")),
+                    _ => self.emit_line(format_args!("mako_nursery_cancel_join(&{name});")),
+                }
             }
             Stmt::Arena { name, body } => {
                 self.locals.insert(name.clone(), "MakoArena".into());
@@ -35816,13 +35825,24 @@ impl Codegen {
                         }
                     }
                 } else {
-                    self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
-                    // Apply field defaults for omitted fields.
-                    if let Some(ref inf) = info {
-                        for (fname, def) in &inf.defaults {
-                            if !fields.iter().any(|(n, _)| n == fname) {
-                                let (_, v) = self.emit_expr(def);
-                                self.line(&format!("{tmp}.{fname} = {v};"));
+                    let all_fields_specified = if let Some(ref inf) = info {
+                        !inf.fields.is_empty()
+                            && inf
+                                .fields
+                                .iter()
+                                .all(|(fname, _)| fields.iter().any(|(n, _)| n == fname))
+                    } else {
+                        false
+                    };
+                    if !all_fields_specified {
+                        self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
+                        // Apply field defaults for omitted fields.
+                        if let Some(ref inf) = info {
+                            for (fname, def) in &inf.defaults {
+                                if !fields.iter().any(|(n, _)| n == fname) {
+                                    let (_, v) = self.emit_expr(def);
+                                    self.line(&format!("{tmp}.{fname} = {v};"));
+                                }
                             }
                         }
                     }
@@ -35928,7 +35948,9 @@ impl Codegen {
                     .unwrap_or_default();
                 let tmp = self.fresh("st");
                 self.line(&format!("{cty} {tmp};"));
-                self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
+                if values.len() < field_names.len() || field_names.is_empty() {
+                    self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
+                }
                 for (i, vexpr) in values.iter().enumerate() {
                     let (fty, v) = self.emit_expr(vexpr);
                     let (fty, v) = Self::coerce_user_struct_value(&fty, v);

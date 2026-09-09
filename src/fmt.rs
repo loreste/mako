@@ -532,7 +532,15 @@ fn fmt_stmt(s: &Stmt, indent: usize) -> String {
         Stmt::Continue(None) => "continue".into(),
         Stmt::Continue(Some(l)) => format!("continue {l}"),
         Stmt::Defer { body } => format!("defer {}", fmt_block(body, indent)),
-        Stmt::Crew { name, body } => format!("crew {name} {}", fmt_block(body, indent)),
+        Stmt::Crew { name, policy, body } => {
+            let prefix = match policy {
+                CrewPolicy::All => format!("crew {name}"),
+                CrewPolicy::Race => format!("crew.race {name}"),
+                CrewPolicy::Any => format!("crew.any {name}"),
+                CrewPolicy::FailFast => format!("crew(fail_fast = true) {name}"),
+            };
+            format!("{prefix} {}", fmt_block(body, indent))
+        }
         Stmt::Arena { name, body } => format!("arena {name} {}", fmt_block(body, indent)),
         Stmt::Unsafe { body } => format!("unsafe {}", fmt_block(body, indent)),
         Stmt::Select {

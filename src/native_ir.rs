@@ -4678,7 +4678,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 self.locals.remove(name);
             }
-            Stmt::Crew { name, body } => {
+            Stmt::Crew { name, body, .. } => {
                 let nursery = self.value();
                 self.emit(Inst::Call {
                     out: Some(nursery),

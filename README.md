@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.31).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.32).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -162,6 +162,14 @@ message inspection, site history, reports, alerts, and traffic metrics.
 - Package security model is not independently audited
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
+
+## New in 0.6.32
+
+- **Structured crew cancellation policies:** First-class language support for `crew:all`, `crew:race`, `crew:any`, `crew:fail_fast`, and `crew(fail_fast=true)`. Eliminates orphan tasks and coordinates race/fail-fast cancellation by construction.
+- **Deep developer tracing:** Hierarchical call tree visualization (`MAKO_TRACE=tree`), Google Chrome Trace Event / Perfetto export (`MAKO_TRACE_JSON=<path>`), and concurrency event telemetry (`MAKO_TRACE_CHAN=1`).
+- **Zero-allocation small channels:** Inline 4-slot ring buffer (`inline_buf[4]`) in `MakoChan` eliminates heap allocations for unbuffered rendezvous and small channels.
+- **Struct literal `memset` elision:** Fully initialized structs omit zero-clearing in native codegen, boosting throughput.
+- **100% memory safe native channel drop:** `mako_native_chan_drop` unified with `mako_chan_free` to safely handle inline vs heap buffers.
 
 ## New in 0.6.31
 

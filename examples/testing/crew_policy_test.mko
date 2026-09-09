@@ -1,0 +1,51 @@
+// Tests for structured crew cancellation policies:
+// crew:all, crew:race, crew:any, and crew:fail_fast / crew(fail_fast=true)
+
+fn double_it(n: int) -> int {
+    return n * 2
+}
+
+fn slow_work(n: int) -> int {
+    return n + 10
+}
+
+fn TestCrewAllPolicy() {
+    crew:all c {
+        let a = c.kick(double_it(5))
+        let b = c.kick(double_it(10))
+        assert_eq(a.join(), 10)
+        assert_eq(b.join(), 20)
+    }
+}
+
+fn TestCrewFailFastPolicy() {
+    crew:fail_fast c {
+        let a = c.kick(double_it(3))
+        assert_eq(a.join(), 6)
+    }
+}
+
+fn TestCrewFailFastOption() {
+    crew c(fail_fast=true) {
+        let a = c.kick(double_it(4))
+        assert_eq(a.join(), 8)
+    }
+}
+
+fn TestCrewAnyPolicy() {
+    crew:any c {
+        let a = c.kick(slow_work(1))
+        let b = c.kick(slow_work(2))
+        let res = a.join()
+        assert(res == 11 || b.join() == 12)
+    }
+}
+
+fn TestCrewRacePolicy() {
+    crew:race c {
+        let a = c.kick(slow_work(100))
+        let b = c.kick(slow_work(200))
+        let res = a.join()
+        assert(res == 110 || b.join() == 210)
+    }
+}

@@ -405,12 +405,7 @@ int64_t mako_native_chan_close(MakoChan *c) {
 
 void mako_native_chan_drop(MakoChan *c) {
     if (!c) return;
-    mako_chan_close(c);
-    pthread_mutex_destroy(&c->mu);
-    pthread_cond_destroy(&c->can_send);
-    pthread_cond_destroy(&c->can_recv);
-    free(c->buf);
-    free(c);
+    mako_chan_free(c);
 }
 
 // ---- uuid / log -------------------------------------------------------------

@@ -1106,7 +1106,9 @@ Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
 
 | Construct | Meaning |
 |-----------|---------|
-| `crew t { … }` | Structured scope; ordinary kicked tasks are cooperatively cancel-joined on exit (blocked C/FFI may delay join) |
+| `crew t { … }` / `crew:all t { … }` | Structured scope; ordinary kicked tasks are cooperatively cancel-joined on exit (blocked C/FFI may delay join) |
+| `crew:race t { … }` / `crew:any t { … }` | Racing structured scope; first completed kicked task cancels sibling tasks |
+| `crew:fail_fast t { … }` / `crew t(fail_fast=true)` | Fail-fast scope; child error or failure triggers immediate cancellation of remaining tasks |
 | `t.kick(f(args…))` | Spawn on crew; returns `Job[R]`. Uses scheduler pool when `sched_set_workers(n>0)` |
 | `sched_set_workers` | `sched_set_workers(n: int) -> void` | RT-002: opt-in pool of `n` workers (0 = one pthread per kick, default) |
 | `sched_workers` | `sched_workers() -> int` | Current configured worker count |
