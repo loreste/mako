@@ -194,6 +194,7 @@ large packs stay O(used shapes), not O(types²).
 | Form | Notes |
 |------|--------|
 | `[]T` | int/string/float/bool/byte/Struct/Enum; nested `[][]T`; bag slices `[]Option` / `[]Result` |
+| `raw []T` | Non-COW single-owner array (plain malloc, no refcount). Same ops as `[]T`. Element types: int/string/float/byte/bool. |
 | `map[K]V` | **K:** int\|string\|float\|bool\|Struct\|Enum · **V:** same, `[]T`/`[][]T`, nested maps (depth ≤3), bags `Option`/`Result` (incl. nests), tuples `(T,U[,…])` (incl. bag/chan fields), `chan[T]` |
 | Ops | `m[k]`, `m[k]=v`, `has`, `delete`, `len`, comma-ok, `range`, `maps_*` |
 

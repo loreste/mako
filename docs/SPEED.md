@@ -67,6 +67,10 @@ contract.
 | Escape (return / store / map set) | `mako_*_array_to_owned` — identity if already heap-owned; copy views only |
 | Slice free | `MAKO_UNLIKELY(cap>0)` — free is cold; views and stack lits are no-ops |
 | `string_view` / `str_as_view` | **Zero-copy** reads; never free the view |
+| Small channels (`cap ≤ 4` / `cap == 0`) | **Zero-allocation ring** — inline 4-slot buffer (`inline_buf[4]`) in `MakoChan`, zero malloc on creation |
+| Fully-initialized struct literals | **`memset` elision** — codegen skips zeroing when all fields are explicitly assigned, eliminating redundant cache writes |
+| Structured nursery policies | `crew:race` / `crew:fail_fast` — cooperative token cancellation without runaway background tasks |
+| Developer tracing in release | **Strictly zero-cost** — all tracing hooks expand to `((void)0)` under `-DNDEBUG`, zero instructions emitted |
 | `sched_set_workers(n)` | Opt-in pool reuses worker threads for kicks (default n=0 = one pthread each) |
 
 **Ownership without a speed tax:** keep short-lived POD slices as stack views in

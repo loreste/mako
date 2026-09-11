@@ -1283,19 +1283,19 @@ fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
         TypeExpr::Named(name) if name == "HttpRequest" => {
             Ok(Type::OwnedOpaque(OpaqueKind::HttpRequest))
         }
-        TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "int" || name == "int64") => {
+        TypeExpr::Array(inner) | TypeExpr::RawArray(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "int" || name == "int64") => {
             Ok(Type::IntSlice)
         }
-        TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "float" || name == "float64") => {
+        TypeExpr::Array(inner) | TypeExpr::RawArray(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "float" || name == "float64") => {
             Ok(Type::FloatSlice)
         }
-        TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "byte" || name == "uint8") => {
+        TypeExpr::Array(inner) | TypeExpr::RawArray(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "byte" || name == "uint8") => {
             Ok(Type::ByteSlice)
         }
-        TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "bool") => {
+        TypeExpr::Array(inner) | TypeExpr::RawArray(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "bool") => {
             Ok(Type::BoolSlice)
         }
-        TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "string") => {
+        TypeExpr::Array(inner) | TypeExpr::RawArray(inner) if matches!(inner.as_ref(), TypeExpr::Named(name) if name == "string") => {
             Ok(Type::StrSlice)
         }
         TypeExpr::Generic(name, args)
@@ -1478,7 +1478,7 @@ fn resolve_type(ty: &TypeExpr, structs: &StructRegistry) -> Result<Type, IrError
             }
             scalar_type(ty)
         }
-        TypeExpr::Array(inner) => {
+        TypeExpr::Array(inner) | TypeExpr::RawArray(inner) => {
             // Prefer scalar slices; then []NamedStruct; then nested / bag slices.
             if let Ok(t) = scalar_type(ty) {
                 return Ok(t);
@@ -1990,6 +1990,7 @@ fn subst_type_expr(ty: &TypeExpr, map: &HashMap<String, TypeExpr>) -> TypeExpr {
     match ty {
         TypeExpr::Named(n) => map.get(n).cloned().unwrap_or_else(|| ty.clone()),
         TypeExpr::Array(inner) => TypeExpr::Array(Box::new(subst_type_expr(inner, map))),
+        TypeExpr::RawArray(inner) => TypeExpr::RawArray(Box::new(subst_type_expr(inner, map))),
         TypeExpr::Generic(name, args) => {
             let args: Vec<TypeExpr> = args.iter().map(|a| subst_type_expr(a, map)).collect();
             // Concrete user monomorph: Pair[int] → Named("Pair__int") so layouts match

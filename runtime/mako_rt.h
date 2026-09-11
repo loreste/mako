@@ -630,6 +630,108 @@ static inline void mako_int_array_free(MakoIntArray a) {
 static inline void mako_abort(const char *msg); /* defined below */
 static inline MakoString mako_str_clone(MakoString s); /* defined below */
 
+/* ==== raw []int — non-COW, single-owner, plain malloc ====
+ * Same struct layout as MakoIntArray but data is plain-malloc'd (no refcount
+ * header). Move-only: assignment transfers ownership, source is invalidated.
+ * No COW, no atomic refcount ops — ideal for hot loops with known ownership.
+ */
+typedef struct {
+    int64_t *data;
+    size_t len;
+    size_t cap;
+} MakoRawIntArray;
+
+static inline MakoRawIntArray mako_raw_int_array_empty(void) {
+    MakoRawIntArray a = {NULL, 0, 0};
+    return a;
+}
+
+static inline MakoRawIntArray mako_raw_int_array_new(size_t n) {
+    if (n == 0) return mako_raw_int_array_empty();
+    MakoRawIntArray a;
+    a.data = (int64_t *)calloc(n, sizeof(int64_t));
+    if (!a.data) abort();
+    a.len = n;
+    a.cap = n;
+    return a;
+}
+
+static inline MakoRawIntArray mako_raw_int_array_of(const int64_t *vals, size_t n) {
+    if (n == 0) return mako_raw_int_array_empty();
+    MakoRawIntArray a = mako_raw_int_array_new(n);
+    memcpy(a.data, vals, n * sizeof(int64_t));
+    return a;
+}
+
+static inline MakoRawIntArray mako_raw_int_array_view(int64_t *data, size_t n) {
+    MakoRawIntArray a = {data, n, 0};
+    return a;
+}
+
+static inline MakoRawIntArray mako_raw_int_array_clone(MakoRawIntArray a) {
+    /* Deep copy — raw arrays are move-only; explicit copy is always full. */
+    return mako_raw_int_array_of(a.data, a.len);
+}
+
+static inline MakoRawIntArray mako_raw_int_array_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    if (len == 0 && cap == 0) return mako_raw_int_array_empty();
+    size_t c = (size_t)(cap ? cap : 1);
+    size_t l = (size_t)len;
+    int64_t *data = (int64_t *)calloc(c, sizeof(int64_t));
+    if (!data) abort();
+    MakoRawIntArray a = {data, l, c};
+    return a;
+}
+
+static inline void mako_raw_int_array_free(MakoRawIntArray a) {
+    if (a.data) free(a.data);
+}
+
+static inline MakoRawIntArray mako_raw_slice_append(MakoRawIntArray s, int64_t v) {
+    /* No COW check — raw arrays are always single-owner. */
+    if (MAKO_LIKELY(s.len < s.cap)) {
+        s.data[s.len++] = v;
+        return s;
+    }
+    size_t ncap = s.cap ? s.cap * 2 : 1;
+    if (ncap < s.len + 1) ncap = s.len + 1;
+    int64_t *nd = (int64_t *)malloc(ncap * sizeof(int64_t));
+    if (!nd) abort();
+    if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));
+    free(s.data);
+    s.data = nd;
+    s.cap = ncap;
+    s.data[s.len++] = v;
+    return s;
+}
+
+static inline MakoRawIntArray mako_raw_slice_expr(
+    MakoRawIntArray s, int64_t low, int64_t high,
+    int64_t max, int has_max
+) {
+    int64_t len = (int64_t)s.len;
+    if (low < 0) low = 0;
+    if (high < 0) high = 0;
+    if (low > len) low = len;
+    if (high > len) high = len;
+    if (high < low) high = low;
+    (void)max; (void)has_max;
+    MakoRawIntArray out;
+    out.data = s.data + (size_t)low;
+    out.len = (size_t)(high - low);
+    out.cap = 0;
+    return out;
+}
+
+static inline int64_t mako_raw_slice_copy(MakoRawIntArray dst, MakoRawIntArray src) {
+    size_t n = dst.len < src.len ? dst.len : src.len;
+    if (n == 0) return 0;
+    memmove(dst.data, src.data, n * sizeof(int64_t));
+    return (int64_t)n;
+}
+
 /* ---- Go-like []byte (uint8) ----
  * Growable byte slice. Same semantics as MakoIntArray but for uint8.
  * Used for raw I/O buffers, binary data, and byte-level string operations.
@@ -1270,6 +1372,184 @@ static inline int64_t mako_bool_array_copy(MakoBoolArray dst, MakoBoolArray src)
     size_t n = dst.len < src.len ? dst.len : src.len;
     if (n) memmove(dst.data, src.data, n * sizeof(bool));
     return (int64_t)n;
+}
+
+/* ==== Raw (non-COW) arrays for []byte, []string, []float, []bool ====
+ * Same struct layout as their COW counterparts but data is plain-malloc'd.
+ * Single-owner, move semantics, no atomic refcount operations.
+ */
+
+/* ---- raw []byte ---- */
+typedef struct { uint8_t *data; size_t len; size_t cap; } MakoRawByteArray;
+
+static inline MakoRawByteArray mako_raw_byte_array_empty(void) {
+    MakoRawByteArray a = {NULL, 0, 0}; return a;
+}
+static inline MakoRawByteArray mako_raw_byte_array_new(size_t n) {
+    if (n == 0) return mako_raw_byte_array_empty();
+    MakoRawByteArray a;
+    a.data = (uint8_t *)calloc(n, sizeof(uint8_t));
+    if (!a.data) abort();
+    a.len = n; a.cap = n; return a;
+}
+static inline MakoRawByteArray mako_raw_byte_array_of(const uint8_t *vals, size_t n) {
+    if (n == 0) return mako_raw_byte_array_empty();
+    MakoRawByteArray a = mako_raw_byte_array_new(n);
+    memcpy(a.data, vals, n); return a;
+}
+static inline MakoRawByteArray mako_raw_byte_array_clone(MakoRawByteArray a) {
+    return mako_raw_byte_array_of(a.data, a.len);
+}
+static inline MakoRawByteArray mako_raw_byte_array_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    if (len == 0 && cap == 0) return mako_raw_byte_array_empty();
+    size_t c = (size_t)(cap ? cap : 1), l = (size_t)len;
+    uint8_t *d = (uint8_t *)calloc(c, sizeof(uint8_t));
+    if (!d) abort();
+    MakoRawByteArray a = {d, l, c}; return a;
+}
+static inline void mako_raw_byte_array_free(MakoRawByteArray a) {
+    if (a.data) free(a.data);
+}
+static inline MakoRawByteArray mako_raw_byte_append(MakoRawByteArray s, uint8_t v) {
+    if (MAKO_LIKELY(s.len < s.cap)) { s.data[s.len++] = v; return s; }
+    size_t ncap = s.cap ? s.cap * 2 : 1;
+    uint8_t *nd = (uint8_t *)malloc(ncap);
+    if (!nd) abort();
+    if (s.len) memcpy(nd, s.data, s.len);
+    free(s.data);
+    s.data = nd; s.cap = ncap; s.data[s.len++] = v; return s;
+}
+
+/* ---- raw []string ---- */
+typedef struct { MakoString *data; size_t len; size_t cap; } MakoRawStrArray;
+
+static inline MakoRawStrArray mako_raw_str_array_empty(void) {
+    MakoRawStrArray a = {NULL, 0, 0}; return a;
+}
+static inline MakoRawStrArray mako_raw_str_array_new(size_t n) {
+    if (n == 0) return mako_raw_str_array_empty();
+    MakoRawStrArray a;
+    a.data = (MakoString *)calloc(n, sizeof(MakoString));
+    if (!a.data) abort();
+    a.len = n; a.cap = n; return a;
+}
+static inline MakoRawStrArray mako_raw_str_array_clone(MakoRawStrArray a) {
+    MakoRawStrArray out = mako_raw_str_array_new(a.len);
+    for (size_t i = 0; i < a.len; i++) out.data[i] = mako_str_clone(a.data[i]);
+    return out;
+}
+static inline void mako_raw_str_array_free(MakoRawStrArray a) {
+    if (!a.data) return;
+    for (size_t i = 0; i < a.len; i++) mako_str_free(a.data[i]);
+    free(a.data);
+}
+static inline MakoRawStrArray mako_raw_str_array_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    if (len == 0 && cap == 0) return mako_raw_str_array_empty();
+    size_t c = (size_t)(cap ? cap : 1), l = (size_t)len;
+    MakoString *d = (MakoString *)calloc(c, sizeof(MakoString));
+    if (!d) abort();
+    MakoRawStrArray a = {d, l, c}; return a;
+}
+static inline MakoRawStrArray mako_raw_str_array_append(MakoRawStrArray s, MakoString v) {
+    if (MAKO_LIKELY(s.len < s.cap)) {
+        s.data[s.len++] = mako_str_clone(v);
+        return s;
+    }
+    size_t ncap = s.cap ? s.cap * 2 : 1;
+    MakoString *nd = (MakoString *)malloc(ncap * sizeof(MakoString));
+    if (!nd) abort();
+    if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoString));
+    free(s.data);
+    s.data = nd; s.cap = ncap;
+    s.data[s.len++] = mako_str_clone(v);
+    return s;
+}
+
+/* ---- raw []float ---- */
+typedef struct { double *data; size_t len; size_t cap; } MakoRawFloatArray;
+
+static inline MakoRawFloatArray mako_raw_float_array_empty(void) {
+    MakoRawFloatArray a = {NULL, 0, 0}; return a;
+}
+static inline MakoRawFloatArray mako_raw_float_array_new(size_t n) {
+    if (n == 0) return mako_raw_float_array_empty();
+    MakoRawFloatArray a;
+    a.data = (double *)calloc(n, sizeof(double));
+    if (!a.data) abort();
+    a.len = n; a.cap = n; return a;
+}
+static inline MakoRawFloatArray mako_raw_float_array_of(const double *vals, size_t n) {
+    if (n == 0) return mako_raw_float_array_empty();
+    MakoRawFloatArray a = mako_raw_float_array_new(n);
+    memcpy(a.data, vals, n * sizeof(double)); return a;
+}
+static inline MakoRawFloatArray mako_raw_float_array_clone(MakoRawFloatArray a) {
+    return mako_raw_float_array_of(a.data, a.len);
+}
+static inline MakoRawFloatArray mako_raw_float_array_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    if (len == 0 && cap == 0) return mako_raw_float_array_empty();
+    size_t c = (size_t)(cap ? cap : 1), l = (size_t)len;
+    double *d = (double *)calloc(c, sizeof(double));
+    if (!d) abort();
+    MakoRawFloatArray a = {d, l, c}; return a;
+}
+static inline void mako_raw_float_array_free(MakoRawFloatArray a) {
+    if (a.data) free(a.data);
+}
+static inline MakoRawFloatArray mako_raw_float_array_append(MakoRawFloatArray s, double v) {
+    if (MAKO_LIKELY(s.len < s.cap)) { s.data[s.len++] = v; return s; }
+    size_t ncap = s.cap ? s.cap * 2 : 1;
+    double *nd = (double *)malloc(ncap * sizeof(double));
+    if (!nd) abort();
+    if (s.len) memcpy(nd, s.data, s.len * sizeof(double));
+    free(s.data);
+    s.data = nd; s.cap = ncap; s.data[s.len++] = v; return s;
+}
+
+/* ---- raw []bool ---- */
+typedef struct { bool *data; size_t len; size_t cap; } MakoRawBoolArray;
+
+static inline MakoRawBoolArray mako_raw_bool_array_empty(void) {
+    MakoRawBoolArray a = {NULL, 0, 0}; return a;
+}
+static inline MakoRawBoolArray mako_raw_bool_array_new(size_t n) {
+    if (n == 0) return mako_raw_bool_array_empty();
+    MakoRawBoolArray a;
+    a.data = (bool *)calloc(n, sizeof(bool));
+    if (!a.data) abort();
+    a.len = n; a.cap = n; return a;
+}
+static inline MakoRawBoolArray mako_raw_bool_array_clone(MakoRawBoolArray a) {
+    MakoRawBoolArray out = mako_raw_bool_array_new(a.len);
+    if (a.len) memcpy(out.data, a.data, a.len * sizeof(bool));
+    return out;
+}
+static inline MakoRawBoolArray mako_raw_bool_array_make(int64_t len, int64_t cap) {
+    if (len < 0) len = 0;
+    if (cap < len) cap = len;
+    if (len == 0 && cap == 0) return mako_raw_bool_array_empty();
+    size_t c = (size_t)(cap ? cap : 1), l = (size_t)len;
+    bool *d = (bool *)calloc(c, sizeof(bool));
+    if (!d) abort();
+    MakoRawBoolArray a = {d, l, c}; return a;
+}
+static inline void mako_raw_bool_array_free(MakoRawBoolArray a) {
+    if (a.data) free(a.data);
+}
+static inline MakoRawBoolArray mako_raw_bool_array_append(MakoRawBoolArray s, bool v) {
+    if (MAKO_LIKELY(s.len < s.cap)) { s.data[s.len++] = v; return s; }
+    size_t ncap = s.cap ? s.cap * 2 : 1;
+    bool *nd = (bool *)malloc(ncap * sizeof(bool));
+    if (!nd) abort();
+    if (s.len) memcpy(nd, s.data, s.len * sizeof(bool));
+    free(s.data);
+    s.data = nd; s.cap = ncap; s.data[s.len++] = v; return s;
 }
 
 /* [](MakoIntArray) — nested slice */

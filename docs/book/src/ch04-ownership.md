@@ -93,6 +93,26 @@ fn main() {
 }
 ```
 
+## Raw arrays -- single-owner, no COW
+
+`raw []T` arrays use plain `malloc` instead of refcounted copy-on-write.
+They follow single-owner semantics: assignment moves the backing, the source
+is invalidated. No atomic refcount operations, no COW detachment checks.
+
+```mko
+fn main() {
+    let mut xs: raw []int = make(raw []int, 0, 8)
+    xs = append(xs, 10)
+    xs = append(xs, 20)
+    // xs freed at scope exit -- unconditional free(data)
+}
+```
+
+All standard slice operations work (`len`, `cap`, `append`, `copy`, indexing,
+sub-slicing, iteration). Use `raw []T` in performance-critical code where
+you know there's a single owner and want zero atomic overhead. Explicit
+`copy(dst, src)` is required for duplication.
+
 ## `hold` -- move semantics
 
 `hold` bindings enforce unique ownership. When a `hold` value is rebound, passed

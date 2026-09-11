@@ -337,6 +337,32 @@ Element types include scalars, named structs/enums, nested `[][]T`, maps
 (`[]map[K]V`), and bags **`[]Option[T]`** / **`[]Result[T,E]`** (make, append,
 index, range, annotated literals).
 
+#### Raw Slices: `raw []T`
+
+A raw slice has the same layout as `[]T` (pointer, length, capacity) but uses
+plain `malloc` instead of refcounted copy-on-write backing. Single-owner,
+move semantics — no atomic refcount operations, no COW detachment checks.
+Ideal for hot loops with known ownership.
+
+```mko
+let mut xs: raw []int = make(raw []int, 0, 1024)
+xs = append(xs, 42)
+print(xs[0])   // 42
+print(len(xs)) // 1
+```
+
+All standard slice operations work: indexing, `len`, `cap`, `append`, `copy`,
+`s[i:j]` sub-slicing, and `for v in s` iteration. The `make` call uses the same
+`make(raw []T, len, cap)` syntax.
+
+Supported element types: `int`, `string`, `float`, `byte`, `bool`.
+
+**Ownership rules:**
+- Assignment moves the backing store; the source is invalidated.
+- No implicit clone — explicit `copy(dst, src)` for duplication.
+- Auto-dropped at scope exit (unconditional `free`, no refcount).
+- Not `Send` — cannot be shared across tasks.
+
 #### Maps: `map[K]V`
 
 Hash maps with open addressing. Supported key types: `string`, `int`,
@@ -1787,13 +1813,13 @@ jobs complete, remaining jobs are cancelled and joined.
 #### Crew Cancellation Policies
 
 Crews support structured cancellation policies via modifiers or options:
-- `crew t { … }` / `crew:all t { … }` (default): joins all tasks on scope exit; remaining tasks are cancelled.
-- `crew:race t { … }` / `crew:any t { … }`: racing tasks; first completed task triggers cancellation of remaining tasks in the crew nursery.
-- `crew:fail_fast t { … }` / `crew t(fail_fast=true) { … }`: immediately cancel the nursery if any child task fails or yields an error.
+- `crew t { … }` / `crew:all t { … }` (default): joins all tasks on scope exit; remaining tasks are cooperatively cancelled and joined.
+- `crew:race t { … }` / `crew:any t { … }`: racing tasks; the first task to finish its computation triggers automatic cancellation of all remaining tasks in the nursery, followed by clean joining.
+- `crew:fail_fast t { … }` / `crew t(fail_fast=true) { … }`: fail-fast policy; on the first child task error or panic, immediately cancels the entire nursery and unwinds cleanly.
 
 ### 7.2 Channels
 
-Typed, buffered channels for communication between concurrent tasks:
+Typed, bounded channels for communication between concurrent tasks:
 
 ```mko
 let ch = chan_new(4)          // buffered channel with capacity 4
@@ -1801,6 +1827,10 @@ let _ = ch.send(42)          // send a value
 let v = ch.recv()            // receive a value (blocks if empty)
 ch.close()                   // close the channel
 ```
+
+#### Zero-Allocation Small Channels
+
+Channels with capacity $\le 4$ (and unbuffered rendezvous channels with capacity $0$) use an embedded 4-slot ring buffer (`inline_buf[4]`) in the channel descriptor. Creation of these channels requires **zero dynamic heap allocations** for channel buffers. Channels with capacity $> 4$ allocate an external heap buffer.
 
 #### Channel Operations
 

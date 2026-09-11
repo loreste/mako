@@ -255,6 +255,80 @@ fn long_task(t_ref: crew_ref) -> int {
 
 ---
 
+## Structured Nursery Cancellation Policies
+
+In high-concurrency systems, asynchronous pipelines often need coordination rules beyond a naive "wait for everything" join:
+- **Speculative racing**: query multiple replicas or mirrors simultaneously, accept whichever finishes first, and cancel the remaining tasks without leaking background threads.
+- **Fail-fast aborts**: stop expensive processing chains immediately if any step yields an error.
+
+Mako formalizes nursery coordination directly in the language via first-class **nursery policies**:
+
+| Policy Syntax | Name | Semantics |
+|---|---|---|
+| `crew c { ... }` or `crew:all c { ... }` | Wait-All (Default) | Waits for every kicked task to finish before leaving the block. Un-joined tasks are cooperatively joined at block exit. |
+| `crew:race c { ... }` or `crew:any c { ... }` | First-to-Finish Race | The first task to finish its computation triggers automatic cooperative cancellation across all remaining sibling tasks in the crew nursery. All tasks are cleanly joined before exiting. |
+| `crew:fail_fast c { ... }` or `crew c(fail_fast=true) { ... }` | Fail-Fast | If any task encounters an error or panic, the nursery triggers immediate cooperative cancellation of all sibling tasks. |
+
+### Racing Tasks with `crew:race`
+
+With `crew:race`, the crew nursery monitors all kicked jobs. As soon as the first job completes, it issues `c.cancel()`, cancelling all other running tasks, and safely joins them:
+
+```mko
+fn fetch_primary() -> int {
+    sleep_ms(150)
+    return 100
+}
+
+fn fetch_replica() -> int {
+    sleep_ms(10)
+    return 200
+}
+
+fn main() {
+    crew:race c {
+        let j1 = c.kick(fetch_primary())
+        let j2 = c.kick(fetch_replica())
+
+        let winner = j2.join()
+        print_int(winner)   // 200
+        // Upon scope exit, fetch_primary is cooperatively cancelled and joined.
+        // Guaranteed zero orphan threads!
+    }
+}
+```
+
+### Fail-Fast with `crew:fail_fast`
+
+When orchestrating multi-stage parallel tasks where a single failure invalidates the rest of the computation:
+
+```mko
+fn validate_auth() -> Result[int, string] {
+    return Err("unauthorized access")
+}
+
+fn heavy_computation() -> Result[int, string] {
+    sleep_ms(500)
+    return Ok(42)
+}
+
+fn main() {
+    crew:fail_fast c {
+        let h1 = c.kick(validate_auth())
+        let h2 = c.kick(heavy_computation())
+
+        match h1.join() {
+            Ok(v) => print_int(v),
+            Err(e) => {
+                print(e)
+                // c was automatically cancelled on error, halting heavy_computation!
+            }
+        }
+    }
+}
+```
+
+---
+
 ## Data-Parallel Fan
 
 For simple map-over-a-collection parallelism, use `fan`. It kicks one task per
@@ -335,6 +409,20 @@ let ch = chan_new(4)    // buffered channel with capacity 4
 The argument is the buffer size. A capacity of 0 creates an unbuffered
 (rendezvous) channel where `send` blocks until a receiver is ready.
 Prefer `make(chan[T], n)` / `chan_open[T](n)` when `T` is not `int`.
+
+#### Zero-Allocation Small Channels
+
+Channel allocation overhead can destroy performance in hot message-passing loops. In Go, every `make(chan T, 1)` allocates channel state and buffer memory on the garbage-collected heap. In Rust, channel libraries like `crossbeam` allocate dynamic memory nodes.
+
+In Makori, `MakoChan` embeds an **inline 4-slot ring buffer** (`inline_buf[4]`):
+- Channels with capacity $\le 4$ (and unbuffered rendezvous channels with capacity $0$) allocate **zero dynamic heap memory** for their payload buffer upon creation.
+- The channel descriptor's internal buffer pointer directly targets this embedded inline memory.
+- Dynamic heap allocation for buffers occurs **only** when requested capacity strictly exceeds 4 (`cap > 4`).
+
+```mko
+let ch = chan_new(4)     // Zero heap buffer allocation! Uses inline_buf[4]
+let rend = chan_new(0)   // Zero heap buffer allocation! Unbuffered rendezvous
+```
 
 ### Sending and receiving
 

@@ -338,6 +338,7 @@ fn fmt_type(t: &TypeExpr) -> String {
     match t {
         TypeExpr::Named(n) => n.clone(),
         TypeExpr::Array(i) => format!("[]{}", fmt_type(i)),
+        TypeExpr::RawArray(i) => format!("raw []{}", fmt_type(i)),
         TypeExpr::Map(k, v) => format!("map[{}]{}", fmt_type(k), fmt_type(v)),
         TypeExpr::Generic(n, args) => {
             // Prefer Go-like map[K]V spelling when name is map with 2 args.

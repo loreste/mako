@@ -952,7 +952,7 @@ fn collect_type_refs(ty: &TypeExpr, types: &mut HashSet<String>) {
             collect_type_refs(k, types);
             collect_type_refs(v, types);
         }
-        TypeExpr::Array(elem) => {
+        TypeExpr::Array(elem) | TypeExpr::RawArray(elem) => {
             collect_type_refs(elem, types);
         }
         TypeExpr::Fn(params, ret) => {

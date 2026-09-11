@@ -53,6 +53,18 @@ General programs and all test harnesses continue through ownership-explicit
 shared IR. This prevents canonical IR migration from silently discarding proven
 CPU transforms while keeping backend selection narrow and deterministic.
 
+### Zero-allocation small channels
+
+Channels created with capacity $\le 4$ (and unbuffered rendezvous channels with capacity $0$) allocate zero dynamic heap memory for their internal ring buffer. `MakoChan` contains an embedded 4-slot ring buffer (`inline_buf[4]`). This eliminates heap allocator overhead and cache line misses during high-throughput channel initialization and short-lived concurrency pipelines. Channels with capacity $> 4$ dynamically allocate an external ring buffer on the heap.
+
+### Struct literal `memset` elision
+
+When a struct literal explicitly initializes every declared field, code generation elides the redundant zero-initialization `memset(&s, 0, sizeof(s))`. Only the explicit field evaluations and stores are emitted, preventing write stalls and memory bandwidth waste in compute loops creating millions of struct instances.
+
+### Zero-cost release tracing
+
+Developer observability tools (hierarchical call trees via `MAKO_TRACE=tree`, Chrome Trace Event JSON export via `MAKO_TRACE_JSON`, and channel telemetry via `MAKO_TRACE_CHAN=1`) are active in debug builds. Under release compilation (`--release` or `-DNDEBUG`), all tracing probes compile to `((void)0)` no-ops, incurring 0 bytes of binary overhead and 0 CPU cycles on production hot paths.
+
 ### Copy-on-write slice cost model
 
 On the C backend, cloning an owned heap-backed slice performs an atomic retain

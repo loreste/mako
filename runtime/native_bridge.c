@@ -367,10 +367,13 @@ int64_t mako_native_print_raw_ptr(MakoNativeString *s) {
 // ---- channels (int) ---------------------------------------------------------
 
 MakoChan *mako_native_chan_new(int64_t capacity) {
-    return mako_chan_new(capacity);
+    MakoChan *c = mako_chan_new(capacity);
+    fprintf(stderr, "DEBUG_CHAN_NEW: %p\n", (void*)c);
+    return c;
 }
 
 MakoChan *mako_native_chan_clone(MakoChan *c) {
+    fprintf(stderr, "DEBUG_CHAN_CLONE: %p (refs_before=%u)\n", (void*)c, (unsigned)atomic_load(&c->refs));
     return mako_chan_clone(c);
 }
 
@@ -405,6 +408,7 @@ int64_t mako_native_chan_close(MakoChan *c) {
 
 void mako_native_chan_drop(MakoChan *c) {
     if (!c) return;
+    fprintf(stderr, "DEBUG_CHAN_DROP: %p (refs_before=%u)\n", (void*)c, (unsigned)atomic_load(&c->refs));
     mako_chan_free(c);
 }
 

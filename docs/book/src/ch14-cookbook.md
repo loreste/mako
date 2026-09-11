@@ -386,6 +386,97 @@ fn main() {
 
 ---
 
+## Speculative Request Racing with `crew:race`
+
+When querying redundant backend services, mirrors, or external APIs where you want the fastest response and want to safely discard the rest:
+
+```mko
+fn query_primary_replica() -> string {
+    sleep_ms(120)
+    return "primary: 200 OK"
+}
+
+fn query_secondary_replica() -> string {
+    sleep_ms(25)
+    return "secondary: 200 OK"
+}
+
+fn main() {
+    let mut response = ""
+    crew:race c {
+        let r1 = c.kick(query_primary_replica())
+        let r2 = c.kick(query_secondary_replica())
+
+        // Whichever completes first wins
+        response = r2.join()
+        // Upon scope exit, query_primary_replica is cooperatively cancelled
+        // and joined without leaking any background OS threads!
+    }
+    print("Winner: " + response)
+}
+```
+
+---
+
+## Fail-Fast Pipelines with `crew:fail_fast`
+
+When running expensive concurrent pipeline stages where an error in any stage should halt sibling work immediately:
+
+```mko
+fn authenticate_token() -> Result[int, string] {
+    return Err("token expired")
+}
+
+fn compute_heavy_features() -> Result[int, string] {
+    sleep_ms(300)
+    return Ok(100)
+}
+
+fn main() {
+    crew:fail_fast c {
+        let auth = c.kick(authenticate_token())
+        let features = c.kick(compute_heavy_features())
+
+        match auth.join() {
+            Ok(uid) => print_int(uid),
+            Err(err) => {
+                print("Aborted: " + err)
+                // c was automatically cancelled on error, stopping features task
+            }
+        }
+    }
+}
+```
+
+---
+
+## Low-Latency Channels with Zero-Allocation Small Buffers
+
+Channels with capacity $\le 4$ (and unbuffered rendezvous channels with capacity $0$) use an embedded 4-slot ring buffer (`inline_buf[4]`) in `MakoChan`, performing zero dynamic heap allocations on creation:
+
+```mko
+fn main() {
+    // Zero dynamic heap allocations for the internal ring buffer:
+    let ch = chan_new(4)
+
+    crew t {
+        let _ = t.kick(worker(ch))
+        let _ = ch.send(42)
+    }
+
+    let val = ch.recv()
+    print_int(val)
+}
+
+fn worker(ch: chan[int]) -> int {
+    let item = ch.recv()
+    let _ = ch.send(item * 2)
+    return 0
+}
+```
+
+---
+
 ## Concurrent Cache with CMap
 
 Use `CMap` as a shared cache across worker tasks -- no channels or mutexes needed:
@@ -1578,6 +1669,82 @@ fn call_downstream(url: string) -> string {
     let resp = http_get(url)
     trace_end()
     return resp
+}
+```
+
+---
+
+## Deep Developer Tracing & Visual Call Tree
+
+Inspect call hierarchies and execution time bottlenecks in real-time during debugging without modifying code:
+
+```bash
+MAKO_TRACE=tree mako run main.mko
+```
+
+Example visual output on `stderr`:
+```text
+[trace] → handle_request (server.mko:10)
+[trace]   → authenticate (auth.mko:4)
+[trace]   ← authenticate (12.0 µs)
+[trace]   → query_database (db.mko:25)
+[trace]   ← query_database (1.3 ms)
+[trace] ← handle_request (1.5 ms)
+```
+
+Durations are automatically color-coded (green < 100µs, yellow 100µs-1ms, red > 1ms).
+
+---
+
+## Exporting Chrome / Perfetto Trace Timelines
+
+Export whole-program execution timelines with microsecond monotonic timestamps, thread IDs (`tid`), and durations to inspect in Chrome or Perfetto:
+
+```bash
+MAKO_TRACE_JSON=profile.json mako run main.mko
+```
+
+Open `profile.json` in:
+- Google Chrome: open `chrome://tracing` and drag-and-drop `profile.json`
+- [Perfetto UI](https://ui.perfetto.dev/): click "Open trace file" to view multi-threaded flame charts and interactive timelines
+
+---
+
+## Channel Telemetry & Deadlock Diagnostics
+
+Debug message passing order, buffer fill levels, and potential deadlocks:
+
+```bash
+MAKO_TRACE_CHAN=1 mako run main.mko
+```
+
+Every send and receive logs the channel address, payload, and current buffer depth:
+```text
+[chan] send chan=0x14000104000 val=1 (len=0/4)
+[chan] recv chan=0x14000104000 val=1 (len=0/4)
+[chan] send chan=0x14000104000 val=42 (len=1/4)
+```
+
+---
+
+## High-Throughput Struct Literal Construction
+
+When all struct fields are explicitly initialized, the compiler elides redundant zeroing (`memset`), writing directly into fields:
+
+```mko
+struct Packet {
+    id: int
+    flags: int
+    payload_len: int
+}
+
+fn build_packet(id: int, flags: int, len: int) -> Packet {
+    // All fields are explicit: compiler elides memset(&p, 0, sizeof(p))
+    return Packet {
+        id: id,
+        flags: flags,
+        payload_len: len,
+    }
 }
 ```
 

@@ -699,7 +699,7 @@ impl Codegen {
                 self.collect_maps_in_type(k);
                 self.collect_maps_in_type(v);
             }
-            TypeExpr::Array(inner) => {
+            TypeExpr::Array(inner) | TypeExpr::RawArray(inner) => {
                 // Bare `[]Option` / `[]map` / … need MakoArr_* even without map use.
                 self.register_arr_elem_type(inner);
                 self.collect_maps_in_type(inner);
@@ -2356,6 +2356,11 @@ impl Codegen {
             "MakoStrArray" => Some("mako_str_array_free".into()),
             "MakoFloatArray" => Some("mako_float_array_free".into()),
             "MakoBoolArray" => Some("mako_bool_array_free".into()),
+            "MakoRawIntArray" => Some("mako_raw_int_array_free".into()),
+            "MakoRawByteArray" => Some("mako_raw_byte_array_free".into()),
+            "MakoRawStrArray" => Some("mako_raw_str_array_free".into()),
+            "MakoRawFloatArray" => Some("mako_raw_float_array_free".into()),
+            "MakoRawBoolArray" => Some("mako_raw_bool_array_free".into()),
             "MakoString" => Some("mako_str_free".into()),
             // str_builder() mallocs the struct and its buffer; the destructor
             // existed but nothing emitted a call to it, so every builder leaked
@@ -2440,6 +2445,11 @@ impl Codegen {
             "MakoStrArray" => Some("mako_str_array_clone".into()),
             "MakoFloatArray" => Some("mako_float_array_clone".into()),
             "MakoBoolArray" => Some("mako_bool_array_clone".into()),
+            "MakoRawIntArray" => Some("mako_raw_int_array_clone".into()),
+            "MakoRawByteArray" => Some("mako_raw_byte_array_clone".into()),
+            "MakoRawStrArray" => Some("mako_raw_str_array_clone".into()),
+            "MakoRawFloatArray" => Some("mako_raw_float_array_clone".into()),
+            "MakoRawBoolArray" => Some("mako_raw_bool_array_clone".into()),
             "MakoMapSI*" => Some("mako_maps_clone_si".into()),
             "MakoMapII*" => Some("mako_maps_clone_ii".into()),
             "MakoMapSS*" => Some("mako_maps_clone_ss".into()),
@@ -3696,6 +3706,11 @@ impl Codegen {
             "MakoStrArray" => TypeExpr::Array(Box::new(named("string"))),
             "MakoFloatArray" => TypeExpr::Array(Box::new(named("float"))),
             "MakoBoolArray" => TypeExpr::Array(Box::new(named("bool"))),
+            "MakoRawIntArray" => TypeExpr::RawArray(Box::new(named("int"))),
+            "MakoRawByteArray" => TypeExpr::RawArray(Box::new(named("byte"))),
+            "MakoRawStrArray" => TypeExpr::RawArray(Box::new(named("string"))),
+            "MakoRawFloatArray" => TypeExpr::RawArray(Box::new(named("float"))),
+            "MakoRawBoolArray" => TypeExpr::RawArray(Box::new(named("bool"))),
             c_ty if Self::own_free_fn(c_ty).is_some() => named(c_ty),
             c_ty => {
                 let name = self
@@ -12648,6 +12663,11 @@ impl Codegen {
     }
 
     fn type_expr_c(&self, t: &TypeExpr) -> String {
+        // Raw arrays reuse the same layout; prefix C type name with "Raw".
+        if let TypeExpr::RawArray(inner) = t {
+            let cow_name = self.type_expr_c(&TypeExpr::Array(inner.clone()));
+            return cow_name.replacen("Mako", "MakoRaw", 1);
+        }
         match t {
             TypeExpr::Named(n) => match n.as_str() {
                 "int" | "int64" | "int32" | "int8" | "uint64" | "byte" => "int64_t".into(),
@@ -16067,6 +16087,21 @@ impl Codegen {
                     self.emit_line(format_args!("mako_map_b_{sn}_set({b}, {i}, {v});"));
                 } else if let Some((kn, vs)) = parse_struct_key_map(&bty) {
                     self.emit_line(format_args!("mako_map_k_{kn}_{vs}_set({b}, {i}, {v});"));
+                } else if bty.starts_with("MakoRaw") {
+                    // Raw arrays: direct store with bounds check, no COW.
+                    let tmp = self.fresh("iass");
+                    self.emit_line(format_args!("int64_t {tmp} = {i};"));
+                    self.emit_bounds_check(
+                        &format!("{tmp} < 0 || (size_t){tmp} >= {b}.len"),
+                        "index out of bounds",
+                    );
+                    if bty == "MakoRawStrArray" {
+                        // Free old string, take ownership of new (no clone — v is already owned).
+                        self.line(&format!("mako_str_free({b}.data[{tmp}]);"));
+                        self.line(&format!("{b}.data[{tmp}] = {v};"));
+                    } else {
+                        self.line(&format!("{b}.data[{tmp}] = {v};"));
+                    }
                 } else if bty == "MakoByteArray" {
                     let tmp = self.fresh("iass");
                     self.emit_line(format_args!("int64_t {tmp} = {i};"));
@@ -35111,6 +35146,10 @@ impl Codegen {
                         }
                         "len" => {
                             let (ty, v) = self.emit_expr(&args[0]);
+                            // Raw arrays: same struct layout, len is at same offset.
+                            if ty.starts_with("MakoRaw") {
+                                return ("int64_t".into(), format!("(int64_t){v}.len"));
+                            }
                             if ty == "MakoString" {
                                 return ("int64_t".into(), format!("mako_str_len({v})"));
                             }
@@ -35426,13 +35465,19 @@ impl Codegen {
                         }
                         "append" => {
                             let (sty, s) = self.emit_expr(&args[0]);
-                            let (vty, mut v) = if sty == "MakoStrArray" {
+                            let (vty, mut v) = if sty == "MakoStrArray" || sty == "MakoRawStrArray" {
                                 ("MakoString".into(), self.emit_str_arg(&args[1]))
                             } else {
                                 let (vty, v) = self.emit_expr(&args[1]);
                                 Self::coerce_user_struct_value(&vty, v)
                             };
                             let tmp = self.fresh("ap");
+                            if sty == "MakoRawByteArray" {
+                                self.line(&format!(
+                                    "MakoRawByteArray {tmp} = mako_raw_byte_append({s}, {v});"
+                                ));
+                                return ("MakoRawByteArray".into(), tmp);
+                            }
                             if sty == "MakoByteArray" {
                                 if let Some(arena) = self.current_arena.clone() {
                                     self.line(&format!(
@@ -35444,6 +35489,12 @@ impl Codegen {
                                     ));
                                 }
                                 return ("MakoByteArray".into(), tmp);
+                            }
+                            if sty == "MakoRawStrArray" {
+                                self.line(&format!(
+                                    "MakoRawStrArray {tmp} = mako_raw_str_array_append({s}, {v});"
+                                ));
+                                return ("MakoRawStrArray".into(), tmp);
                             }
                             if sty == "MakoStrArray" {
                                 if let Some(arena) = self.current_arena.clone() {
@@ -35461,6 +35512,12 @@ impl Codegen {
                                 }
                                 return ("MakoStrArray".into(), tmp);
                             }
+                            if sty == "MakoRawFloatArray" {
+                                self.line(&format!(
+                                    "MakoRawFloatArray {tmp} = mako_raw_float_array_append({s}, {v});"
+                                ));
+                                return ("MakoRawFloatArray".into(), tmp);
+                            }
                             if sty == "MakoFloatArray" {
                                 if let Some(arena) = self.current_arena.clone() {
                                     self.line(&format!(
@@ -35472,6 +35529,12 @@ impl Codegen {
                                     ));
                                 }
                                 return ("MakoFloatArray".into(), tmp);
+                            }
+                            if sty == "MakoRawBoolArray" {
+                                self.line(&format!(
+                                    "MakoRawBoolArray {tmp} = mako_raw_bool_array_append({s}, {v});"
+                                ));
+                                return ("MakoRawBoolArray".into(), tmp);
                             }
                             if sty == "MakoBoolArray" {
                                 if let Some(arena) = self.current_arena.clone() {
@@ -35510,6 +35573,12 @@ impl Codegen {
                             }
                             // Opaque handles (pointers) need cast to int64_t.
                             let vc = opaque_to_int(&vty, &v);
+                            if sty.starts_with("MakoRaw") {
+                                self.line(&format!(
+                                    "MakoRawIntArray {tmp} = mako_raw_slice_append({s}, {vc});"
+                                ));
+                                return ("MakoRawIntArray".into(), tmp);
+                            }
                             if let Some(arena) = self.current_arena.clone() {
                                 self.line(&format!(
                                     "MakoIntArray {tmp} = mako_arena_int_array_append(&{arena}, {s}, {vc});"
@@ -35524,6 +35593,22 @@ impl Codegen {
                         "copy" => {
                             let (dty, d) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
+                            if dty == "MakoRawIntArray" {
+                                return ("int64_t".into(), format!("mako_raw_slice_copy({d}, {s})"));
+                            }
+                            if dty == "MakoRawByteArray" || dty == "MakoRawFloatArray"
+                                || dty == "MakoRawBoolArray" || dty == "MakoRawStrArray"
+                            {
+                                // Generic raw copy: memmove min(dst.len, src.len) elements.
+                                let tmp = self.fresh("cn");
+                                self.line(&format!(
+                                    "size_t {tmp} = {d}.len < {s}.len ? {d}.len : {s}.len;"
+                                ));
+                                self.line(&format!(
+                                    "if ({tmp}) memmove({d}.data, {s}.data, {tmp} * sizeof(*{d}.data));"
+                                ));
+                                return ("int64_t".into(), format!("(int64_t){tmp}"));
+                            }
                             if dty == "MakoByteArray" {
                                 return ("int64_t".into(), format!("mako_byte_copy({d}, {s})"));
                             }
@@ -36775,28 +36860,29 @@ impl Codegen {
                     };
                     return (cty, tmp);
                 }
+                let is_raw = matches!(ty, TypeExpr::RawArray(_));
                 let is_byte = matches!(
                     ty,
-                    TypeExpr::Array(inner)
+                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner)
                         if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "byte")
                 );
                 let is_string = matches!(
                     ty,
-                    TypeExpr::Array(inner)
+                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner)
                         if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "string")
                 );
                 let is_float = matches!(
                     ty,
-                    TypeExpr::Array(inner)
+                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner)
                         if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "float" || n == "float64")
                 );
                 let is_bool = matches!(
                     ty,
-                    TypeExpr::Array(inner)
+                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner)
                         if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "bool")
                 );
                 let struct_elem = match ty {
-                    TypeExpr::Array(inner) => match inner.as_ref() {
+                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner) => match inner.as_ref() {
                         TypeExpr::Named(n)
                             if self.structs.contains_key(n) || self.enums.contains_key(n) =>
                         {
@@ -36807,19 +36893,19 @@ impl Codegen {
                     _ => None,
                 };
                 let nested_elem_c = match ty {
-                    TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Array(_)) => {
+                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner) if matches!(inner.as_ref(), TypeExpr::Array(_)) => {
                         Some(self.type_expr_c(inner))
                     }
                     _ => None,
                 };
                 let map_elem_c = match ty {
-                    TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Map(_, _)) => {
+                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner) if matches!(inner.as_ref(), TypeExpr::Map(_, _)) => {
                         Some(self.type_expr_c(inner))
                     }
                     _ => None,
                 };
                 let bag_elem_tag = match ty {
-                    TypeExpr::Array(inner) => match inner.as_ref() {
+                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner) => match inner.as_ref() {
                         TypeExpr::Generic(n, args)
                             if (n == "Option" || n == "Result") && !args.is_empty() =>
                         {
@@ -36886,26 +36972,28 @@ impl Codegen {
                     ));
                     return ("MakoIntArray".into(), tmp);
                 }
+                let rp = if is_raw { "Raw" } else { "" };
+                let rfn = if is_raw { "raw_" } else { "" };
                 if is_byte {
                     self.line(&format!(
-                        "MakoByteArray {tmp} = mako_byte_array_make({l}, {c});"
+                        "Mako{rp}ByteArray {tmp} = mako_{rfn}byte_array_make({l}, {c});"
                     ));
-                    ("MakoByteArray".into(), tmp)
+                    (format!("Mako{rp}ByteArray"), tmp)
                 } else if is_string {
                     self.line(&format!(
-                        "MakoStrArray {tmp} = mako_str_array_make({l}, {c});"
+                        "Mako{rp}StrArray {tmp} = mako_{rfn}str_array_make({l}, {c});"
                     ));
-                    ("MakoStrArray".into(), tmp)
+                    (format!("Mako{rp}StrArray"), tmp)
                 } else if is_float {
                     self.line(&format!(
-                        "MakoFloatArray {tmp} = mako_float_array_make({l}, {c});"
+                        "Mako{rp}FloatArray {tmp} = mako_{rfn}float_array_make({l}, {c});"
                     ));
-                    ("MakoFloatArray".into(), tmp)
+                    (format!("Mako{rp}FloatArray"), tmp)
                 } else if is_bool {
                     self.line(&format!(
-                        "MakoBoolArray {tmp} = mako_bool_array_make({l}, {c});"
+                        "Mako{rp}BoolArray {tmp} = mako_{rfn}bool_array_make({l}, {c});"
                     ));
-                    ("MakoBoolArray".into(), tmp)
+                    (format!("Mako{rp}BoolArray"), tmp)
                 } else if let Some(elem_c) = nested_elem_c {
                     let tag = c_type_mono_tag(&elem_c);
                     let outer = format!("MakoArr_{tag}");
@@ -36927,7 +37015,7 @@ impl Codegen {
                     (format!("MakoArr_{sn}"), tmp)
                 } else {
                     // Record opaque element type for later index/iteration casts.
-                    if let TypeExpr::Array(inner) = ty {
+                    if let TypeExpr::Array(inner) | TypeExpr::RawArray(inner) = ty {
                         if let TypeExpr::Named(n) = inner.as_ref() {
                             let elem_c = self.type_expr_c(&TypeExpr::Named(n.clone()));
                             if is_opaque_c_handle(&elem_c) {
@@ -36936,9 +37024,9 @@ impl Codegen {
                         }
                     }
                     self.line(&format!(
-                        "MakoIntArray {tmp} = mako_int_array_make({l}, {c});"
+                        "Mako{rp}IntArray {tmp} = mako_{rfn}int_array_make({l}, {c});"
                     ));
-                    ("MakoIntArray".into(), tmp)
+                    (format!("Mako{rp}IntArray"), tmp)
                 }
             }
             _ => unreachable!(),
@@ -37100,6 +37188,29 @@ impl Codegen {
                 }
                 let tmp = self.fresh("idx");
                 self.emit_line(format_args!("int64_t {tmp} = {i};"));
+                // Raw arrays: direct element access (same struct layout, bounds check inline).
+                if bty == "MakoRawIntArray" {
+                    self.line(&format!("if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"));
+                    return ("int64_t".into(), format!("{b}.data[{tmp}]"));
+                }
+                if bty == "MakoRawByteArray" {
+                    self.line(&format!("if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"));
+                    return ("int64_t".into(), format!("(int64_t){b}.data[{tmp}]"));
+                }
+                if bty == "MakoRawStrArray" {
+                    self.line(&format!("if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"));
+                    let out = self.fresh("sg");
+                    self.line(&format!("MakoString {out} = {b}.data[{tmp}];"));
+                    return ("MakoString".into(), out);
+                }
+                if bty == "MakoRawFloatArray" {
+                    self.line(&format!("if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"));
+                    return ("double".into(), format!("{b}.data[{tmp}]"));
+                }
+                if bty == "MakoRawBoolArray" {
+                    self.line(&format!("if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"));
+                    return ("bool".into(), format!("{b}.data[{tmp}]"));
+                }
                 if bty == "MakoByteArray" {
                     return ("int64_t".into(), format!("mako_byte_get({b}, {tmp})"));
                 }
@@ -40500,6 +40611,7 @@ fn type_expr_schema(t: &TypeExpr) -> String {
     match t {
         TypeExpr::Named(n) => n.clone(),
         TypeExpr::Array(inner) => format!("[]{}", type_expr_schema(inner)),
+        TypeExpr::RawArray(inner) => format!("raw []{}", type_expr_schema(inner)),
         TypeExpr::Map(k, v) => format!("map[{}]{}", type_expr_schema(k), type_expr_schema(v)),
         TypeExpr::Generic(n, args) => {
             let a: Vec<_> = args.iter().map(type_expr_schema).collect();
@@ -40572,7 +40684,7 @@ impl Codegen {
                 }
             }
             match t {
-                TypeExpr::Array(i) => walk_ty(i, out),
+                TypeExpr::Array(i) | TypeExpr::RawArray(i) => walk_ty(i, out),
                 TypeExpr::Map(k, v) => {
                     walk_ty(k, out);
                     walk_ty(v, out);

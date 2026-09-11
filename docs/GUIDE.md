@@ -483,6 +483,7 @@ rows = append(rows, [10, 20])
 | `[]byte(s)` or `bytes(s)` / `string(b)` | String ↔ bytes conversion |
 | `make([]int\|[]byte\|[]string\|[]float\|[]bool\|[][]T, …)` | Pre-sized allocation |
 | `[]bool` / `[]Enum` | Bool and enum element slices |
+| `raw []T` / `make(raw []T, len, cap)` | Non-COW single-owner array (plain malloc, no refcount) |
 | `s[i:j]`, `len`/`cap`/`append`/`copy` | Slice operations |
 
 Compile-time: `int8(200)` / `byte(300)` rejected at `makori check` when the arg is a constant
@@ -1255,9 +1256,32 @@ crew t {
 }
 ```
 
+### Structured Nursery Cancellation Policies
+
+Mako nurseries provide first-class language keywords for structured cancellation:
+
+| Nursery Policy | Syntax | Cancellation & Join Semantics |
+|---|---|---|
+| **Wait-All** (default) | `crew t { ... }` or `crew:all t { ... }` | Waits for all kicked tasks to finish before exiting. Un-joined tasks are joined at block exit. |
+| **Race** | `crew:race t { ... }` or `crew:any t { ... }` | First completed task wins; cooperatively cancels all remaining sibling tasks and joins all without leaks. |
+| **Fail-Fast** | `crew:fail_fast t { ... }` or `crew t(fail_fast=true) { ... }` | On first task error or failure, immediately cancels all tasks in the crew and unwinds cleanly. |
+
+```mko
+// Speculative race: first replica wins, losers are cancelled
+crew:race t {
+    let a = t.kick(fetch_replica_a())
+    let b = t.kick(fetch_replica_b())
+    let winner = b.join()
+    print_int(winner)
+    // fetch_replica_a is cooperatively cancelled and joined on exit
+}
+```
+
 | Tool | Role |
 |------|------|
 | `crew` / `kick` / `join` | Structured concurrency; **join** returns the job’s type (`int`, `string`, `Result`, …) |
+| `crew:race` / `crew:any` | First-completed task cancels siblings; joins all |
+| `crew:fail_fast` | First child failure cooperatively cancels nursery |
 | `job.join_timeout(ms)` | Timed join → `Result[R, string]`: `Ok(value)` or `Err("timeout")` |
 | `crew.drain(ms)` | Cancel + join with timeout |
 | `fan(collection, mapper)` | Data-parallel map: `[]int` / `[]float` / `[]string` / `[]Struct` |
@@ -1321,6 +1345,10 @@ string uses the string ring.
 
 Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
 `chan_backpressure_test`, `lang_ergonomics_test` (`chan[tuple]`).
+
+### Zero-Allocation Small Channels
+
+Channels with capacity $\le 4$ (and unbuffered rendezvous channels with capacity $0$) allocate **zero dynamic heap memory** for their internal ring buffer on creation. `MakoChan` contains an embedded 4-slot ring buffer (`inline_buf[4]`), ensuring cache-friendly message passing with zero malloc overhead. Dynamic buffer allocation occurs only when requested capacity strictly exceeds 4 (`cap > 4`).
 
 ```mko
 // examples/select_default.mko — timeout + default + up to 16 arms
@@ -2440,6 +2468,25 @@ Flags of note: `--time`, `-j` / `MAKO_JOBS`, `--no-incremental`, `--target <trip
 Linux musl targets default to static linking; glibc Linux, macOS, Windows, and
 WASM stay dynamic/default unless static linking is explicitly supported and requested.
 See [BUILD.md](BUILD.md) · [PERFORMANCE.md](PERFORMANCE.md) · [SECURITY.md](SECURITY.md).
+
+### Deep Developer Tracing & Observability
+
+Makori provides built-in, zero-dependency developer tracing and structured observability out of the box:
+
+- **Hierarchical Call Tree (`MAKO_TRACE=tree`)**: prints function entry/exit trees with automatic nesting indentation, ANSI color-graded execution durations (green < 100µs, yellow 100µs-1ms, red > 1ms), and source locations (`file.mko:line`):
+  ```bash
+  MAKO_TRACE=tree mako run main.mko
+  ```
+- **Chrome Trace / Perfetto Export (`MAKO_TRACE_JSON=<path>`)**: records execution traces with microsecond monotonic timestamps, thread IDs (`tid`), process IDs, and durations in Chrome Trace Event format:
+  ```bash
+  MAKO_TRACE_JSON=trace.json mako run main.mko
+  ```
+  Drag and drop `trace.json` into `chrome://tracing` or [Perfetto](https://ui.perfetto.dev/) for interactive flame charts and multi-threaded timeline analysis.
+- **Channel Telemetry Tracing (`MAKO_TRACE_CHAN=1`)**: logs channel pointer addresses, sent/received values, and buffer fill level `(len/cap)` on every message operation to immediately diagnose deadlocks and contention:
+  ```bash
+  MAKO_TRACE_CHAN=1 mako run main.mko
+  ```
+- **Zero-Cost Release Contract**: all tracing hooks compile down to `((void)0)` no-op macros under `-DNDEBUG` / `--release`, guaranteeing zero runtime overhead and zero binary bloat in production.
 
 `makori deploy docker` writes a multi-stage Dockerfile plus `.dockerignore`.
 Default mode builds a static `x86_64-unknown-linux-musl` binary and copies it

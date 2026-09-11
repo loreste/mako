@@ -2401,7 +2401,7 @@ fn rewrite_type_expr(ty: &mut TypeExpr, alias: &str, names: &ImportNameSets) {
                 *n = format!("{alias}__{n}");
             }
         }
-        TypeExpr::Array(inner) => rewrite_type_expr(inner, alias, names),
+        TypeExpr::Array(inner) | TypeExpr::RawArray(inner) => rewrite_type_expr(inner, alias, names),
         TypeExpr::Map(k, v) => {
             rewrite_type_expr(k, alias, names);
             rewrite_type_expr(v, alias, names);

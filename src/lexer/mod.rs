@@ -52,6 +52,8 @@ pub enum TokenKind {
     Hold,
     Share,
     Unsafe,
+    /// Non-COW array qualifier: `raw []T`
+    Raw,
     As,
     Select,
     Timeout,
@@ -737,6 +739,7 @@ impl<'a> Lexer<'a> {
             "hold" => TokenKind::Hold,
             "share" => TokenKind::Share,
             "unsafe" => TokenKind::Unsafe,
+            "raw" => TokenKind::Raw,
             "as" => TokenKind::As,
             "select" => TokenKind::Select,
             "timeout" => TokenKind::Timeout,

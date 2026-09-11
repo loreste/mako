@@ -33,6 +33,8 @@ pub enum Type {
     Bool,
     String,
     Array(Box<Type>),
+    /// Non-COW array: `raw []T` — single-owner, move semantics, plain malloc.
+    RawArray(Box<Type>),
     /// Go-like `map[K]V`
     Map(Box<Type>, Box<Type>),
     Named(String),
@@ -113,6 +115,7 @@ impl Type {
             Type::Bool => "bool".into(),
             Type::String => "string".into(),
             Type::Array(t) => format!("[]{}", t.display()),
+            Type::RawArray(t) => format!("raw []{}", t.display()),
             Type::Map(k, v) => format!("map[{}]{}", k.display(), v.display()),
             Type::Named(n) => n.clone(),
             Type::Option(t) => format!("Option[{}]", t.display()),
@@ -169,6 +172,7 @@ impl Type {
             Type::String => "string".into(),
             Type::Void => "void".into(),
             Type::Array(t) => format!("arr_{}", t.mono_tag()),
+            Type::RawArray(t) => format!("rawarr_{}", t.mono_tag()),
             Type::Chan(t) => format!("chan_{}", t.mono_tag()),
             Type::Queue(t) => format!("queue_{}", t.mono_tag()),
             Type::Graphql => "Graphql".into(),
@@ -15444,6 +15448,7 @@ impl TypeChecker {
                 Ok(Type::Map(Box::new(k), Box::new(v)))
             }
             TypeExpr::Array(inner) => Ok(Type::Array(Box::new(self.resolve_type(inner)?))),
+            TypeExpr::RawArray(inner) => Ok(Type::RawArray(Box::new(self.resolve_type(inner)?))),
             TypeExpr::Fn(params, ret) => {
                 let params: Result<Vec<_>, _> =
                     params.iter().map(|p| self.resolve_type(p)).collect();
@@ -15988,7 +15993,7 @@ impl TypeChecker {
                             Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::Byte,
                             Expr::Int(_),
                         ) => expected.clone(),
-                        (Type::Array(inner), Expr::Array(elems))
+                        (Type::Array(inner) | Type::RawArray(inner), Expr::Array(elems))
                             if matches!(
                                 inner.as_ref(),
                                 Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::Byte
@@ -16276,7 +16281,7 @@ impl TypeChecker {
                 let bt = self.check_expr(base)?;
                 let it = self.check_expr(index)?;
                 match bt {
-                    Type::Array(inner) => {
+                    Type::Array(inner) | Type::RawArray(inner) => {
                         if it != Type::Int {
                             return Err(TypeError::new("slice index must be int"));
                         }
@@ -16810,7 +16815,7 @@ impl TypeChecker {
                 // Classify iterable
                 // String + `range` → Go-like runes (int code points); legacy `for b in s` → bytes.
                 let (index_ty, value_ty, is_int_count, is_chan) = match &it {
-                    Type::Array(e) => (Type::Int, (**e).clone(), false, false),
+                    Type::Array(e) | Type::RawArray(e) => (Type::Int, (**e).clone(), false, false),
                     Type::Map(k, v) => ((**k).clone(), (**v).clone(), false, false),
                     Type::Chan(e) => (Type::Int, (**e).clone(), false, true),
                     Type::String if *is_range => (Type::Int, Type::Int, false, false), // rune
@@ -18188,7 +18193,7 @@ impl TypeChecker {
                         "string" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             match t {
-                                Type::Array(inner) if *inner == Type::Byte => {
+                                Type::Array(inner) | Type::RawArray(inner) if *inner == Type::Byte => {
                                     return Ok(Type::String);
                                 }
                                 Type::String => return Ok(Type::String),
@@ -18248,7 +18253,11 @@ impl TypeChecker {
                                 (Type::Array(a), Type::Array(b)) if self.compatible(a, b) => {
                                     return Ok(Type::Int);
                                 }
-                                (Type::Array(_), Type::Array(_)) => {
+                                (Type::RawArray(a), Type::RawArray(b)) if self.compatible(a, b) => {
+                                    return Ok(Type::Int);
+                                }
+                                (Type::Array(_), Type::Array(_))
+                                | (Type::RawArray(_), Type::RawArray(_)) => {
                                     return Err(TypeError::new(format!(
                                         "copy element type mismatch: {} vs {}",
                                         dt.display(),
@@ -18268,6 +18277,7 @@ impl TypeChecker {
                             let t = self.check_expr(&args[0])?;
                             return match t {
                                 Type::Array(_)
+                                | Type::RawArray(_)
                                 | Type::String
                                 | Type::Map(_, _)
                                 | Type::StrBuilder => Ok(Type::Int),
@@ -18421,7 +18431,7 @@ impl TypeChecker {
                         "cap" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             return match t {
-                                Type::Array(_) => Ok(Type::Int),
+                                Type::Array(_) | Type::RawArray(_) => Ok(Type::Int),
                                 other => Err(TypeError::new(format!(
                                     "cap needs slice ([]int), got {}",
                                     other.display()
@@ -18430,8 +18440,9 @@ impl TypeChecker {
                         }
                         "append" if args.len() == 2 => {
                             let st = self.check_expr(&args[0])?;
+                            let is_raw = matches!(&st, Type::RawArray(_));
                             match st {
-                                Type::Array(inner) => {
+                                Type::Array(inner) | Type::RawArray(inner) => {
                                     // Push element type so None/Some/Ok/Err match []Option / []Result.
                                     let saved_expected = self.current_expected.clone();
                                     self.current_expected = Some(inner.as_ref().clone());
@@ -18450,7 +18461,7 @@ impl TypeChecker {
                                             vt.display()
                                         )));
                                     }
-                                    return Ok(Type::Array(inner));
+                                    return Ok(if is_raw { Type::RawArray(inner) } else { Type::Array(inner) });
                                 }
                                 other => {
                                     return Err(TypeError::new(format!(
@@ -18609,7 +18620,7 @@ impl TypeChecker {
                     }
                 }
                 match (&rt, method.as_str()) {
-                    (Type::Array(_), "len") => Ok(Type::Int),
+                    (Type::Array(_) | Type::RawArray(_), "len") => Ok(Type::Int),
                     (Type::String, "len") => Ok(Type::Int),
                     (Type::Chan(inner), "send") => {
                         if args.len() != 1 {
@@ -19064,7 +19075,7 @@ impl TypeChecker {
                 let bt = self.check_expr(base)?;
                 let it = self.check_expr(index)?;
                 match bt {
-                    Type::Array(e) => {
+                    Type::Array(e) | Type::RawArray(e) => {
                         if it != Type::Int {
                             return Err(TypeError::new("index must be int"));
                         }
@@ -19119,6 +19130,7 @@ impl TypeChecker {
                 }
                 match bt {
                     Type::Array(e) => Ok(Type::Array(e)),
+                    Type::RawArray(e) => Ok(Type::RawArray(e)),
                     Type::String => {
                         if max.is_some() {
                             return Err(TypeError::new(
@@ -19553,7 +19565,9 @@ impl TypeChecker {
                         }
                         Ok(Type::Map(k, v))
                     }
-                    Type::Array(inner) => {
+                    Type::Array(ref inner) | Type::RawArray(ref inner) => {
+                        let is_raw = matches!(target, Type::RawArray(_));
+                        let inner = inner.clone();
                         let Some(l) = len else {
                             return Err(TypeError::new(
                                 "make([]T) needs len: make([]int, n) or make([]int, n, cap)",
@@ -19577,6 +19591,7 @@ impl TypeChecker {
                                 return Err(TypeError::new("make cap must be int"));
                             }
                         }
+                        let wrap = |inner: Box<Type>| if is_raw { Type::RawArray(inner) } else { Type::Array(inner) };
                         match inner.as_ref() {
                             Type::Int
                             | Type::Int64
@@ -19589,11 +19604,12 @@ impl TypeChecker {
                             | Type::Struct { .. }
                             | Type::Enum { .. }
                             | Type::Array(_)
+                            | Type::RawArray(_)
                             | Type::Map(_, _)
                             | Type::Option(_)
                             | Type::Result(_, _)
-                            | Type::Chan(_) => Ok(Type::Array(inner)),
-                            other if is_opaque_handle(other) => Ok(Type::Array(inner)),
+                            | Type::Chan(_) => Ok(wrap(inner)),
+                            other if is_opaque_handle(other) => Ok(wrap(inner)),
                             other => Err(TypeError::new(format!(
                                 "make([]{}) not supported yet",
                                 other.display()
@@ -20113,6 +20129,7 @@ impl TypeChecker {
             (Type::Named(n), Type::Named(m)) if n == "string_view" && m == "string_view" => true,
             (Type::Named(a), Type::Named(b)) if a == b => true,
             (Type::Array(a), Type::Array(b)) => self.compatible(a, b),
+            (Type::RawArray(a), Type::RawArray(b)) => self.compatible(a, b),
             (Type::Map(k1, v1), Type::Map(k2, v2)) => {
                 self.compatible(k1, k2) && self.compatible(v1, v2)
             }
@@ -20525,6 +20542,14 @@ impl TypeChecker {
             }
             Type::Array(a) => match concrete {
                 Type::Array(b) => self.unify_generic(a, b, type_params, subst),
+                _ => Err(TypeError::new(format!(
+                    "expected {}, got {}",
+                    pattern.display(),
+                    concrete.display()
+                ))),
+            },
+            Type::RawArray(a) => match concrete {
+                Type::RawArray(b) => self.unify_generic(a, b, type_params, subst),
                 _ => Err(TypeError::new(format!(
                     "expected {}, got {}",
                     pattern.display(),
@@ -21844,6 +21869,7 @@ impl TypeChecker {
                             | Type::Tuple(_)
                             | Type::Enum { .. }
                             | Type::Array(_)
+                            | Type::RawArray(_)
                             | Type::Map(_, _)
                     ) {
                         frame.insert(name.clone());
@@ -21967,6 +21993,7 @@ fn is_kick_sendable(t: &Type) -> bool {
         Type::Named(_) => false, // non-POD / handled in TypeChecker::is_kick_sendable_ty
         // Option/Result/tuple/enum handled in TypeChecker::is_kick_sendable_ty (fuller Send).
         Type::Array(_)
+        | Type::RawArray(_)
         | Type::Map(_, _)
         | Type::Tuple(_)
         | Type::Option(_)
@@ -22814,6 +22841,7 @@ pub fn subst_type_expr(t: &TypeExpr, subst: &HashMap<String, Type>) -> TypeExpr 
             }
         }
         TypeExpr::Array(inner) => TypeExpr::Array(Box::new(subst_type_expr(inner, subst))),
+        TypeExpr::RawArray(inner) => TypeExpr::RawArray(Box::new(subst_type_expr(inner, subst))),
         TypeExpr::Map(k, v) => TypeExpr::Map(
             Box::new(subst_type_expr(k, subst)),
             Box::new(subst_type_expr(v, subst)),
@@ -22845,6 +22873,7 @@ pub fn type_to_type_expr(t: &Type) -> TypeExpr {
         Type::String => TypeExpr::Named("string".into()),
         Type::Void => TypeExpr::Named("void".into()),
         Type::Array(inner) => TypeExpr::Array(Box::new(type_to_type_expr(inner))),
+        Type::RawArray(inner) => TypeExpr::RawArray(Box::new(type_to_type_expr(inner))),
         Type::Chan(inner) => TypeExpr::Generic("chan".into(), vec![type_to_type_expr(inner)]),
         Type::Named(n) => TypeExpr::Named(n.clone()),
         Type::Tuple(elems) => TypeExpr::Tuple(elems.iter().map(type_to_type_expr).collect()),

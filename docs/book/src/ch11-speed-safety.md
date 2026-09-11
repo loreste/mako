@@ -101,6 +101,29 @@ If you pass an invalid index, behavior is undefined -- there is no safety net.
 **Guideline:** Only use `unsafe_index` when you have profiled and confirmed the
 bounds check is the bottleneck. In most code, the checked path is free.
 
+### Raw arrays: zero atomic overhead
+
+When the bottleneck is COW refcount atomics (not bounds checks), use `raw []T`.
+Raw arrays use plain `malloc` -- no refcount header, no `atomic_fetch_add` on
+clone, no `mako_rc_shared` check before mutation.
+
+```mko
+fn hot_loop(n: int) -> int {
+    let mut buf: raw []int = make(raw []int, 0, n)
+    for i in n {
+        buf = append(buf, i * i)
+    }
+    let mut sum = 0
+    for v in buf {
+        sum = sum + v
+    }
+    return sum
+}
+```
+
+Bounds checks are still enforced -- `raw` removes COW overhead, not safety.
+Combine with `unsafe_index` only if profiling confirms both are bottlenecks.
+
 ---
 
 ## The Hold/Share Move Checker
@@ -766,12 +789,116 @@ control over per-connection drain when needed.
 
 ---
 
+## Zero-Allocation Channels and Inline Buffers
+
+For high-throughput microservices and message-passing pipelines, channel creation
+must be as close to zero-cost as possible. In Makori, channels with a capacity
+of 4 elements or fewer (including unbuffered rendezvous channels, capacity 0) use
+an **embedded inline ring buffer** (`inline_buf[4]`) directly inside `MakoChan`.
+
+```mko
+fn main() {
+    // Zero heap allocations for the ring buffer:
+    let ch = make(chan[int], 2)
+    ch <- 42
+    print_int(<-ch)
+    chan_close(ch)
+}
+```
+
+- Channels with capacity `<= 4` avoid a separate heap `malloc` and `free` for the ring buffer.
+- When capacity exceeds 4, the runtime allocates a dynamic heap buffer.
+- Channel destruction (`mako_chan_free`) dynamically identifies whether the buffer was inline or heap-allocated, guaranteeing zero memory leaks and zero invalid pointer frees.
+
+---
+
+## Struct Literal `memset` Elision
+
+When instantiating structs in loops or hot request paths, traditional compilers
+often emit a defensive `memset(&s, 0, sizeof(s))` before populating fields.
+Makori analyzes struct literal completeness at compile time:
+
+```mko
+struct Event {
+    id: int
+    kind: int
+    payload: string
+}
+
+fn make_event(i: int) -> Event {
+    // All fields (id, kind, payload) are provided:
+    // Redundant zero-clearing is completely elided.
+    return Event {
+        id: i,
+        kind: 1,
+        payload: "click",
+    }
+}
+```
+
+If every field is explicitly assigned in the literal, the compiler skips the
+zeroing step and writes field values directly into destination memory. This
+measurably improves throughput in benchmarks like `struct1m` and JSON/RPC decoders.
+
+---
+
+## Structured Nursery Cancellation Policies
+
+Makori's structured concurrency model (`crew`) ensures that concurrent child
+tasks cannot outlive their enclosing lexical scope. Starting in `0.6.32`, crews
+support first-class execution and cancellation policies:
+
+| Policy Syntax | Semantic | Use Case |
+|---|---|---|
+| `crew` or `crew:all` | Wait for every child task to complete | Batch parallel processing |
+| `crew:race` or `crew:any` | Cancel remaining siblings as soon as the first task finishes | Speculative racing, DNS lookups |
+| `crew:fail_fast` | Cancel all siblings immediately if any task returns an error | Validating multi-step pipelines |
+
+```mko
+fn fetch_replicated(urls: []string) -> string {
+    let ch = make(chan[string], 1)
+    crew:race t {
+        for url in urls {
+            let u = url
+            let _ = t.kick(fn() {
+                let body = http_get(u)
+                let _ = chan_send(ch, body)
+            })
+        }
+    }
+    return <-ch
+}
+```
+
+When the winner of `crew:race` completes or a task in `crew:fail_fast` fails:
+1. Cancellation tokens propagate instantly to all active sibling tasks.
+2. In-flight tasks abort cooperatively or upon subsequent channel/crew interactions.
+3. The crew joins all threads and releases all local task resources before exiting the block.
+4. **Zero orphan tasks, zero thread leaks, zero goroutine leaks.**
+
+---
+
+## Zero-Cost Observability in Release Builds
+
+Makori's developer tracing system (`MAKO_TRACE=tree`, `MAKO_TRACE_JSON=<path>`,
+and `MAKO_TRACE_CHAN=1`) provides rich visual telemetry during development.
+However, hot production paths must never pay for unused instrumentation.
+
+In release mode (`mako build --release` with `-O3 -flto` and `-DNDEBUG`):
+- `mako_trace_enter(...)` and `mako_trace_exit(...)` compile down to `((void)0)`.
+- Channel tracing hooks (`mako_trace_chan_op(...)`) are eliminated by the C preprocessor.
+- Call trees, JSON file descriptors, and thread-local depth tracking vanish entirely.
+- Zero nanoseconds of overhead, zero binary size penalty, and zero memory allocations.
+
+---
+
 ## Summary
 
 Mako achieves speed through direct compilation to C with `-O3 -flto`, arena
-allocation, low-overhead ownership, and no garbage collector. It achieves safety
-through compile-time move analysis, runtime bounds checks, structured
-concurrency, and explicit `unsafe` opt-out. The two goals reinforce each other:
+allocation, zero-allocation small channels, struct memset elision, low-overhead
+ownership, and no garbage collector. It achieves safety through compile-time move
+analysis, runtime bounds checks, structured concurrency policies (`crew:race`,
+`crew:fail_fast`), and explicit `unsafe` opt-out. The two goals reinforce each other:
 the ownership system eliminates the need for a GC (speed) while preventing
 use-after-free (safety). Bounds checks prevent overflows (safety); measure their
 cost on the workload that matters (speed).

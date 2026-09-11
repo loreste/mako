@@ -1977,7 +1977,7 @@ static int mako_prof_sa_saved = 0;
 #endif
 
 static inline int64_t mako_prof_current_tid(void) {
-#if defined(_WIN32) || defined(MAKO_WASI)
+#if defined(_WIN32) || defined(MAKO_WASI) || defined(__wasi__)
     return 0;
 #else
     return (int64_t)(uintptr_t)pthread_self();

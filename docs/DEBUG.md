@@ -290,6 +290,37 @@ Mako nursery crews support explicit cancellation and joining policies directly i
 | `crew:race` / `crew:any` | `crew:race c { ... }` / `crew:any c { ... }` | First task to finish wins; all other tasks in the crew are cooperatively cancelled and joined. |
 | `crew:fail_fast` | `crew:fail_fast c { ... }` or `crew c(fail_fast=true) { ... }` | On first task error, cancels the entire crew immediately. |
 
+Debugging nursery cancellation:
+- Under `MAKO_TRACE=tree`, task entries and exits indicate nursery lifecycle events.
+- Combined with `MAKO_TRACE_CHAN=1`, channel writes after cancellation will log buffer drops and channel closure events.
+
+### 5. Zero-cost release contract
+
+In production systems, developer tracing hooks must never introduce CPU overhead, memory writes, or branch mispredictions. Makori enforces a strict zero-cost contract:
+- In release builds (`--release` or `-DNDEBUG`), every tracing macro (`MAKO_TRACE_FN_ENTER`, `MAKO_TRACE_FN_EXIT`, `MAKO_TRACE_CHAN_SEND`, `MAKO_TRACE_CHAN_RECV`) expands to `((void)0)`.
+- The compiler emits zero instructions, zero branch checks, and zero string constants for function signatures or channel operations.
+- Tracing is entirely compile-time elided in release mode, ensuring native execution speeds match or exceed Rust.
+
+### 6. Adversarial memory safety and sanitizers
+
+Makori targets 100% memory safety by construction (ownership moves, non-lexical lifetimes, checked array bounds, arena bounds). To adversarially verify safety against memory corruption and concurrency races:
+
+```bash
+# Verify spatial and temporal memory safety (ASan)
+mako run --sanitize address examples/testing/crew_policy_test.mko
+
+# Verify race-free concurrency across kicked crew tasks (TSan)
+mako run --sanitize thread examples/testing/crew_policy_test.mko
+
+# Verify absence of undefined behavior (UBSan)
+mako run --sanitize undefined examples/testing/crew_policy_test.mko
+```
+
+The runtime enforces:
+- `mako_chan_free` distinguishes inline small-channel buffers from heap buffers, preventing invalid interior pointer frees.
+- No data races across thread boundaries for kicked tasks or channel messaging.
+- Bounds checking on all slice/array indexing in debug and release builds.
+
 ---
 
 ## Running with lldb (manual)

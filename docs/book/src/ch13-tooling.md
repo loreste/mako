@@ -655,9 +655,75 @@ lldb bin/app
 ```bash
 mako build --sanitize=address main.mko   # detect buffer overflows, use-after-free
 mako build --sanitize=thread main.mko    # detect data races
+mako build --sanitize=undefined main.mko # detect undefined behavior
 ```
 
 Run the resulting binary normally. On violation, the sanitizer prints a detailed
 report with stack traces.
+
+---
+
+## Deep Developer Tracing & Observability
+
+Mako provides built-in, zero-dependency developer tracing. Without adding any third-party crates or modifying your source code, you can inspect live call hierarchies, profile execution times, trace concurrency channels, or export timeline flame charts.
+
+In release builds (`--release` or `-DNDEBUG`), all tracing hooks compile to strictly zero-cost `((void)0)` no-op macros.
+
+### 1. Hierarchical Call Tree (`MAKO_TRACE=tree`)
+
+Inspect function calls in real time with automatic indentation, ANSI duration color coding, and source line coordinates:
+
+```bash
+MAKO_TRACE=tree mako run main.mko
+```
+
+Example stderr output:
+```text
+[trace] → process_request (server.mko:45)
+[trace]   → authenticate (auth.mko:12)
+[trace]   ← authenticate (42.0 µs)
+[trace]   → query_db (db.mko:88)
+[trace]   ← query_db (1.2 ms)
+[trace] ← process_request (1.5 ms)
+```
+
+Durations are automatically color-graded:
+- **Green**: `< 100 µs` (optimal)
+- **Yellow**: `100 µs - 1 ms` (moderate)
+- **Red**: `> 1 ms` (hotspot / slow)
+
+### 2. Chrome Trace / Perfetto Timeline Export (`MAKO_TRACE_JSON`)
+
+To generate interactive flame charts and multi-threaded execution traces, point `MAKO_TRACE_JSON` to an output path:
+
+```bash
+MAKO_TRACE_JSON=trace.json mako run main.mko
+```
+
+The runtime writes a standard Chrome Trace Event JSON array with monotonic microsecond timestamps (`ts`), durations (`dur`), function names, thread IDs (`tid`), and process IDs (`pid`).
+
+Open `trace.json` in:
+- Google Chrome: navigate to `chrome://tracing` and drag-and-drop the file.
+- [Perfetto UI](https://ui.perfetto.dev/): click "Open trace file" for interactive timeline exploration.
+
+### 3. Channel Telemetry & Deadlock Diagnostics (`MAKO_TRACE_CHAN=1`)
+
+To debug message passing, buffer backpressure, or channel deadlocks, enable channel tracing:
+
+```bash
+MAKO_TRACE_CHAN=1 mako run main.mko
+```
+
+Example output:
+```text
+[chan] send chan=0x14000104000 val=1 (len=0/4)
+[chan] recv chan=0x14000104000 val=1 (len=0/4)
+[chan] send chan=0x14000104000 val=42 (len=1/4)
+```
+
+Each log line records:
+- Channel memory address (`chan=...`)
+- Sent or received value (`val=...`)
+- Real-time buffer fill level vs capacity `(len/cap)`
 
 Next: [Cookbook](ch14-cookbook.md).

@@ -91,6 +91,7 @@ Guided tour: [The Makori Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) ·
 | `hold` | Move-on-rebind ownership binding |
 | `share` | Shared / RC-style binding (seed) |
 | `as` | Type / ownership cast helper in expressions |
+| `raw` | Non-COW array qualifier: `raw []T` — single-owner, plain malloc |
 
 ## Messaging / GraphQL (language types)
 
@@ -106,7 +107,7 @@ See [MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md).
 ```
 actor and arena as break const continue crew default defer else enum extern false
 fallthrough fan fn for graphql hold if import in interface join kick let match mut
-not on or queue range receive return select share struct timeout true while
+not on or queue range raw receive return select share struct timeout true while
 ```
 (also duals: `func` `var` `package` `type` `import` · export is reserved)
 

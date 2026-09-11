@@ -52,6 +52,14 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 | **Also** | Return transfers ownership + materialize-before-free; view escape/return type errors; stack POD lits (`cap==0`) heapify on escape. |
 | **Alias concurrency** | Slice Views are NLL borrows, with one live View per base; `mut` Views are exclusive and may mutate their range. Their base cannot mutate, reassign, move, drop, detach, or be borrowed again while live. Slices/Views remain non-Send; refcount uniqueness never grants mutation authority. Checked retain/release abort on overflow, underflow, or resurrection. |
 
+### SAFE-003b — Raw array drops (`raw []T`) — **Done**
+
+| | |
+|--|--|
+| **Contract** | Raw arrays use plain `malloc`/`free` (no refcount header). Single-owner; auto-freed at scope exit or reassignment via unconditional `free(data)`. String elements are freed individually before backing. No COW, no detachment, no shared check. |
+| **Code** | `mako_raw_*_array_free`, `mako_raw_slice_append`, `mako_raw_*_array_make`; codegen `own_free_fn` dispatches `MakoRaw*Array` types to their free functions. |
+| **Evidence** | Adversarial tests: 100-round alloc/free stress, string overwrite, nested scope drops, reassign loops. macOS `leaks --atExit`: 0 leaks, 0 bytes across all tests. |
+
 ### SAFE-004 — Compiler-generated drops for maps — **Done**
 
 | | |

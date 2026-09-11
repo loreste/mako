@@ -91,7 +91,8 @@ with `?` propagation. Pattern matching. Enums with payloads. Generics
 multi-return. Integer literals in decimal, hex (`0xFF`), binary (`0b1010`),
 and octal (`0o77`) with `_` separators. `defer`. Labeled loops. F-strings.
 Struct update syntax. Pipe operator (`|>`). `prove` contracts. `live fn`
-hot-reload foundation.
+hot-reload foundation. `raw []T` non-COW arrays for zero-atomic-overhead
+hot paths.
 
 **Memory.** Ownership tracking with compile-time move checks. Arenas for
 bulk allocation. Bounds checks in debug and release. Escape analysis.
@@ -99,10 +100,12 @@ Deterministic cleanup with copy-on-write slices — no GC. The C backend shares
 owned heap backing through atomic reference counts and detaches before
 mutation; borrowed views and pool-backed buffers never enter that release
 path. The native backend tracks owned and borrowed values explicitly across
-calls and returns. The ownership and runtime safety model was introduced in
-0.2.4 and continues to be hardened through adversarial tests, sanitizers, leak
-checks, and regression gates. It is not formally proven complete. `unsafe` and
-FFI are outside the model.
+calls and returns. **Raw arrays** (`raw []T`) opt out of COW entirely — plain
+`malloc` backing, no refcount header, no atomic ops, single-owner move
+semantics with unconditional `free` at scope exit. The ownership and runtime
+safety model was introduced in 0.2.4 and continues to be hardened through
+adversarial tests, sanitizers, leak checks, and regression gates. It is not
+formally proven complete. `unsafe` and FFI are outside the model.
 
 **Concurrency.** `crew` / `kick` / `join` — structured concurrency where
 ordinary crew jobs cannot outlive their scope. Explicit `detach` tasks are
@@ -165,211 +168,12 @@ message inspection, site history, reports, alerts, and traffic metrics.
 
 ## New in 0.6.32
 
-- **Structured crew cancellation policies:** First-class language support for `crew:all`, `crew:race`, `crew:any`, `crew:fail_fast`, and `crew(fail_fast=true)`. Eliminates orphan tasks and coordinates race/fail-fast cancellation by construction.
-- **Deep developer tracing:** Hierarchical call tree visualization (`MAKO_TRACE=tree`), Google Chrome Trace Event / Perfetto export (`MAKO_TRACE_JSON=<path>`), and concurrency event telemetry (`MAKO_TRACE_CHAN=1`).
-- **Zero-allocation small channels:** Inline 4-slot ring buffer (`inline_buf[4]`) in `MakoChan` eliminates heap allocations for unbuffered rendezvous and small channels.
-- **Struct literal `memset` elision:** Fully initialized structs omit zero-clearing in native codegen, boosting throughput.
-- **100% memory safe native channel drop:** `mako_native_chan_drop` unified with `mako_chan_free` to safely handle inline vs heap buffers.
+- **Raw arrays (`raw []T`):** Non-COW single-owner arrays with plain `malloc` backing. No refcount header, no atomic ops, unconditional `free` at scope exit. All standard slice operations work. Adversarial-tested with zero leaks.
+- **Structured crew cancellation policies:** `crew:all`, `crew:race`, `crew:any`, `crew:fail_fast`, and `crew(fail_fast=true)`. Eliminates orphan tasks by construction.
+- **Deep developer tracing:** `MAKO_TRACE=tree` (call tree), `MAKO_TRACE_JSON=<path>` (Chrome/Perfetto), `MAKO_TRACE_CHAN=1` (concurrency events).
+- **Zero-allocation small channels:** Inline 4-slot ring buffer eliminates heap allocations for unbuffered and small channels.
 
-## New in 0.6.31
-
-- **Loop-exit ownership cleanup:** `emit_loop_exit_cleanup` along `break` and `continue` branches no longer mutates or clears compiler tracking scopes. Loop body fallthrough preserves scope drop tracking for per-iteration temporaries (e.g. UDP receive buffers and per-request strings, issue #56).
-- **Temporary string argument tracking & double-free prevention:** Restored `scope_drop_safe` for owned string temporaries in `emit_str_arg` while disarming immediate-free drops in `append`, string array literals, `print`, channel send-take operations, and binary string concatenation (issue #55).
-- **Transient struct field extraction:** Added proper scope drop tracking and cleanup when extracting owned fields from temporary call/method structs (e.g. `call().field`), freeing non-extracted fields and transferring ownership of the extracted field.
-- **Nested field array append reassign:** Fixed `emit_assign_owned_value` to release only the old slice backing buffer without deep-freeing string elements live in the newly grown slice.
-- **JSON control byte escaping:** Fixed shared runtime string serialization to escape every JSON control byte in `#[derive(json)]` output and object keys (issue #54).
-
-## New in 0.6.30
-
-Mako-level stack traces on panic with function names and source locations.
-`MAKO_TRACE=1` prints function entry/exit. `dbg()` now works on any type
-(int, float, bool, string). Debugger (DAP) hides codegen temporaries — only
-user variable names visible. Position-aware last-use move for owned locals
-including strings.
-
-## New in 0.6.29
-
-COW string arrays: `[]string` clone is now O(1) RC retain; `set` COWs the backing buffer only when shared. Inline-call arg temps from `append`/`make` are registered for scope-exit free (issue #53). Short-circuit `||`/`&&` bodies correctly scope owned temps.
-
-## New in 0.6.24
-
-Channel handles now retain/release atomically across owning struct copies, preventing cross-task use-after-free when sessions or clients are returned by value (issue #51). Native nullary enum call temporaries are also released exactly once. The v0.6.22 owned-field and pointer-ABI fixes remain intact.
-
-## New in 0.6.22
-
-Moved owned fields on unique struct locals are now a type error on second
-read, including nested paths and struct literals. C and native move those
-fields instead of cloning. `db = result.db` destroys the previous Database
-before overwrite (issue #49).
-
-C codegen keeps borrowed owning-struct parameters pointer-based without
-mis-lowering opaque `void*` handles. Whole-struct replacement destroys the old
-owned fields exactly once, while array/map escape makes one independent deep
-clone before the container takes ownership (issue #50).
-
-## New in 0.6.21
-
-Owned fields extracted from fresh call-returned local structs now move without
-cloning. The source field is zeroed, nested ownership is discovered
-recursively, and ordinary struct locals still clone on field extraction.
-
-## New in 0.6.20
-
-Aggregate channel sends deep-clone owned fields before handoff. Sender and
-receiver values therefore have independent lifetimes, and rejected sends
-recursively destroy the unaccepted clone.
-
-## New in 0.6.19
-
-Fresh struct locals containing owned fields now run recursive destructors at
-scope exit, including values returned by calls. Whole-struct reassignment frees
-the previous fields first; indexed struct values remain non-owning borrows.
-
-## New in 0.6.18
-
-Appending an owning struct/enum element now consumes identifier sources and
-moves fresh temporaries directly. Existing elements still clone during COW
-detach, eliminating both insertion leaks and source-alias double frees.
-
-## New in 0.6.17
-
-Struct literals now move fresh owned temporaries and clone only borrowed aliases,
-preserving recursive ownership without leaking discarded `Option`/`Result`
-payloads. The Ubuntu leak gate covers this boundary explicitly.
-
-## New in 0.6.16
-
-Top-level struct slices clone by O(1) RC retain of the outer buffer (same as
-`[]int`). Final-owner destruction recursively releases strings, nested slices,
-maps, builders, and nested structs exactly once. Append copy-on-write detaches
-when the buffer is shared. Mutable owning parameters retain caller storage for
-their scope, and shared `StrBuilder` handles use atomic lifetime management.
-
-## New in 0.6.15
-
-Nested struct arrays now clone in O(1) by retaining their copy-on-write backing
-buffer. The last owner recursively destroys each element's owned fields before
-releasing the buffer, preventing both deep-clone amplification and nested leaks.
-
-LLVM error tracing now uses backend-specific ABIs: by-value string records for
-LLVM and heap-header pointers for Cranelift/native.
-
-**LLVM-safe error propagation ownership** — traced errors propagate from an
-owned clone so result-field replacement drops the original exactly once. Runtime integer predicates are
-explicitly compared with zero before shared IR emits an LLVM branch.
-
-## New in 0.6.10
-
-**LLVM traced-result ownership** — plain `Err` values now bypass trace-field
-replacement entirely; only explicitly traced errors replace their error field.
-
-## New in 0.6.9
-
-**String ownership safety** — string destruction again follows explicit
-ownership and never probes memory before a string's data pointer. Mutable
-struct parameters retain conservative whole-value cloning until a proven-safe
-field-level optimization is available.
-Compiler diagnostics preserve file, line, and column locations, while `?`
-adds file:line frames to explicitly traced `Result` error chains on the error path.
-
-## New in 0.6.8
-
-**Interface type hardening** — interface satisfaction now verifies parameter
-and return types instead of accepting a same-named method with a different
-signature.
-
-## New in 0.6.7
-
-**Consuming View detach** — `v = append(v, x)` safely converts a borrowed View
-to owned backing and ends the base borrow, with portable refcount CI probes.
-
-## New in 0.6.6
-
-**Normative slice safety** — zero-copy Views now participate in NLL, mutable
-Views are exclusive, slice data remains non-Send, and invalid refcount
-transitions abort without wrapping. See [MEMORY_MODEL.md](docs/MEMORY_MODEL.md).
-
-## New in 0.6.5
-
-**Unicode 17, ML-DSA, traced errors, UUIDs, and JSON parity** — Unicode XID
-identifiers and normalization, OpenSSL 3.5+ ML-DSA signatures, error-chain
-metadata, UUID v1/v6/v8, and float/bool JSON derivation now run through both
-the C and native backends.
-
-## New in 0.6.4
-
-**Typed channel methods on the C backend** — string and aggregate channels now
-lower `try_send` and `send_timeout` through their typed runtime helpers. This
-keeps generated argument types correct and preserves caller ownership when a
-string send succeeds, times out, or observes a closed channel.
-
-## New in 0.6.3
-
-**Durable C-backend loops** — string, channel, map, and iterator range loops
-now release owned body temporaries after every iteration. Long-running
-workloads no longer accumulate one allocation per iteration until
-`rc_alloc` aborts with an out-of-memory error.
-
-## New in 0.6.2
-
-**Copy-on-write slices** — on the C backend, heap-backed slice clones are O(1)
-atomic retains. Append and other mutations preserve value semantics by
-detaching shared backing storage before writing. Borrowed views remain
-non-owning, and the native backend keeps call, return, and nested temporary
-ownership explicit. This removes repeated deep copies from database and
-collection-heavy loops without introducing a garbage collector.
-
-**Ownership hardening** — C and native lowering now retain, clone, transfer,
-and release slice storage consistently across calls, returns, struct fields,
-discarded values, and generated helpers. Adversarial tests cover aliasing,
-reassignment, clone storms, allocator pairing, and nested native temporaries.
-Release CI passed ASan/LSan, TSan, UBSan, native differential tests, the
-memory-safety gate, and long-running RSS soaks.
-
-## New in 0.6.1
-
-**Native LLM builtin parity** — the native backend now wires the hosted LLM
-surface through checked bridge shims instead of leaving those calls as C-only
-coverage. Offline LLM builders, parsers, retry helpers, and embedding helpers
-run under the native backend test path.
-
-**Runtime hardening** — LLM bridge string ownership stays explicit at the
-native/C boundary, and release CI keeps the benchmark, sanitizer, memory-safety,
-and product-claims gates hard.
-
-## New in 0.6.0
-
-**Pipe operator** — chain function calls top-to-bottom:
-
-```mko
-let result = data
-    |> parse
-    |> validate(schema)
-    |> transform
-// desugars to: transform(validate(parse(data), schema))
-// zero-cost — pure syntax sugar, no allocations
-```
-
-**Prove contracts** — compiler-verified preconditions:
-
-```mko
-fn transfer(from: int, to: int, amount: int) -> int
-    prove amount > 0
-    prove from >= amount
-{
-    return from - amount
-}
-```
-
-**Live fn** — hot-reload foundation:
-
-```mko
-live fn handle_request(req: string) -> string {
-    return "ok"
-}
-// compiles to indirect call through swappable function pointer
-// update running servers without dropping connections
-```
+See [CHANGELOG.md](CHANGELOG.md) for earlier releases.
 
 ## Concurrency
 
@@ -444,9 +248,8 @@ makori test -r TestAdd -v                   # filter + verbose
 makori test --sanitize address examples/testing  # under ASan
 ```
 
-420 `*_test.mko` files under `examples/testing` (inventory 2026-08-23).
-That day: default 420 passed / 0 failed; C 420 passed / 0 failed; native 420
-passed / 0 failed. The suite is exercised under ASan and UBSan in CI.
+452 `*_test.mko` files under `examples/testing` (inventory 2026-09-11).
+The suite is exercised under ASan and UBSan in CI.
 A focused concurrency subset is exercised under TSan.
 
 ## Docs

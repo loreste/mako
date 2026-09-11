@@ -1115,6 +1115,19 @@ impl Parser {
             }
             return Ok(TypeExpr::Tuple(elems));
         }
+        // `raw []T` — non-COW single-owner array
+        if matches!(self.peek_kind(), TokenKind::Raw) {
+            self.bump();
+            self.expect(TokenKind::LBracket)?;
+            if matches!(self.peek_kind(), TokenKind::RBracket) {
+                self.bump();
+                let inner = self.parse_type()?;
+                return Ok(TypeExpr::RawArray(Box::new(inner)));
+            }
+            let inner = self.parse_type()?;
+            self.expect(TokenKind::RBracket)?;
+            return Ok(TypeExpr::RawArray(Box::new(inner)));
+        }
         // Go-like `[]T` or existing `[T]`
         if matches!(self.peek_kind(), TokenKind::LBracket) {
             self.bump();
@@ -3393,6 +3406,7 @@ fn type_expr_mono_tag(t: &TypeExpr) -> String {
             other => other.to_string(),
         },
         TypeExpr::Array(inner) => format!("arr_{}", type_expr_mono_tag(inner)),
+        TypeExpr::RawArray(inner) => format!("rawarr_{}", type_expr_mono_tag(inner)),
         TypeExpr::Map(k, v) => format!("map_{}_{}", type_expr_mono_tag(k), type_expr_mono_tag(v)),
         TypeExpr::Generic(name, args) => {
             let tags: Vec<String> = args.iter().map(|a| type_expr_mono_tag(a)).collect();

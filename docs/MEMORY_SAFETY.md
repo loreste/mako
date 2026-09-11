@@ -16,6 +16,11 @@ There is no garbage collector. Memory frees when ownership says so — scope
 exit, move, drop — or when you use explicit share (RC) or arenas. Not when a
 tracing collector eventually notices.
 
+**Raw arrays** (`raw []T`) bypass COW entirely: plain `malloc` backing, no
+refcount header, unconditional `free` at scope exit. String elements are freed
+individually before the backing array. Same bounds-checked safety as COW slices,
+just without atomic ownership tracking. See SOUNDNESS.md SAFE-003b.
+
 That isn’t a soft preference. **0.4.11+**. More detail in
 [SOUNDNESS.md](SOUNDNESS.md), [SECURITY.md](SECURITY.md),
 [MEMORY_MODEL.md](MEMORY_MODEL.md), [LONG_RUNNING.md](LONG_RUNNING.md),

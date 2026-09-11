@@ -194,6 +194,8 @@ pub enum TypeExpr {
     /// Go-like `map[K]V` (parsed as Generic("map", [K, V]) or this form).
     Map(Box<TypeExpr>, Box<TypeExpr>),
     Array(Box<TypeExpr>),
+    /// Non-COW array: `raw []T` — single-owner, move semantics, plain malloc.
+    RawArray(Box<TypeExpr>),
     Fn(Vec<TypeExpr>, Box<TypeExpr>),
     /// Product type: `(int, string)` — Mako tuples (additive).
     Tuple(Vec<TypeExpr>),
@@ -228,6 +230,7 @@ impl fmt::Display for TypeExpr {
             }
             TypeExpr::Map(k, v) => write!(f, "map[{k}]{v}"),
             TypeExpr::Array(t) => write!(f, "[]{t}"),
+            TypeExpr::RawArray(t) => write!(f, "raw []{t}"),
             TypeExpr::Fn(params, ret) => {
                 write!(f, "fn(")?;
                 for (i, p) in params.iter().enumerate() {

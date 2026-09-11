@@ -44,6 +44,23 @@ The ownership proof happens before the refcount optimization. Implementations
 must not inspect uniqueness first and then infer exclusive access; that is a
 time-of-check/time-of-use race if aliases can be created concurrently.
 
+### Raw arrays (`raw []T`)
+
+Raw arrays opt out of the COW/refcount model entirely. Their backing is
+plain-`malloc`'d (no 8-byte refcount header), and they follow single-owner
+move semantics:
+
+- **No refcount** — no `mako_rc_retain`/`mako_rc_release`, no atomic ops.
+- **No COW** — mutations are direct; no `mako_rc_shared` check before write.
+- **Move-only** — assignment transfers ownership; the source is invalidated.
+- **Auto-drop** — `free(data)` at scope exit, unconditional.
+- **Not Send** — cannot cross task boundaries (same as COW slices).
+
+Explicit `copy(dst, src)` performs a deep copy. All standard operations
+(`len`, `cap`, `append`, indexing, sub-slicing, `for v in s`) work identically
+to COW slices. Raw arrays are ideal for hot loops with known single ownership
+where atomic refcount overhead is measurable.
+
 The native backend represents the same language contract through explicit
 owned/borrowed tracking: arguments are cloned or borrowed according to their
 boundary, return values transfer ownership, and nested or discarded temporaries

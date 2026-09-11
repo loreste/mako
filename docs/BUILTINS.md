@@ -179,6 +179,12 @@ let o = str_to_owned(v)           // owned clone
 | `slice_get` | `slice_get(s: Slice, idx: int) -> int` | Get an element from a slice by index |
 | `unsafe_index` | `unsafe_index(arr: []int, idx: int) -> int` | Unchecked array index (no bounds check) |
 
+**Raw arrays (`raw []T`)** — non-COW, single-owner arrays using plain `malloc`
+(no refcount header, no atomic ops). All standard slice builtins (`len`, `cap`,
+`append`, `copy`, indexing, sub-slicing, `for v in s`) work identically.
+`make(raw []T, len, cap)` allocates. Auto-dropped at scope exit. Supported
+element types: `int`, `string`, `float`, `byte`, `bool`.
+
 ---
 
 ## 6. Maps

@@ -248,6 +248,27 @@ Element types include `int`, `string`, `float`, `bool`, `byte`, named structs,
 named enums, **`Option[T]`**, and **`Result[T,E]`**. Nested `[][]T` stores outer
 headers of inner slices.
 
+### Raw arrays
+
+`raw []T` is a non-COW variant: same operations, but the backing uses plain
+`malloc` instead of refcounted copy-on-write. Single-owner, auto-freed at scope
+exit, no atomic overhead.
+
+```mko
+fn main() {
+    let mut xs: raw []int = make(raw []int, 0, 8)
+    xs = append(xs, 10)
+    xs = append(xs, 20)
+    print_int(xs[0])   // 10
+    print_int(len(xs)) // 2
+    // xs freed here — unconditional free, no refcount
+}
+```
+
+Use `raw []T` in hot loops where you know there's a single owner and want
+to avoid atomic refcount operations. All element types supported: `int`,
+`string`, `float`, `byte`, `bool`.
+
 ### Iterating over slices
 
 ```mko
