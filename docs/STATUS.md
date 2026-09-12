@@ -41,6 +41,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | SAFE-001 bounds in release | Done |
 | SAFE-002 ownership categories | Done |
 | SAFE-003/004 slice+map free (incl. monomorph) + reassign + nested release_replaced | Done (2026-07-18 audit) |
+| SAFE-003b raw array drops (`raw []T`) | Done — plain malloc, unconditional free, 0 leaks under adversarial stress |
 | SAFE-005 string own + `string_view` | Done |
 | SAFE-006 CFG drops (return/break/continue/`?`/match/discard) + double-free guards | Done (core) — resolved bag payload cleanup, borrowed-bag guard, bind-scope free, `__own` alias mut, move/clone store |
 | SAFE-007 arena/slice escape + field store | Done |

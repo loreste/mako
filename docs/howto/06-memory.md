@@ -14,6 +14,10 @@ a new freer; aliases and field/index borrows **clone**. Alias muts that start as
 a view of another owner (`let mut out = path`) only free after they take Own
 (conditional freer flag — no double-free with the caller).
 
+**Raw arrays** (`raw []T`) bypass COW entirely — plain `malloc`, no refcount
+header, unconditional `free` at scope exit. Use for hot loops with known single
+ownership. See [MEMORY_MODEL.md](../MEMORY_MODEL.md) § Raw arrays.
+
 ## Default bindings
 
 Regular `let` bindings are the simplest form. They work like stack values:

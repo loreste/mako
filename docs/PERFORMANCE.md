@@ -80,6 +80,11 @@ pays the copy required to preserve value semantics. The native backend uses
 explicit owned/borrowed tracking across calls and returns; benchmark each
 backend rather than assuming the C refcount cost model applies to both.
 
+**Raw arrays** (`raw []T`) eliminate COW overhead entirely: plain `malloc`
+backing, no refcount header, no atomic retain/release, no shared-check before
+mutation. Use when profiling shows atomic refcount ops are the bottleneck in a
+single-owner hot loop.
+
 Book: [§11 Speed & memory safety](book/src/ch11-speed-safety.md) · Release how-to: [howto/09-release-builds.md](howto/09-release-builds.md).
 
 Don’t invent numbers. Re-run locally:

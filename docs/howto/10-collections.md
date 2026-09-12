@@ -85,6 +85,20 @@ fn main() {
 | `append(s, v)` | may reallocate; reassign result |
 | `s[low:high]` | sub-slice |
 | `make([]T, len[, cap])` | allocate (`[]Option[T]` / `[]Result[T,E]` supported) |
+| `raw []T` | non-COW single-owner array (plain malloc, no refcount) |
+
+### Raw arrays
+
+`raw []T` uses plain `malloc` instead of refcounted COW. Same operations, zero atomic overhead:
+
+```mko
+let mut buf: raw []int = make(raw []int, 0, 1024)
+buf = append(buf, 42)
+print(buf[0])  // 42
+// freed at scope exit — unconditional free(), no refcount
+```
+
+Use when you know there's a single owner and want to avoid atomic refcount ops in hot loops.
 
 ---
 
