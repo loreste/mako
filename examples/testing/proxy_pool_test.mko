@@ -50,8 +50,8 @@ fn TestTcpPoolReleaseIsNonblocking() {
 }
 
 fn TestHttpParseFull() {
-    let raw = "POST /api/v1/items HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\nContent-Type: text/plain\r\n\r\nhello"
-    let r = http_parse(raw)
+    let rawv = "POST /api/v1/items HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\nContent-Type: text/plain\r\n\r\nhello"
+    let r = http_parse(rawv)
     assert_eq(http_parsed_ok(r), 1)
     assert_eq_str(http_parsed_method(r), "POST")
     assert_eq_str(http_parsed_path(r), "/api/v1/items")
@@ -70,8 +70,8 @@ fn TestHttpDecodeChunked() {
 }
 
 fn TestHttpParseChunkedBody() {
-    let raw = "POST /c HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nchunk\r\n0\r\n\r\n"
-    let r = http_parse(raw)
+    let rawv = "POST /c HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nchunk\r\n0\r\n\r\n"
+    let r = http_parse(rawv)
     assert_eq(http_parsed_ok(r), 1)
     assert_eq(http_parsed_chunked(r), 1)
     assert_eq_str(http_parsed_body(r), "chunk")

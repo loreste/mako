@@ -41,11 +41,11 @@ fn TestNestOuterErr() {
 
 fn TestJpegDctHuffMarkers() {
     let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
-    let raw = jpeg_encode_gray(8, 8, gray)
-    assert_eq(jpeg_has_app8(raw), 0)
-    assert_eq(jpeg_has_app9(raw), 0)
-    assert_eq(jpeg_is_mako_dct(raw), 0)
-    assert_eq(jpeg_is_mako_huff(raw), 0)
+    let rawv = jpeg_encode_gray(8, 8, gray)
+    assert_eq(jpeg_has_app8(rawv), 0)
+    assert_eq(jpeg_has_app9(rawv), 0)
+    assert_eq(jpeg_is_mako_dct(rawv), 0)
+    assert_eq(jpeg_is_mako_huff(rawv), 0)
 
     let dct = jpeg_encode_gray_dct(8, 8, gray)
     assert_eq(jpeg_has_app8(dct), 1)

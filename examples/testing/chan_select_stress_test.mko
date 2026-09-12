@@ -5,11 +5,11 @@ struct SelectPoint {
 }
 
 fn stress_setting(name: string, fallback: int) -> int {
-    let raw = env_get_or(name, "")
-    if len(raw) == 0 {
+    let rawv = env_get_or(name, "")
+    if len(rawv) == 0 {
         return fallback
     }
-    match parse_int(raw) {
+    match parse_int(rawv) {
         Ok(value) => {
             return value
         }

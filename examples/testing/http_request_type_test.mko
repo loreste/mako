@@ -1,6 +1,6 @@
 fn TestHttpRequestParse() {
-    let raw = "POST /api/v1 HTTP/1.1\r\nHost: x\r\n\r\n{\"a\":1}"
-    let req = http_request_parse(raw)
+    let rawv = "POST /api/v1 HTTP/1.1\r\nHost: x\r\n\r\n{\"a\":1}"
+    let req = http_request_parse(rawv)
     assert_eq_str(http_request_method(req), "POST")
     assert_eq_str(http_request_path(req), "/api/v1")
     assert_eq_str(http_request_body(req), "{\"a\":1}")

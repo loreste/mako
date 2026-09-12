@@ -1,7 +1,7 @@
-// Typed HttpRequest — parse raw HTTP/1.1 (same shape used under TLS after decrypt).
+// Typed HttpRequest — parse rawv HTTP/1.1 (same shape used under TLS after decrypt).
 fn main() {
-    let raw = "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n"
-    let req = http_request_parse(raw)
+    let rawv = "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n"
+    let req = http_request_parse(rawv)
     print(http_request_method(req))
     print(http_request_path(req))
 }

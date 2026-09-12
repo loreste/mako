@@ -30,11 +30,11 @@ fn kv_del(key: string) -> int {
 
 fn kv_load() -> map[string]string {
     let mut m = make(map[string]string)
-    let raw = read_file(kv_path())
-    if str_eq(raw, "") {
+    let rawv = read_file(kv_path())
+    if str_eq(rawv, "") {
         return m
     }
-    let data = bytes(raw)
+    let data = bytes(rawv)
     let n = len(data)
     let mut i = 0
     while i < n {

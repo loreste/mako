@@ -48,9 +48,9 @@ fn TestHmacSha1() {
     let data = "what do ya want for nothing?"
     let hex = hmac_sha1(key, data)
     assert_eq_str(hex, "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79")
-    // raw length 20
-    let raw = hmac_sha1_raw(key, data)
+    // rawv length 20
+    let rawv = hmac_sha1_raw(key, data)
     // may be empty if no CC/OpenSSL — then hex would also fail; hex passed
-    assert_eq(len(raw), 20)
-    assert_eq_str(hex_encode(raw), "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79")
+    assert_eq(len(rawv), 20)
+    assert_eq_str(hex_encode(rawv), "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79")
 }

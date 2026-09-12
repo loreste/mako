@@ -8,13 +8,13 @@ fn TestMailAddressHelpers() {
 }
 
 fn TestMailSimpleAndHeaders() {
-    let raw = mail_simple("a@x.com", "b@y.com", "Hello", "Body line")
-    assert(str_contains(raw, "From: a@x.com"))
-    assert(str_contains(raw, "To: b@y.com"))
-    assert(str_contains(raw, "Subject: Hello"))
-    assert(str_contains(raw, "Body line"))
-    assert_eq_str(mail_header_get(raw, "Subject"), "Hello")
-    assert_eq_str(mail_header_get(raw, "From"), "a@x.com")
+    let rawv = mail_simple("a@x.com", "b@y.com", "Hello", "Body line")
+    assert(str_contains(rawv, "From: a@x.com"))
+    assert(str_contains(rawv, "To: b@y.com"))
+    assert(str_contains(rawv, "Subject: Hello"))
+    assert(str_contains(rawv, "Body line"))
+    assert_eq_str(mail_header_get(rawv, "Subject"), "Hello")
+    assert_eq_str(mail_header_get(rawv, "From"), "a@x.com")
 }
 
 fn TestMailMsgBuilderMime() {
@@ -30,19 +30,19 @@ fn TestMailMsgBuilderMime() {
     assert_eq(mail_msg_add_header(m, "X-Mako", "1"), 1)
     assert_eq(mail_msg_attach(m, "note.txt", "text/plain", "file-bytes"), 1)
 
-    let raw = mail_msg_build(m)
-    assert(str_contains(raw, "From: Sender <from@mako.dev>"))
-    assert(str_contains(raw, "To: to@mako.dev"))
-    assert(str_contains(raw, "Cc: cc@mako.dev"))
-    assert(str_contains(raw, "Subject: MIME test"))
-    assert(str_contains(raw, "multipart/mixed"))
-    assert(str_contains(raw, "multipart/alternative"))
-    assert(str_contains(raw, "plain body"))
-    assert(str_contains(raw, "<b>html</b>"))
-    assert(str_contains(raw, "note.txt"))
-    assert(str_contains(raw, "X-Mako: 1"))
+    let rawv = mail_msg_build(m)
+    assert(str_contains(rawv, "From: Sender <from@mako.dev>"))
+    assert(str_contains(rawv, "To: to@mako.dev"))
+    assert(str_contains(rawv, "Cc: cc@mako.dev"))
+    assert(str_contains(rawv, "Subject: MIME test"))
+    assert(str_contains(rawv, "multipart/mixed"))
+    assert(str_contains(rawv, "multipart/alternative"))
+    assert(str_contains(rawv, "plain body"))
+    assert(str_contains(rawv, "<b>html</b>"))
+    assert(str_contains(rawv, "note.txt"))
+    assert(str_contains(rawv, "X-Mako: 1"))
     // Bcc not in headers
-    assert(not str_contains(raw, "Bcc:"))
+    assert(not str_contains(rawv, "Bcc:"))
 
     assert_eq_str(mail_msg_envelope_from(m), "from@mako.dev")
     assert_eq(mail_msg_rcpt_count(m), 3)

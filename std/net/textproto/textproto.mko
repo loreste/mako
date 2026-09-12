@@ -18,9 +18,9 @@ fn canonical_mime(s: string) -> string {
     return out
 }
 
-fn mime_header_get(raw: string, name: string) -> string {
+fn mime_header_get(rawv: string, name: string) -> string {
     let want = str_to_lower(name)
-    let lines = str_split(raw, "\n")
+    let lines = str_split(rawv, "\n")
     let mut i = 0
     while i < len(lines) {
         let line = str_trim(lines[i], "\r")

@@ -1,4 +1,4 @@
-// Wave 33: bool deep nests, mako raw/APP0 length/APP7 payload, scripts.
+// Wave 33: bool deep nests, mako rawv/APP0 length/APP7 payload, scripts.
 
 fn bool_ok() -> Result[Option[Result[Option[bool], string]], string] {
     return Ok(Some(Ok(Some(true))))
@@ -70,13 +70,13 @@ fn TestBoolOuterErr() {
 
 fn TestJpegRawAndAppLengths() {
     let gray = "ABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGHABCDEFGH"
-    let raw = jpeg_encode_gray(8, 8, gray)
-    assert_eq(jpeg_is_mako_raw(raw), 1)
-    assert_eq(jpeg_is_jfif(raw), 0)
-    assert_eq(jpeg_is_mako_complete(raw), 0)
-    assert_eq(jpeg_app7_payload_len(raw), 64)
-    assert_eq(jpeg_width(raw), 8)
-    assert_eq(jpeg_height(raw), 8)
+    let rawv = jpeg_encode_gray(8, 8, gray)
+    assert_eq(jpeg_is_mako_raw(rawv), 1)
+    assert_eq(jpeg_is_jfif(rawv), 0)
+    assert_eq(jpeg_is_mako_complete(rawv), 0)
+    assert_eq(jpeg_app7_payload_len(rawv), 64)
+    assert_eq(jpeg_width(rawv), 8)
+    assert_eq(jpeg_height(rawv), 8)
 
     let j = jpeg_encode_gray_jfif(8, 8, gray)
     assert_eq(jpeg_is_mako_raw(j), 1)

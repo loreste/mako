@@ -403,7 +403,7 @@ fn main() {
 }
 ```
 
-`flate` is raw DEFLATE (needs zlib linked). `bzip2.available()` is 0 unless
+`flate` is rawv DEFLATE (needs zlib linked). `bzip2.available()` is 0 unless
 the build defines `MAKO_BZ2`. MD5 is for legacy checksums only.
 
 ```mko
@@ -541,7 +541,7 @@ fn main() {
 }
 ```
 
-Never store raw or plain-hashed (`sha256`) passwords — always use
+Never store rawv or plain-hashed (`sha256`) passwords — always use
 `password_hash`. `crypto.password_hashing_ok()` reports whether the backend is
 available on the current build.
 
@@ -568,7 +568,7 @@ fn main() {
 
 For Postgres-style challenge-response auth, the `crypto.scram_*` functions
 provide the SCRAM-SHA-256 **crypto core** (RFC 5802 / RFC 7677) — not SASL
-framing. They work on **raw bytes** (`sha256_raw`, `hmac_sha256_raw`,
+framing. They work on **rawv bytes** (`sha256_raw`, `hmac_sha256_raw`,
 `xor_bytes` back them); you assemble the `AuthMessage`, nonces, and base64 wire
 encoding. A server verifies a client without re-deriving from a stored
 plaintext password if it keeps `StoredKey` + `ServerKey` + salt + iterations:
@@ -576,7 +576,7 @@ plaintext password if it keeps `StoredKey` + `ServerKey` + salt + iterations:
 ```mko
 pull "crypto"
 
-// salt is raw bytes — base64-decode the value from the wire first.
+// salt is rawv bytes — base64-decode the value from the wire first.
 let salted = crypto.scram_salted_password(password, salt, iterations)
 let stored_key = crypto.scram_stored_key(crypto.scram_client_key(salted))
 
@@ -905,8 +905,8 @@ import (
     "path"
 )
 
-fn process_config(raw: string) -> string {
-    let lines = strings.split(raw, "\n")
+fn process_config(rawv: string) -> string {
+    let lines = strings.split(rawv, "\n")
     let mut result = ""
     for line in lines {
         let trimmed = strings.trim(line)
@@ -1058,7 +1058,7 @@ Key operations:
 | `buf_read_u8` ... `buf_read_u64` | Read unsigned ints (LE) |
 | `buf_read_u16be` / `buf_read_u32be` | Read big-endian |
 | `buf_read_i32` / `buf_read_f32` / `buf_read_f64` | Read signed/float |
-| `buf_write_bytes` / `buf_write_str` | Write raw data |
+| `buf_write_bytes` / `buf_write_str` | Write rawv data |
 | `buf_read_bytes(b, n)` / `buf_read_str(b, n)` | Read n bytes |
 
 Big-endian variants are essential for network protocols (which typically use

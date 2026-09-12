@@ -48,8 +48,8 @@ fn TestTlsClientSurface() {
 
     // Valid CA file when present — construct client context only
     let ca = "runtime/certs/dev.crt"
-    let raw = read_file(ca)
-    if len(raw) > 10 {
+    let rawv = read_file(ca)
+    if len(rawv) > 10 {
         let cli = tls_client_new(ca)
         let _ = tls_client_free(cli)
     }

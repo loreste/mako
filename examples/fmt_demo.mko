@@ -11,7 +11,7 @@ fn main() {
     fmt_eprintln(err)
 
     // print package style (no newline vs newline)
-    print_raw("raw:")
+    print_raw("rawv:")
     print_raw(n)
     print_raw("\n")
     print("done")

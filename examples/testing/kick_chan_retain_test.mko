@@ -1,5 +1,5 @@
 // Channel handles passed to crew.kick must keep the parent's mailbox alive
-// after the worker returns. A raw pointer pack lets the worker drop free the
+// after the worker returns. A rawv pointer pack lets the worker drop free the
 // shared channel (FayDB thread-per-connection req_ch).
 
 fn echo_int(ch: chan[int]) -> int {

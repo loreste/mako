@@ -299,8 +299,8 @@ fn TestDomainStoragePolishP0toP4() {
     let pm = pman_open(path)
     let p1 = pman_alloc(pm)
     assert_eq(pman_write_page(pm, p1, "hello-pman-page"), 15)
-    let raw = pman_read_page(pm, p1)
-    assert(str_has_prefix(raw, "hello-pman-page") == true)
+    let rawv = pman_read_page(pm, p1)
+    assert(str_has_prefix(rawv, "hello-pman-page") == true)
     assert_eq(pman_sync(pm), 0)
 
     // --- domain registry (handle slots / "slice" of handles) ---

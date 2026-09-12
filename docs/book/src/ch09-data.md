@@ -493,14 +493,14 @@ struct Config {
 }
 
 fn load_config(path: string) -> string {
-    let raw = read_file(path)
-    return raw
+    let rawv = read_file(path)
+    return rawv
 }
 
 fn main() {
-    let raw = "{\"port\":8080,\"host\":\"0.0.0.0\"}"
-    let port = Config_port_from_json(raw)
-    let host = Config_host_from_json(raw)
+    let rawv = "{\"port\":8080,\"host\":\"0.0.0.0\"}"
+    let port = Config_port_from_json(rawv)
+    let host = Config_host_from_json(rawv)
     print_int(port)
     print(host)
 }
@@ -939,8 +939,8 @@ fn main() {
 | `buf_read_u16be/u32be(b)` | Read big-endian unsigned |
 | `buf_read_i32(b)` | Read signed 32-bit int |
 | `buf_read_f32/f64(b)` | Read IEEE 754 floats |
-| `buf_write_bytes(b, data)` / `buf_write_str(b, s)` | Write raw bytes |
-| `buf_read_bytes(b, n)` / `buf_read_str(b, n)` | Read n raw bytes |
+| `buf_write_bytes(b, data)` / `buf_write_str(b, s)` | Write rawv bytes |
+| `buf_read_bytes(b, n)` / `buf_read_str(b, n)` | Read n rawv bytes |
 
 ---
 

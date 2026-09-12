@@ -34,9 +34,9 @@ fn TestUuidRoundtrip() {
     let braced = "{" + s + "}"
     assert(uuid_eq(id, uuid_parse(braced)))
     // bytes roundtrip
-    let raw = uuid_bytes(id)
-    assert_eq(len(raw), 16)
-    assert(uuid_eq(id, uuid_from_bytes(raw)))
+    let rawv = uuid_bytes(id)
+    assert_eq(len(rawv), 16)
+    assert(uuid_eq(id, uuid_from_bytes(rawv)))
     assert_eq(uuid_cmp(id, id), 0)
 }
 

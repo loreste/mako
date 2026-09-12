@@ -131,7 +131,7 @@ This is capability parity, not a syntax clone. Preferred surface is
 | `index/suffixarray` | same | naive build, lookup |
 | `time.ParseDuration` | `time.parse_duration` | result in milliseconds |
 | `sync.Once` | `sync.once` / `do_once` | CAS handle + `fn() -> int` |
-| `unsafe` / raw pointer APIs / unchecked memory primitives | **won't** | conflicts with safe Mako |
+| `unsafe` / rawv pointer APIs / unchecked memory primitives | **won't** | conflicts with safe Mako |
 | `weak` / `go/*` / `debug/*` | **won't / blocked** | Go toolchain or binary-parser surfaces; only bounded safe data parsers may be reconsidered |
 | `compress/{flate,zlib,bzip2,lzw}` | **Done** | C zlib/flate/LZW hot path; bzip2 when `MAKO_BZ2` |
 | `crypto/{rsa,ecdsa,md5,sha3}` | **Done** | MD5/SHA3-256 C; ES256/RS256 via existing JWT/OpenSSL |
@@ -414,7 +414,7 @@ Structured binary read/write for protocols and file formats (`runtime/mako_buf.h
 | `buf_write_u16be/u32be` | write big-endian |
 | `buf_read_u8/u16/u32/u64/i32/f32/f64` | read typed values (LE) |
 | `buf_read_u16be/u32be` | read big-endian |
-| `buf_write_bytes/str` / `buf_read_bytes/str` | raw byte/string I/O |
+| `buf_write_bytes/str` / `buf_read_bytes/str` | rawv byte/string I/O |
 
 Tests: `examples/testing/buf_test.mko`. Header: `runtime/mako_buf.h`.
 
@@ -504,9 +504,9 @@ fn main() {
     print(builder_string(b))                         // hello world
 
     // String <-> bytes
-    let raw = bytes("mako")
-    print_int(len(raw))                              // 4
-    print(string(raw))                               // mako
+    let rawv = bytes("mako")
+    print_int(len(rawv))                              // 4
+    print(string(rawv))                               // mako
 }
 ```
 
@@ -712,7 +712,7 @@ See [BUILTINS.md](BUILTINS.md) §§71–75 and [CLI.md](CLI.md) (`makori dev`, `
 | `tcp_fd_copy` / `tcp_splice` / `tcp_proxy_pump` | Efficient stream copy (Linux `splice` when available) |
 | `http_forward` | Simple upstream forward → body only |
 | `http_forward_full` / `http_forward_fd` | Status + body + headers (`HttpForwardResult`); chunked OK |
-| `http_proxy_raw` | Raw request → backend → raw response → client |
+| `http_proxy_raw` | Raw request → backend → rawv response → client |
 | `http_parse` / `http_parsed_*` | C hot-path request parse (`HttpParsed`) |
 | `http_decode_chunked` | Standalone chunked body decode |
 
@@ -779,7 +779,7 @@ files, and return unsupported (`-1`) on Windows until named pipes are designed.
 
 | Builtin | Role |
 |---------|------|
-| `http_request_parse(raw)` | parse HTTP/1.1 request bytes → `HttpRequest` |
+| `http_request_parse(rawv)` | parse HTTP/1.1 request bytes → `HttpRequest` |
 | `http_request_from_conn(conn)` | snapshot from accepted connection |
 | `http_request_method` / `path` / `body` | accessors |
 | `http_route_match(req, method, pattern)` | match `HttpRequest` against a method and Mako route pattern |
@@ -844,11 +844,11 @@ fn main() {
 
 ```mko
 fn main() {
-    let raw = "https://example.com:8080/path?q=mako&page=1"
-    print(url_scheme(raw))          // https
-    print(url_host(raw))            // example.com:8080
-    print(url_path(raw))            // /path
-    print(url_query(raw))           // q=mako&page=1
+    let rawv = "https://example.com:8080/path?q=mako&page=1"
+    print(url_scheme(rawv))          // https
+    print(url_host(rawv))            // example.com:8080
+    print(url_path(rawv))            // /path
+    print(url_query(rawv))           // q=mako&page=1
 
     let encoded = query_escape("hello world & more")
     print(encoded)                  // hello+world+%26+more
@@ -915,8 +915,8 @@ fn main() {
     // Hex encode/decode
     let h = hex_encode("AB")
     print(h)                                // 4142
-    let raw = hex_decode(h)
-    print(raw)                              // AB
+    let rawv = hex_decode(h)
+    print(rawv)                              // AB
 }
 ```
 
@@ -952,7 +952,7 @@ fn main() {
 ## `crypto`
 
 Cryptographic hashing, KDFs, password storage, AEAD, and SCRAM-SHA-256 core.
-Prefer `pull "crypto"` and the package wrappers; raw builtins (`sha256_raw`,
+Prefer `pull "crypto"` and the package wrappers; rawv builtins (`sha256_raw`,
 `pbkdf2_sha256`, …) remain available. Full symbol table: [BUILTINS.md](BUILTINS.md)
 § Crypto. Narrative + password/SCRAM recipes: book
 [ch07-stdlib](book/src/ch07-stdlib.md#crypto). Threat model notes:
@@ -1008,7 +1008,7 @@ Never store plain or single-pass digests of passwords. Use
 
 ### SCRAM-SHA-256 (Postgres-style wire auth)
 
-Core only — you assemble the wire/SASL `AuthMessage` and nonces. Salt is **raw
+Core only — you assemble the wire/SASL `AuthMessage` and nonces. Salt is **rawv
 bytes** (base64-decode values from the wire). Server-side proof check uses
 constant-time compare (`const_eq` inside `scram_verify_proof`).
 
@@ -1801,14 +1801,14 @@ when you intentionally want the platform names.
 
 ```mko
 // Integration boundary: you own the transaction map + timers.
-fn on_datagram(raw: string, peer_host: string, peer_port: int) {
-    if sip_ok(raw) == 0 { return }
-    if sip_is_request(raw) == 1 {
-        let via = sip_header(raw, "Via")
-        let key = sip_txn_key(sip_via_branch(via), sip_method(raw))
+fn on_datagram(rawv: string, peer_host: string, peer_port: int) {
+    if sip_ok(rawv) == 0 { return }
+    if sip_is_request(rawv) == 1 {
+        let via = sip_header(rawv, "Via")
+        let key = sip_txn_key(sip_via_branch(via), sip_method(rawv))
         // store key → state in map[string]…; schedule retransmit with mono_ns
         let _ = key
-        let _ = sip_udp_send(sock, peer_host, peer_port, sip_reply(raw, 100, "Trying", "", ""))
+        let _ = sip_udp_send(sock, peer_host, peer_port, sip_reply(rawv, 100, "Trying", "", ""))
     }
 }
 ```

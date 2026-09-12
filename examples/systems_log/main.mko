@@ -18,11 +18,11 @@ fn log_append(event: string) -> int {
 }
 
 fn log_count() -> int {
-    let raw = read_file(log_path())
-    if str_eq(raw, "") {
+    let rawv = read_file(log_path())
+    if str_eq(rawv, "") {
         return 0
     }
-    let data = bytes(raw)
+    let data = bytes(rawv)
     let mut n = 0
     let mut i = 0
     while i < len(data) {

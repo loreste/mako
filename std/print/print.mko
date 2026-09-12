@@ -14,4 +14,4 @@ fn str(s: string) { print(s) }
 fn int(n: int) { print_int(n) }
 fn float(v: float) { print_float(v) }
 fn bool(b: bool) { print(b) }
-fn raw(s: string) -> int { return print_raw(s) }
+fn rawprint(s: string) -> int { return print_raw(s) }

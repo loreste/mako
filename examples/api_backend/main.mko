@@ -47,9 +47,9 @@ fn main() {
                         let _ = http_respond_json(c, 200, body)
                     } else {
                         if str_eq(method, "POST") {
-                            let raw = http_body(c)
-                            let title = json_get_string(raw, "title")
-                            let body = json_get_string(raw, "body")
+                            let rawv = http_body(c)
+                            let title = json_get_string(rawv, "title")
+                            let body = json_get_string(rawv, "body")
                             if str_eq(title, "") {
                                 let _ = http_respond_json(
                                     c,
