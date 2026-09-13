@@ -86,16 +86,26 @@ makori build --release main.mko -o hello
 ## What actually works
 
 **Language.** Static types with local inference. `Result[T, E]` and `Option[T]`
-with `?` propagation. Pattern matching. Enums with payloads. Generics
-(monomorphized). Interfaces (structural, like Go). Closures. Tuples and
-multi-return. Integer literals in decimal, hex (`0xFF`), binary (`0b1010`),
-and octal (`0o77`) with `_` separators. `defer`. Labeled loops. F-strings.
-Struct update syntax. Pipe operator (`|>`). `prove` contracts. `live fn`
-hot-reload foundation. `raw []T` non-COW arrays for zero-atomic-overhead
-hot paths.
+with `?` propagation. Pattern matching with exhaustive checking and match guards.
+Concise `if let` single-arm matching (`if let Some(v) = opt { ... } else { ... }`).
+Enums with payloads. Generics (monomorphized). Interfaces (structural, like Go).
+Closures with mutable captures. Tuples and multi-return. Integer literals in
+decimal, hex (`0xFF`), binary (`0b1010`), and octal (`0o77`) with `_` separators.
+`defer`. Labeled loops. F-strings with stack builders. Struct update syntax.
+Iterator combinators (`xs.map(fn)`, `xs.filter(fn)`, `xs.reduce(init, fn)` on slices)
+with zero-allocation inline loop codegen. Variadic parameters (`fn f(args: ...T)`).
+Compile-time file embedding (`embed("file.txt")` and `embed_bytes("file.bin")`).
+Conditional compilation (`#[cfg(os = "...")]` / `#[cfg(arch = "...")]`).
+Pipe operator (`|>`). `prove` contracts. `live fn` hot-reload foundation.
+Contextual `raw` keyword and `raw []T` non-COW arrays for zero-atomic-overhead
+hot paths (while allowing `raw` as an ordinary struct field or variable name).
 
-**Memory.** Ownership tracking with compile-time move checks. Arenas for
-bulk allocation. Bounds checks in debug and release. Escape analysis.
+**Memory.** Ownership tracking with compile-time move checks and position-aware
+last-use move optimization. Multi-mention statement move safety: multiple accesses
+in a single statement borrow or clone cleanly without premature zeroing.
+Unconditional zero-initialization of struct and tuple stack temporaries, preventing
+uninitialized padding bytes from leaking. Arenas for bulk allocation (`arena`
+freed on scope exit). Bounds checks in debug and release. Escape analysis.
 Deterministic cleanup with copy-on-write slices — no GC. The C backend shares
 owned heap backing through atomic reference counts and detaches before
 mutation; borrowed views and pool-backed buffers never enter that release
@@ -107,22 +117,29 @@ safety model was introduced in 0.2.4 and continues to be hardened through
 adversarial tests, sanitizers, leak checks, and regression gates. It is not
 formally proven complete. `unsafe` and FFI are outside the model.
 
-**Concurrency.** `crew` / `kick` / `join` — structured concurrency where
-ordinary crew jobs cannot outlive their scope. Explicit `detach` tasks are
-process-scoped and require separate lifecycle management. Typed channels
-(`chan[int]`, `chan[string]`, `chan[T]`), `select`, `fan` for parallel map.
+**Concurrency & Parallelism.** Structured concurrency with `crew` / `kick` / `join`
+where ordinary crew jobs cannot outlive their scope (no orphan tasks).
+Structured nursery cancellation policies: `crew:all` (wait all), `crew:race` / `crew:any`
+(first to finish cancels remaining siblings), `crew:fail_fast` (child error cancels
+siblings immediately), and `crew(fail_fast=true)`. Zero-allocation small channels
+via inline 4-slot ring buffers (`inline_buf[4]`) in `MakoChan`. Guaranteed blocking
+client sockets on accept (`tcp_accept`, `tcp_accept_nb`, and `unix_accept` clear
+inherited nonblocking flags from nonblocking listeners so worker threads do not
+spin or hang on `EAGAIN`/`EWOULDBLOCK`). Typed channels (`chan[int]`, `chan[string]`,
+`chan[T]`), `select` with timeouts and defaults, `fan` for parallel map.
 Actors with mailboxes. No free `go` keyword — every spawned task has an owner.
 
-**Stdlib.** HTTP server and client. TLS (OpenSSL). WebSocket. JSON. SQLite and
-Postgres. SIP parsing and building. HEP (Homer) ingest. UDP/TCP/Unix sockets.
-File I/O. Regex. UUID. Base64. Binary buffers. Prometheus metrics. Crypto
-(SHA-256, HMAC, PBKDF2, AEAD). Protobuf wire codec. gRPC unary frames and
-service registry. Application packs have Go-equivalent surfaces
-(`strings`, `bytes`, `io`, `os/env`, `net/netip`, `math/bits`, `hash/crc32`,
-`crypto/rand`, `image`, … — Makori names, not a syntax clone). Coverage is
-still uneven — [STDLIB.md](docs/STDLIB.md) records what has real tests,
-what is a capability equivalent, and what is intentionally out (`unsafe`,
-`go/*`, `debug/*`, `weak`).
+**Stdlib.** HTTP/1.1 and HTTP/2 servers and clients with ALPN and chunked streaming.
+TLS (OpenSSL) with multi-certificate SNI. WebSocket. JSON encoding and decoding
+with streaming builders. SQLite and Postgres connection pools with transactions.
+SIP parsing and building. HEP (Homer) ingest. UDP/TCP/Unix domain sockets.
+Direct I/O (`mako_dio`) and memory-mapped files (`MMap`). File I/O. Regex (with RE2
+backrefs and Unicode `\p{L/N}`). UUID and ULID. Base64. Binary buffers (`Buf`).
+Prometheus metrics. Crypto (SHA-256, HMAC, PBKDF2, AEAD, DTLS 1.2 / SRTP, P-256).
+Protobuf wire codec. gRPC unary frames and service registry. Application packs have
+Go-equivalent surfaces (`strings`, `bytes`, `io`, `os/env`, `net/netip`, `math/bits`,
+`hash/crc32`, `crypto/rand`, `image`, … — Makori names, not a syntax clone).
+Coverage is detailed in [STDLIB.md](docs/STDLIB.md).
 
 **Backends.** Native object code default (Cranelift). C backend
 remains available via explicit `--backend c` as the oracle for sanitizers,
@@ -139,9 +156,15 @@ and remote HTTPS registry. The default public registry is
 from it automatically. Packages can be signed with ed25519 and verified
 on fetch.
 
-**Tooling.** `makori fmt`, `makori lint`, `makori test` (with JSON reports), `makori check`.
-LSP server with completions, go-to-def, references, rename, diagnostics,
-and inlay hints. VS Code extension.
+**Tooling & Observability.** `makori fmt`, `makori lint` (including `--identity`),
+`makori test` (with JSON reports and `--coverage`), `makori check` (with `--json=v1`
+for IDE diagnostics), `makori doc` (API docs and search index), `makori profile`.
+Deep developer tracing: hierarchical call trees (`MAKO_TRACE=tree`), Chrome Trace /
+Perfetto timeline export (`MAKO_TRACE_JSON=<path>`), and channel operation telemetry
+(`MAKO_TRACE_CHAN=1`), strictly zero-cost under release `-DNDEBUG`.
+Interactive debugger integration with `makori debug` (LLDB with custom Mako formatters)
+and `makori dap` (VS Code DAP protocol adapter). LSP server with completions,
+go-to-def, references, rename, diagnostics, and inlay hints. VS Code extension.
 
 ## Built with Makori
 
@@ -157,7 +180,7 @@ message inspection, site history, reports, alerts, and traffic metrics.
 - Linux native backend requires `gcc` or `clang` for linking (installer handles this)
 - WASM: WASI Preview 1 only — no sockets, no TLS, no Preview 2/WIT/DOM
 - Sanitizers, cross-compilation, and emit-c require explicit `--backend c`
-- No debugger product (lldb works with `#line` source mapping, but no IDE integration beyond seeds)
+- Full IDE visual breakpoint debugging is still maturing (`makori debug` and `makori dap` provide command-line and DAP foundations)
 - Stdlib coverage is uneven — some APIs are shape-only
 - No stable ABI promise
 - Package registry is public but has few packages; signing lacks key rotation and revocation
