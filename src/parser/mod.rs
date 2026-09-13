@@ -1146,8 +1146,11 @@ impl Parser {
             }
             return Ok(TypeExpr::Tuple(elems));
         }
-        // `raw []T` — non-COW single-owner array
-        if matches!(self.peek_kind(), TokenKind::Raw) {
+        // `raw []T` — non-COW single-owner array (contextual keyword)
+        if matches!(self.peek_kind(), TokenKind::Raw)
+            || (matches!(self.peek_kind(), TokenKind::Ident(s) if s == "raw")
+                && self.tokens.get(self.pos + 1).map(|t| &t.kind) == Some(&TokenKind::LBracket))
+        {
             self.bump();
             self.expect(TokenKind::LBracket)?;
             if matches!(self.peek_kind(), TokenKind::RBracket) {
@@ -1729,24 +1732,37 @@ impl Parser {
     fn parse_if(&mut self) -> Result<Stmt, ParseError> {
         self.expect(TokenKind::If)?;
         // `if let Pattern = expr { … } else { … }`
+        // `if let Pattern = expr { ... }` — only when Pattern is a variant/tuple
+        // (Some/Ok/Err/...), not a plain ident (which is Go-style init: `if let x = v; cond`).
         if matches!(self.peek_kind(), TokenKind::Let) {
-            self.bump();
-            let pattern = self.parse_pattern()?;
-            self.expect(TokenKind::Assign)?;
-            let scrutinee = self.parse_header_expr()?;
-            let then_block = self.parse_block()?;
-            let else_block = if matches!(self.peek_kind(), TokenKind::Else) {
-                self.bump();
-                Some(self.parse_block()?)
-            } else {
-                None
+            let save = self.pos;
+            self.bump(); // consume let
+            // Lookahead: is next token a variant pattern (Uppercase ident + '(')?
+            let is_pattern = match self.peek_kind() {
+                TokenKind::Ident(n) => n.starts_with(|c: char| c.is_ascii_uppercase()) 
+                    && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::LParen | TokenKind::LBrace)),
+                _ => matches!(self.peek_kind(), TokenKind::LParen), // tuple pattern
             };
-            return Ok(Stmt::IfLet {
-                pattern,
-                scrutinee,
-                then_block,
-                else_block,
-            });
+            if is_pattern {
+                let pattern = self.parse_pattern()?;
+                self.expect(TokenKind::Assign)?;
+                let scrutinee = self.parse_header_expr()?;
+                let then_block = self.parse_block()?;
+                let else_block = if matches!(self.peek_kind(), TokenKind::Else) {
+                    self.bump();
+                    Some(self.parse_block()?)
+                } else {
+                    None
+                };
+                return Ok(Stmt::IfLet {
+                    pattern,
+                    scrutinee,
+                    then_block,
+                    else_block,
+                });
+            }
+            // Not a pattern — rewind and fall through to Go-style if-with-init
+            self.pos = save;
         }
         // Go-style if-with-init: `if err := f(); err != nil { … }`.
         // Detected by a top-level `;` before the block `{` — unambiguous because a
@@ -2432,6 +2448,10 @@ impl Parser {
             TokenKind::FString(raw) => {
                 self.bump();
                 self.parse_fstring(&raw)
+            }
+            TokenKind::Raw => {
+                self.bump();
+                Ok(Expr::Ident("raw".into()))
             }
             TokenKind::Ident(name) => {
                 self.bump();
@@ -3163,6 +3183,10 @@ impl Parser {
             TokenKind::Ident(s) => {
                 self.bump();
                 Ok(s)
+            }
+            TokenKind::Raw => {
+                self.bump();
+                Ok("raw".into())
             }
             // Allow some keywords as identifiers in type/name positions when needed
             other => Err(self.err(format!("expected identifier, found {other}"))),

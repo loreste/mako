@@ -405,6 +405,7 @@ fn main() {
     println!("cargo:rerun-if-changed=runtime/native_runtime.c");
     println!("cargo:rerun-if-changed=runtime/native_bridge.c");
     println!("cargo:rerun-if-changed=runtime/mako_rt.h");
+    println!("cargo:rerun-if-changed=runtime/mako_net.h");
     println!("cargo:rerun-if-changed=runtime/mako_extern_demo.c");
     println!("cargo:rerun-if-changed=runtime/mako_sctp.h");
     println!("cargo:rerun-if-changed=runtime/mako_diameter.h");

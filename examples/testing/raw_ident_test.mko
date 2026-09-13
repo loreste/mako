@@ -1,0 +1,20 @@
+struct Stmt {
+    raw: string
+}
+
+fn test_fn(raw: int) -> int {
+    return raw + 1
+}
+
+fn TestRawAsIdentifier() {
+    let raw = 42
+    assert_eq(raw, 42)
+    assert_eq(test_fn(10), 11)
+    let s = Stmt { raw: "select 1" }
+    assert_eq_str(s.raw, "select 1")
+
+    let mut arr: raw []int = make(raw []int, 0, 4)
+    arr = append(arr, 100)
+    assert_eq(len(arr), 1)
+    assert_eq(arr[0], 100)
+}

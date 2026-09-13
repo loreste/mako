@@ -293,6 +293,7 @@ static inline int64_t mako_tcp_accept(int64_t listen_fd) {
         return -1;
     }
     mako_sock_set_cloexec((mako_sock_t)cfd);
+    mako_sock_set_nonblock((mako_sock_t)cfd, 0);
     MakoString ps = mako_sockaddr_str((struct sockaddr *)&peer, plen);
     if (ps.data) {
         size_t n = ps.len < sizeof(mako_tcp_last_peer) - 1 ? ps.len : sizeof(mako_tcp_last_peer) - 1;
@@ -568,7 +569,10 @@ static inline int64_t mako_tcp_connect(MakoString host, int64_t port) {
 
 static inline int64_t mako_tcp_write(int64_t fd, MakoString s) {
     if (fd < 0) return -1;
-    ssize_t n = send((int)fd, s.data, s.len, 0);
+    ssize_t n;
+    do {
+        n = send((int)fd, s.data, s.len, 0);
+    } while (n < 0 && errno == EINTR);
     return (int64_t)n;
 }
 
@@ -601,7 +605,10 @@ static inline int64_t mako_tcp_read_print(int64_t fd) {
 /* Read up to 65536 bytes from fd; returns data as MakoString. */
 static inline MakoString mako_tcp_read(int64_t fd) {
     char buf[65536];
-    ssize_t n = recv((int)fd, buf, sizeof(buf), 0);
+    ssize_t n;
+    do {
+        n = recv((int)fd, buf, sizeof(buf), 0);
+    } while (n < 0 && errno == EINTR);
     if (n <= 0) return mako_str_from_cstr("");
     char *d = (char *)malloc((size_t)n + 1);
     if (!d) return mako_str_from_cstr("");
@@ -1015,6 +1022,7 @@ static inline int64_t mako_unix_accept(int64_t listen_fd) {
     mako_sock_t cfd = accept((mako_sock_t)listen_fd, NULL, NULL);
     if (cfd == MAKO_INVALID_SOCK) return -1;
     mako_sock_set_cloexec(cfd);
+    mako_sock_set_nonblock(cfd, 0);
     return (int64_t)cfd;
 #else
     (void)listen_fd;
@@ -1378,6 +1386,8 @@ static inline int64_t mako_tcp_accept_nb(int64_t listen_fd) {
     (void)ioctlsocket((mako_sock_t)listen_fd, FIONBIO, &mode);
     mako_sock_t cfd = accept((mako_sock_t)listen_fd, NULL, NULL);
     if (cfd == MAKO_INVALID_SOCK) return -1;
+    mako_sock_set_cloexec(cfd);
+    mako_sock_set_nonblock(cfd, 0);
     return (int64_t)cfd;
 #else
     int flags = fcntl((int)listen_fd, F_GETFL, 0);
@@ -1387,6 +1397,8 @@ static inline int64_t mako_tcp_accept_nb(int64_t listen_fd) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return -1;
         return -1;
     }
+    mako_sock_set_cloexec((mako_sock_t)cfd);
+    mako_sock_set_nonblock((mako_sock_t)cfd, 0);
     return (int64_t)cfd;
 #endif
 }

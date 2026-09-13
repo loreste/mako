@@ -1,0 +1,60 @@
+// Reproduction test for issue 58
+fn handle_conn(conn: int) -> int {
+    let msg = tcp_read(conn)
+    let _ = tcp_write(conn, "PONG:" + msg)
+    let _ = tcp_close(conn)
+    return 1
+}
+
+fn client_worker(port: int, id: int) -> int {
+    sleep_ms(20)
+    let c = tcp_connect("127.0.0.1", port)
+    if c < 0 {
+        return -1
+    }
+    sleep_ms(50)
+    let _ = tcp_write(c, "PING")
+    let resp = tcp_read(c)
+    let _ = tcp_close(c)
+    if resp == "PONG:PING" {
+        return 1
+    }
+    return 0
+}
+
+fn TestConcurrentAcceptNonblocking() {
+    let port = 19451
+    let listener = tcp_listen(port)
+    assert(listener >= 0)
+    let _ = io_set_nonblocking(listener, 1)
+
+    crew workers {
+        // Spawn 4 clients
+        let c1 = workers.kick(client_worker(port, 1))
+        let c2 = workers.kick(client_worker(port, 2))
+        let c3 = workers.kick(client_worker(port, 3))
+        let c4 = workers.kick(client_worker(port, 4))
+
+        // Accept 4 connections
+        let mut accepted = 0
+        let mut attempts = 0
+        while accepted < 4 && attempts < 200 {
+            let conn = tcp_accept_nb(listener)
+            if conn >= 0 {
+                let _ = workers.kick(handle_conn(conn))
+                accepted = accepted + 1
+            } else {
+                sleep_ms(10)
+                attempts = attempts + 1
+            }
+        }
+        assert_eq(accepted, 4)
+
+        assert_eq(c1.join(), 1)
+        assert_eq(c2.join(), 1)
+        assert_eq(c3.join(), 1)
+        assert_eq(c4.join(), 1)
+    }
+
+    let _ = tcp_close(listener)
+}

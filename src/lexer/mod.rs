@@ -739,7 +739,6 @@ impl<'a> Lexer<'a> {
             "hold" => TokenKind::Hold,
             "share" => TokenKind::Share,
             "unsafe" => TokenKind::Unsafe,
-            "raw" => TokenKind::Raw,
             "as" => TokenKind::As,
             "select" => TokenKind::Select,
             "timeout" => TokenKind::Timeout,

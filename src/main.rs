@@ -5366,9 +5366,16 @@ fn find_nghttp2() -> Option<(PathBuf, PathBuf)> {
 }
 
 fn runtime_include_dir() -> Result<PathBuf, String> {
+    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
+    let has_checkout = checkout.join("mako_rt.h").exists();
+
     // 1) Explicit override (install scripts / CI / brew wrappers)
     if let Ok(rt) = std::env::var("MAKO_RUNTIME") {
-        let p = PathBuf::from(rt);
+        let p = PathBuf::from(&rt);
+        let is_default_share = rt.ends_with("share/mako/runtime") || rt.ends_with("share/mako/runtime/");
+        if has_checkout && is_default_share {
+            return Ok(checkout);
+        }
         if p.join("mako_rt.h").exists() {
             return Ok(p.canonicalize().unwrap_or(p));
         }
@@ -5379,11 +5386,8 @@ fn runtime_include_dir() -> Result<PathBuf, String> {
     }
 
     // 2) Dev checkout: CARGO_MANIFEST_DIR or cwd
-    if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
-        let p = PathBuf::from(manifest).join("runtime");
-        if p.join("mako_rt.h").exists() {
-            return Ok(p);
-        }
+    if has_checkout {
+        return Ok(checkout);
     }
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let p = cwd.join("runtime");

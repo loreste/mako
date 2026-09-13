@@ -35913,24 +35913,13 @@ impl Codegen {
                         }
                     }
                 } else {
-                    let all_fields_specified = if let Some(ref inf) = info {
-                        !inf.fields.is_empty()
-                            && inf
-                                .fields
-                                .iter()
-                                .all(|(fname, _)| fields.iter().any(|(n, _)| n == fname))
-                    } else {
-                        false
-                    };
-                    if !all_fields_specified {
-                        self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
-                        // Apply field defaults for omitted fields.
-                        if let Some(ref inf) = info {
-                            for (fname, def) in &inf.defaults {
-                                if !fields.iter().any(|(n, _)| n == fname) {
-                                    let (_, v) = self.emit_expr(def);
-                                    self.line(&format!("{tmp}.{fname} = {v};"));
-                                }
+                    self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
+                    // Apply field defaults for omitted fields.
+                    if let Some(ref inf) = info {
+                        for (fname, def) in &inf.defaults {
+                            if !fields.iter().any(|(n, _)| n == fname) {
+                                let (_, v) = self.emit_expr(def);
+                                self.line(&format!("{tmp}.{fname} = {v};"));
                             }
                         }
                     }
@@ -36036,9 +36025,7 @@ impl Codegen {
                     .unwrap_or_default();
                 let tmp = self.fresh("st");
                 self.line(&format!("{cty} {tmp};"));
-                if values.len() < field_names.len() || field_names.is_empty() {
-                    self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
-                }
+                self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
                 for (i, vexpr) in values.iter().enumerate() {
                     let (fty, v) = self.emit_expr(vexpr);
                     let (fty, v) = Self::coerce_user_struct_value(&fty, v);
@@ -36147,6 +36134,7 @@ impl Codegen {
                 }
                 let tmp = self.fresh("tup");
                 self.line(&format!("{cname} {tmp};"));
+                self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
                 for (i, v) in vals.iter().enumerate() {
                     self.line(&format!("{tmp}._{i} = {v};"));
                 }
