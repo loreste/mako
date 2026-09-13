@@ -267,7 +267,9 @@ fn main() {
 
 Use `raw []T` in hot loops where you know there's a single owner and want
 to avoid atomic refcount operations. All element types supported: `int`,
-`string`, `float`, `byte`, `bool`.
+`string`, `float`, `byte`, `bool`. `raw` is a contextual keyword only parsed in
+type position, so you can freely use `raw` as a struct field, function parameter,
+or local variable.
 
 ### Iterating over slices
 
@@ -297,6 +299,23 @@ fn main() {
         count = count + 1
     }
     print_int(count)
+}
+```
+
+### Iterator combinators: map, filter, reduce
+
+Slices support `map`, `filter`, and `reduce` as built-in methods that lower to inline loops with zero allocation overhead:
+
+```mko
+fn double(x: int) -> int { return x * 2 }
+fn is_even(x: int) -> bool { return x % 2 == 0 }
+fn add(acc: int, x: int) -> int { return acc + x }
+
+fn main() {
+    let nums = [1, 2, 3, 4, 5]
+    let doubled = nums.map(double)        // [2, 4, 6, 8, 10]
+    let evens = nums.filter(is_even)      // [2, 4]
+    let sum = nums.reduce(0, add)         // 15
 }
 ```
 
@@ -703,6 +722,49 @@ structs after a `pull` (`let t, n = eng.grow_pair(t0, 1)`).
 For more complex cases you can still use a struct, but tuples cover the common
 multi-return pattern without boilerplate.
 
+### Variadic functions
+
+Functions can take a variadic parameter by prefixing the type with `...`. Inside the function, the parameter is accessed as a standard slice `[]T`:
+
+```mko
+fn print_all(prefix: string, items: ...string) {
+    print(prefix + ":")
+    for item in items {
+        print("  " + item)
+    }
+}
+
+fn main() {
+    print_all("Names", "Alice", "Bob", "Charlie")
+}
+```
+
+### Compile-time embed
+
+Use `embed("path")` to embed a text file as a `string` literal at compile time, or `embed_bytes("path")` to embed binary content as a `[]byte` slice. Paths are resolved relative to the source file:
+
+```mko
+let schema = embed("schema.sql")
+let favicon = embed_bytes("favicon.ico")
+```
+
+### Conditional compilation (#[cfg])
+
+Functions can be conditionally compiled with `#[cfg(...)]` attributes based on target operating system or CPU architecture:
+
+```mko
+#[cfg(os = "darwin")]
+fn platform_name() -> string { return "macOS" }
+
+#[cfg(os = "linux")]
+fn platform_name() -> string { return "Linux" }
+
+#[cfg(arch = "aarch64")]
+fn is_arm() -> bool { return true }
+```
+
+Excluded functions are eliminated before type checking and codegen.
+
 ## Generics (0.2.0)
 
 Functions, **structs**, and **enums** can be parameterized over types using
@@ -1045,6 +1107,28 @@ fn unwrap_or(o: Option[int], fallback: int) -> int {
     }
 }
 ```
+
+### if let expressions
+
+When you only care about matching a single variant of an `Option` or `Result`, use `if let` instead of a full `match` expression:
+
+```mko
+fn process(maybe_id: Option[int]) {
+    if let Some(id) = maybe_id {
+        print("Processing id: " + int_to_string(id))
+    } else {
+        print("No id provided")
+    }
+}
+
+fn check_result(res: Result[string, string]) {
+    if let Ok(data) = res {
+        print("Received: " + data)
+    }
+}
+```
+
+The `else` branch is optional. `if let` desugars cleanly before type checking.
 
 ### switch
 

@@ -170,16 +170,19 @@ message inspection, site history, reports, alerts, and traffic metrics.
 
 - **`if let`:** Concise single-arm pattern matching — `if let Some(v) = expr { ... } else { ... }`. Works with Option and Result.
 - **Iterator combinators:** `xs.map(fn)`, `xs.filter(fn)`, `xs.reduce(init, fn)` as methods on `[]T`. Inline loop codegen.
-- **Variadic functions:** `fn log(msgs: ...string)` — `...T` desugars to `[]T`.
-- **Compile-time embed:** `embed("file.txt")` reads a file at compile time. `embed_bytes("file.bin")` for `[]byte`.
+- **Variadic functions:** `fn log(msgs: ...string)` — `...T` in parameter position desugars to `[]T`.
+- **Compile-time embed:** `embed("file.txt")` reads a file as a string literal at compile time. `embed_bytes("file.bin")` for `[]byte`.
 - **Conditional compilation:** `#[cfg(os = "darwin")]` / `#[cfg(arch = "aarch64")]` on functions.
-- **Raw arrays (`raw []T`):** Non-COW single-owner arrays with plain `malloc` backing. Zero atomic overhead.
+- **Contextual `raw` keyword & raw arrays (`raw []T`):** Non-COW single-owner arrays with plain `malloc` backing (zero atomic overhead). `raw` is parsed contextually for types; struct fields and variables may freely use `raw` without collisions.
+- **C backend struct move safety & padding:** Fixes premature move zeroing on multi-mention statements and ensures unconditional `memset` of stack struct/tuple padding bytes.
+- **Nonblocking socket accept fix:** Explicitly clears `O_NONBLOCK` on accepted client fds across all platforms so worker threads do not hit `EAGAIN` / `EWOULDBLOCK`.
+
 ## New in 0.6.32
 
-- **Raw arrays (`raw []T`):** Non-COW single-owner arrays with plain `malloc` backing. No refcount header, no atomic ops, unconditional `free` at scope exit. All standard slice operations work. Adversarial-tested with zero leaks.
 - **Structured crew cancellation policies:** `crew:all`, `crew:race`, `crew:any`, `crew:fail_fast`, and `crew(fail_fast=true)`. Eliminates orphan tasks by construction.
 - **Deep developer tracing:** `MAKO_TRACE=tree` (call tree), `MAKO_TRACE_JSON=<path>` (Chrome/Perfetto), `MAKO_TRACE_CHAN=1` (concurrency events).
 - **Zero-allocation small channels:** Inline 4-slot ring buffer eliminates heap allocations for unbuffered and small channels.
+- **Struct literal `memset` elision:** Skips redundant zeroing when all struct fields are provided.
 
 See [CHANGELOG.md](CHANGELOG.md) for earlier releases.
 

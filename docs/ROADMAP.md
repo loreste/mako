@@ -1,12 +1,12 @@
 # Makori roadmap
 
-**Product version:** **0.6.32** (tip) · release tag **v0.6.32** · Last sync: **2026-09-09**.
-**Suite:** **452** `examples/testing` `*_test.mko` files · **2026-09-09:**
+**Product version:** **0.6.33** (tip) · release tag **v0.6.33** · Last sync: **2026-09-13**.
+**Suite:** **452** `examples/testing` `*_test.mko` files · **2026-09-13:**
 C **452 passed, 0 failed** · native **452 passed, 0 failed** (per-file sweep) ·
-`cargo test` **402 passed, 0 failed** · tooling, stdlib, memory-safety, and performance gates passed locally.
+`cargo test` **202 passed, 0 failed** · tooling, stdlib, memory-safety, and performance gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.6.32`**; tip train **0.6.32**.
+**Release:** tag **`v0.6.33`**; tip train **0.6.33**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Makori Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -55,7 +55,8 @@ C **452 passed, 0 failed** · native **452 passed, 0 failed** (per-file sweep) �
 | **0.6.25–0.6.27** | O(1) RC array clone, dest-destroy fixes, struct-return transfer_own leak | **Shipped** |
 | **0.6.28–0.6.30** | Position-aware last-use move, MakoString move at last use, inline-call arg temp fixes | **Shipped** |
 | **0.6.31** | Loop-exit ownership drop, temporary string arg leaks, reassign double-frees, zero-cost trace | **Shipped** |
-| **0.6.32** | Structured crew cancellation, zero-allocation channels, struct memset elision | **Tip** |
+| **0.6.32** | Structured crew cancellation, zero-allocation channels, struct memset elision | **Shipped** |
+| **0.6.33** | if let, iterator combinators, variadic, embed, cfg, contextual raw arrays, struct move safety, nonblocking accept | **Tip** |
 | **0.6.x** | Further patches on 0.6 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after the 0.x series |
 
@@ -93,6 +94,9 @@ C **452 passed, 0 failed** · native **452 passed, 0 failed** (per-file sweep) �
 0.6.19–24   scope-exit destructors, deep-clone, channel RC
 0.6.25–27   O(1) RC array clone, dest-destroy, struct-return fixes
 0.6.28–29   position-aware last-use move, string move at last use
+0.6.31      loop-exit ownership drop, temporary string arg leaks, reassign fixes
+0.6.32      crew cancellation, zero-alloc channels, struct memset elision
+0.6.33      if let, iterator combinators, variadics, embed, cfg, raw arrays, move safety
 0.6.x       patches
 1.0         stability freeze
 ```

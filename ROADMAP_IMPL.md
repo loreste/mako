@@ -1,12 +1,12 @@
 # Mako Implementation Roadmap
 
 Detailed feature plan for Mako, organized by version. See
-[docs/ROADMAP.md](docs/ROADMAP.md) for the summary view.
+[docs/ROADMAP.md](docs/ROADMAP.md) for the primary authoritative view.
 
-**Current version:** 0.4.0  
-**Next milestone:** 1.0 (stability)  
-**Last updated:** 2026-07-19  
-**Test suite:** 360 Mako tests + 79 Rust tests, 0 failures, ASan clean
+**Current version:** 0.6.33  
+**Next milestone:** 0.7 (consolidation & freeze) / 1.0 (stability)  
+**Last updated:** 2026-09-13  
+**Test suite:** 452 Mako tests + 202 Rust tests, 0 failures, ASan/UBSan clean
 
 Soundness program of record: **[docs/SOUNDNESS.md](docs/SOUNDNESS.md)**.  
 Concurrency model: **[docs/MEMORY_MODEL.md](docs/MEMORY_MODEL.md)**.  
@@ -482,6 +482,23 @@ Production-grade developer experience.
 - Direct LLVM IR emission as alternative to C backend
 - Better optimization for targets where clang is slow or unavailable
 - Required for some advanced optimizations (vectorization, link-time devirt)
+
+---
+
+## v0.5.x–v0.6.x — Shipped Milestones
+
+Detailed evolution tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md):
+
+- **v0.5.0–v0.5.15**: Native-first Cranelift backend, DTLS/SRTP, CMap concurrency maps, stdlib safety contracts, zero silent C fallback, tooling polish (doctor, check --json).
+- **v0.6.0–v0.6.18**: Pipe operator (`|>`), `prove` contracts, copy-on-write slice semantics, Go syntax checklist completion (52/52 in-scope items).
+- **v0.6.19–v0.6.30**: Scope-exit destructors for owned fields, O(1) RC array clones, position-aware last-use move analysis.
+- **v0.6.31**: Loop-exit ownership drop preservation, temporary string argument leak fixes, zero-cost tracing under NDEBUG.
+- **v0.6.32**: Structured crew cancellation policies (`crew:all`, `crew:race`, `crew:fail_fast`), zero-allocation small channels (`inline_buf[4]`), struct literal `memset` elision, hierarchical call tree tracing (`MAKO_TRACE=tree`).
+- **v0.6.33**:
+  - Language features: `if let` pattern matching, iterator combinators (`map`/`filter`/`reduce`), variadic functions (`...T`), compile-time `embed`/`embed_bytes`, conditional compilation `#[cfg(...)]`.
+  - Contextual `raw` keyword: `raw []T` raw arrays with plain `malloc` backing; `raw` remains valid for fields/variables/params (#57).
+  - C backend struct move safety and padding initialization (#57).
+  - Worker thread hang fix on nonblocking listener accept (#58).
 
 ---
 

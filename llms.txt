@@ -4,14 +4,14 @@
 > Longer reference: https://mako-lang.com/llms-full.txt
 > Repo: https://github.com/loreste/mako
 
-Version **0.6.29** (alpha). Compiled language, `.mko` sources, native (Cranelift) + C + LLVM backends, no GC.
+Version **0.6.33** (alpha). Compiled language, `.mko` sources, native (Cranelift) + C + LLVM backends, no GC.
 Ownership model actively hardened — O(1) RC array clone, position-aware
-last-use move, scope-exit destructors. Safety validated under ASan, UBSan,
-TSan with zero errors across 448 test files. `unsafe`, the C runtime, and
+last-use move, scope-exit destructors, raw arrays (`raw []T`). Safety validated under ASan, UBSan,
+TSan with zero errors across 452 test files. `unsafe`, the C runtime, and
 FFI are outside the safety model.
 
 Write new code with: `fn`, `let`, `on Type {}`, `pack` / `pull` / `export`,
-`hold` / `share` / `arena`, `crew` / `kick` / `join` / `fan`, `match`,
+`hold` / `share` / `arena`, `crew` / `kick` / `join` / `fan`, `match`, `if let`,
 `switch` / `case`. Older dual forms (`func`, `:=`, `import`, `package`) still
 parse; do not prefer them. See docs/IDENTITY.md if you care about the style bar.
 
@@ -39,6 +39,13 @@ parse; do not prefer them. See docs/IDENTITY.md if you care about the style bar.
   bounds `fn f[T: Iface](x: T)` — all monomorphized. Write `Pair[int] { … }`.
 - `mut self` on methods: `fn push(mut self, v: int)` — mutations persist in caller
 - Multi-statement lambdas: `fn(x) { let a = x + 1; return a }` — full control flow
+- `if let`: single-arm pattern matching — `if let Some(v) = opt { ... } else { ... }`
+- Iterator combinators: `xs.map(fn)`, `xs.filter(fn)`, `xs.reduce(init, fn)` on slices with inline loop codegen
+- Variadic functions: `fn log(msgs: ...string)` — `...T` desugars to `[]T`
+- Compile-time embed: `embed("file.txt")` (string) and `embed_bytes("file.bin")` (`[]byte`)
+- Conditional compilation: `#[cfg(os = "...")]` and `#[cfg(arch = "...")]` on functions
+- Raw arrays: `raw []T` / `make(raw []T, len, cap)` — non-COW single-owner arrays with plain `malloc`
+- Contextual `raw`: `raw` is contextual in type position; struct fields/vars can freely use `raw`
 - Stdlib in Mako: `pull "io"`, `pull "encoding/json"`, `pull "context"`,
   `pull "net/http"`, `pull "database/sql"`, `pull "collections"`,
   plus Go-equivalent packs (`strings`, `bytes`, `slices`, `os/env`,
@@ -54,6 +61,7 @@ parse; do not prefer them. See docs/IDENTITY.md if you care about the style bar.
   `maps_*`. Map monomorph C helpers are demand-driven (only used shapes).
 - Struct/enum `==` `!=` structural (strings by content)
 - Channels: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/struct/enum/tuple
+- Small channels: inline 4-slot ring buffer eliminates heap allocations for unbuffered and small channels
 - `chan_len` / `chan_cap` work on any `chan[T]` (not only int rings)
 - Kick Send: Copy, string, deep-POD structs, Option/Result/tuple of sendables, chan handles
   (not maps/arrays/non-POD). Prefer `chan[Struct]` for multi-field worker results.
@@ -65,6 +73,7 @@ parse; do not prefer them. See docs/IDENTITY.md if you care about the style bar.
 - Dispatch: `match` on strings/ints/enums; `switch`/`case` on values
 - Parallel work: `fan(xs, fn(x) { x * x })`
 - Concurrency: `crew` / `kick` / `join`, channels, `select`, `actor`
+- Structured cancellation policies: `crew:all`, `crew:race`, `crew:any`, `crew:fail_fast`
 - Scheduler: `sched_set_workers(n)` opt-in pool (0 = one pthread per kick)
 - Channel string take: `chan_str_send_take` / `chan_str_try_send_take` (move; no clone)
 - Build: locked deps verified at compile (`mako.lock` content hashes)
@@ -94,6 +103,9 @@ string `""` is a singleton — do not raw-free it.
 - `dbg_str(s)` — string-specific variant (still works).
 - `MAKO_TRACE=1 ./binary` — prints function entry/exit with source locations.
   Zero overhead when not enabled.
+- `MAKO_TRACE=tree ./binary` — hierarchical call tree with durations and ANSI nesting.
+- `MAKO_TRACE_JSON=<path> ./binary` — Chrome Trace / Perfetto format event export.
+- `MAKO_TRACE_CHAN=1 ./binary` — concurrency channel telemetry.
 - Panics print a Mako-level stack trace with function names and source locations.
 - `mako debug file.mko` — interactive lldb session with Mako data formatters.
 - `mako dap` — DAP adapter for VS Code. Debugger shows user variable names
@@ -103,7 +115,7 @@ string `""` is a singleton — do not raw-free it.
 - `stack_trace()` — print current call stack at any point.
 - `error_chain(err)` — print error with full source-location trace.
 
-## Ownership model (0.6.29)
+## Ownership model (0.6.33)
 
 Mako uses compile-time ownership tracking with no garbage collector:
 
@@ -111,9 +123,12 @@ Mako uses compile-time ownership tracking with no garbage collector:
   at scope exit automatically.
 - **`mut` params** are passed by pointer. The caller retains ownership.
 - **Last-use move**: when an owned local is used for the last time, the compiler
-  moves it (zero-copy) instead of cloning. This includes strings.
+  moves it (zero-copy) instead of cloning. This includes strings. Multi-mention
+  statements borrow or clone safely without early zeroing.
 - **O(1) array clone**: `[]struct` clone is an RC retain, not a deep copy.
   Append COWs when the buffer is shared.
+- **Raw arrays (`raw []T`)**: Single-owner non-COW arrays using plain `malloc`
+  with zero refcount overhead.
 - **Scope-exit destructors** run for all owned locals, including struct fields
   and call-result temporaries.
 - **No use-after-free**: the codegen tracks liveness and prevents moved values

@@ -2,7 +2,7 @@
 #
 # https://mako-lang.com
 # https://github.com/loreste/mako
-# Version: 0.6.30
+# Version: 0.6.33
 #
 # Compile paths:
 #   native (default): .mko -> IR -> Cranelift -> native binary (no C compiler needed)
@@ -2676,7 +2676,7 @@ Edge ALPN
   solid. If you turn h2 back on, use a build that splits DATA frames.
 
 ================================================================================
-34. OWNERSHIP MODEL (0.6.29+)
+34. OWNERSHIP MODEL (0.6.33+)
 ================================================================================
 
 Mako uses compile-time ownership tracking with no garbage collector:
@@ -2685,9 +2685,12 @@ Mako uses compile-time ownership tracking with no garbage collector:
   at scope exit automatically.
 - `mut` params are passed by pointer. The caller retains ownership.
 - Last-use move: when an owned local is used for the last time, the compiler
-  moves it (zero-copy) instead of cloning. This includes strings (0.6.29+).
+  moves it (zero-copy) instead of cloning. This includes strings. Multi-mention
+  statements borrow or clone safely without premature zeroing.
 - O(1) array clone: []struct clone is an RC retain, not a deep copy.
   Append COWs when the buffer is shared.
+- Raw arrays (`raw []T`): single-owner non-COW arrays using plain malloc
+  without refcount overhead. `raw` is a contextual keyword only in type position.
 - Scope-exit destructors run for all owned locals, including struct fields
   and call-result temporaries.
 - No use-after-free: the codegen tracks liveness and prevents moved values
@@ -2713,7 +2716,7 @@ Common ownership patterns:
   xs = append(xs, value)
 
 ================================================================================
-35. DEBUGGING AND TRACING (0.6.29+)
+35. DEBUGGING AND TRACING (0.6.33+)
 ================================================================================
 
 dbg(x)
@@ -2729,6 +2732,15 @@ MAKO_TRACE=1 ./binary
     [trace] ← db_exec
     [trace] ← main
   Zero overhead when not enabled (env var checked once, cached).
+
+MAKO_TRACE=tree ./binary
+  Hierarchical call tree with nesting indentation, durations, and source lines.
+
+MAKO_TRACE_JSON=<path> ./binary
+  Exports Chrome Trace / Perfetto format event timeline for flamecharts.
+
+MAKO_TRACE_CHAN=1 ./binary
+  Logs real-time channel send/receive and buffer telemetry.
 
 Panic stack traces
   When a program aborts (index out of bounds, nil deref, assert failure),
@@ -2754,7 +2766,23 @@ Other tools:
   error_chain(err)              — print error with source-location trace
 
 ================================================================================
-36. KEY RULES FOR GENERATING MAKO CODE
+36. LANGUAGE FEATURES (0.6.33)
+================================================================================
+
+- if let: concise single-arm Option/Result matching
+    if let Some(v) = opt { print(v) } else { print("none") }
+- Iterator combinators on slices:
+    let doubled = xs.map(fn)
+    let evens = xs.filter(fn)
+    let sum = xs.reduce(init, fn)
+- Variadic functions: fn log(msgs: ...string) desugars to []string
+- Compile-time embed: embed("file.txt") and embed_bytes("file.bin")
+- Conditional compilation: #[cfg(os = "...")] and #[cfg(arch = "...")]
+- Structured crew cancellation: crew:all, crew:race, crew:any, crew:fail_fast
+- Zero-allocation channels: inline 4-slot ring buffer for small channels
+
+================================================================================
+37. KEY RULES FOR GENERATING MAKO CODE
 ================================================================================
 
 1.  No semicolons. Statements are newline-terminated.
@@ -2769,9 +2797,9 @@ Other tools:
 10. Test functions: fn TestFoo() { assert(...) } in *_test.mko files.
 
 ================================================================================
-37. END
+38. END
 ================================================================================
 
 # https://mako-lang.com
 # https://github.com/loreste/mako
-# 0.6.30
+# 0.6.33

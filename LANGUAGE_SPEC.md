@@ -342,7 +342,8 @@ index, range, annotated literals).
 A raw slice has the same layout as `[]T` (pointer, length, capacity) but uses
 plain `malloc` instead of refcounted copy-on-write backing. Single-owner,
 move semantics — no atomic refcount operations, no COW detachment checks.
-Ideal for hot loops with known ownership.
+Ideal for hot loops with known ownership. `raw` is a contextual keyword only parsed
+in type position before `[]T`; struct fields, parameters, and locals can freely use `raw`.
 
 ```mko
 let mut xs: raw []int = make(raw []int, 0, 1024)
