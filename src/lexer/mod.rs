@@ -52,8 +52,6 @@ pub enum TokenKind {
     Hold,
     Share,
     Unsafe,
-    /// Non-COW array qualifier: `raw []T`
-    Raw,
     As,
     Select,
     Timeout,

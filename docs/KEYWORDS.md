@@ -1,11 +1,13 @@
 # Makori keywords
 
-Source of truth: `src/lexer/mod.rs` → `lex_ident` (**48** reserved words, including duals; `pack`/`pull`/`go`/`switch` are contextual).  
-Every identifier that matches one of these strings is always a keyword token — never
-an `Ident`. There are **no contextual keywords** today: you cannot name a variable `crew` or `default`.
+Source of truth: `src/lexer/mod.rs` → `lex_ident` (**47** reserved words, including duals; `pack`/`pull`/`raw`/`go`/`switch` are contextual).  
+Every identifier that matches one of these reserved strings is always a keyword token — never
+an `Ident`. Contextual keywords (`pack`, `pull`, `raw`) are only keywords in specific grammar
+positions (e.g. `raw []T` for non-COW arrays); elsewhere they remain ordinary identifiers so you can
+freely name a field or local `raw` (e.g. `struct Stmt { raw: string }`).
 
 **Mako flair (preferred):** `fn`, `let`, `pack`, `pull`, `on`, `hold`, `share`, `arena`,
-`crew`, `kick`, `join`, `fan`, `export`, `queue`, `graphql`, … — see [IDENTITY.md](IDENTITY.md).
+`crew`, `kick`, `join`, `fan`, `export`, `queue`, `graphql`, `raw`, … — see [IDENTITY.md](IDENTITY.md).
 
 **Dual / compat:** `func`, `var`, `package`, `import`, `type`, plus `:=` (token, not a keyword).
 
@@ -58,7 +60,7 @@ Guided tour: [The Makori Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) ·
 | Keyword | Meaning |
 |---------|---------|
 | `true` / `false` | Bool literals |
-| `and` / `or` / `not` | Boolean operators (word forms; `&&` / `\|\|` / `!` also work) |
+| `and` / `or` / `not` | Boolean operators (word forms; `&&` / `||` / `!` also work) |
 
 ## Operators (not keywords)
 
@@ -66,10 +68,10 @@ Guided tour: [The Makori Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) ·
 |------|---------|
 | `=` | Assignment only (never equality) |
 | `==` `!=` `<` `>` `<=` `>=` | Comparison |
-| `&&` `\|\|` `!` | Logical and / or / not (short-circuit `&&`/`\|\|`); `!!x` is two `!` |
-| `and` `or` `not` | Same as `&&` / `\|\|` / `!` |
-| `&` `\|` `^` `&^` `<<` `>>` | Bitwise; unary `^x` is bitwise complement |
-| Leading `\|…\|` | Still a lambda; infix `\|` is bitwise or |
+| `&&` `||` `!` | Logical and / or / not (short-circuit `&&`/`||`); `!!x` is two `!` |
+| `and` `or` `not` | Same as `&&` / `||` / `!` |
+| `&` `|` `^` `&^` `<<` `>>` | Bitwise; unary `^x` is bitwise complement |
+| Leading `|…|` | Still a lambda; infix `|` is bitwise or |
 
 ## Concurrency
 
@@ -91,7 +93,7 @@ Guided tour: [The Makori Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) ·
 | `hold` | Move-on-rebind ownership binding |
 | `share` | Shared / RC-style binding (seed) |
 | `as` | Type / ownership cast helper in expressions |
-| `raw` | Non-COW array qualifier: `raw []T` — single-owner, plain malloc |
+| `raw` | Non-COW array qualifier: `raw []T` — contextual keyword (single-owner, plain malloc) |
 
 ## Messaging / GraphQL (language types)
 
@@ -107,8 +109,8 @@ See [MESSAGING_GRAPHQL.md](MESSAGING_GRAPHQL.md).
 ```
 actor and arena as break const continue crew default defer else enum extern false
 fallthrough fan fn for graphql hold if import in interface join kick let match mut
-not on or queue range raw receive return select share struct timeout true while
+not on or queue range receive return select share struct timeout true while
 ```
 (also duals: `func` `var` `package` `type` `import` · export is reserved)
 
-(Count must match `lex_ident` keywords; duals `func`/`var`/`package`/`type`/`pull`/`pack` also reserved.)
+(Count must match `lex_ident` keywords; duals `func`/`var`/`package`/`type` also reserved. Contextual: `pack`, `pull`, `raw`.)

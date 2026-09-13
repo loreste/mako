@@ -1,0 +1,74 @@
+// Regression test for Issue 57: C backend struct and tuple initialization for SELECT query paths
+
+struct QueryRow {
+    id: int
+    is_active: bool
+    title: string
+    score: float
+    tag: string
+}
+
+struct QueryResult {
+    raw: string
+    rows: []QueryRow
+    total: int
+}
+
+fn make_row(id: int, active: bool, title: string, score: float, tag: string) -> QueryRow {
+    return QueryRow {
+        id: id,
+        is_active: active,
+        title: title,
+        score: score,
+        tag: tag
+    }
+}
+
+fn execute_select(raw: string) -> QueryResult {
+    let mut rows: []QueryRow = []
+    let mut i = 0
+    while i < 10 {
+        let active = (i % 2 == 0)
+        let row = make_row(i, active, "item_" + int_to_string(i), 3.14 * float(i), "cat_" + int_to_string(i % 3))
+        rows = append(rows, row)
+        i = i + 1
+    }
+    return QueryResult {
+        raw: raw,
+        rows: rows,
+        total: len(rows)
+    }
+}
+
+fn TestSelectStructAndTuplePadding() {
+    let q = "SELECT id, is_active, title, score, tag FROM items WHERE id < 10"
+    let res = execute_select(q)
+    assert_eq_str(res.raw, q)
+    assert_eq(res.total, 10)
+    assert_eq(len(res.rows), 10)
+
+    let mut sum_id = 0
+    let mut active_count = 0
+    let mut idx = 0
+    while idx < len(res.rows) {
+        let r = res.rows[idx]
+        sum_id = sum_id + r.id
+        if r.is_active {
+            active_count = active_count + 1
+        }
+        assert(str_has_prefix(r.title, "item_"))
+        assert(str_has_prefix(r.tag, "cat_"))
+        idx = idx + 1
+    }
+    assert_eq(sum_id, 45)
+    assert_eq(active_count, 5)
+
+    // Tuple with padding
+    let t = (true, 42, "select_val", false, 99)
+    let b1, i1, s1, b2, i2 = t
+    assert(b1)
+    assert_eq(i1, 42)
+    assert_eq_str(s1, "select_val")
+    assert(!b2)
+    assert_eq(i2, 99)
+}

@@ -1147,9 +1147,8 @@ impl Parser {
             return Ok(TypeExpr::Tuple(elems));
         }
         // `raw []T` — non-COW single-owner array (contextual keyword)
-        if matches!(self.peek_kind(), TokenKind::Raw)
-            || (matches!(self.peek_kind(), TokenKind::Ident(s) if s == "raw")
-                && self.tokens.get(self.pos + 1).map(|t| &t.kind) == Some(&TokenKind::LBracket))
+        if matches!(self.peek_kind(), TokenKind::Ident(s) if s == "raw")
+            && self.tokens.get(self.pos + 1).map(|t| &t.kind) == Some(&TokenKind::LBracket)
         {
             self.bump();
             self.expect(TokenKind::LBracket)?;
@@ -2449,10 +2448,6 @@ impl Parser {
                 self.bump();
                 self.parse_fstring(&raw)
             }
-            TokenKind::Raw => {
-                self.bump();
-                Ok(Expr::Ident("raw".into()))
-            }
             TokenKind::Ident(name) => {
                 self.bump();
                 if name == "make" && matches!(self.peek_kind(), TokenKind::LParen) {
@@ -3183,10 +3178,6 @@ impl Parser {
             TokenKind::Ident(s) => {
                 self.bump();
                 Ok(s)
-            }
-            TokenKind::Raw => {
-                self.bump();
-                Ok("raw".into())
             }
             // Allow some keywords as identifiers in type/name positions when needed
             other => Err(self.err(format!("expected identifier, found {other}"))),

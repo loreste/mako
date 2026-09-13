@@ -1554,8 +1554,8 @@ Default `ch.send(s)` still clones so the caller may reuse `s`. Prefer take on pr
 | `tcp_listen` | `tcp_listen(port: int) -> int` | Listen on a TCP port (all interfaces) |
 | `tcp_listen_addr` | `tcp_listen_addr(host: string, port: int) -> int` | Listen bound to a specific address (`"127.0.0.1"`, `"*"` for all) |
 | `tcp_listen_backlog` | `tcp_listen_backlog(host: string, port: int, backlog: int) -> int` | Listen with an explicit accept backlog (bounds inbound queue) |
-| `tcp_accept` | `tcp_accept(listener: int) -> int` | Accept a TCP connection (records peer) |
-| `tcp_accept_nb` | `tcp_accept_nb(listener: int) -> int` | Non-blocking TCP accept |
+| `tcp_accept` | `tcp_accept(listener: int) -> int` | Accept a TCP connection (records peer; guarantees blocking client fd) |
+| `tcp_accept_nb` | `tcp_accept_nb(listener: int) -> int` | Non-blocking TCP accept (guarantees blocking client fd) |
 | `tcp_connect` | `tcp_connect(host: string, port: int) -> int` | Dual-stack connect (IPv4/IPv6/hostname) with **Happy Eyeballs** |
 | `tcp_connect_timeout` | `tcp_connect_timeout(host, port, timeout_ms) -> int` | Same with total timeout (default path uses 30s) |
 | `tcp_set_he_delay_ms` / `tcp_get_he_delay_ms` | stagger between HE attempts (default **250**) | RFC 8305 lite |

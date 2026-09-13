@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.6.33
+
+- Fix contextual `raw` keyword (issue #57): `raw` is parsed contextually only in
+  type position (`raw []T`), rather than being a hard reserved lexer keyword. Existing
+  code using `raw` as a struct field name, function parameter, or local variable
+  (e.g. `struct Stmt { raw: string }` or `fn raw(s: string)`) compiles cleanly
+  without breaking existing codebases.
+- Fix C backend struct/tuple move safety and padding initialization (issue #57):
+  - Fix early move zeroing in multi-mention statements: when an identifier is used
+    multiple times in the same statement (e.g. `QueryResult { rows: rows, total: len(rows) }`
+    or `first: rows[0]`), prevent premature move zeroing (`memset(&rows, 0, ...)`) on
+    the first reference. Eliminates null pointer dereference segfaults and corrupted
+    zero values on query result paths.
+  - Fix struct and tuple stack padding initialization: ensure unconditional `memset`
+    of stack temporaries for struct literals and tuple expressions in C codegen,
+    preventing uninitialized padding bytes from leaking across calls.
+- Fix worker thread hang on nonblocking listener accept (issue #58):
+  - In `runtime/mako_net.h`, explicitly clear `O_NONBLOCK` on accepted client fds
+    in `mako_tcp_accept`, `mako_tcp_accept_nb`, and `mako_unix_accept`. On BSD, macOS,
+    and Windows, `accept()` inherits socket flags from the listening socket; when the
+    listener was configured nonblocking (e.g. via `io_poll2`), worker threads calling
+    `tcp_read` immediately failed with `EAGAIN` / `EWOULDBLOCK`, causing hangs or
+    dropped connections.
+  - Added `EINTR` retry loops to `mako_tcp_read` and `mako_tcp_write`.
+- Language features:
+  - `if let`: single-arm Option/Result pattern matching (`if let Some(v) = opt { ... } else { ... }`),
+    desugared before type checking; preserves Go-style if-with-init (`if let x = v; cond`).
+  - Iterator combinators: `map`, `filter`, and `reduce` methods on slices `[]T` with
+    inline loop codegen.
+  - Variadic functions: `...T` in parameter position desugars to `[]T`.
+  - Compile-time embed: `embed("file.txt")` and `embed_bytes("file.bin")` resolved at
+    compile time, replaced with string or byte slice literals.
+  - Conditional compilation: `#[cfg(os = "...")]` and `#[cfg(arch = "...")]` on functions.
+  - Raw arrays (`raw []T`): non-COW single-owner arrays using plain `malloc` with zero
+    atomic refcount overhead.
+
 ## 0.6.32
 
 - Structured crew cancellation policies: first-class language support for `crew:all`,

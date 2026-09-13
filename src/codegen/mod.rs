@@ -4304,12 +4304,17 @@ impl Codegen {
         Self::ident_mentions_in_block(body, name) > 1
     }
 
-    /// Position-aware last-use: true if `name` appears in any top-level
-    /// statement *after* the one currently being emitted.
+    /// Position-aware last-use: true if `name` appears anywhere later in
+    /// the current statement or in any statement after the current one.
     fn ident_used_after_current(&self, name: &str) -> bool {
         let Some(body) = &self.current_fn_body else {
             return true;
         };
+        if self.current_stmt_idx < body.stmts.len()
+            && Self::count_ident_in_stmt(&body.stmts[self.current_stmt_idx], name) > 1
+        {
+            return true;
+        }
         let after = self.current_stmt_idx + 1;
         if after >= body.stmts.len() {
             return false;
@@ -14112,6 +14117,7 @@ impl Codegen {
             self.emit_stmt(stmt);
         }
         if implicit_return {
+            self.current_stmt_idx = stmts.len().saturating_sub(1);
             if let Some(Stmt::Expr(e)) = stmts.last() {
                 let (ty, val) = self.emit_expr(e);
                 let (ty, val) = Self::coerce_user_struct_value(&ty, val);
