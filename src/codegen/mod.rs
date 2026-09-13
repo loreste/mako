@@ -4297,13 +4297,6 @@ impl Codegen {
         }
     }
 
-    fn ident_reused_in_fn(&self, name: &str) -> bool {
-        let Some(body) = &self.current_fn_body else {
-            return true;
-        };
-        Self::ident_mentions_in_block(body, name) > 1
-    }
-
     /// Position-aware last-use: true if `name` appears anywhere later in
     /// the current statement or in any statement after the current one.
     fn ident_used_after_current(&self, name: &str) -> bool {
@@ -4320,10 +4313,6 @@ impl Codegen {
             return false;
         }
         Self::count_ident_in_stmts(&body.stmts[after..], name) > 0
-    }
-
-    pub(crate) fn ident_mentions_in_block(body: &Block, name: &str) -> usize {
-        Self::count_ident_in_stmts(&body.stmts, name)
     }
 
     fn count_ident_in_stmts(stmts: &[Stmt], name: &str) -> usize {
@@ -4814,31 +4803,6 @@ impl Codegen {
         }
     }
 
-    /// Move an owning struct from a ptr-passed parameter by copying it and
-    /// then zeroing each owned field in the source individually. Unlike bulk
-    /// memset, per-field zeroing is safe: strings check `!s.data`, RC slices
-    /// check `!(a.cap > 0 && a.data)`, so the source's destructor becomes a
-    /// no-op for transferred fields without calling free/release.
-    fn emit_ptr_param_field_move(&mut self, c_ty: &str, val: &str) -> String {
-        let fields = self.struct_own_field_frees(c_ty);
-        if fields.is_empty() {
-            // No owned fields — plain copy is fine.
-            return val.to_string();
-        }
-        let moved = self.fresh("fmove");
-        self.emit_line(format_args!("{c_ty} {moved} = {val};"));
-        // Zero each owned field in the source so its destructor skips them.
-        for (path, free_fn) in &fields {
-            // Strings: zero .data + .len
-            if free_fn == "mako_str_free" {
-                self.emit_line(format_args!("{val}.{path}.data = 0; {val}.{path}.len = 0;"));
-            } else {
-                // RC slices / nested structs: zero the whole field.
-                self.emit_line(format_args!("memset(&{val}.{path}, 0, sizeof({val}.{path}));"));
-            }
-        }
-        moved
-    }
 
     /// Move an owned field out of a unique owning local without allocating.
     /// Shared, indexed, and other borrowed sources still clone. Cloning a

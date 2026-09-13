@@ -3310,15 +3310,6 @@ See docs/GUIDE.md (Building APIs), docs/PERFORMANCE.md, docs/SECURITY.md.
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-struct PkgDep {
-    name: String,
-    kind: String, // path | git | other
-    source: String,
-    version: String,
-}
-
 fn parse_mako_toml_meta(text: &str) -> (Option<String>, Option<String>) {
     let mut name = None;
     let mut version = None;

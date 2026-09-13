@@ -32,15 +32,3 @@ pub fn result_err_enum_c(ty: &TypeExpr, is_known_enum: impl Fn(&str) -> bool) ->
         None
     }
 }
-
-/// True when Err payload should use string path (`mako_err_int`).
-#[allow(dead_code)]
-pub fn is_string_err(ty: &TypeExpr) -> bool {
-    matches!(
-        ty,
-        TypeExpr::Generic(n, args)
-            if n == "Result"
-                && args.len() == 2
-                && matches!(&args[1], TypeExpr::Named(e) if e == "string")
-    ) || matches!(ty, TypeExpr::Named(n) if n == "string")
-}

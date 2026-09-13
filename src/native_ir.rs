@@ -228,9 +228,6 @@ pub enum MapValKind {
     StructKeyStructSlice(u32, u32),
     /// `map[Struct]` with a runtime-owned opaque value.
     StructKeyOwnedOpaque(u32, OpaqueKind),
-    /// `map[Struct]V` for other pointer-sized values (chan, map, nested, …).
-    /// Value is stored as i64; get retypes via expression context / from_type.
-    StructKeyPtr(u32),
 }
 
 impl MapValKind {
@@ -444,8 +441,6 @@ impl MapValKind {
             MapValKind::StructKeyFloatSlice(_) => Type::FloatSlice,
             MapValKind::StructKeyStructSlice(_, eid) => Type::StructSlice(eid),
             MapValKind::StructKeyOwnedOpaque(_, kind) => Type::OwnedOpaque(kind),
-            // Pointer-sized payload; callers retype (chan/map/…) after get.
-            MapValKind::StructKeyPtr(_) => Type::I64,
         }
     }
 
@@ -458,8 +453,7 @@ impl MapValKind {
             | MapValKind::StructKeyIntSlice(id)
             | MapValKind::StructKeyStrSlice(id)
             | MapValKind::StructKeyFloatSlice(id)
-            | MapValKind::StructKeyOwnedOpaque(id, _)
-            | MapValKind::StructKeyPtr(id) => Some(id),
+            | MapValKind::StructKeyOwnedOpaque(id, _) => Some(id),
             MapValKind::StructKeyToStruct(kid, _) | MapValKind::StructKeyStructSlice(kid, _) => {
                 Some(kid)
             }
