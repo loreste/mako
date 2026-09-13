@@ -49,7 +49,7 @@ pub fn parse_file(path: &Path) -> Result<Program, String> {
     let src = fs::read_to_string(path).map_err(|e| e.to_string())?;
     let tokens = Lexer::new(&src).tokenize().map_err(|e| format!("{e}"))?;
     let program = Parser::new(tokens).parse().map_err(|e| format!("{e}"))?;
-    Ok(desugar::desugar(program))
+    Ok(desugar::desugar(program, None))
 }
 
 pub fn check_file(path: &Path) -> Result<Program, ()> {
@@ -63,7 +63,7 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
     let program = Parser::new(tokens).parse().map_err(|e| {
         diagnostic_from_parse_error(&path_s, &src, e).emit();
     })?;
-    let program = desugar::desugar(program);
+    let program = desugar::desugar(program, None);
     let program = resolve_imports(path, program).map_err(|e| {
         Diagnostic::error(&path_s, &src, Span::unknown(), e).emit();
     })?;
@@ -279,7 +279,7 @@ fn check_file_structured(path: &Path) -> Result<Program, Diagnostic> {
     let program = Parser::new(tokens)
         .parse()
         .map_err(|e| diagnostic_from_parse_error(&path_s, &src, e))?;
-    let program = desugar::desugar(program);
+    let program = desugar::desugar(program, None);
     let program = resolve_imports(path, program)
         .map_err(|e| Diagnostic::error(&path_s, &src, Span::unknown(), e))?;
     let program = merge_package_dir_siblings(path, program)
@@ -1456,7 +1456,7 @@ fn collect_calls_stmt(stmt: &Stmt, out: &mut Vec<String>) {
         }
         Stmt::Expr(expr) => collect_calls_expr(expr, out),
         Stmt::Return(Some(expr)) => collect_calls_expr(expr, out),
-        Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => {}
+        Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::IfLet { .. } => {}
         Stmt::If {
             init,
             cond,
@@ -2446,7 +2446,7 @@ fn rewrite_stmt(s: &mut Stmt, alias: &str, names: &ImportNameSets) {
             rewrite_expr(value, alias, names);
         }
         Stmt::Expr(e) | Stmt::Return(Some(e)) => rewrite_expr(e, alias, names),
-        Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => {}
+        Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::IfLet { .. } => {}
         Stmt::If {
             init,
             cond,
@@ -3851,7 +3851,7 @@ pub(crate) fn parse_program_file_raw(
     };
     let tokens = Lexer::new(&src).tokenize().map_err(|e| format!("{e}"))?;
     let program = Parser::new(tokens).parse().map_err(|e| format!("{e}"))?;
-    Ok(desugar::desugar(program))
+    Ok(desugar::desugar(program, None))
 }
 
 pub fn parse_program_file(path: &Path) -> Result<Program, String> {

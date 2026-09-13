@@ -562,6 +562,7 @@ impl Codegen {
             | Stmt::Unsafe { body }
             | Stmt::Crew { body, .. }
             | Stmt::Arena { body, .. } => self.collect_maps_in_block(body),
+            Stmt::IfLet { .. } => {} // desugared before codegen
             Stmt::Select {
                 timeout_ms,
                 arms,
@@ -4388,6 +4389,7 @@ impl Codegen {
             | Stmt::Crew { body, .. }
             | Stmt::Arena { body, .. }
             | Stmt::Unsafe { body } => Self::count_ident_in_stmts(&body.stmts, name),
+            Stmt::IfLet { .. } => 0, // desugared
             Stmt::Select {
                 timeout_ms,
                 arms,
@@ -16338,6 +16340,7 @@ impl Codegen {
             Stmt::Defer { body } => {
                 self.defer_stack.push(body.clone());
             }
+            Stmt::IfLet { .. } => unreachable!("if let desugared before codegen"),
             Stmt::If {
                 init,
                 cond,
@@ -37855,6 +37858,72 @@ impl Codegen {
                 }
                 let (rty, rv) = self.emit_expr(receiver);
                 match method.as_str() {
+                    "map" if rty.contains("Array") && args.len() == 1 => {
+                        let src = rv.clone();
+                        let out = self.fresh("mapped");
+                        let idx = self.fresh("mi");
+                        let elem = self.fresh("me");
+                        let fn_name = match &args[0] {
+                            Expr::Ident(n) => mangle(n),
+                            _ => { let (_, v) = self.emit_expr(&args[0]); v }
+                        };
+                        let elem_c = if rty.contains("Str") { "MakoString" }
+                            else if rty.contains("Float") { "double" }
+                            else if rty.contains("Bool") { "bool" }
+                            else { "int64_t" };
+                        let make_fn = rty.replace("Mako", "mako_").replace("Array", "_array_make").to_lowercase();
+                        self.line(&format!("{} {out} = {}((int64_t){src}.len, (int64_t){src}.len);", rty, make_fn));
+                        self.line(&format!("for (size_t {idx} = 0; {idx} < {src}.len; {idx}++) {{"));
+                        self.indent += 1;
+                        self.line(&format!("{elem_c} {elem} = {src}.data[{idx}];"));
+                        self.line(&format!("{out}.data[{idx}] = {fn_name}({elem});"));
+                        self.indent -= 1;
+                        self.line(&format!("}}"));
+                        return (rty, out);
+                    }
+                    "filter" if rty.contains("Array") && args.len() == 1 => {
+                        let src = rv.clone();
+                        let out = self.fresh("filtered");
+                        let idx = self.fresh("fi");
+                        let elem = self.fresh("fe");
+                        let wi = self.fresh("fw");
+                        let fn_name = match &args[0] {
+                            Expr::Ident(n) => mangle(n),
+                            _ => { let (_, v) = self.emit_expr(&args[0]); v }
+                        };
+                        let elem_c = if rty.contains("Str") { "MakoString" }
+                            else if rty.contains("Float") { "double" }
+                            else if rty.contains("Bool") { "bool" }
+                            else { "int64_t" };
+                        let make_fn = rty.replace("Mako", "mako_").replace("Array", "_array_make").to_lowercase();
+                        self.line(&format!("{} {out} = {}((int64_t){src}.len, (int64_t){src}.len);", rty, make_fn));
+                        self.line(&format!("size_t {wi} = 0;"));
+                        self.line(&format!("for (size_t {idx} = 0; {idx} < {src}.len; {idx}++) {{"));
+                        self.indent += 1;
+                        self.line(&format!("{elem_c} {elem} = {src}.data[{idx}];"));
+                        self.line(&format!("if ({fn_name}({elem})) {{ {out}.data[{wi}++] = {elem}; }}"));
+                        self.indent -= 1;
+                        self.line(&format!("}}"));
+                        self.line(&format!("{out}.len = {wi};"));
+                        return (rty, out);
+                    }
+                    "reduce" if rty.contains("Array") && args.len() == 2 => {
+                        let src = rv.clone();
+                        let (init_ty, init_val) = self.emit_expr(&args[0]);
+                        let fn_name = match &args[1] {
+                            Expr::Ident(n) => mangle(n),
+                            _ => { let (_, v) = self.emit_expr(&args[1]); v }
+                        };
+                        let acc = self.fresh("acc");
+                        let idx = self.fresh("ri");
+                        self.line(&format!("{init_ty} {acc} = {init_val};"));
+                        self.line(&format!("for (size_t {idx} = 0; {idx} < {src}.len; {idx}++) {{"));
+                        self.indent += 1;
+                        self.line(&format!("{acc} = {fn_name}({acc}, {src}.data[{idx}]);"));
+                        self.indent -= 1;
+                        self.line(&format!("}}"));
+                        return (init_ty, acc);
+                    }
                     "send" => {
                         let (vty, v) = self.emit_expr(&args[0]);
                         let tmp = self.fresh("ok");

@@ -187,7 +187,7 @@ fn diagnose(src: &str) -> Vec<(u32, u32, u32, u32, String)> {
             return vec![(sl, sc, sl, sc + 1, msg)];
         }
     };
-    let program = desugar::desugar(program);
+    let program = desugar::desugar(program, None);
     if let Err(e) = TypeChecker::new().check(&program) {
         let msg = format!("{e}");
         let (line, col) = match &e {
@@ -582,7 +582,7 @@ fn hover_info(_uri: &str, src: &str, line: u32, character: u32) -> String {
 fn typecheck_hover(src: &str, name: &str) -> Option<String> {
     let tokens = Lexer::new(src).tokenize().ok()?;
     let program = Parser::new(tokens).parse().ok()?;
-    let program = desugar::desugar(program);
+    let program = desugar::desugar(program, None);
     let mut tc = TypeChecker::new();
     let symbols = tc.check_for_lsp(&program);
     // Check collected bindings first (inferred let types)
@@ -684,7 +684,7 @@ fn inlay_hints(src: &str) -> String {
         Ok(p) => p,
         Err(_) => return "[]".into(),
     };
-    let program = desugar::desugar(program);
+    let program = desugar::desugar(program, None);
     let mut tc = TypeChecker::new();
     let _ = tc.check_for_lsp(&program);
 

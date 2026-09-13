@@ -154,6 +154,8 @@ pub struct Param {
     pub name: String,
     pub ty: TypeExpr,
     pub mutable: bool,
+    /// Variadic: `...T` — receives zero or more args as `[]T`.
+    pub variadic: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -328,6 +330,13 @@ pub enum Stmt {
         /// `cond` and is scoped to the whole if/else.
         init: Option<Box<Stmt>>,
         cond: Expr,
+        then_block: Block,
+        else_block: Option<Block>,
+    },
+    /// `if let Pattern = expr { … } else { … }` — desugared to match before typecheck.
+    IfLet {
+        pattern: Pattern,
+        scrutinee: Expr,
         then_block: Block,
         else_block: Option<Block>,
     },

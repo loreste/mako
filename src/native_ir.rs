@@ -2578,8 +2578,7 @@ fn monomorphize_generics(
             .map(|p| crate::ast::Param {
                 name: p.name.clone(),
                 ty: subst_type_expr(&p.ty, &map),
-                mutable: p.mutable,
-            })
+                mutable: p.mutable, variadic: false })
             .collect();
         let ret = tmpl.ret.as_ref().map(|t| subst_type_expr(t, &map));
         out.push(FnDef {
@@ -4644,6 +4643,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.drop_loop_body_scope(&owned_before, &locals_before);
                 self.terminate(Terminator::Jump(cont_target))?;
             }
+            Stmt::IfLet { .. } => unreachable!("if let desugared before IR"),
             Stmt::Unsafe { body } => {
                 self.lower_block(body)?;
             }
@@ -5442,8 +5442,7 @@ impl<'a> FunctionLowerer<'a> {
             fn_params.push(crate::ast::Param {
                 name: "__env".into(),
                 ty: TypeExpr::Named("int".into()),
-                mutable: false,
-            });
+                mutable: false, variadic: false });
         }
         for (i, p) in params.iter().enumerate() {
             let ty = if let Some(t) = expected_param_tys.get(i) {
@@ -5466,8 +5465,7 @@ impl<'a> FunctionLowerer<'a> {
             fn_params.push(crate::ast::Param {
                 name: p.clone(),
                 ty,
-                mutable: false,
-            });
+                mutable: false, variadic: false });
         }
         let mut body_stmts: Vec<Stmt> = Vec::new();
         if has_env {

@@ -201,6 +201,29 @@ impl Parser {
                 ItemAttr::Deprecated(message) => {
                     stability = crate::ast::ApiStability::Deprecated { message }
                 }
+                ItemAttr::Cfg(key, val) => {
+                    let matches = match key.as_str() {
+                        "os" => std::env::consts::OS == val,
+                        "arch" => std::env::consts::ARCH == val,
+                        "target_os" => std::env::consts::OS == val,
+                        "target_arch" => std::env::consts::ARCH == val,
+                        _ => false,
+                    };
+                    if !matches {
+                        // Skip this item entirely — consume tokens until next item boundary
+                        while !matches!(self.peek_kind(), TokenKind::Fn | TokenKind::Func | TokenKind::Struct | TokenKind::Enum | TokenKind::Const | TokenKind::Export | TokenKind::Hash | TokenKind::Eof) {
+                            self.bump();
+                        }
+                        return Ok(Item::Fn(crate::ast::FnDef {
+                            name: "__cfg_excluded__".into(),
+                            type_params: vec![], params: vec![], ret: None,
+                            body: crate::ast::Block { stmts: vec![], source_lines: Box::default() },
+                            exported: false, is_const: false, is_live: false,
+                            stability: crate::ast::ApiStability::Unspecified,
+                            type_bounds: std::collections::HashMap::new(), contracts: vec![], source_file: None,
+                        }));
+                    }
+                }
             }
         }
         let exported = if matches!(self.peek_kind(), TokenKind::Export) {
@@ -407,9 +430,20 @@ impl Parser {
                 };
                 ItemAttr::Deprecated(message)
             }
+            "cfg" => {
+                self.expect(TokenKind::LParen)?;
+                let key = self.expect_ident()?;
+                self.expect(TokenKind::Assign)?;
+                let val = match self.peek_kind().clone() {
+                    TokenKind::String(s) => { self.bump(); s }
+                    _ => return Err(self.err("#[cfg] expects key = \"value\"".into())),
+                };
+                self.expect(TokenKind::RParen)?;
+                ItemAttr::Cfg(key, val)
+            }
             other => {
                 return Err(self.err(format!(
-                    "unknown attribute `{other}` (supported: derive, stable, deprecated)"
+                    "unknown attribute `{other}` (supported: derive, stable, deprecated, cfg)"
                 )));
             }
         };
@@ -740,8 +774,7 @@ impl Parser {
                 params.push(Param {
                     name: pname,
                     ty,
-                    mutable,
-                });
+                    mutable, variadic: false });
                 if matches!(self.peek_kind(), TokenKind::Comma) {
                     self.bump();
                 } else {
@@ -813,8 +846,7 @@ impl Parser {
                                 go_receiver = Some(Param {
                                     name: rname,
                                     ty: rty,
-                                    mutable,
-                                });
+                                    mutable, variadic: false });
                             } else {
                                 self.pos = save;
                             }
@@ -860,8 +892,7 @@ impl Parser {
                     params.push(Param {
                         name: first,
                         ty,
-                        mutable,
-                    });
+                        mutable, variadic: false });
                     if matches!(self.peek_kind(), TokenKind::Comma) {
                         self.bump();
                         continue;
@@ -872,15 +903,16 @@ impl Parser {
                 // Only share when the type is Go-style (no colon). With `:`, each param is alone.
                 let mut names = vec![first];
                 if matches!(self.peek_kind(), TokenKind::Colon) {
-                    // Mako `a: T` — single param
+                    // Mako `a: T` or `a: ...T` (variadic)
                     self.bump();
-                    let ty = self.parse_type()?;
+                    let is_variadic = matches!(self.peek_kind(), TokenKind::DotDot);
+                    if is_variadic { self.bump(); }
+                    let inner_ty = self.parse_type()?;
+                    let ty = if is_variadic { TypeExpr::Array(Box::new(inner_ty)) } else { inner_ty };
                     params.push(Param {
                         name: names.pop().unwrap(),
                         ty,
-                        mutable,
-                    });
-                } else {
+                        mutable, variadic: is_variadic });                } else {
                     // Collect `a, b` only for bare Go shared type `a, b int`
                     while matches!(self.peek_kind(), TokenKind::Comma) {
                         let save = self.pos;
@@ -921,8 +953,7 @@ impl Parser {
                         params.push(Param {
                             name: pname,
                             ty: ty.clone(),
-                            mutable,
-                        });
+                            mutable, variadic: false });
                     }
                 }
                 if matches!(self.peek_kind(), TokenKind::Comma) {
@@ -1697,6 +1728,26 @@ impl Parser {
 
     fn parse_if(&mut self) -> Result<Stmt, ParseError> {
         self.expect(TokenKind::If)?;
+        // `if let Pattern = expr { … } else { … }`
+        if matches!(self.peek_kind(), TokenKind::Let) {
+            self.bump();
+            let pattern = self.parse_pattern()?;
+            self.expect(TokenKind::Assign)?;
+            let scrutinee = self.parse_header_expr()?;
+            let then_block = self.parse_block()?;
+            let else_block = if matches!(self.peek_kind(), TokenKind::Else) {
+                self.bump();
+                Some(self.parse_block()?)
+            } else {
+                None
+            };
+            return Ok(Stmt::IfLet {
+                pattern,
+                scrutinee,
+                then_block,
+                else_block,
+            });
+        }
         // Go-style if-with-init: `if err := f(); err != nil { … }`.
         // Detected by a top-level `;` before the block `{` — unambiguous because a
         // `;` never occurs at bracket-depth 0 inside an expression. When present the
@@ -3334,6 +3385,7 @@ enum ItemAttr {
     Derive(Vec<String>),
     Stable,
     Deprecated(String),
+    Cfg(String, String),
 }
 
 /// Go-style: names starting with an uppercase letter are package-exported.

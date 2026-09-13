@@ -15769,7 +15769,7 @@ impl TypeChecker {
                 Self::expr_mentions(base, name) || Self::expr_mentions(value, name)
             }
             Stmt::Expr(e) | Stmt::Return(Some(e)) => Self::expr_mentions(e, name),
-            Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => false,
+            Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::IfLet { .. } => false,
             Stmt::If {
                 init,
                 cond,
@@ -16804,6 +16804,7 @@ impl TypeChecker {
                 self.pending_defers.push(body.clone());
                 Ok(())
             }
+            Stmt::IfLet { .. } => unreachable!("if let desugared before typecheck"),
             Stmt::For {
                 label,
                 binders,
@@ -18620,6 +18621,54 @@ impl TypeChecker {
                     }
                 }
                 match (&rt, method.as_str()) {
+                    (Type::Array(elem) | Type::RawArray(elem), "map") if args.len() == 1 => {
+                        let saved = self.current_expected.clone();
+                        // Expect fn(T) -> U; infer U from the lambda body.
+                        self.current_expected = Some(Type::Fn(
+                            vec![elem.as_ref().clone()],
+                            Box::new(Type::Void), // placeholder; lambda infers return
+                        ));
+                        let fn_ty = self.check_expr(&args[0])?;
+                        self.current_expected = saved;
+                        match fn_ty {
+                            Type::Fn(_, ret) => {
+                                let out = if matches!(&rt, Type::RawArray(_)) {
+                                    Type::RawArray(ret)
+                                } else {
+                                    Type::Array(ret)
+                                };
+                                Ok(out)
+                            }
+                            _ => Err(TypeError::new("map requires a function argument")),
+                        }
+                    }
+                    (Type::Array(elem) | Type::RawArray(elem), "filter") if args.len() == 1 => {
+                        let saved = self.current_expected.clone();
+                        self.current_expected = Some(Type::Fn(
+                            vec![elem.as_ref().clone()],
+                            Box::new(Type::Bool),
+                        ));
+                        let fn_ty = self.check_expr(&args[0])?;
+                        self.current_expected = saved;
+                        match fn_ty {
+                            Type::Fn(_, _) => Ok(rt.clone()),
+                            _ => Err(TypeError::new("filter requires a function argument")),
+                        }
+                    }
+                    (Type::Array(elem) | Type::RawArray(elem), "reduce") if args.len() == 2 => {
+                        let init_ty = self.check_expr(&args[0])?;
+                        let saved = self.current_expected.clone();
+                        self.current_expected = Some(Type::Fn(
+                            vec![init_ty.clone(), elem.as_ref().clone()],
+                            Box::new(init_ty.clone()),
+                        ));
+                        let fn_ty = self.check_expr(&args[1])?;
+                        self.current_expected = saved;
+                        match fn_ty {
+                            Type::Fn(_, ret) => Ok(*ret),
+                            _ => Err(TypeError::new("reduce requires (init, fn) arguments")),
+                        }
+                    }
                     (Type::Array(_) | Type::RawArray(_), "len") => Ok(Type::Int),
                     (Type::String, "len") => Ok(Type::Int),
                     (Type::Chan(inner), "send") => {
@@ -21371,7 +21420,7 @@ impl TypeChecker {
             Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
                 Self::collect_free_expr(expr, bound, out)
             }
-            Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => {}
+            Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::IfLet { .. } => {}
             Stmt::If {
                 init,
                 cond,
@@ -22903,8 +22952,7 @@ pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, 
             .map(|p| Param {
                 name: p.name.clone(),
                 ty: subst_type_expr(&p.ty, subst),
-                mutable: p.mutable,
-            })
+                mutable: p.mutable, variadic: false })
             .collect(),
         ret: template.ret.as_ref().map(|t| subst_type_expr(t, subst)),
         body: subst_block(&template.body, subst),

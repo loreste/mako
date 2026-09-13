@@ -3,7 +3,7 @@
 use crate::ast::*;
 
 /// Expand `actor` / `#[derive(json)]` / `on Type { … }` into helper functions.
-pub fn desugar(mut program: Program) -> Program {
+pub fn desugar(mut program: Program, source_path: Option<&str>) -> Program {
     let mut extras: Vec<Item> = Vec::new();
     let mut kept: Vec<Item> = Vec::new();
     let struct_fields: std::collections::HashMap<String, Vec<(String, TypeExpr)>> = program
@@ -39,8 +39,151 @@ pub fn desugar(mut program: Program) -> Program {
         }
     }
 
+    // Remove cfg-excluded placeholder items.
+    kept.retain(|item| !matches!(item, Item::Fn(f) if f.name == "__cfg_excluded__"));
     kept.extend(extras);
-    Program { items: kept }
+    let mut prog = Program { items: kept };
+    for item in &mut prog.items {
+        if let Item::Fn(f) = item {
+            let base_dir = source_path
+                .and_then(|p| std::path::Path::new(p).parent())
+                .map(|p| p.to_path_buf());
+            desugar_if_let_block(&mut f.body);
+            resolve_embed_block(&mut f.body, base_dir.as_deref());
+        }
+    }
+    prog
+}
+
+fn resolve_embed_block(block: &mut Block, base: Option<&std::path::Path>) {
+    for s in &mut block.stmts { resolve_embed_stmt(s, base); }
+}
+fn resolve_embed_stmt(stmt: &mut Stmt, base: Option<&std::path::Path>) {
+    match stmt {
+        Stmt::Let { init, .. } | Stmt::Assign { value: init, .. } => resolve_embed_expr(init, base),
+        Stmt::Expr(e) | Stmt::Return(Some(e)) => resolve_embed_expr(e, base),
+        Stmt::If { cond, then_block, else_block, .. } => {
+            resolve_embed_expr(cond, base);
+            resolve_embed_block(then_block, base);
+            if let Some(eb) = else_block { resolve_embed_block(eb, base); }
+        }
+        Stmt::While { body, .. } | Stmt::Defer { body } | Stmt::Unsafe { body } => resolve_embed_block(body, base),
+        Stmt::For { body, .. } => resolve_embed_block(body, base),
+        _ => {}
+    }
+}
+fn resolve_embed_expr(expr: &mut Expr, base: Option<&std::path::Path>) {
+    if let Expr::Call { callee, args } = expr {
+        if let Expr::Ident(name) = callee.as_ref() {
+            if name == "embed" && args.len() == 1 {
+                if let Expr::String(path) = &args[0] {
+                    let full = base.map(|b| b.join(path)).unwrap_or_else(|| path.into());
+                    match std::fs::read_to_string(&full) {
+                        Ok(c) => { *expr = Expr::String(c); return; }
+                        Err(e) => { eprintln!("embed: {}: {e}", full.display()); std::process::exit(1); }
+                    }
+                }
+            }
+            if name == "embed_bytes" && args.len() == 1 {
+                if let Expr::String(path) = &args[0] {
+                    let full = base.map(|b| b.join(path)).unwrap_or_else(|| path.into());
+                    match std::fs::read(&full) {
+                        Ok(b) => { *expr = Expr::Array(b.into_iter().map(|v| Expr::Int(v as i64)).collect()); return; }
+                        Err(e) => { eprintln!("embed_bytes: {}: {e}", full.display()); std::process::exit(1); }
+                    }
+                }
+            }
+        }
+        resolve_embed_expr(callee, base);
+        for a in args { resolve_embed_expr(a, base); }
+    }
+}
+
+
+fn desugar_if_let_block(block: &mut Block) {
+    let stmts = std::mem::take(&mut block.stmts);
+    block.stmts = stmts
+        .into_iter()
+        .map(|s| desugar_if_let_stmt(s))
+        .collect();
+}
+
+fn desugar_if_let_stmt(stmt: Stmt) -> Stmt {
+    match stmt {
+        Stmt::IfLet {
+            pattern,
+            scrutinee,
+            then_block,
+            else_block,
+        } => {
+            let mut then_block = then_block;
+            let mut else_block = else_block;
+            desugar_if_let_block(&mut then_block);
+            if let Some(eb) = &mut else_block {
+                desugar_if_let_block(eb);
+            }
+            // Desugar: match scrutinee { Pattern => then, _ => else }
+            let mut arms = vec![MatchArm {
+                pattern,
+                guard: None,
+                body: Expr::Block(then_block),
+            }];
+            arms.push(MatchArm {
+                pattern: Pattern::Wildcard,
+                guard: None,
+                body: Expr::Block(else_block.unwrap_or(Block {
+                    stmts: vec![],
+                    source_lines: Box::default(),
+                })),
+            });
+            Stmt::Expr(Expr::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            })
+        }
+        Stmt::If {
+            init,
+            cond,
+            mut then_block,
+            mut else_block,
+        } => {
+            desugar_if_let_block(&mut then_block);
+            if let Some(eb) = &mut else_block {
+                desugar_if_let_block(eb);
+            }
+            Stmt::If {
+                init,
+                cond,
+                then_block,
+                else_block,
+            }
+        }
+        Stmt::While {
+            label,
+            cond,
+            mut body,
+        } => {
+            desugar_if_let_block(&mut body);
+            Stmt::While { label, cond, body }
+        }
+        Stmt::For {
+            label,
+            binders,
+            is_range,
+            iter,
+            mut body,
+        } => {
+            desugar_if_let_block(&mut body);
+            Stmt::For {
+                label,
+                binders,
+                is_range,
+                iter,
+                body,
+            }
+        }
+        other => other,
+    }
 }
 
 /// `on Point { fn distance(self) -> int { … } }` → `fn Point_distance(self: Point, …)`
@@ -90,8 +233,7 @@ fn expand_json_derive(
         .map(|(n, ty, _)| Param {
             name: n.clone(),
             ty: ty.clone(),
-            mutable: false,
-        })
+            mutable: false, variadic: false })
         .collect();
 
     let mut pieces = s
@@ -136,8 +278,7 @@ fn expand_json_derive(
             params: vec![Param {
                 name: "j".into(),
                 ty: TypeExpr::Named("string".into()),
-                mutable: false,
-            }],
+                mutable: false, variadic: false }],
             ret: Some(TypeExpr::Named(ret_ty.into())),
             body: Block {
                 stmts: vec![Stmt::Return(Some(Expr::Call {
@@ -340,8 +481,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 vec![Param {
                     name: pname.clone(),
                     ty: TypeExpr::Named("int".into()),
-                    mutable: false,
-                }],
+                    mutable: false, variadic: false }],
                 vec![Expr::Int(tag), Expr::Ident(pname.clone())],
             )
         } else {
@@ -402,8 +542,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         params: vec![Param {
             name: "__cap".into(),
             ty: TypeExpr::Named("int".into()),
-            mutable: false,
-        }],
+            mutable: false, variadic: false }],
         ret: Some(TypeExpr::Generic(
             "chan".into(),
             vec![TypeExpr::Named("int".into())],
@@ -432,13 +571,11 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             Param {
                 name: "__mbox".into(),
                 ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]),
-                mutable: false,
-            },
+                mutable: false, variadic: false },
             Param {
                 name: "__tag".into(),
                 ty: TypeExpr::Named("int".into()),
-                mutable: false,
-            },
+                mutable: false, variadic: false },
         ],
         ret: Some(TypeExpr::Named("bool".into())),
         body: Block {
@@ -609,8 +746,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         params: vec![Param {
             name: "__mbox".into(),
             ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]),
-            mutable: false,
-        }],
+            mutable: false, variadic: false }],
         ret: Some(TypeExpr::Named("int".into())),
         body: Block {
             stmts: loop_stmts,

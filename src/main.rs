@@ -4050,7 +4050,7 @@ fn compile_to_ast_with(file: &Path, incr: &incremental::IncrOptions) -> Result<a
         return Err(());
     }
 
-    let program = desugar::desugar(program);
+    let program = desugar::desugar(program, Some(&path));
     let program = tooling::resolve_imports(file, program).map_err(|e| {
         Diagnostic::error(&path, &src, Span::unknown(), e).emit();
     })?;

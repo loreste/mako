@@ -528,6 +528,10 @@ fn fmt_stmt(s: &Stmt, indent: usize) -> String {
                 fmt_block(body, indent)
             )
         }
+        Stmt::IfLet { pattern, scrutinee, then_block, else_block } => {
+            let s = format!("if let {} = {} {}", fmt_pattern(pattern), fmt_expr(scrutinee, 0), fmt_block(then_block, indent));
+            if let Some(eb) = else_block { format!("{s} else {}", fmt_block(eb, indent)) } else { s }
+        }
         Stmt::Break(None) => "break".into(),
         Stmt::Break(Some(l)) => format!("break {l}"),
         Stmt::Continue(None) => "continue".into(),

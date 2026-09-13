@@ -374,7 +374,7 @@ fn collect_used_names_stmt(stmt: &Stmt, out: &mut HashSet<String>) {
                 collect_used_names_block(d, out);
             }
         }
-        Stmt::Break(_) | Stmt::Continue(_) | Stmt::LetCommaOk { .. } => {}
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::LetCommaOk { .. } | Stmt::IfLet { .. } => {}
     }
 }
 
@@ -704,6 +704,7 @@ fn collect_stmt_refs(stmt: &Stmt, queue: &mut Vec<String>, types: &mut HashSet<S
             collect_block_refs(body, queue, types);
         }
         Stmt::Break { .. } | Stmt::Continue { .. } => {}
+        Stmt::IfLet { .. } => {} // desugared
         Stmt::Defer { body } => {
             collect_block_refs(body, queue, types);
         }
@@ -772,10 +773,10 @@ fn collect_expr_refs(expr: &Expr, queue: &mut Vec<String>, types: &mut HashSet<S
                 collect_expr_refs(a, queue, types);
             }
         }
-        Expr::Ident(_name) => {
-            // Idents are usually local variables. Function references (first-class
-            // fn values) are rare — accepting false negatives here to avoid
-            // marking every local variable as a reachable function.
+        Expr::Ident(name) => {
+            // Idents in expression position may be function references (first-class
+            // fn values passed to map/filter/reduce). Mark as potentially reachable.
+            queue.push(name.clone());
         }
         Expr::Binary { left, right, .. } => {
             collect_expr_refs(left, queue, types);
