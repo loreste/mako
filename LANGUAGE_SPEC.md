@@ -1734,7 +1734,60 @@ Inside an `arena name { ... }` block:
 Arenas are useful for request-scoped work in servers, where many small
 allocations can be freed together.
 
-### 6.5 Unsafe Blocks
+### 6.5 If Let
+
+`if let` provides concise single-arm pattern matching:
+
+```mko
+if let Some(v) = maybe_value {
+    print(v)
+} else {
+    print("nothing")
+}
+```
+
+Desugared to `match` before type checking. The `else` branch is optional.
+
+### 6.6 Iterator Combinators
+
+Slices support `map`, `filter`, and `reduce` as method calls:
+
+```mko
+fn double(x: int) -> int { return x * 2 }
+let doubled = [1, 2, 3].map(double)      // [2, 4, 6]
+let sum = [1, 2, 3].reduce(0, add)       // 6
+```
+
+### 6.7 Variadic Functions
+
+`...T` in a parameter accepts zero or more arguments as `[]T`:
+
+```mko
+fn log(msgs: ...string) {
+    for msg in msgs { print(msg) }
+}
+```
+
+### 6.8 Compile-Time Embed
+
+`embed("path")` reads a file at compile time:
+
+```mko
+let html = embed("index.html")
+let icon = embed_bytes("favicon.ico")
+```
+
+### 6.9 Conditional Compilation
+
+`#[cfg(key = "value")]` excludes a function when the condition does not match:
+
+```mko
+#[cfg(os = "linux")]
+fn epoll_wait(fd: int) -> int { ... }
+```
+
+Supported keys: `os`, `arch`, `target_os`, `target_arch`.
+### 6.10 Unsafe Blocks
 
 ```mko
 unsafe {

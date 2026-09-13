@@ -1,11 +1,11 @@
 # Makori status (adversarial / verified)
 
-Last inventory: **2026-09-09** · product **mako 0.6.32** (tip; release tag **v0.6.32**) ·
+Last inventory: **2026-09-13** · product **mako 0.6.33** (tip; release tag **v0.6.33**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
 const-fn depth (match/while/for/strings · `s[i]`) · **452** `examples/testing`
-`*_test.mko` files · **2026-09-09:** release claims gate passed · `cargo test` **402 passed, 0 failed** ·
+`*_test.mko` files · **2026-09-13:** release claims gate passed · `cargo test` **402 passed, 0 failed** ·
 tooling, stdlib, memory-safety, and performance gates passed locally ·
 CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard failures/quarantines · [The Makori Book](book/).
 
@@ -17,7 +17,7 @@ CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard fa
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.6.32** tip · release tag **v0.6.32** ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.6.33** tip · release tag **v0.6.33** ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
@@ -50,6 +50,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | SAFE-010 memory model doc | Done |
 | RT-001 / RT-005 / RT-006 | Done |
 | RT-002/003 scheduler pool + spawn_blocking | Done (seed) |
+| if let / iterator combinators / variadic / embed / cfg | Done — 0.6.33 |
 | RT-004 channel ownership (clone/take) | Done (core) |
 | Struct Own field free | Done |
 | Pkg lock build verification (PR #3) | Done |

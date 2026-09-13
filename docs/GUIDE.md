@@ -484,6 +484,11 @@ rows = append(rows, [10, 20])
 | `make([]int\|[]byte\|[]string\|[]float\|[]bool\|[][]T, …)` | Pre-sized allocation |
 | `[]bool` / `[]Enum` | Bool and enum element slices |
 | `raw []T` / `make(raw []T, len, cap)` | Non-COW single-owner array (plain malloc, no refcount) |
+| `xs.map(fn)` / `xs.filter(fn)` / `xs.reduce(init, fn)` | Iterator combinators on slices |
+| `if let Some(v) = expr { ... }` | Concise single-arm pattern matching |
+| `fn f(args: ...T)` | Variadic parameter (desugars to `[]T`) |
+| `embed("file.txt")` | Compile-time file embedding |
+| `#[cfg(os = "linux")]` | Conditional compilation |
 | `s[i:j]`, `len`/`cap`/`append`/`copy` | Slice operations |
 
 Compile-time: `int8(200)` / `byte(300)` rejected at `makori check` when the arg is a constant

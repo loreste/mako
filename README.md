@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.32).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.33).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -166,6 +166,14 @@ message inspection, site history, reports, alerts, and traffic metrics.
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
 
+## New in 0.6.33
+
+- **`if let`:** Concise single-arm pattern matching — `if let Some(v) = expr { ... } else { ... }`. Works with Option and Result.
+- **Iterator combinators:** `xs.map(fn)`, `xs.filter(fn)`, `xs.reduce(init, fn)` as methods on `[]T`. Inline loop codegen.
+- **Variadic functions:** `fn log(msgs: ...string)` — `...T` desugars to `[]T`.
+- **Compile-time embed:** `embed("file.txt")` reads a file at compile time. `embed_bytes("file.bin")` for `[]byte`.
+- **Conditional compilation:** `#[cfg(os = "darwin")]` / `#[cfg(arch = "aarch64")]` on functions.
+- **Raw arrays (`raw []T`):** Non-COW single-owner arrays with plain `malloc` backing. Zero atomic overhead.
 ## New in 0.6.32
 
 - **Raw arrays (`raw []T`):** Non-COW single-owner arrays with plain `malloc` backing. No refcount header, no atomic ops, unconditional `free` at scope exit. All standard slice operations work. Adversarial-tested with zero leaks.

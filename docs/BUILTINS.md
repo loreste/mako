@@ -185,6 +185,21 @@ let o = str_to_owned(v)           // owned clone
 `make(raw []T, len, cap)` allocates. Auto-dropped at scope exit. Supported
 element types: `int`, `string`, `float`, `byte`, `bool`.
 
+**Iterator combinators** (methods on `[]T`):
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `map` | `xs.map(fn(T) -> U) -> []U` | Transform each element |
+| `filter` | `xs.filter(fn(T) -> bool) -> []T` | Keep elements matching predicate |
+| `reduce` | `xs.reduce(init: U, fn(U, T) -> U) -> U` | Fold elements into accumulator |
+
+## 6. Compile-Time
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `embed` | `embed(path: string) -> string` | Embed file contents as string at compile time |
+| `embed_bytes` | `embed_bytes(path: string) -> []byte` | Embed file contents as byte array at compile time |
+
 ---
 
 ## 6. Maps
