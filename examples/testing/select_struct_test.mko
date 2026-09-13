@@ -9,7 +9,7 @@ struct QueryRow {
 }
 
 struct QueryResult {
-    raw: string
+    rawv: string
     rows: []QueryRow
     total: int
 }
@@ -24,7 +24,7 @@ fn make_row(id: int, active: bool, title: string, score: float, tag: string) -> 
     }
 }
 
-fn execute_select(raw: string) -> QueryResult {
+fn execute_select(rawv: string) -> QueryResult {
     let mut rows: []QueryRow = []
     let mut i = 0
     while i < 10 {
@@ -34,7 +34,7 @@ fn execute_select(raw: string) -> QueryResult {
         i = i + 1
     }
     return QueryResult {
-        raw: raw,
+        rawv: rawv,
         rows: rows,
         total: len(rows)
     }
@@ -43,7 +43,7 @@ fn execute_select(raw: string) -> QueryResult {
 fn TestSelectStructAndTuplePadding() {
     let q = "SELECT id, is_active, title, score, tag FROM items WHERE id < 10"
     let res = execute_select(q)
-    assert_eq_str(res.raw, q)
+    assert_eq_str(res.rawv, q)
     assert_eq(res.total, 10)
     assert_eq(len(res.rows), 10)
 

@@ -1,17 +1,17 @@
 struct Stmt {
-    raw: string
+    rawv: string
 }
 
-fn test_fn(raw: int) -> int {
-    return raw + 1
+fn test_fn(rawv: int) -> int {
+    return rawv + 1
 }
 
 fn TestRawAsIdentifier() {
-    let raw = 42
-    assert_eq(raw, 42)
+    let rawv = 42
+    assert_eq(rawv, 42)
     assert_eq(test_fn(10), 11)
-    let s = Stmt { raw: "select 1" }
-    assert_eq_str(s.raw, "select 1")
+    let s = Stmt { rawv: "select 1" }
+    assert_eq_str(s.rawv, "select 1")
 
     let mut arr: raw []int = make(raw []int, 0, 4)
     arr = append(arr, 100)

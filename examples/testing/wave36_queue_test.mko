@@ -63,10 +63,10 @@ fn TestJpegApp7SoiLayout() {
     assert_eq(jpeg_roundtrip_ok(j), 1)
     assert_eq(jpeg_has_eoi(j), 1)
 
-    let raw = jpeg_encode_gray(8, 8, gray)
-    assert_eq(jpeg_has_soi(raw), 1)
-    assert_eq(jpeg_app7_length(raw), 77)
-    assert_eq(jpeg_app7_len_matches_payload(raw), 1)
+    let rawv = jpeg_encode_gray(8, 8, gray)
+    assert_eq(jpeg_has_soi(rawv), 1)
+    assert_eq(jpeg_app7_length(rawv), 77)
+    assert_eq(jpeg_app7_len_matches_payload(rawv), 1)
 }
 
 fn TestRegexUnicodeSmSkPc() {
