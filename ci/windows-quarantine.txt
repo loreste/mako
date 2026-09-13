@@ -7,6 +7,7 @@
 examples/testing/domain_tracks_test.mko
 examples/testing/fs_storage_test.mko
 examples/testing/issue36_builtins_test.mko
+examples/testing/issue58_test.mko
 examples/testing/mail_smtp_test.mko
 examples/testing/net_ipv6_he_test.mko
 examples/testing/net_lowlevel_test.mko
