@@ -1029,26 +1029,33 @@ No-self interfaces use a unit vtable for dynamic dispatch.
 
 ### 3.7 Actor Declarations
 
-Actors are message-processing entities with isolated state:
+Actors are message-processing entities with isolated state and dedicated mailboxes:
 
 ```mko
 actor Name {
+    field: type = default_value
+
     receive MessageType {
         body
     }
-    receive AnotherMessage {
+    receive MessageWithPayload(arg: type) {
         body
     }
 }
 ```
 
-Example:
+Example with internal state and message payloads:
 
 ```mko
-actor Session {
-    receive Invite { print("invite") }
-    receive Timer  { print("tick") }
-    receive Bye    { print("bye") }
+actor Counter {
+    n: int = 0
+
+    receive Inc(delta: int) {
+        self.n = self.n + delta
+    }
+    receive Bye {
+        let _ = 0
+    }
 }
 ```
 
@@ -1058,9 +1065,10 @@ ends the loop by convention.
 Actor operations:
 
 ```mko
-let session = Session_spawn()                 // spawn actor
-let _ = Session_send(session, Session_Invite()) // send message
-let loopj = t.kick(Session_loop(session))     // run actor loop in crew
+let c = Counter_spawn()                     // spawn actor (default mailbox cap)
+let c2 = Counter_spawn_cap(64)              // spawn actor with custom capacity
+let _ = Counter_send(c, Counter_Inc(5))     // send message with payload
+let loopj = t.kick(Counter_loop(c))         // run actor loop in crew
 ```
 
 ### 3.8 Foreign Declarations
@@ -1940,39 +1948,60 @@ Fairness: when multiple channels are ready simultaneously, selection uses
 Helper functions: `chan_select2`, `chan_select3`, `chan_select4` for 2-4 channel
 select without the full `select` block syntax.
 
-### 7.4 Actors
+### 7.4 Actors and Supervision
 
-Actors are message-processing entities with isolated mailboxes:
+Actors are message-processing entities with isolated mailboxes and optional owned state:
 
 ```mko
-actor Session {
-    receive Invite { print("invite") }
-    receive Timer  { print("tick") }
-    receive Bye    { print("bye") }
+actor Counter {
+    n: int = 0
+
+    receive Inc(delta: int) {
+        self.n = self.n + delta
+    }
+    receive Bye {
+        let _ = 0
+    }
 }
 ```
 
 #### Actor Operations
 
-| Operation              | Description                          |
-|------------------------|--------------------------------------|
-| `ActorName_spawn()`    | Create and spawn an actor            |
-| `ActorName_send(a, msg)` | Send a message to the actor        |
-| `ActorName_loop(a)`    | Run the actor's message processing loop |
+| Operation | Description |
+|---|---|
+| `ActorName_spawn()` | Allocate actor with default mailbox capacity |
+| `ActorName_spawn_cap(cap: int)` | Allocate actor with custom mailbox capacity |
+| `ActorName_send(a, msg)` | Send a message to the actor's mailbox |
+| `ActorName_loop(a)` | Run the actor's message processing loop |
 
 Actors desugar to a mailbox plus a crew loop internally.
 
+#### Supervision Pattern
+
+Actors execute within structured nurseries (`crew`). A supervisor actor or coordinator monitors workers and manages shutdown or failure cascades:
+
 ```mko
 fn main() {
-    let session = Session_spawn()
+    let sup = Supervisor_spawn()
+    let w1 = Worker_spawn()
+
     crew t {
-        let loopj = t.kick(Session_loop(session))
-        let _ = Session_send(session, Session_Invite())
-        let _ = Session_send(session, Session_Bye())
-        print_int(loopj.join())
+        let sj = t.kick(Supervisor_loop(sup))
+        let wj = t.kick(Worker_loop(w1))
+
+        let _ = Supervisor_send(sup, Supervisor_Start())
+        let _ = Worker_send(w1, Worker_Job())
+
+        let _ = Worker_send(w1, Worker_Stop())
+        let _ = Supervisor_send(sup, Supervisor_Stop())
+
+        let _ = wj.join()
+        let _ = sj.join()
     }
 }
 ```
+
+With `crew:fail_fast`, if a child task or actor terminates unexpectedly, sibling actors are cooperatively cancelled, avoiding leaks and orphaned processes.
 
 ### 7.5 Fan (Data-Parallel Map)
 

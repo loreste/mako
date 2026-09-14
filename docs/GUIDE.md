@@ -1400,14 +1400,19 @@ sched_set_stack_size(4 * 1024 * 1024) // Set task stack to 4MB (valid range: 256
 
 ---
 
-## 10. Actors
+## 10. Actors and Supervision
+
+Actors are long-lived, concurrent message-processing entities with isolated state. They communicate exclusively through typed mailboxes, eliminating shared mutable state.
+
+### 10.1 Defining Actors
+
+An actor defines message handlers with `receive` blocks. By convention, a `Bye` or `Stop` message ends the actor's receive loop:
 
 ```mko
-// examples/actor.mko
 actor Session {
     receive Invite { print("invite") }
-    receive Timer { print("tick") }
-    receive Bye { print("bye") }
+    receive Timer  { print("tick") }
+    receive Bye    { print("bye") }
 }
 
 fn main() {
@@ -1421,7 +1426,104 @@ fn main() {
 }
 ```
 
-Desugars to mailbox + crew loop. `Bye` / `Stop` end the loop by convention.
+### 10.2 Actors with Owned State and Payloads
+
+Actors can declare internal state fields and receive messages with parameters. State fields are accessed and updated through `self.field`:
+
+```mko
+actor Counter {
+    n: int = 0
+
+    receive Inc(delta: int) {
+        self.n = self.n + delta
+    }
+    receive Set(v: int) {
+        self.n = v
+    }
+    receive Bye {
+        let _ = 0
+    }
+}
+
+fn main() {
+    // Custom mailbox buffer capacity via _spawn_cap (default is 16)
+    let c = Counter_spawn_cap(64)
+    crew t {
+        let loopj = t.kick(Counter_loop(c))
+        let _ = Counter_send(c, Counter_Inc(5))
+        let _ = Counter_send(c, Counter_Inc(10))
+        let _ = Counter_send(c, Counter_Bye())
+
+        // Upon termination, loop returns terminal state
+        let total = loopj.join()
+        print_int(total) // 15
+    }
+}
+```
+
+### 10.3 Generated Actor API
+
+For an actor declared as `actor Name`:
+
+| Generated Function | Signature | Description |
+|---|---|---|
+| `Name_spawn()` | `() -> Name` | Allocates actor and mailbox ring buffer |
+| `Name_spawn_cap(cap)` | `(cap: int) -> Name` | Allocates actor with custom mailbox capacity |
+| `Name_send(actor, msg)` | `(actor: Name, msg: int) -> bool` | Sends message to actor mailbox |
+| `Name_loop(actor)` | `(actor: Name) -> int` | Executes message processing loop in a crew task |
+| `Name_MsgName(payload...)` | `(...) -> int` | Packs message tag and optional payload into an envelope |
+
+### 10.4 Actor Supervision Pattern
+
+Because actors run inside structured `crew` scopes, supervision is clean, robust, and leak-free. Supervisors coordinate workers, monitor message queues, and handle lifecycle events:
+
+```mko
+actor Worker {
+    receive Job {
+        print("worker processing job")
+    }
+    receive Stop {
+        print("worker stopped")
+    }
+}
+
+actor Supervisor {
+    receive Start {
+        print("supervisor active")
+    }
+    receive Stop {
+        print("supervisor shutting down")
+    }
+}
+
+fn main() {
+    let sup = Supervisor_spawn()
+    let w1 = Worker_spawn()
+    let w2 = Worker_spawn()
+
+    // Structured nursery guarantees all actors terminate before crew exit
+    crew t {
+        let s_job = t.kick(Supervisor_loop(sup))
+        let w1_job = t.kick(Worker_loop(w1))
+        let w2_job = t.kick(Worker_loop(w2))
+
+        let _ = Supervisor_send(sup, Supervisor_Start())
+        let _ = Worker_send(w1, Worker_Job())
+        let _ = Worker_send(w2, Worker_Job())
+
+        // Controlled teardown
+        let _ = Worker_send(w1, Worker_Stop())
+        let _ = Worker_send(w2, Worker_Stop())
+        let _ = Supervisor_send(sup, Supervisor_Stop())
+
+        let _ = w1_job.join()
+        let _ = w2_job.join()
+        let _ = s_job.join()
+    }
+}
+```
+
+Under `crew:fail_fast t { ... }`, if a worker encounters a panic or unrecoverable error, the nursery cooperatively cancels all peer actors, preventing orphaned worker threads.
 
 ---
 

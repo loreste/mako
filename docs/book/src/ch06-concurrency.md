@@ -712,6 +712,39 @@ function returns 0 when it receives the termination message. Without a
 termination message, the actor loop runs indefinitely (or until the crew is
 cancelled).
 
+### Actors with owned state and message payloads
+
+Actors can maintain private internal state fields and accept parameters in message handlers:
+
+```mko
+actor Counter {
+    n: int = 0
+
+    receive Inc(delta: int) {
+        self.n = self.n + delta
+    }
+    receive Set(v: int) {
+        self.n = v
+    }
+    receive Bye {
+        let _ = 0
+    }
+}
+
+fn main() {
+    let c = Counter_spawn_cap(32) // custom mailbox capacity
+    crew t {
+        let loopj = t.kick(Counter_loop(c))
+        let _ = Counter_send(c, Counter_Inc(10))
+        let _ = Counter_send(c, Counter_Inc(5))
+        let _ = Counter_send(c, Counter_Bye())
+
+        // Upon termination, Counter_loop returns self.n
+        assert_eq(loopj.join(), 15)
+    }
+}
+```
+
 ### Actor design patterns
 
 **State machine actor**: use the receive handlers to transition between states.
@@ -788,6 +821,8 @@ fn main() {
     }
 }
 ```
+
+Under structured nurseries (`crew:fail_fast`), if any child actor encounters an error or panic, the nursery cooperatively cancels all sibling actors, guaranteeing clean shutdown without leaving orphan worker processes.
 
 ---
 
