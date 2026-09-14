@@ -76,7 +76,7 @@ contract.
 | `sched_set_workers(n)` | Opt-in pool reuses worker threads for kicks (default n=0 = one pthread each) |
 | Integer string formatting | **Two-digit table + small integer fast-path** — zero-division path for 0..99, cuts division ops by 50% for 64-bit ints |
 | Channel struct cache layout | **Mutex at offset 0** — aligns `mu`, `cap`, `count`, and `inline_buf` in contiguous L1 cache lines for uncontended send/recv |
-| Slice append refcount check | **Relaxed atomic load** — `mako_rc_shared` uses relaxed memory order, eliminating ARM64 `ldar` pipeline barriers on loop appends |
+| Slice append refcount check | **Acquire atomic load** — `mako_rc_shared` uses acquire memory order, synchronizing with any concurrent retain to guarantee safe COW detachment |
 
 **Ownership without a speed tax:** keep short-lived POD slices as stack views in
 tight loops; only pay for a heap copy when the value escapes or shared backing

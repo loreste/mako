@@ -140,7 +140,7 @@ static inline int mako_rc_release(void *data) {
 }
 static inline int mako_rc_shared(void *data) {
     if (!data) return 0;
-    return atomic_load_explicit(mako_rc_of(data), memory_order_relaxed) > 1;
+    return atomic_load_explicit(mako_rc_of(data), memory_order_acquire) > 1;
 }
 
 /* Branch hints for hot paths (no-ops on unknown compilers). */
