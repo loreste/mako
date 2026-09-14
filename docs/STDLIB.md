@@ -685,6 +685,9 @@ TCP: `tcp_listen` / `tcp_accept` / `tcp_connect` / `tcp_write` / `tcp_write_all`
 `tcp_local_addr`), half-close (`tcp_shutdown`), `tcp_linger` / `sock_error`,
 session controls (`tcp_set_timeout`, `tcp_keepalive`, `tcp_nodelay`,
 `tcp_listen_backlog` / `tcp_listen_reuseport`, buffer sizing, `tcp_accept4`).
+On Linux, `tcp_accept_nb` clears `SOCK_NONBLOCK` via `accept4(SOCK_CLOEXEC)` so accepted
+client connections cleanly enter worker threads as standard blocking sockets, preventing
+`EAGAIN` / `EWOULDBLOCK` race conditions under high concurrency (Issue #58).
 
 ### Safety / ops (overflow, shutdown, leak, trace)
 

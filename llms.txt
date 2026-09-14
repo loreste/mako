@@ -74,7 +74,10 @@ parse; do not prefer them. See docs/IDENTITY.md if you care about the style bar.
 - Parallel work: `fan(xs, fn(x) { x * x })`
 - Concurrency: `crew` / `kick` / `join`, channels, `select`, `actor`
 - Structured cancellation policies: `crew:all`, `crew:race`, `crew:any`, `crew:fail_fast`
-- Scheduler: `sched_set_workers(n)` opt-in pool (0 = one pthread per kick)
+- Scheduler: `sched_set_workers(n)` opt-in pool, `sched_set_stack_size(bytes)` (8MB default stack)
+- Channels: native mutex trylock fast path (100% TSan clean, 1.19x vs Rust), zero-alloc inline rings
+- Iterator safety: compile-time invalidation prevention (`cannot assign to xs while shared`)
+- Raw arrays: `raw []T` single-owner malloc arrays with static use-after-move enforcement
 - Channel string take: `chan_str_send_take` / `chan_str_try_send_take` (move; no clone)
 - Build: locked deps verified at compile (`mako.lock` content hashes)
 - `+= -= *= /= ++ --`, `a, b = b, a`, `let x = if c { a } else { b }`

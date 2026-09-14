@@ -111,7 +111,10 @@ fn main() {
 All standard slice operations work (`len`, `cap`, `append`, `copy`, indexing,
 sub-slicing, iteration). Use `raw []T` in performance-critical code where
 you know there's a single owner and want zero atomic overhead. Explicit
-`copy(dst, src)` is required for duplication.
+`copy(dst, src)` is required for duplication. Passing a `raw []T` into a
+function transfers ownership; accessing the identifier after transfer is a
+compile-time error (`cannot use moved raw array`), preventing use-after-move
+and double-free bugs.
 
 ## Iterator safety
 

@@ -360,6 +360,7 @@ Supported element types: `int`, `string`, `float`, `byte`, `bool`.
 
 **Ownership rules:**
 - Assignment moves the backing store; the source is invalidated.
+- Passing a `raw []T` into a function transfers ownership. Subsequent access to the identifier is a compile-time error (`cannot use moved raw array`).
 - No implicit clone — explicit `copy(dst, src)` for duplication.
 - Auto-dropped at scope exit (unconditional `free`, no refcount).
 - Not `Send` — cannot be shared across tasks.
@@ -1359,6 +1360,10 @@ for v in s {              // legacy: values only
     // v: element type
 }
 ```
+
+#### 5.4.1 Iterator Invalidation Prevention
+
+During iteration over a collection `s` (`for ... in s` or `for ... in range s`), modifying, reassigning, or appending to `s` inside the loop body is statically prohibited and produces a compile error: `cannot assign to s while shared`. This prevents Copy-On-Write backing buffer reallocation or deallocation while elements are actively being traversed.
 
 ### 5.5 Break and Continue
 

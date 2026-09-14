@@ -1133,6 +1133,7 @@ Tests: `chan_struct_test`, `chan_make_struct_test`, `chan_float_test`,
 | `t.kick(f(args…))` | Spawn on crew; returns `Job[R]`. Uses scheduler pool when `sched_set_workers(n>0)` |
 | `sched_set_workers` | `sched_set_workers(n: int) -> void` | RT-002: opt-in pool of `n` workers (0 = one pthread per kick, default) |
 | `sched_workers` | `sched_workers() -> int` | Current configured worker count |
+| `sched_set_stack_size` | `sched_set_stack_size(bytes: int) -> void` | Configure thread stack size for kicked tasks (default: 8MB; 256KB–64MB) |
 | `job.join()` / `join(job)` | Wait for result of type `R` |
 | `job.join_timeout(ms)` | Timed join → **`Result[R, string]`** (`Ok`/`Err("timeout")`). If `R` is already `Result[T, string]`, **flattens** (no nest). |
 | `job.join_deadline(dl)` | Same as `join_timeout`, but `dl` is absolute mono deadline from `deadline_ms`/`deadline_ns` |
@@ -1493,6 +1494,7 @@ or a dedicated reply socket — do not share one `GameUDP` handle across workers
 | `runtime_stats_reset` | `runtime_stats_reset() -> void` | Reset runtime statistics counters |
 | `sched_set_workers` | `sched_set_workers(n: int) -> void` | Bounded worker pool for kicks (see §24) |
 | `sched_workers` | `sched_workers() -> int` | Configured worker count |
+| `sched_set_stack_size` | `sched_set_stack_size(bytes: int) -> void` | Configure thread stack size for kicked tasks (default: 8MB) |
 | `exit` | `exit(code: int) -> void` | Exit the process with a status code |
 | `leak_mark` | `leak_mark() -> int` | Mark current allocation state for leak detection |
 | `leak_bytes_since` | `leak_bytes_since(mark: int) -> int` | Bytes allocated since a leak mark |

@@ -35,6 +35,7 @@ and cannot enter the refcount release path.
 | Can uniqueness change concurrently? | The count can change when authorized owners retain or release. Count `1` is never proof of exclusive access and cannot authorize mutation. |
 | Are headers atomic? | No. Each header is task-owned and protected by move/borrow rules. Unsafe sharing requires external synchronization. |
 | Can a View outlive detach? | No. A non-retaining View prevents mutation, move, reassign, drop, and therefore detach of its base until its NLL lifetime ends. Safe Mako permits one live View per base; a `mut` View is the sole mutation path. `v = append(v, x)` consumes the View, detaches into owned backing, and ends the borrow. |
+| Can a slice be mutated during iteration? | No. A `for` loop over a collection creates an active shared borrow across the loop body. Mutating, reassigning, or growing the collection is rejected at compile time (`cannot assign to xs while shared`). |
 | Are elements deeply owned? | Copy elements copy directly. Own elements clone/drop recursively. Share/Sync elements may remain shallowly shared only under their own contract. |
 | What about destructors? | Detach constructs valid clones before publishing the new header. Each backing drops initialized elements exactly once at final release. Partial clone failure must unwind initialized clones. |
 | Can the refcount overflow? | No. Retain at `UINT32_MAX`, retain at zero, and release at zero abort; the counter never wraps. |
@@ -52,7 +53,7 @@ move semantics:
 
 - **No refcount** — no `mako_rc_retain`/`mako_rc_release`, no atomic ops.
 - **No COW** — mutations are direct; no `mako_rc_shared` check before write.
-- **Move-only** — assignment transfers ownership; the source is invalidated.
+- **Move-only** — assignment transfers ownership; the source is invalidated. Passing into a function transfers ownership, and subsequent access is statically rejected at compile time (`cannot use moved raw array`).
 - **Auto-drop** — `free(data)` at scope exit, unconditional.
 - **Not Send** — cannot cross task boundaries (same as COW slices).
 

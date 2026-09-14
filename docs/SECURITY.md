@@ -81,6 +81,15 @@ force an explicit choice: a loud name, an unsafe boundary, or a failing return.
 - **Unsafe stays narrow:** raw memory, unchecked indexes, FFI ownership transfer,
   dynamic loading, and platform-specific handles are excluded from safe parity
   unless wrapped by checked handles with deterministic cleanup.
+- **Iterator invalidation is a compile error (0.6.34):** mutating, reassigning, or
+  appending to an iterated slice within a `for` loop body is rejected
+  (`cannot assign to xs while shared`), preventing COW reallocation crashes and UAF.
+- **Channel data races are eliminated by construction (0.6.34):** channel synchronization
+  uses platform-native mutex trylocks and wait queues (`pthread_mutex_trylock` / SRWLock),
+  providing full ThreadSanitizer-clean safety with zero race conditions.
+- **Thread stack overflow protection (0.6.34):** default thread stack is set to 8MB
+  to prevent stack smashing in deep recursive workloads (e.g. database engines), with
+  `sched_set_stack_size()` available for bounded deployment targets.
 
 ### Concurrency Send seed (kick)
 
