@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.34
+
+- Prevent iterator invalidation:
+  - Mark iterated collections as borrowed during `for` loop body type checking.
+  - Mutating, reassigning, or appending to the iterated variable inside the loop body is rejected at compile time (`cannot assign to xs while shared`), preventing heap corruption and segfaults from COW backing invalidation.
+- Channel data race elimination & trylock fast path:
+  - Replaced spinlock fast path with `pthread_mutex_trylock` (POSIX) and `TryAcquireSRWLockExclusive` (Windows), using the same mutex as the condvar slow path.
+  - Eliminates TSan data races where channel count/head/tail were accessed outside mutex synchronization, while keeping uncontended operations fast (chan50k benchmark improved by 14% to 1.21x Rust).
+- Stack size safety & configurability:
+  - Reverted default thread stack to 8MB, preventing stack smashing in deep execution paths (e.g., FayDB SQL execution).
+  - Added `sched_set_stack_size(bytes)` runtime API for configurable stack sizing.
+- Single-owner raw array use-after-move enforcement:
+  - Compile-time tracking of `raw []T` bindings across function calls.
+  - Passing a raw array to a function consumes the binding; subsequent reads are rejected at compile time with actionable diagnostic hints.
+- Dead code elimination and struct retention fix (issue #59):
+  - Fixed DCE reachability analysis so local variable identifiers do not pollute the function reachability queue, ensuring struct typedefs and return signatures are retained correctly for complex multi-package applications (e.g., FayDB).
+- Nonblocking listener accept race fix (issue #58):
+  - Linux `tcp_accept_nb` uses `accept4(SOCK_CLOEXEC)` without `SOCK_NONBLOCK`, eliminating the window where accepted sockets could inherit nonblocking state before fcntl configuration.
+
 ## 0.6.33
 
 - Fix contextual `raw` keyword (issue #57): `raw` is parsed contextually only in

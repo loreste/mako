@@ -4,7 +4,7 @@
 > Longer reference: https://mako-lang.com/llms-full.txt
 > Repo: https://github.com/loreste/mako
 
-Version **0.6.33** (alpha). Compiled language, `.mko` sources, native (Cranelift) + C + LLVM backends, no GC.
+Version **0.6.34** (alpha). Compiled language, `.mko` sources, native (Cranelift) + C + LLVM backends, no GC.
 Ownership model actively hardened — O(1) RC array clone, position-aware
 last-use move, scope-exit destructors, raw arrays (`raw []T`). Safety validated under ASan, UBSan,
 TSan with zero errors across 452 test files. `unsafe`, the C runtime, and
@@ -115,7 +115,7 @@ string `""` is a singleton — do not raw-free it.
 - `stack_trace()` — print current call stack at any point.
 - `error_chain(err)` — print error with full source-location trace.
 
-## Ownership model (0.6.33)
+## Ownership model (0.6.34)
 
 Mako uses compile-time ownership tracking with no garbage collector:
 

@@ -3,9 +3,9 @@
 Detailed feature plan for Mako, organized by version. See
 [docs/ROADMAP.md](docs/ROADMAP.md) for the primary authoritative view.
 
-**Current version:** 0.6.33  
+**Current version:** 0.6.34  
 **Next milestone:** 0.7 (consolidation & freeze) / 1.0 (stability)  
-**Last updated:** 2026-09-13  
+**Last updated:** 2026-09-14  
 **Test suite:** 452 Mako tests + 202 Rust tests, 0 failures, ASan/UBSan clean
 
 Soundness program of record: **[docs/SOUNDNESS.md](docs/SOUNDNESS.md)**.  
@@ -499,6 +499,13 @@ Detailed evolution tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and [CHANGELOG.
   - Contextual `raw` keyword: `raw []T` raw arrays with plain `malloc` backing; `raw` remains valid for fields/variables/params (#57).
   - C backend struct move safety and padding initialization (#57).
   - Worker thread hang fix on nonblocking listener accept (#58).
+- **v0.6.34**:
+  - Iterator invalidation prevention: compile-time error when mutating or reassigning an iterated collection inside a loop body.
+  - Channel data race elimination: replaced spinlock with mutex trylock on POSIX and SRWLock trylock on Windows (TSan verified clean, chan50k 1.21x Rust).
+  - Stack size safety: reverted default thread stack to 8MB; added `sched_set_stack_size()` API.
+  - Single-owner raw array use-after-move enforcement: static tracking prevents use after call transfer.
+  - Struct DCE retention fix (#59): reachability analysis properly retains struct definitions and return signatures.
+  - Nonblocking accept race fix (#58): Linux `tcp_accept_nb` uses `accept4(SOCK_CLOEXEC)` without `SOCK_NONBLOCK`.
 
 ---
 

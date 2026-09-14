@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.33).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.34).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -188,6 +188,15 @@ message inspection, site history, reports, alerts, and traffic metrics.
 - Package security model is not independently audited
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
+
+## New in 0.6.34
+
+- **Iterator invalidation prevention:** Compile-time error when mutating, reassigning, or appending to a slice while iterating over it in a `for` loop body, eliminating use-after-free and reallocation crashes.
+- **Channel trylock fast path & race elimination:** Switched channel spinlocks to platform-native mutex trylocks (`pthread_mutex_trylock` / SRWLock), fully eliminating TSan races while keeping 1.21x vs Rust uncontended channel throughput.
+- **Stack size safety & configurability:** Restored 8MB default thread stack to prevent stack overflows on deeply nested calls (e.g. FayDB SQL engine); added `sched_set_stack_size()` API for custom workloads.
+- **Single-owner raw array use-after-move tracking:** Static compile-time tracking rejects accessing `raw []T` bindings after transfer into function calls.
+- **Dead code elimination & struct retention:** Multi-package builds now accurately retain struct definitions referenced through function return types across package boundaries (issue #59).
+- **Nonblocking socket accept race fix:** Linux listener cleanly blocks on client accept, preventing race conditions under high concurrency (issue #58).
 
 ## New in 0.6.33
 

@@ -1,12 +1,12 @@
 # Makori roadmap
 
-**Product version:** **0.6.33** (tip) · release tag **v0.6.33** · Last sync: **2026-09-13**.
-**Suite:** **452** `examples/testing` `*_test.mko` files · **2026-09-13:**
+**Product version:** **0.6.34** (tip) · release tag **v0.6.34** · Last sync: **2026-09-14**.
+**Suite:** **452** `examples/testing` `*_test.mko` files · **2026-09-14:**
 C **452 passed, 0 failed** · native **452 passed, 0 failed** (per-file sweep) ·
 `cargo test` **202 passed, 0 failed** · tooling, stdlib, memory-safety, and performance gates passed locally.
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.6.33`**; tip train **0.6.33**.
+**Release:** tag **`v0.6.34`**; tip train **0.6.34**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Makori Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -56,7 +56,8 @@ C **452 passed, 0 failed** · native **452 passed, 0 failed** (per-file sweep) �
 | **0.6.28–0.6.30** | Position-aware last-use move, MakoString move at last use, inline-call arg temp fixes | **Shipped** |
 | **0.6.31** | Loop-exit ownership drop, temporary string arg leaks, reassign double-frees, zero-cost trace | **Shipped** |
 | **0.6.32** | Structured crew cancellation, zero-allocation channels, struct memset elision | **Shipped** |
-| **0.6.33** | if let, iterator combinators, variadic, embed, cfg, contextual raw arrays, struct move safety, nonblocking accept | **Tip** |
+| **0.6.33** | if let, iterator combinators, variadic, embed, cfg, contextual raw arrays, struct move safety, nonblocking accept | **Shipped** |
+| **0.6.34** | iterator invalidation prevention, channel trylock fast path (TSan clean), 8MB stack safety, raw array move tracking, struct DCE retention | **Tip** |
 | **0.6.x** | Further patches on 0.6 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after the 0.x series |
 
@@ -97,6 +98,7 @@ C **452 passed, 0 failed** · native **452 passed, 0 failed** (per-file sweep) �
 0.6.31      loop-exit ownership drop, temporary string arg leaks, reassign fixes
 0.6.32      crew cancellation, zero-alloc channels, struct memset elision
 0.6.33      if let, iterator combinators, variadics, embed, cfg, raw arrays, move safety
+0.6.34      iterator invalidation, channel trylock (TSan), 8MB stack, raw array move-tracking
 0.6.x       patches
 1.0         stability freeze
 ```

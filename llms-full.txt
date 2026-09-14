@@ -2,7 +2,7 @@
 #
 # https://mako-lang.com
 # https://github.com/loreste/mako
-# Version: 0.6.33
+# Version: 0.6.34
 #
 # Compile paths:
 #   native (default): .mko -> IR -> Cranelift -> native binary (no C compiler needed)
