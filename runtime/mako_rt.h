@@ -7926,11 +7926,13 @@ static inline MakoTask *mako_spawn_ex(MakoNursery *n, MakoTaskFn fn, void *arg, 
     {
         pthread_attr_t attr;
         pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, 8 * 1024 * 1024); /* 8 MB stack for large codebases */
-        if (pthread_create(&t->thread, &attr, mako_task_trampoline, t) != 0) {
+        pthread_attr_setstacksize(&attr, 2 * 1024 * 1024); /* 2 MB stack (default-safe for cross-compiled targets) */
+        int rc = pthread_create(&t->thread, &attr, mako_task_trampoline, t);
+        if (rc != 0) {
             pthread_attr_destroy(&attr);
             n->len--;
             free(t);
+            fprintf(stderr, "mako: pthread_create failed (errno=%d, tasks=%zu)\n", rc, n->len);
             mako_abort("task: unable to create worker thread");
         }
         pthread_attr_destroy(&attr);
