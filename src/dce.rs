@@ -770,13 +770,19 @@ fn collect_expr_refs(expr: &Expr, queue: &mut Vec<String>, types: &mut HashSet<S
             // Also mark any function that contains this method name as a suffix.
             // This is conservative but necessary without type info.
             for a in args {
+                // Function references passed to map/filter/reduce: mark ident args
+                // as reachable functions (they're fn values, not local variables).
+                if let Expr::Ident(fn_name) = a {
+                    queue.push(fn_name.clone());
+                }
                 collect_expr_refs(a, queue, types);
             }
         }
-        Expr::Ident(name) => {
-            // Idents in expression position may be function references (first-class
-            // fn values passed to map/filter/reduce). Mark as potentially reachable.
-            queue.push(name.clone());
+        Expr::Ident(_name) => {
+            // Function references passed to map/filter/reduce are handled
+            // by the Method arm which pushes method args. Don't push bare
+            // idents here — it pollutes reachable_fns with local variables
+            // and breaks struct retention (struct prefix matching).
         }
         Expr::Binary { left, right, .. } => {
             collect_expr_refs(left, queue, types);

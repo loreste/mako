@@ -1389,6 +1389,19 @@ static inline int64_t mako_tcp_accept_nb(int64_t listen_fd) {
     mako_sock_set_cloexec(cfd);
     mako_sock_set_nonblock(cfd, 0);
     return (int64_t)cfd;
+#elif defined(__linux__) && defined(SOCK_CLOEXEC)
+    /* accept4: accepted fd gets SOCK_CLOEXEC but NOT SOCK_NONBLOCK,
+     * regardless of the listener's O_NONBLOCK state. Avoids the race
+     * between accept() inheriting O_NONBLOCK and fcntl() clearing it
+     * before a crew.kick thread starts reading. */
+    int flags = fcntl((int)listen_fd, F_GETFL, 0);
+    if (flags >= 0 && !(flags & O_NONBLOCK))
+        fcntl((int)listen_fd, F_SETFL, flags | O_NONBLOCK);
+    int cfd = accept4((int)listen_fd, NULL, NULL, SOCK_CLOEXEC);
+    if (cfd < 0) return -1;
+    /* Explicitly clear O_NONBLOCK — belt and suspenders. */
+    mako_sock_set_nonblock((mako_sock_t)cfd, 0);
+    return (int64_t)cfd;
 #else
     int flags = fcntl((int)listen_fd, F_GETFL, 0);
     if (flags >= 0) fcntl((int)listen_fd, F_SETFL, flags | O_NONBLOCK);
