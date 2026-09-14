@@ -140,7 +140,7 @@ static inline int mako_rc_release(void *data) {
 }
 static inline int mako_rc_shared(void *data) {
     if (!data) return 0;
-    return atomic_load_explicit(mako_rc_of(data), memory_order_acquire) > 1;
+    return atomic_load_explicit(mako_rc_of(data), memory_order_relaxed) > 1;
 }
 
 /* Branch hints for hot paths (no-ops on unknown compilers). */
@@ -2497,7 +2497,29 @@ static inline int64_t mako_error_has_tag(MakoResultInt r, MakoString tag) {
 }
 
 static inline MakoString mako_int_to_string(int64_t n) {
-    /* Fast path: write digits directly without snprintf for small numbers. */
+    /* Fast path for single-digit non-negative integers: no division or loop. */
+    if ((uint64_t)n < 10) {
+        char *d = (char *)malloc(2);
+        if (MAKO_UNLIKELY(!d)) abort();
+        d[0] = '0' + (char)n;
+        d[1] = 0;
+        return (MakoString){d, 1};
+    }
+    static const char dtable[200] =
+        "0001020304050607080910111213141516171819"
+        "2021222324252627282930313233343536373839"
+        "4041424344454647484950515253545556575859"
+        "6061626364656667686970717273747576777879"
+        "8081828384858687888990919293949596979899";
+    if ((uint64_t)n < 100) {
+        char *d = (char *)malloc(3);
+        if (MAKO_UNLIKELY(!d)) abort();
+        size_t idx = (size_t)n * 2;
+        d[0] = dtable[idx];
+        d[1] = dtable[idx + 1];
+        d[2] = 0;
+        return (MakoString){d, 2};
+    }
     char buf[32];
     int neg = 0;
     uint64_t v;
@@ -2505,9 +2527,18 @@ static inline MakoString mako_int_to_string(int64_t n) {
     else { v = (uint64_t)n; }
     char *p = buf + sizeof(buf) - 1;
     *p = 0;
-    if (v == 0) { *--p = '0'; }
-    else {
-        while (v > 0) { *--p = '0' + (char)(v % 10); v /= 10; }
+    while (v >= 100) {
+        uint64_t q = v / 100;
+        uint32_t r = (uint32_t)(v - q * 100);
+        v = q;
+        p -= 2;
+        memcpy(p, &dtable[r * 2], 2);
+    }
+    if (v < 10) {
+        *--p = '0' + (char)v;
+    } else {
+        p -= 2;
+        memcpy(p, &dtable[v * 2], 2);
     }
     if (neg) *--p = '-';
     size_t len = (size_t)(buf + sizeof(buf) - 1 - p);
@@ -5804,18 +5835,18 @@ static inline int64_t mako_slice_copy(MakoIntArray dst, MakoIntArray src) {
 static inline void mako_select_notify(void); /* forward decl — wakes select waiters */
 
 typedef struct {
-    _Atomic uint32_t refs;
-    int64_t *buf;
-    size_t cap;       /* 0 = unbuffered rendezvous; else ring capacity */
+    pthread_mutex_t mu;   /* Mutex first: aligned at offset 0 */
+    size_t cap;           /* 0 = unbuffered rendezvous; else ring capacity */
+    size_t count;         /* buffered depth, or 0/1 handoff for unbuffered */
+    int waiters_send;     /* threads blocked in send */
+    int waiters_recv;     /* threads blocked in recv */
+    bool closed;
+    int64_t inline_buf[4];/* Inline 4-slot ring buffer (cap <= 4) */
     size_t head;
     size_t tail;
-    size_t count;     /* buffered depth, or 0/1 handoff for unbuffered */
+    int64_t *buf;
+    _Atomic uint32_t refs;
     size_t peak_depth;
-    int64_t inline_buf[4];
-    bool closed;
-    int waiters_send; /* threads blocked in send */
-    int waiters_recv; /* threads blocked in recv (for unbuffered try_send) */
-    pthread_mutex_t mu;
     pthread_cond_t can_send;
     pthread_cond_t can_recv;
 } MakoChan;
