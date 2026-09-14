@@ -18,6 +18,9 @@
   - Fixed DCE reachability analysis so local variable identifiers do not pollute the function reachability queue, ensuring struct typedefs and return signatures are retained correctly for complex multi-package applications (e.g., FayDB).
 - Nonblocking listener accept race fix (issue #58):
   - Linux `tcp_accept_nb` uses `accept4(SOCK_CLOEXEC)` without `SOCK_NONBLOCK`, eliminating the window where accepted sockets could inherit nonblocking state before fcntl configuration.
+- Actor mailbox inspection & nonblocking send:
+  - Added `actor_try_send(mailbox, msg)` returning 1 on success or 0 if full, enabling nonblocking backpressure handling without task suspension.
+  - Added `actor_len(mailbox)` and `actor_cap(mailbox)` builtins for telemetry, load shedding, and supervision health checks.
 
 ## 0.6.33
 

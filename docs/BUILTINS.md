@@ -2633,7 +2633,10 @@ HTTP seed path `/debug/hot_sites` via `profile_http_route`.
 |----------|-----------|-------------|
 | `actor_spawn` | `actor_spawn(mailbox_size: int) -> chan[int]` | Spawn an actor with a mailbox |
 | `actor_send` | `actor_send(mailbox: chan[int], msg: int) -> bool` | Send a message to an actor |
+| `actor_try_send` | `actor_try_send(mailbox: chan[int], msg: int) -> int` | Non-blocking send to actor mailbox (returns 1 on success, 0 if full) |
 | `actor_recv` | `actor_recv(mailbox: chan[int]) -> int` | Receive a message from a mailbox |
+| `actor_len` | `actor_len(mailbox: chan[int]) -> int` | Current queued message count in mailbox |
+| `actor_cap` | `actor_cap(mailbox: chan[int]) -> int` | Capacity of actor mailbox |
 | `actor_stop` | `actor_stop(mailbox: chan[int]) -> void` | Stop an actor |
 
 ---
