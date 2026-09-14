@@ -208,6 +208,9 @@ static inline int pthread_mutex_unlock(pthread_mutex_t *m) {
     ReleaseSRWLockExclusive(m);
     return 0;
 }
+static inline int pthread_mutex_trylock(pthread_mutex_t *m) {
+    return TryAcquireSRWLockExclusive(m) ? 0 : EBUSY;
+}
 static inline int pthread_cond_init(pthread_cond_t *c, const pthread_condattr_t *a) {
     (void)a;
     InitializeConditionVariable(c);
