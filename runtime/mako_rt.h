@@ -5802,6 +5802,21 @@ static inline int64_t mako_slice_copy(MakoIntArray dst, MakoIntArray src) {
  * select() polls multiple channels with optional timeout.
  */
 static inline void mako_select_notify(void); /* forward decl — wakes select waiters */
+
+/* Lightweight spinlock for channel fast path — single CAS, no syscall. */
+typedef struct { _Atomic int locked; } MakoChanSpin;
+static inline void mako_chan_spin_lock(MakoChanSpin *s) {
+    int expected = 0;
+    while (!atomic_compare_exchange_weak_explicit(&s->locked, &expected, 1,
+            memory_order_acquire, memory_order_relaxed)) {
+        expected = 0;
+        /* ponytail: no sched_yield — hot spin for <10 instructions of critical section */
+    }
+}
+static inline void mako_chan_spin_unlock(MakoChanSpin *s) {
+    atomic_store_explicit(&s->locked, 0, memory_order_release);
+}
+
 typedef struct {
     _Atomic uint32_t refs;
     int64_t *buf;
@@ -5814,6 +5829,7 @@ typedef struct {
     bool closed;
     int waiters_send; /* threads blocked in send */
     int waiters_recv; /* threads blocked in recv (for unbuffered try_send) */
+    MakoChanSpin spin; /* fast-path spinlock for uncontended buffered ops */
     pthread_mutex_t mu;
     pthread_cond_t can_send;
     pthread_cond_t can_recv;
@@ -5878,6 +5894,7 @@ static inline MakoChan *mako_chan_new(int64_t capacity) {
         if (!c->buf) mako_abort("channel: out of memory");
     }
     c->cap = cap;
+    c->spin = (MakoChanSpin){0};
     pthread_mutex_init(&c->mu, NULL);
     pthread_cond_init(&c->can_send, NULL);
     pthread_cond_init(&c->can_recv, NULL);
@@ -5898,6 +5915,20 @@ static inline MakoChan *mako_chan_clone(MakoChan *c) {
 }
 
 static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
+    /* Spinlock fast path: buffered, not full, no waiters, not closed. */
+    if (MAKO_LIKELY(c->cap > 0)) {
+        mako_chan_spin_lock(&c->spin);
+        if (MAKO_LIKELY(c->count < c->cap && !c->closed && c->waiters_recv == 0)) {
+            c->buf[c->tail] = v;
+            if (++c->tail == c->cap) c->tail = 0;
+            c->count++;
+            mako_chan_spin_unlock(&c->spin);
+            mako_rt_counter_inc(&mako_rt_channel_sends);
+            mako_chan_trace_send(c, v);
+            return 1;
+        }
+        mako_chan_spin_unlock(&c->spin);
+    }
     pthread_mutex_lock(&c->mu);
     if (c->cap == 0) {
         /* Rendezvous: wait for free handoff, post, then wait until taken. */
@@ -6003,6 +6034,20 @@ static inline int64_t mako_chan_cap(MakoChan *c) {
 }
 
 static inline int64_t mako_chan_recv(MakoChan *c) {
+    /* Spinlock fast path: buffered, has data, no waiters. */
+    if (MAKO_LIKELY(c->cap > 0)) {
+        mako_chan_spin_lock(&c->spin);
+        if (MAKO_LIKELY(c->count > 0 && c->waiters_send == 0)) {
+            int64_t v = c->buf[c->head];
+            if (++c->head == c->cap) c->head = 0;
+            c->count--;
+            mako_chan_spin_unlock(&c->spin);
+            mako_rt_counter_inc(&mako_rt_channel_recvs);
+            mako_chan_trace_recv(c, v);
+            return v;
+        }
+        mako_chan_spin_unlock(&c->spin);
+    }
     pthread_mutex_lock(&c->mu);
     while (c->count == 0 && !c->closed) {
         c->waiters_recv++;

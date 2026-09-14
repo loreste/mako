@@ -293,6 +293,8 @@ pub struct TypeChecker {
     interfaces: Vec<InterfaceDef>,
     /// Names bound with `hold` that have been moved (use-after-move error).
     moved_holds: HashMap<String, bool>,
+    /// Raw array bindings that have been moved (passed to a function).
+    raw_moved: HashSet<String>,
     /// Currently live `hold` bindings in scope.
     hold_vars: HashMap<String, bool>,
     /// Partial moves: hold / unique-owner name → set of moved field names.
@@ -13747,6 +13749,7 @@ impl TypeChecker {
             current_expected: None,
             interfaces: Vec::new(),
             moved_holds: HashMap::new(),
+            raw_moved: HashSet::new(),
             hold_vars: HashMap::new(),
             hold_moved_fields: HashMap::new(),
             unique_field_owners: HashSet::new(),
@@ -16054,6 +16057,7 @@ impl TypeChecker {
                     self.moved_holds.insert(name.clone(), false);
                     self.hold_moved_fields.insert(name.clone(), HashSet::new());
                 }
+
                 if *ownership != Ownership::Share {
                     self.note_unique_field_owner(name, &final_ty, init);
                     self.note_unique_field_move(init, &final_ty)?;
@@ -17311,9 +17315,26 @@ impl TypeChecker {
         }
     }
 
+    /// Mark raw []T idents as moved after being passed to a function call.
+    fn mark_raw_array_args_moved(&mut self, args: &[Expr]) {
+        for a in args {
+            if let Expr::Ident(name) = a {
+                if let Some((ty, _)) = self.lookup(name).cloned() {
+                    if matches!(ty, Type::RawArray(_)) {
+                        self.raw_moved.insert(name.clone());
+                    }
+                }
+            }
+        }
+    }
+
     fn check_ident_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
         match expr {
             Expr::Ident(name) => {
+                if self.raw_moved.contains(name) {
+                    return Err(TypeError::new(format!("use of moved raw array `{name}`"))
+                        .hint("raw []T is single-owner — after passing to a function, the binding is consumed. Use copy() for explicit duplication."));
+                }
                 if self.moved_holds.get(name).copied().unwrap_or(false) {
                     return Err(TypeError::new(format!("use of moved value `{name}`"))
                         .hint("use-after-move: `hold` values are consumed on rebind, into calls, and on any full read — bind once or use `share` / Copy types"));
@@ -20145,7 +20166,19 @@ impl TypeChecker {
             Expr::Unary { .. } => self.check_unary_expr(expr),
             Expr::Tuple(..) => self.check_tuple_expr(expr),
             Expr::ChanOpen { .. } => self.check_chan_open_expr(expr),
-            Expr::Call { .. } => self.check_call_expr(expr),
+            Expr::Call { callee, args, .. } => {
+                let result = self.check_call_expr(expr)?;
+                // Mark raw []T args as moved after the call succeeds.
+                if let Expr::Ident(name) = callee.as_ref() {
+                    // Don't move for builtins that don't take ownership (len, cap, print, etc.)
+                    if !matches!(name.as_str(), "len" | "cap" | "print" | "print_int" | "print_float"
+                        | "assert" | "assert_eq" | "assert_eq_str" | "eprintln" | "eprint"
+                        | "copy" | "append" | "string" | "str_eq") {
+                        self.mark_raw_array_args_moved(args);
+                    }
+                }
+                Ok(result)
+            },
             Expr::Method { .. } => self.check_method_expr(expr),
             Expr::Index { .. } => self.check_index_expr(expr),
             Expr::Slice { .. } => self.check_slice_expr(expr),
