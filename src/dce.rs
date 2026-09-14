@@ -280,7 +280,6 @@ fn collect_let_names(block: &Block, out: &mut Vec<(String, bool)>) {
             | Stmt::For { body, .. }
             | Stmt::CFor { body, .. }
             | Stmt::Crew { body, .. }
-            | Stmt::Supervisor { body, .. }
             | Stmt::Arena { body, .. }
             | Stmt::Unsafe { body }
             | Stmt::Defer { body } => {
@@ -360,7 +359,6 @@ fn collect_used_names_stmt(stmt: &Stmt, out: &mut HashSet<String>) {
             collect_used_names_block(body, out);
         }
         Stmt::Crew { body, .. }
-        | Stmt::Supervisor { body, .. }
         | Stmt::Arena { body, .. }
         | Stmt::Unsafe { body }
         | Stmt::Defer { body } => {
@@ -543,7 +541,6 @@ fn check_shadow_block(block: &Block, stack: &mut Vec<HashSet<String>>, fn_name: 
             | Stmt::For { body, .. }
             | Stmt::CFor { body, .. }
             | Stmt::Crew { body, .. }
-            | Stmt::Supervisor { body, .. }
             | Stmt::Arena { body, .. }
             | Stmt::Unsafe { body }
             | Stmt::Defer { body } => {
@@ -601,7 +598,6 @@ fn check_block_unreachable(block: &Block, fn_name: &str) {
             | Stmt::For { body, .. }
             | Stmt::CFor { body, .. }
             | Stmt::Crew { body, .. }
-            | Stmt::Supervisor { body, .. }
             | Stmt::Arena { body, .. }
             | Stmt::Unsafe { body }
             | Stmt::Defer { body } => {
@@ -712,7 +708,7 @@ fn collect_stmt_refs(stmt: &Stmt, queue: &mut Vec<String>, types: &mut HashSet<S
         Stmt::Defer { body } => {
             collect_block_refs(body, queue, types);
         }
-        Stmt::Crew { body, .. } | Stmt::Supervisor { body, .. } => {
+        Stmt::Crew { body, .. } => {
             collect_block_refs(body, queue, types);
         }
         Stmt::Arena { body, .. } => {

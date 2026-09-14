@@ -1871,24 +1871,6 @@ Crews support structured cancellation policies via modifiers or options:
 - `crew:race t { … }` / `crew:any t { … }`: racing tasks; the first task to finish its computation triggers automatic cancellation of all remaining tasks in the nursery, followed by clean joining.
 - `crew:fail_fast t { … }` / `crew t(fail_fast=true) { … }`: fail-fast policy; on the first child task error or panic, immediately cancels the entire nursery and unwinds cleanly.
 
-#### Supervisor Scopes
-
-Makori provides structured supervisor blocks for robust fault isolation and automatic child restarts (Erlang/OTP-inspired):
-
-```mko
-supervisor sup (policy = one_for_one, max_restarts = 5) {
-    let t1 = sup.kick(worker(1))
-    let t2 = sup.kick(worker(2))
-}
-```
-
-Policies:
-- `one_for_one` (default): Only the failed child task is restarted.
-- `one_for_all`: If any child crashes or exits with failure, all children are restarted.
-- `rest_for_one`: If a child crashes, any child spawned after it in sequence is restarted.
-
-Supervisors track restart counts (`mako_supervisor_restart_count`) and enforce an upper bound (`max_restarts`, default 3) to prevent infinite restart loops.
-
 ### 7.2 Channels
 
 Typed, bounded channels for communication between concurrent tasks:

@@ -35,10 +35,6 @@
   - Conditional compilation: `#[cfg(os = "...")]` and `#[cfg(arch = "...")]` on functions.
   - Raw arrays (`raw []T`): non-COW single-owner arrays using plain `malloc` with zero
     atomic refcount overhead.
-  - Supervisor scopes: structured fault isolation with restart policies (`one_for_one`, `one_for_all`, `rest_for_one`)
-    and bounded restarts via `supervisor s (policy = one_for_one, max_restarts = N) { ... }`.
-  - Actor mailbox bounding: `actor(capacity = N) Name { ... }` with auto-generated capacity and length helpers.
-  - Codebase cleanup: removed stale and dead functions in codegen, unreferenced native IR variants, and ensured zero compiler warnings across all targets.
 
 ## 0.6.32
 

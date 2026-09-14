@@ -86,8 +86,6 @@ pub struct ConstDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActorDef {
     pub name: String,
-    /// Bounded mailbox capacity limit (e.g. `actor(capacity = 1024)`).
-    pub capacity: Option<i64>,
     /// Optional owned state fields (`n: int = 0`); accessed as `self.n` in receives.
     pub fields: Vec<(String, TypeExpr, Option<Expr>)>,
     pub receives: Vec<ReceiveArm>,
@@ -285,14 +283,6 @@ pub enum CrewPolicy {
     FailFast,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SupervisorPolicy {
-    #[default]
-    OneForOne,
-    OneForAll,
-    RestForOne,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Let {
@@ -389,13 +379,6 @@ pub enum Stmt {
     Crew {
         name: String,
         policy: CrewPolicy,
-        body: Block,
-    },
-    /// Supervisor scope: `supervisor:one_for_one name { ... }`
-    Supervisor {
-        name: String,
-        policy: SupervisorPolicy,
-        max_restarts: Option<i64>,
         body: Block,
     },
     /// Region allocator: `arena name { ... }` — freed on exit

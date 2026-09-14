@@ -262,11 +262,7 @@ fn fmt_item(item: &Item) -> String {
             o
         }
         Item::Actor(a) => {
-            let mut o = if let Some(cap) = a.capacity {
-                format!("actor(capacity = {cap}) {} {{\n", a.name)
-            } else {
-                format!("actor {} {{\n", a.name)
-            };
+            let mut o = format!("actor {} {{\n", a.name);
             for (n, t, d) in &a.fields {
                 o.push_str(INDENT);
                 o.push_str(n);
@@ -549,19 +545,6 @@ fn fmt_stmt(s: &Stmt, indent: usize) -> String {
                 CrewPolicy::FailFast => format!("crew(fail_fast = true) {name}"),
             };
             format!("{prefix} {}", fmt_block(body, indent))
-        }
-        Stmt::Supervisor { name, policy, max_restarts, body } => {
-            let pol_str = match policy {
-                SupervisorPolicy::OneForOne => "one_for_one",
-                SupervisorPolicy::OneForAll => "one_for_all",
-                SupervisorPolicy::RestForOne => "rest_for_one",
-            };
-            let opts = if let Some(mr) = max_restarts {
-                format!("(max_restarts = {mr})")
-            } else {
-                String::new()
-            };
-            format!("supervisor:{pol_str}{opts} {name} {}", fmt_block(body, indent))
         }
         Stmt::Arena { name, body } => format!("arena {name} {}", fmt_block(body, indent)),
         Stmt::Unsafe { body } => format!("unsafe {}", fmt_block(body, indent)),

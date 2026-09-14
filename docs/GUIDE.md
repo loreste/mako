@@ -1287,14 +1287,13 @@ crew:race t {
 | `crew` / `kick` / `join` | Structured concurrency; **join** returns the job’s type (`int`, `string`, `Result`, …) |
 | `crew:race` / `crew:any` | First-completed task cancels siblings; joins all |
 | `crew:fail_fast` | First child failure cooperatively cancels nursery |
-| `supervisor` | Structured supervisor scope with restart policies (`one_for_one`, `one_for_all`, `rest_for_one`) |
 | `job.join_timeout(ms)` | Timed join → `Result[R, string]`: `Ok(value)` or `Err("timeout")` |
 | `crew.drain(ms)` | Cancel + join with timeout |
 | `fan(collection, mapper)` | Data-parallel map: `[]int` / `[]float` / `[]string` / `[]Struct` |
 | **message queues** | First-class `queue[string]`: `make(queue[string], n)`, `.publish` / `.try_take` / `.len` / `.free` (no GC) |
 | **GraphQL** | `Graphql` via `graphql_parse(body)`; `.has` / `.data` / `.error` / `.fields` |
 | channels + `select` | Message-passing: `make(chan[T], n)` / `chan_open[T](n)` for int/bool/float/string/**struct**/enum/**tuple** (incl. pack types) |
-| `actor` / `receive` | Long-lived concurrent entities with bounded mailbox (`actor(capacity = N)`) |
+| `actor` / `receive` | Long-lived concurrent entities |
 
 ```mko
 // string / Result across kick
@@ -1320,22 +1319,7 @@ channel handles. **Not** maps, arrays, arenas, or non-POD structs.
 several ints into one integer. See [ERGONOMICS.md](ERGONOMICS.md) · [SPEED.md](SPEED.md).
 
 Tests: `examples/testing/crew_fan_test.mko`, `job_join_typed_test.mko`,
-`fan_struct_test.mko`, `kick_send_test.mko`, `chan_struct_test.mko`,
-`supervisor_block_test.mko`.
-
-### Supervisors
-
-Supervisors provide structured fault tolerance and automatic child restarts:
-
-```mko
-supervisor sup (policy = one_for_one, max_restarts = 3) {
-    let t1 = sup.kick(worker(1))
-    let t2 = sup.kick(worker(2))
-}
-```
-
-- Supported policies: `one_for_one`, `one_for_all`, `rest_for_one`.
-- `max_restarts`: Maximum restart threshold before cancelling the nursery (default 3).
+`fan_struct_test.mko`, `kick_send_test.mko`, `chan_struct_test.mko`.
 
 ---
 
@@ -1409,14 +1393,6 @@ fn main() {
 ```
 
 Desugars to mailbox + crew loop. `Bye` / `Stop` end the loop by convention.
-
-Mailbox capacity can be bounded with `actor(capacity = N)` (default 16):
-```mko
-actor(capacity = 32) Worker {
-    receive Ping { print("pong") }
-}
-```
-Auto-generated helpers `Worker_cap(mbox)` and `Worker_len(mbox)` introspect mailbox capacity and pending queue depth.
 
 ---
 

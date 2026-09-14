@@ -176,7 +176,6 @@ pub fn stmts_has_continue(stmts: &[Stmt]) -> bool {
             Stmt::While { .. } | Stmt::For { .. } => {}
             Stmt::Defer { body }
             | Stmt::Crew { body, .. }
-            | Stmt::Supervisor { body, .. }
             | Stmt::Arena { body, .. }
             | Stmt::Unsafe { body } => {
                 if stmts_has_continue(&body.stmts) {

@@ -561,7 +561,6 @@ impl Codegen {
             Stmt::Defer { body }
             | Stmt::Unsafe { body }
             | Stmt::Crew { body, .. }
-            | Stmt::Supervisor { body, .. }
             | Stmt::Arena { body, .. } => self.collect_maps_in_block(body),
             Stmt::IfLet { .. } => {} // desugared before codegen
             Stmt::Select {
@@ -2532,7 +2531,6 @@ impl Codegen {
             | Stmt::For { body, .. }
             | Stmt::CFor { body, .. }
             | Stmt::Crew { body, .. }
-            | Stmt::Supervisor { body, .. }
             | Stmt::Arena { body, .. }
             | Stmt::Unsafe { body }
             | Stmt::Defer { body } => Self::body_has_tuple(body),
@@ -4383,7 +4381,6 @@ impl Codegen {
             }
             Stmt::Defer { body }
             | Stmt::Crew { body, .. }
-            | Stmt::Supervisor { body, .. }
             | Stmt::Arena { body, .. }
             | Stmt::Unsafe { body } => Self::count_ident_in_stmts(&body.stmts, name),
             Stmt::IfLet { .. } => 0, // desugared
@@ -16467,28 +16464,6 @@ impl Codegen {
                     CrewPolicy::Race => self.emit_line(format_args!("mako_nursery_race_join(&{name});")),
                     _ => self.emit_line(format_args!("mako_nursery_cancel_join(&{name});")),
                 }
-            }
-            Stmt::Supervisor {
-                name,
-                policy,
-                max_restarts,
-                body,
-            } => {
-                self.locals.insert(name.clone(), "MakoSupervisor".into());
-                let pol_c = match policy {
-                    SupervisorPolicy::OneForOne => "MAKO_SUPERVISOR_ONE_FOR_ONE",
-                    SupervisorPolicy::OneForAll => "MAKO_SUPERVISOR_ONE_FOR_ALL",
-                    SupervisorPolicy::RestForOne => "MAKO_SUPERVISOR_REST_FOR_ONE",
-                };
-                let mr = max_restarts.unwrap_or(3);
-                self.emit_line(format_args!(
-                    "MakoSupervisor {name} = mako_supervisor_new({pol_c}, {mr});"
-                ));
-                self.crew_stack.push(name.clone());
-                self.emit_body(body);
-                self.crew_stack.pop();
-                self.emit_line(format_args!("mako_supervisor_cancel_join(&{name});"));
-                self.emit_line(format_args!("mako_supervisor_free(&{name});"));
             }
             Stmt::Arena { name, body } => {
                 self.locals.insert(name.clone(), "MakoArena".into());
@@ -37761,10 +37736,6 @@ impl Codegen {
                             if crew == "__detached__" {
                                 self.line(&format!(
                                     "MakoTask *{task} = mako_detach_spawn({helper}, {arg_name});"
-                                ));
-                            } else if self.locals.get(crew).map(|s| s.as_str()) == Some("MakoSupervisor") {
-                                self.line(&format!(
-                                    "MakoTask *{task} = mako_supervisor_spawn(&{crew}, {helper}, {arg_name});"
                                 ));
                             } else {
                                 self.line(&format!(
