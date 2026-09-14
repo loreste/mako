@@ -24686,6 +24686,25 @@ impl Codegen {
                             self.line(&format!("mako_actor_stop({a});"));
                             return ("void".into(), "/*void*/".into());
                         }
+                        "actor_try_send" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, m) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("ats");
+                            self.line(&format!("int64_t {tmp} = mako_actor_try_send({a}, {m});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "actor_len" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("alen");
+                            self.line(&format!("int64_t {tmp} = mako_actor_len({a});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "actor_cap" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("acap");
+                            self.line(&format!("int64_t {tmp} = mako_actor_cap({a});"));
+                            return ("int64_t".into(), tmp);
+                        }
                         "actor_pack" => {
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);

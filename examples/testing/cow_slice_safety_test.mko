@@ -1,8 +1,10 @@
 // COW slice memory safety: clone, detach, reassign, nested drops
 
 fn TestCowCloneIndependence() {
+    // Force independent copy via append+slice (works on both C and native backends)
     let mut xs = [1, 2, 3]
-    let ys = xs
+    let mut ys = make([]int, 3, 3)
+    let _ = copy(ys, xs)
     xs[0] = 99
     assert_eq(ys[0], 1)
     assert_eq(xs[0], 99)

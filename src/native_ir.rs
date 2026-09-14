@@ -17509,6 +17509,24 @@ impl<'a> FunctionLowerer<'a> {
             "actor_stop" if args.len() == 1 => {
                 Some(("mako_native_actor_stop", &[Type::ChanI], None, false))
             }
+            "actor_try_send" if args.len() == 2 => Some((
+                "mako_native_actor_try_send",
+                &[Type::ChanI, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "actor_len" if args.len() == 1 => Some((
+                "mako_native_actor_len",
+                &[Type::ChanI],
+                Some(Type::I64),
+                false,
+            )),
+            "actor_cap" if args.len() == 1 => Some((
+                "mako_native_actor_cap",
+                &[Type::ChanI],
+                Some(Type::I64),
+                false,
+            )),
             "http_body" if args.len() == 1 => Some((
                 "mako_native_http_body_ptr",
                 &[Type::I64],

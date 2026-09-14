@@ -92,10 +92,26 @@ fn TestActorSequentialReuse() {
     }
 }
 
+fn TestActorMailboxMetrics() {
+    let c = Counter_spawn_cap(4)
+    assert(actor_cap(c) == 4)
+    assert(actor_len(c) == 0)
+    assert(actor_try_send(c, Counter_Inc()) == 1)
+    assert(actor_len(c) == 1)
+    assert(actor_try_send(c, Counter_Inc()) == 1)
+    assert(actor_try_send(c, Counter_Inc()) == 1)
+    assert(actor_try_send(c, Counter_Inc()) == 1)
+    assert(actor_len(c) == 4)
+    // Full mailbox: try_send returns 0
+    assert(actor_try_send(c, Counter_Inc()) == 0)
+    actor_stop(c)
+}
+
 fn main() {
     TestActorBasicMessages()
     TestActorReset()
     TestMultipleActors()
     TestActorWithFailFast()
     TestActorSequentialReuse()
+    TestActorMailboxMetrics()
 }

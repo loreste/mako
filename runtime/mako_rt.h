@@ -11202,6 +11202,18 @@ static inline int64_t mako_actor_recv(MakoActor *a) {
     return mako_chan_recv(a);
 }
 
+static inline int64_t mako_actor_try_send(MakoActor *a, int64_t msg) {
+    return a ? mako_chan_try_send(a, msg) : 0;
+}
+
+static inline int64_t mako_actor_len(MakoActor *a) {
+    return a ? mako_chan_len(a) : 0;
+}
+
+static inline int64_t mako_actor_cap(MakoActor *a) {
+    return a ? mako_chan_cap(a) : 0;
+}
+
 static inline void mako_actor_stop(MakoActor *a) {
     mako_chan_close(a);
 }

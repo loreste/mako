@@ -6040,6 +6040,21 @@ impl TypeChecker {
             "actor_stop".into(),
             Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Void)),
         );
+        fns.insert(
+            "actor_try_send".into(),
+            Type::Fn(
+                vec![Type::Chan(Box::new(Type::Int)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "actor_len".into(),
+            Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "actor_cap".into(),
+            Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
         // Packed actor messages: tag (high 16) + int payload (low 48).
         fns.insert(
             "actor_pack".into(),

@@ -1684,6 +1684,18 @@ void mako_native_actor_stop(MakoChan *a) {
     if (a) mako_actor_stop(a);
 }
 
+int64_t mako_native_actor_try_send(MakoChan *a, int64_t msg) {
+    return mako_actor_try_send(a, msg);
+}
+
+int64_t mako_native_actor_len(MakoChan *a) {
+    return mako_actor_len(a);
+}
+
+int64_t mako_native_actor_cap(MakoChan *a) {
+    return mako_actor_cap(a);
+}
+
 MakoNativeIntSlice *mako_native_slice_ints(MakoNativeIntSlice *s, int64_t lo, int64_t hi) {
     if (!s) return mako_native_int_slice_make_ptr(0, 0);
     if (lo < 0) lo = 0;
