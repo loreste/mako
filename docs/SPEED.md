@@ -74,9 +74,7 @@ contract.
 | Structured nursery policies | `crew:race` / `crew:fail_fast` — cooperative token cancellation without runaway background tasks |
 | Developer tracing in release | **Strictly zero-cost** — all tracing hooks expand to `((void)0)` under `-DNDEBUG`, zero instructions emitted |
 | `sched_set_workers(n)` | Opt-in pool reuses worker threads for kicks (default n=0 = one pthread each) |
-| Integer string formatting | **Two-digit table + small integer fast-path** — zero-division path for 0..99, cuts division ops by 50% for 64-bit ints |
-| Channel struct cache layout | **Mutex at offset 0** — aligns `mu`, `cap`, `count`, and `inline_buf` in contiguous L1 cache lines for uncontended send/recv |
-| Slice append refcount check | **Acquire atomic load** — `mako_rc_shared` uses acquire memory order, synchronizing with any concurrent retain to guarantee safe COW detachment |
+| Channel inline buffer | **Inline 4-slot ring buffer** — small channels (`cap <= 4`) avoid separate heap allocation for ring storage |
 
 **Ownership without a speed tax:** keep short-lived POD slices as stack views in
 tight loops; only pay for a heap copy when the value escapes or shared backing

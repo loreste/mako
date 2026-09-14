@@ -5835,18 +5835,18 @@ static inline int64_t mako_slice_copy(MakoIntArray dst, MakoIntArray src) {
 static inline void mako_select_notify(void); /* forward decl — wakes select waiters */
 
 typedef struct {
-    pthread_mutex_t mu;   /* Mutex first: aligned at offset 0 */
-    size_t cap;           /* 0 = unbuffered rendezvous; else ring capacity */
-    size_t count;         /* buffered depth, or 0/1 handoff for unbuffered */
-    int waiters_send;     /* threads blocked in send */
-    int waiters_recv;     /* threads blocked in recv */
-    bool closed;
-    int64_t inline_buf[4];/* Inline 4-slot ring buffer (cap <= 4) */
+    _Atomic uint32_t refs;
+    int64_t *buf;
+    size_t cap;       /* 0 = unbuffered rendezvous; else ring capacity */
     size_t head;
     size_t tail;
-    int64_t *buf;
-    _Atomic uint32_t refs;
+    size_t count;     /* buffered depth, or 0/1 handoff for unbuffered */
     size_t peak_depth;
+    int64_t inline_buf[4];
+    bool closed;
+    int waiters_send; /* threads blocked in send */
+    int waiters_recv; /* threads blocked in recv (for unbuffered try_send) */
+    pthread_mutex_t mu;
     pthread_cond_t can_send;
     pthread_cond_t can_recv;
 } MakoChan;
@@ -5942,6 +5942,7 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
                 c->count++;
             }
             pthread_mutex_unlock(&c->mu);
+            mako_select_notify();
             mako_rt_counter_inc(&mako_rt_channel_sends);
             mako_chan_trace_send(c, v);
             return 1;
