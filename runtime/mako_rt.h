@@ -5902,9 +5902,14 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
     /* trylock fast path: buffered, not full, no waiters — avoids condvar overhead. */
     if (MAKO_LIKELY(c->cap > 0) && pthread_mutex_trylock(&c->mu) == 0) {
         if (MAKO_LIKELY(c->count < c->cap && !c->closed && c->waiters_recv == 0)) {
-            c->buf[c->tail] = v;
-            if (++c->tail == c->cap) c->tail = 0;
-            c->count++;
+            if (MAKO_LIKELY(c->cap == 1)) {
+                c->inline_buf[0] = v;
+                c->count = 1;
+            } else {
+                c->buf[c->tail] = v;
+                if (++c->tail == c->cap) c->tail = 0;
+                c->count++;
+            }
             pthread_mutex_unlock(&c->mu);
             mako_rt_counter_inc(&mako_rt_channel_sends);
             mako_chan_trace_send(c, v);
@@ -6020,9 +6025,15 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
     /* trylock fast path: buffered, has data, no blocked senders. */
     if (MAKO_LIKELY(c->cap > 0) && pthread_mutex_trylock(&c->mu) == 0) {
         if (MAKO_LIKELY(c->count > 0 && c->waiters_send == 0)) {
-            int64_t v = c->buf[c->head];
-            if (++c->head == c->cap) c->head = 0;
-            c->count--;
+            int64_t v;
+            if (MAKO_LIKELY(c->cap == 1)) {
+                v = c->inline_buf[0];
+                c->count = 0;
+            } else {
+                v = c->buf[c->head];
+                if (++c->head == c->cap) c->head = 0;
+                c->count--;
+            }
             pthread_mutex_unlock(&c->mu);
             mako_rt_counter_inc(&mako_rt_channel_recvs);
             mako_chan_trace_recv(c, v);
