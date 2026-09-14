@@ -124,6 +124,13 @@ fn hot_loop(n: int) -> int {
 Bounds checks are still enforced -- `raw` removes COW overhead, not safety.
 Combine with `unsafe_index` only if profiling confirms both are bottlenecks.
 
+### Iterator safety
+
+Mutating a collection during iteration (e.g. `xs = append(xs, v)` inside
+`for v in xs`) is a compile-time error. This prevents segfaults from COW
+backing invalidation — the same class of bug that causes undefined behavior
+in C++ iterator invalidation.
+
 ---
 
 ## The Hold/Share Move Checker

@@ -50,7 +50,7 @@ Program: [SOUNDNESS.md](SOUNDNESS.md) · model: [MEMORY_MODEL.md](MEMORY_MODEL.m
 | SAFE-010 memory model doc | Done |
 | RT-001 / RT-005 / RT-006 | Done |
 | RT-002/003 scheduler pool + spawn_blocking | Done (seed) |
-| if let / iterator combinators / variadic / embed / cfg | Done — 0.6.33 |
+| if let / iterator combinators / variadic / embed / cfg / iterator invalidation prevention | Done — 0.6.33 |
 | RT-004 channel ownership (clone/take) | Done (core) |
 | Struct Own field free | Done |
 | Pkg lock build verification (PR #3) | Done |

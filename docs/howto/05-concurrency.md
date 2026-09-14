@@ -347,6 +347,8 @@ fn main() {
 3. Channels are typed -- `chan[int]` only carries `int` values
 4. `select` timeout is in milliseconds; 0 means poll once
 5. No shared mutable state -- communicate through channels or actors
+6. **Iterator invalidation is a compile error** -- mutating or reassigning a collection inside `for v in xs` is rejected; use a separate collection for output
+7. **TCP accept on Linux uses `accept4(SOCK_CLOEXEC)`** without `SOCK_NONBLOCK` -- accepted fds are always blocking regardless of listener state, preventing multi-client hangs with `crew.kick`
 
 ## Next steps
 

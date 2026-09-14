@@ -21,6 +21,10 @@ refcount header, unconditional `free` at scope exit. String elements are freed
 individually before the backing array. Same bounds-checked safety as COW slices,
 just without atomic ownership tracking. See SOUNDNESS.md SAFE-003b.
 
+**Iterator invalidation** is prevented at compile time: mutating or reassigning
+the iterated collection inside a `for` loop body is rejected. This prevents
+segfaults from COW backing invalidation during iteration.
+
 That isn’t a soft preference. **0.4.11+**. More detail in
 [SOUNDNESS.md](SOUNDNESS.md), [SECURITY.md](SECURITY.md),
 [MEMORY_MODEL.md](MEMORY_MODEL.md), [LONG_RUNNING.md](LONG_RUNNING.md),

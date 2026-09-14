@@ -126,6 +126,14 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 | **Doc** | [MEMORY_MODEL.md](MEMORY_MODEL.md) |
 | **Covers** | Sync handles, channels as happens-before edges, crew cancel/join, data-race freedom in safe Mako, intentional Sync. |
 
+### SAFE-011 — Iterator invalidation prevention — **Done**
+
+| | |
+|--|--|
+| **Contract** | The iterated collection is marked as borrowed during for-loop body type checking. Reassignment, append, or mutation of the collection inside the loop is a compile-time error. Mutating a different collection is allowed. |
+| **Code** | `shared_borrows` insert in `Stmt::For` handler (`types/mod.rs`); assignment check rejects writes to borrowed names. |
+| **Evidence** | `iter_invalid.mko` (segfault → compile error), valid iteration and separate-collection mutation verified. |
+
 ---
 
 ## Runtime and concurrency

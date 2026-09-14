@@ -113,6 +113,28 @@ sub-slicing, iteration). Use `raw []T` in performance-critical code where
 you know there's a single owner and want zero atomic overhead. Explicit
 `copy(dst, src)` is required for duplication.
 
+## Iterator safety
+
+Mako prevents iterator invalidation at compile time. You cannot mutate the
+collection you are iterating over:
+
+```mko
+let mut xs = [1, 2, 3]
+for v in xs {
+    xs = append(xs, v * 2)  // error: cannot assign to `xs` while shared
+}
+```
+
+Mutating a different collection during iteration is fine:
+
+```mko
+let xs = [1, 2, 3]
+let mut ys: []int = []
+for v in xs {
+    ys = append(ys, v * 2)  // ok — ys is not the iterated collection
+}
+```
+
 ## `hold` -- move semantics
 
 `hold` bindings enforce unique ownership. When a `hold` value is rebound, passed

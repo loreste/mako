@@ -463,6 +463,13 @@ A `Result` used as a bare statement is an **error**.
 Debug and release (`-O3 -flto -DNDEBUG`): abort on OOB. Generated code defines
 `MAKO_SAFE_DEFAULT`. Explicit opt-out: `unsafe` / `unsafe_index` only.
 
+### Iterator invalidation (SAFE-011)
+
+Mutating or reassigning the iterated collection inside a `for` loop body is a
+compile-time error. This prevents segfaults from COW backing invalidation during
+iteration — the same class of bug that causes undefined behavior in C++ iterator
+invalidation. Mutating a different collection is allowed.
+
 ### Diagnostics
 
 Lexer/parser/type errors print `file:line:col`, caret, and `help:` hints.
