@@ -5571,6 +5571,7 @@ fn stmt_feature(stmt: &Stmt) -> &'static str {
         Stmt::CFor { .. } => "three-clause for loops",
         Stmt::Defer { .. } => "defer",
         Stmt::Crew { .. } => "structured concurrency",
+        Stmt::Supervisor { .. } => "supervisor scopes",
         Stmt::Arena { .. } => "arenas",
         Stmt::Select { .. } => "channel select",
         _ => "this statement",

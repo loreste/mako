@@ -1494,6 +1494,7 @@ fn collect_calls_stmt(stmt: &Stmt, out: &mut Vec<String>) {
         }
         Stmt::Defer { body }
         | Stmt::Crew { body, .. }
+        | Stmt::Supervisor { body, .. }
         | Stmt::Arena { body, .. }
         | Stmt::Unsafe { body } => {
             collect_calls_block(body, out);
@@ -2484,6 +2485,7 @@ fn rewrite_stmt(s: &mut Stmt, alias: &str, names: &ImportNameSets) {
         }
         Stmt::Defer { body }
         | Stmt::Crew { body, .. }
+        | Stmt::Supervisor { body, .. }
         | Stmt::Arena { body, .. }
         | Stmt::Unsafe { body } => rewrite_block(body, alias, names),
         Stmt::Select {

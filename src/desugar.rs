@@ -182,6 +182,32 @@ fn desugar_if_let_stmt(stmt: Stmt) -> Stmt {
                 body,
             }
         }
+        Stmt::Crew {
+            name,
+            policy,
+            mut body,
+        } => {
+            desugar_if_let_block(&mut body);
+            Stmt::Crew {
+                name,
+                policy,
+                body,
+            }
+        }
+        Stmt::Supervisor {
+            name,
+            policy,
+            max_restarts,
+            mut body,
+        } => {
+            desugar_if_let_block(&mut body);
+            Stmt::Supervisor {
+                name,
+                policy,
+                max_restarts,
+                body,
+            }
+        }
         other => other,
     }
 }
@@ -509,7 +535,9 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         }));
     }
 
-    // Session_spawn() -> chan[int] (default mailbox 16)
+    let default_cap = actor.capacity.unwrap_or(16);
+
+    // Session_spawn() -> chan[int] (default mailbox cap)
     items.push(Item::Fn(FnDef {
         type_bounds: std::collections::HashMap::new(),
         name: format!("{name}_spawn"),
@@ -522,7 +550,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         body: Block {
             stmts: vec![Stmt::Return(Some(Expr::Call {
                 callee: Box::new(Expr::Ident("actor_spawn".into())),
-                args: vec![Expr::Int(16)],
+                args: vec![Expr::Int(default_cap)],
             }))],
             source_lines: Box::default(),
         },
@@ -583,6 +611,106 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 callee: Box::new(Expr::Ident("actor_send".into())),
                 args: vec![Expr::Ident("__mbox".into()), Expr::Ident("__tag".into())],
             }))],
+            source_lines: Box::default(),
+        },
+        exported: false,
+        is_const: false,
+        is_live: false,
+        stability: crate::ast::ApiStability::Unspecified,
+        contracts: vec![],
+        source_file: None,
+    }));
+
+    // Session_try_send(mbox, tag) -> bool
+    items.push(Item::Fn(FnDef {
+        type_bounds: std::collections::HashMap::new(),
+        name: format!("{name}_try_send"),
+        type_params: Vec::new(),
+        params: vec![
+            Param {
+                name: "__mbox".into(),
+                ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]),
+                mutable: false, variadic: false },
+            Param {
+                name: "__tag".into(),
+                ty: TypeExpr::Named("int".into()),
+                mutable: false, variadic: false },
+        ],
+        ret: Some(TypeExpr::Named("bool".into())),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(Expr::Call {
+                callee: Box::new(Expr::Ident("actor_try_send".into())),
+                args: vec![Expr::Ident("__mbox".into()), Expr::Ident("__tag".into())],
+            }))],
+            source_lines: Box::default(),
+        },
+        exported: false,
+        is_const: false,
+        is_live: false,
+        stability: crate::ast::ApiStability::Unspecified,
+        contracts: vec![],
+        source_file: None,
+    }));
+
+    // Session_len(mbox) -> int
+    items.push(Item::Fn(FnDef {
+        type_bounds: std::collections::HashMap::new(),
+        name: format!("{name}_len"),
+        type_params: Vec::new(),
+        params: vec![Param {
+            name: "__mbox".into(),
+            ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]),
+            mutable: false, variadic: false }],
+        ret: Some(TypeExpr::Named("int".into())),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(Expr::Call {
+                callee: Box::new(Expr::Ident("actor_len".into())),
+                args: vec![Expr::Ident("__mbox".into())],
+            }))],
+            source_lines: Box::default(),
+        },
+        exported: false,
+        is_const: false,
+        is_live: false,
+        stability: crate::ast::ApiStability::Unspecified,
+        contracts: vec![],
+        source_file: None,
+    }));
+
+    // Session_cap(mbox) -> int
+    items.push(Item::Fn(FnDef {
+        type_bounds: std::collections::HashMap::new(),
+        name: format!("{name}_cap"),
+        type_params: Vec::new(),
+        params: vec![Param {
+            name: "__mbox".into(),
+            ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]),
+            mutable: false, variadic: false }],
+        ret: Some(TypeExpr::Named("int".into())),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(Expr::Call {
+                callee: Box::new(Expr::Ident("actor_cap".into())),
+                args: vec![Expr::Ident("__mbox".into())],
+            }))],
+            source_lines: Box::default(),
+        },
+        exported: false,
+        is_const: false,
+        is_live: false,
+        stability: crate::ast::ApiStability::Unspecified,
+        contracts: vec![],
+        source_file: None,
+    }));
+
+    // Session_capacity() -> int
+    items.push(Item::Fn(FnDef {
+        type_bounds: std::collections::HashMap::new(),
+        name: format!("{name}_capacity"),
+        type_params: Vec::new(),
+        params: vec![],
+        ret: Some(TypeExpr::Named("int".into())),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(Expr::Int(default_cap)))],
             source_lines: Box::default(),
         },
         exported: false,

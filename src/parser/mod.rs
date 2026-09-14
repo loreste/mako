@@ -601,7 +601,39 @@ impl Parser {
 
     fn parse_actor(&mut self) -> Result<ActorDef, ParseError> {
         self.expect(TokenKind::Actor)?;
+        let mut capacity = None;
+        let parse_actor_opts = |p: &mut Parser, cap: &mut Option<i64>| -> Result<(), ParseError> {
+            p.expect(TokenKind::LParen)?;
+            while !matches!(p.peek_kind(), TokenKind::RParen) {
+                let opt = p.expect_ident()?;
+                if opt == "capacity" || opt == "cap" || opt == "mailbox" {
+                    p.expect(TokenKind::Assign)?;
+                    match p.peek_kind() {
+                        TokenKind::Int(v) => {
+                            let val = *v;
+                            p.bump();
+                            *cap = Some(val);
+                        }
+                        _ => return Err(p.err("actor capacity must be an integer literal".into())),
+                    }
+                } else {
+                    return Err(p.err(format!("unknown actor option `{opt}`, expected `capacity`")));
+                }
+                if matches!(p.peek_kind(), TokenKind::Comma) {
+                    p.bump();
+                }
+            }
+            p.expect(TokenKind::RParen)?;
+            Ok(())
+        };
+
+        if matches!(self.peek_kind(), TokenKind::LParen) {
+            parse_actor_opts(self, &mut capacity)?;
+        }
         let name = self.expect_ident()?;
+        if matches!(self.peek_kind(), TokenKind::LParen) {
+            parse_actor_opts(self, &mut capacity)?;
+        }
         self.expect(TokenKind::LBrace)?;
         let mut fields = Vec::new();
         let mut receives = Vec::new();
@@ -664,6 +696,7 @@ impl Parser {
         self.expect(TokenKind::RBrace)?;
         Ok(ActorDef {
             name,
+            capacity,
             fields,
             receives,
         })
@@ -1368,9 +1401,12 @@ impl Parser {
                         "any" => policy = CrewPolicy::Any,
                         "all" => policy = CrewPolicy::All,
                         "fail_fast" => policy = CrewPolicy::FailFast,
+                        "one_for_one" => return self.parse_supervisor_body(SupervisorPolicy::OneForOne),
+                        "one_for_all" => return self.parse_supervisor_body(SupervisorPolicy::OneForAll),
+                        "rest_for_one" => return self.parse_supervisor_body(SupervisorPolicy::RestForOne),
                         _ => {
                             return Err(self.err(format!(
-                                "unknown crew policy `{p}`, expected `race`, `any`, `all`, or `fail_fast`"
+                                "unknown crew policy `{p}`, expected `race`, `any`, `all`, `fail_fast`, `one_for_one`, `one_for_all`, or `rest_for_one`"
                             )))
                         }
                     }
@@ -1419,6 +1455,7 @@ impl Parser {
                 Ok(Stmt::Arena { name, body })
             }
             TokenKind::Select => self.parse_select(),
+            TokenKind::Ident(ref s) if s == "supervisor" => self.parse_supervisor(),
             TokenKind::Ident(_) => {
                 // `label: while` / `label: for` — labeled loops for break/continue.
                 if self.pos + 1 < self.tokens.len()
@@ -1622,6 +1659,100 @@ impl Parser {
             timeout_ms,
             arms,
             default_arm,
+        })
+    }
+
+    fn parse_supervisor(&mut self) -> Result<Stmt, ParseError> {
+        self.bump(); // consume "supervisor"
+        let mut policy = SupervisorPolicy::OneForOne;
+        if matches!(self.peek_kind(), TokenKind::Colon | TokenKind::Dot) {
+            self.bump();
+            let p = self.expect_ident()?;
+            match p.as_str() {
+                "one_for_one" => policy = SupervisorPolicy::OneForOne,
+                "one_for_all" => policy = SupervisorPolicy::OneForAll,
+                "rest_for_one" => policy = SupervisorPolicy::RestForOne,
+                _ => {
+                    return Err(self.err(format!(
+                        "unknown supervisor policy `{p}`, expected `one_for_one`, `one_for_all`, or `rest_for_one`"
+                    )));
+                }
+            }
+        }
+        self.parse_supervisor_body(policy)
+    }
+
+    fn parse_supervisor_body(&mut self, mut policy: SupervisorPolicy) -> Result<Stmt, ParseError> {
+        let mut max_restarts = None;
+        let parse_opts = |p: &mut Parser, policy: &mut SupervisorPolicy, max_r: &mut Option<i64>| -> Result<(), ParseError> {
+            p.expect(TokenKind::LParen)?;
+            while !matches!(p.peek_kind(), TokenKind::RParen) {
+                let opt = p.expect_ident()?;
+                if opt == "max_restarts" || opt == "restarts" {
+                    p.expect(TokenKind::Assign)?;
+                    match p.peek_kind() {
+                        TokenKind::Int(v) => {
+                            let val = *v;
+                            p.bump();
+                            *max_r = Some(val);
+                        }
+                        _ => return Err(p.err("max_restarts must be an integer".into())),
+                    }
+                } else if opt == "policy" {
+                    p.expect(TokenKind::Assign)?;
+                    let pol_name = match p.peek_kind() {
+                        TokenKind::Ident(id) => {
+                            let s = id.clone();
+                            p.bump();
+                            s
+                        }
+                        TokenKind::String(s) => {
+                            let s = s.clone();
+                            p.bump();
+                            s
+                        }
+                        _ => return Err(p.err("policy must be an identifier or string".into())),
+                    };
+                    match pol_name.as_str() {
+                        "one_for_one" => *policy = SupervisorPolicy::OneForOne,
+                        "one_for_all" => *policy = SupervisorPolicy::OneForAll,
+                        "rest_for_one" => *policy = SupervisorPolicy::RestForOne,
+                        _ => return Err(p.err(format!("unknown supervisor policy `{pol_name}`"))),
+                    }
+                } else {
+                    return Err(p.err(format!("unknown supervisor option `{opt}`")));
+                }
+                if matches!(p.peek_kind(), TokenKind::Comma) {
+                    p.bump();
+                }
+            }
+            p.expect(TokenKind::RParen)?;
+            Ok(())
+        };
+
+        if matches!(self.peek_kind(), TokenKind::LParen) {
+            parse_opts(self, &mut policy, &mut max_restarts)?;
+        }
+
+        let name = if matches!(self.peek_kind(), TokenKind::LBrace) {
+            "sup".to_string()
+        } else {
+            self.expect_ident()?
+        };
+
+        if matches!(self.peek_kind(), TokenKind::LParen) {
+            parse_opts(self, &mut policy, &mut max_restarts)?;
+        }
+
+        self.crew_stack.push(name.clone());
+        let body = self.parse_block();
+        self.crew_stack.pop();
+
+        Ok(Stmt::Supervisor {
+            name,
+            policy,
+            max_restarts,
+            body: body?,
         })
     }
 

@@ -8169,6 +8169,134 @@ static inline int64_t mako_crew_drain_joined(void) {
     return mako_last_crew_drain_joined;
 }
 
+/* ---- Erlang/OTP-style Supervisors (structured fault isolation & restarts) ---- */
+#define MAKO_SUPERVISOR_ONE_FOR_ONE 0
+#define MAKO_SUPERVISOR_ONE_FOR_ALL 1
+#define MAKO_SUPERVISOR_REST_FOR_ONE 2
+
+typedef struct MakoSupervisor MakoSupervisor;
+
+typedef struct MakoSupervisorChild {
+    MakoSupervisor *sup;
+    size_t index;
+    MakoTaskFn fn;
+    void *arg;
+    int64_t restarts;
+    atomic_bool should_restart;
+} MakoSupervisorChild;
+
+struct MakoSupervisor {
+    MakoNursery nursery;
+    MakoSupervisorChild **children;
+    size_t len;
+    size_t cap;
+    int policy;
+    int64_t max_restarts;
+    atomic_int_fast64_t total_restarts;
+    atomic_bool stopped;
+};
+
+static void *mako_supervisor_child_trampoline(void *raw) {
+    MakoSupervisorChild *child = (MakoSupervisorChild *)raw;
+    MakoSupervisor *s = child->sup;
+    while (!atomic_load_explicit(&s->stopped, memory_order_acquire)) {
+        atomic_store_explicit(&child->should_restart, false, memory_order_release);
+        void *res = child->fn(child->arg);
+        intptr_t code = (intptr_t)res;
+        if (atomic_load_explicit(&s->stopped, memory_order_acquire)) {
+            break;
+        }
+        if (code == 0 && !atomic_load_explicit(&child->should_restart, memory_order_acquire)) {
+            break;
+        }
+        if (child->restarts >= s->max_restarts) {
+            mako_nursery_cancel(&s->nursery);
+            break;
+        }
+        child->restarts++;
+        atomic_fetch_add_explicit(&s->total_restarts, 1, memory_order_acq_rel);
+
+        if (s->policy == MAKO_SUPERVISOR_ONE_FOR_ONE) {
+            struct timespec pause = {0, 1000000}; /* 1 ms */
+            nanosleep(&pause, NULL);
+            continue;
+        } else if (s->policy == MAKO_SUPERVISOR_ONE_FOR_ALL) {
+            for (size_t i = 0; i < s->len; i++) {
+                if (s->children[i] && s->children[i] != child) {
+                    atomic_store_explicit(&s->children[i]->should_restart, true, memory_order_release);
+                }
+            }
+            continue;
+        } else if (s->policy == MAKO_SUPERVISOR_REST_FOR_ONE) {
+            for (size_t i = child->index + 1; i < s->len; i++) {
+                if (s->children[i]) {
+                    atomic_store_explicit(&s->children[i]->should_restart, true, memory_order_release);
+                }
+            }
+            continue;
+        }
+    }
+    return NULL;
+}
+
+static inline MakoSupervisor mako_supervisor_new(int policy, int64_t max_restarts) {
+    MakoSupervisor s;
+    s.nursery = mako_nursery_new();
+    s.children = NULL;
+    s.len = 0;
+    s.cap = 0;
+    s.policy = policy;
+    s.max_restarts = max_restarts <= 0 ? 3 : max_restarts;
+    atomic_init(&s.total_restarts, 0);
+    atomic_init(&s.stopped, false);
+    return s;
+}
+
+static inline MakoTask *mako_supervisor_spawn(MakoSupervisor *s, MakoTaskFn fn, void *arg) {
+    if (!s || !fn) return NULL;
+    if (s->len == s->cap) {
+        size_t nc = s->cap ? s->cap * 2 : 4;
+        MakoSupervisorChild **next = (MakoSupervisorChild **)realloc(s->children, nc * sizeof(MakoSupervisorChild *));
+        if (!next) mako_abort("supervisor: out of memory");
+        s->children = next;
+        s->cap = nc;
+    }
+    MakoSupervisorChild *child = (MakoSupervisorChild *)calloc(1, sizeof(MakoSupervisorChild));
+    if (!child) mako_abort("supervisor: out of memory");
+    child->sup = s;
+    child->index = s->len;
+    child->fn = fn;
+    child->arg = arg;
+    child->restarts = 0;
+    atomic_init(&child->should_restart, false);
+    s->children[s->len++] = child;
+
+    return mako_spawn(&s->nursery, mako_supervisor_child_trampoline, child);
+}
+
+static inline int64_t mako_supervisor_restart_count(MakoSupervisor *s) {
+    return s ? (int64_t)atomic_load_explicit(&s->total_restarts, memory_order_acquire) : 0;
+}
+
+static inline void mako_supervisor_cancel_join(MakoSupervisor *s) {
+    if (!s) return;
+    atomic_store_explicit(&s->stopped, true, memory_order_release);
+    mako_nursery_cancel_join(&s->nursery);
+}
+
+static inline void mako_supervisor_free(MakoSupervisor *s) {
+    if (!s) return;
+    if (s->children) {
+        for (size_t i = 0; i < s->len; i++) {
+            if (s->children[i]) {
+                free(s->children[i]);
+            }
+        }
+        free(s->children);
+        s->children = NULL;
+    }
+}
+
 /* ---- Parallel map over int arrays ---- */
 typedef int64_t (*MakoMapFn)(int64_t);
 
@@ -11153,6 +11281,18 @@ static inline MakoActor *mako_actor_spawn(int64_t mailbox_cap) {
 
 static inline int64_t mako_actor_send(MakoActor *a, int64_t msg) {
     return mako_chan_send(a, msg);
+}
+
+static inline int64_t mako_actor_try_send(MakoActor *a, int64_t msg) {
+    return a ? mako_chan_try_send(a, msg) : 0;
+}
+
+static inline int64_t mako_actor_len(MakoActor *a) {
+    return a ? mako_chan_len(a) : 0;
+}
+
+static inline int64_t mako_actor_cap(MakoActor *a) {
+    return a ? mako_chan_cap(a) : 0;
 }
 
 static inline int64_t mako_actor_recv(MakoActor *a) {

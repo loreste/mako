@@ -15814,6 +15814,7 @@ impl TypeChecker {
             }
             Stmt::Defer { body }
             | Stmt::Crew { body, .. }
+            | Stmt::Supervisor { body, .. }
             | Stmt::Arena { body, .. }
             | Stmt::Unsafe { body } => body.stmts.iter().any(|s| Self::stmt_mentions(s, name)),
             Stmt::Select {
@@ -17003,7 +17004,7 @@ impl TypeChecker {
                 self.pop_scope();
                 Ok(())
             }
-            Stmt::Crew { name, body, .. } => {
+            Stmt::Crew { name, body, .. } | Stmt::Supervisor { name, body, .. } => {
                 // NLL: outer hold moves inside crew survive after the block
                 // (crew body always runs synchronously to cancel_join). Snapshot
                 // only for share/borrow join; hold moves use normal sequential flow.
@@ -21516,7 +21517,7 @@ impl TypeChecker {
             Stmt::Defer { body } | Stmt::Unsafe { body } | Stmt::Arena { body, .. } => {
                 Self::collect_free_block(body, &mut bound.clone(), out)
             }
-            Stmt::Crew { name, body, .. } => {
+            Stmt::Crew { name, body, .. } | Stmt::Supervisor { name, body, .. } => {
                 let mut local = bound.clone();
                 local.insert(name.clone());
                 Self::collect_free_block(body, &mut local, out);
@@ -23081,6 +23082,17 @@ fn subst_stmt(s: &Stmt, subst: &HashMap<String, Type>) -> Stmt {
         Stmt::Crew { name, policy, body } => Stmt::Crew {
             name: name.clone(),
             policy: *policy,
+            body: subst_block(body, subst),
+        },
+        Stmt::Supervisor {
+            name,
+            policy,
+            max_restarts,
+            body,
+        } => Stmt::Supervisor {
+            name: name.clone(),
+            policy: *policy,
+            max_restarts: *max_restarts,
             body: subst_block(body, subst),
         },
         Stmt::Arena { name, body } => Stmt::Arena {
