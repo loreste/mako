@@ -16961,6 +16961,17 @@ impl TypeChecker {
                 let loop_share_sources = self.share_sources.clone();
                 let loop_share_depth = self.share_scope_depth.clone();
                 let loop_borrows = self.shared_borrows.clone();
+                // Iterator invalidation: mark iterated collection as borrowed
+                // so reassignment/append inside the body is rejected.
+                let iter_root = match iter {
+                    Expr::Ident(n) => Some(n.clone()),
+                    _ => None,
+                };
+                if let Some(ref name) = iter_root {
+                    if matches!(it, Type::Array(_) | Type::RawArray(_) | Type::Map(_, _)) {
+                        self.shared_borrows.insert(name.clone(), true);
+                    }
+                }
                 self.push_loop(label.clone());
                 self.check_loop_body_stmts(&body.stmts)?;
                 self.share_vars = loop_share_vars.clone();
