@@ -1,0 +1,92 @@
+// COW slice memory safety: clone, detach, reassign, nested drops
+
+fn TestCowCloneIndependence() {
+    let mut xs = [1, 2, 3]
+    let ys = xs
+    xs[0] = 99
+    assert_eq(ys[0], 1)
+    assert_eq(xs[0], 99)
+}
+
+fn TestCowAppendDetach() {
+    let xs = [1, 2, 3]
+    let mut ys = xs
+    ys = append(ys, 4)
+    assert_eq(len(xs), 3)
+    assert_eq(len(ys), 4)
+    assert_eq(ys[3], 4)
+}
+
+fn TestCowStringSlice() {
+    let mut ss: []string = ["a", "b", "c"]
+    let tt = ss
+    ss[0] = "X"
+    if tt[0] != "a" { exit(1) }
+    if ss[0] != "X" { exit(1) }
+}
+
+fn TestSliceReassignFree() {
+    let mut xs = [1, 2, 3]
+    xs = [4, 5, 6]
+    assert_eq(xs[0], 4)
+    xs = [7]
+    assert_eq(len(xs), 1)
+}
+
+fn TestNestedSliceDrop() {
+    let mut grid: [][]int = [[1, 2], [3, 4]]
+    grid = append(grid, [5, 6])
+    assert_eq(len(grid), 3)
+    assert_eq(grid[2][1], 6)
+}
+
+fn TestSliceScopeExit() {
+    {
+        let xs = [1, 2, 3, 4, 5]
+        assert_eq(len(xs), 5)
+    }
+    // xs freed at scope exit
+    let ys = [10, 20]
+    assert_eq(ys[0], 10)
+}
+
+fn TestStringSliceAppend() {
+    let mut ss: []string = []
+    for i in 20 {
+        ss = append(ss, "item_" + string(i))
+    }
+    assert_eq(len(ss), 20)
+    if ss[0] != "item_0" { exit(1) }
+    if ss[19] != "item_19" { exit(1) }
+}
+
+fn TestSliceCopy() {
+    let src = [10, 20, 30, 40, 50]
+    let mut dst = make([]int, 3, 3)
+    let n = copy(dst, src)
+    assert_eq(n, 3)
+    assert_eq(dst[0], 10)
+    assert_eq(dst[2], 30)
+}
+
+fn TestEmptySliceOps() {
+    let mut xs: []int = []
+    assert_eq(len(xs), 0)
+    xs = append(xs, 1)
+    assert_eq(len(xs), 1)
+    let mut ss: []string = []
+    ss = append(ss, "hello")
+    assert_eq(len(ss), 1)
+}
+
+fn main() {
+    TestCowCloneIndependence()
+    TestCowAppendDetach()
+    TestCowStringSlice()
+    TestSliceReassignFree()
+    TestNestedSliceDrop()
+    TestSliceScopeExit()
+    TestStringSliceAppend()
+    TestSliceCopy()
+    TestEmptySliceOps()
+}

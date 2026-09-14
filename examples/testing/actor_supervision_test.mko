@@ -1,0 +1,101 @@
+// Actor lifecycle, supervision patterns, and message safety tests
+
+actor Counter {
+    count: int = 0
+    receive Inc {
+        self.count = self.count + 1
+    }
+    receive Dec {
+        self.count = self.count - 1
+    }
+    receive Reset {
+        self.count = 0
+    }
+    receive Bye {
+        let _ = 0
+    }
+}
+
+actor Logger {
+    entries: int = 0
+    receive Log {
+        self.entries = self.entries + 1
+    }
+    receive Bye {
+        let _ = 0
+    }
+}
+
+fn TestActorBasicMessages() {
+    let c = Counter_spawn()
+    crew t {
+        let j = t.kick(Counter_loop(c))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Dec()))
+        assert(Counter_send(c, Counter_Bye()))
+        let _ = j.join()
+    }
+}
+
+fn TestActorReset() {
+    let c = Counter_spawn()
+    crew t {
+        let j = t.kick(Counter_loop(c))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Reset()))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Bye()))
+        let _ = j.join()
+    }
+}
+
+fn TestMultipleActors() {
+    let c = Counter_spawn()
+    let l = Logger_spawn()
+    crew t {
+        let cj = t.kick(Counter_loop(c))
+        let lj = t.kick(Logger_loop(l))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Logger_send(l, Logger_Log()))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Logger_send(l, Logger_Log()))
+        assert(Counter_send(c, Counter_Bye()))
+        assert(Logger_send(l, Logger_Bye()))
+        let _ = cj.join()
+        let _ = lj.join()
+    }
+}
+
+fn TestActorWithFailFast() {
+    let c = Counter_spawn()
+    crew:fail_fast t {
+        let j = t.kick(Counter_loop(c))
+        assert(Counter_send(c, Counter_Inc()))
+        assert(Counter_send(c, Counter_Bye()))
+        let _ = j.join()
+    }
+}
+
+fn TestActorSequentialReuse() {
+    // Spawn, use, and drop actors in a loop — leak detection
+    for i in 10 {
+        let c = Counter_spawn()
+        crew t {
+            let j = t.kick(Counter_loop(c))
+            assert(Counter_send(c, Counter_Inc()))
+            assert(Counter_send(c, Counter_Bye()))
+            let _ = j.join()
+        }
+    }
+}
+
+fn main() {
+    TestActorBasicMessages()
+    TestActorReset()
+    TestMultipleActors()
+    TestActorWithFailFast()
+    TestActorSequentialReuse()
+}

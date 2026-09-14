@@ -1,0 +1,81 @@
+// Iterator safety: valid patterns and edge cases (both backends)
+
+fn TestValidIteration() {
+    let xs = [1, 2, 3]
+    let mut sum = 0
+    for v in xs {
+        sum = sum + v
+    }
+    assert_eq(sum, 6)
+}
+
+fn TestMutateDifferentArray() {
+    let xs = [1, 2, 3]
+    let mut ys: []int = []
+    for v in xs {
+        ys = append(ys, v * 2)
+    }
+    assert_eq(len(ys), 3)
+    assert_eq(ys[0], 2)
+    assert_eq(ys[2], 6)
+}
+
+fn TestRangeIteration() {
+    let mut sum = 0
+    for i in 10 {
+        sum = sum + i
+    }
+    assert_eq(sum, 45)
+}
+
+fn TestNestedIteration() {
+    let xs = [1, 2, 3]
+    let ys = [10, 20]
+    let mut sum = 0
+    for x in xs {
+        for y in ys {
+            sum = sum + x * y
+        }
+    }
+    assert_eq(sum, 180)
+}
+
+fn TestIterateStringSlice() {
+    let ss: []string = ["hello", "world"]
+    let mut count = 0
+    for s in ss {
+        count = count + len(s)
+    }
+    assert_eq(count, 10)
+}
+
+fn TestIterateEmptySlice() {
+    let xs: []int = []
+    let mut count = 0
+    for v in xs {
+        count = count + v
+    }
+    assert_eq(count, 0)
+}
+
+fn TestIterateLargeSlice() {
+    let mut xs = make([]int, 0, 1000)
+    for i in 1000 {
+        xs = append(xs, i)
+    }
+    let mut sum = 0
+    for v in xs {
+        sum = sum + v
+    }
+    assert_eq(sum, 499500)
+}
+
+fn main() {
+    TestValidIteration()
+    TestMutateDifferentArray()
+    TestRangeIteration()
+    TestNestedIteration()
+    TestIterateStringSlice()
+    TestIterateEmptySlice()
+    TestIterateLargeSlice()
+}

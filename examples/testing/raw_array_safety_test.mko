@@ -1,0 +1,113 @@
+// Comprehensive raw []T memory safety tests
+
+fn consume_ints(xs: raw []int) -> int {
+    let mut total = 0
+    for v in xs {
+        total = total + v
+    }
+    return total
+}
+
+fn TestRawArrayMakeAppendDrop() {
+    let mut xs: raw []int = make(raw []int, 0, 4)
+    xs = append(xs, 10)
+    xs = append(xs, 20)
+    xs = append(xs, 30)
+    assert_eq(len(xs), 3)
+    assert_eq(xs[0], 10)
+    assert_eq(xs[2], 30)
+    // xs auto-dropped — unconditional free
+}
+
+fn TestRawArrayGrowFromZero() {
+    let mut xs: raw []int = make(raw []int, 0, 0)
+    xs = append(xs, 1)
+    xs = append(xs, 2)
+    xs = append(xs, 3)
+    assert_eq(len(xs), 3)
+}
+
+fn TestRawArrayReassignDropsOld() {
+    let mut xs: raw []int = make(raw []int, 10, 10)
+    xs[0] = 42
+    xs = make(raw []int, 5, 5)
+    xs[0] = 99
+    assert_eq(xs[0], 99)
+}
+
+fn TestRawArrayStringOwnership() {
+    let mut ss: raw []string = make(raw []string, 0, 4)
+    ss = append(ss, "alpha")
+    ss = append(ss, "beta")
+    ss = append(ss, "gamma")
+    ss[0] = "replaced"
+    if ss[0] != "replaced" { exit(1) }
+    assert_eq(len(ss), 3)
+}
+
+fn TestRawArrayCopy() {
+    let mut src: raw []int = make(raw []int, 5, 5)
+    for i in 5 {
+        src[i] = i * 10
+    }
+    let mut dst: raw []int = make(raw []int, 3, 3)
+    let n = copy(dst, src)
+    assert_eq(n, 3)
+    assert_eq(dst[0], 0)
+    assert_eq(dst[2], 20)
+}
+
+fn TestRawArrayNestedScopeDrop() {
+    let mut outer: raw []int = make(raw []int, 0, 4)
+    outer = append(outer, 1)
+    {
+        let mut inner: raw []string = make(raw []string, 0, 4)
+        inner = append(inner, "deep")
+    }
+    assert_eq(outer[0], 1)
+}
+
+fn TestRawArrayStressAppendFree() {
+    for round in 50 {
+        let mut xs: raw []int = make(raw []int, 0, 1)
+        for i in 100 {
+            xs = append(xs, i * round)
+        }
+        assert_eq(len(xs), 100)
+    }
+}
+
+fn TestRawArrayBoolFloatByte() {
+    let mut bs: raw []bool = make(raw []bool, 0, 4)
+    bs = append(bs, true)
+    bs = append(bs, false)
+    if bs[1] != false { exit(1) }
+
+    let mut fs: raw []float = make(raw []float, 0, 4)
+    fs = append(fs, 3.14)
+    if fs[0] != 3.14 { exit(1) }
+
+    let mut bytes: raw []byte = make(raw []byte, 0, 4)
+    bytes = append(bytes, 65)
+    assert_eq(bytes[0], 65)
+}
+
+fn TestRawArrayFnParam() {
+    let mut xs: raw []int = make(raw []int, 0, 4)
+    xs = append(xs, 10)
+    xs = append(xs, 20)
+    xs = append(xs, 30)
+    assert_eq(consume_ints(xs), 60)
+}
+
+fn main() {
+    TestRawArrayMakeAppendDrop()
+    TestRawArrayGrowFromZero()
+    TestRawArrayReassignDropsOld()
+    TestRawArrayStringOwnership()
+    TestRawArrayCopy()
+    TestRawArrayNestedScopeDrop()
+    TestRawArrayStressAppendFree()
+    TestRawArrayBoolFloatByte()
+    TestRawArrayFnParam()
+}

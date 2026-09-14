@@ -15593,6 +15593,7 @@ impl TypeChecker {
         self.pending_defers.clear();
         self.moved_holds.clear();
         self.hold_vars.clear();
+        self.raw_moved.clear();
         self.hold_moved_fields.clear();
         self.unique_field_owners.clear();
         self.push_scope();
