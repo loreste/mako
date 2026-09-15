@@ -754,24 +754,52 @@ fn main() {
 }
 ```
 
-### Typed message payloads
+### Actor constructor parameters and state
 
-Receive arms accept any type — `string`, multi-param, `chan[T]`, or structs — not just `int`:
+Actors accept constructor parameters at declaration time: `actor Worker(id: int, prefix: string) { ... }`.
+These parameters are supplied to `Worker_spawn(id, prefix)` or `Worker_spawn_cap(cap, id, prefix)`.
+Parameters automatically become state fields accessible on `self.param` across all receive arms:
+
+```mko
+actor Worker(id: int, prefix: string) {
+    jobs: int = 0
+
+    receive Process(tag: string, reply: chan[string]) {
+        self.jobs = self.jobs + 1
+        let _ = reply.send(f"{self.prefix}{tag}:{self.id}")
+    }
+
+    receive ReplaceState(new_id: int) {
+        // Whole-state replacement
+        self = Worker_State { id: new_id, prefix: self.prefix, jobs: self.jobs + 1 }
+    }
+
+    receive Bye { let _ = 0 }
+}
+```
+
+### Typed message payloads and per-arm zero-allocation
+
+Receive arms accept arbitrary typed parameters — `string`, `chan[T]`, tuples, or structs:
 
 ```mko
 actor DB {
     receive Query(sid: int, sql: string, reply: chan[string]) {
-        chan_send(reply, "result")
+        let _ = reply.send("result")
     }
-    receive Log(msg: string) {
-        print(msg)
+    receive Inc(delta: int) {
+        // Zero allocation: packed directly in 48-bit scalar payload
+        self.total = self.total + delta
     }
     receive Bye { let _ = 0 }
 }
 ```
 
-Single `int` parameters keep the zero-allocation tag+value pack path. Multi-param
-and non-int receives generate a per-message envelope struct (heap-allocated).
+- **Per-arm zero-allocation**: 0-param arms and single-integer arms (`int`/`int64`) bypass heap allocation completely, using 16-bit tag and 48-bit payload bit-packing.
+- **Typed envelopes**: Arms with multiple parameters or non-integer types generate per-arm envelope structs, boxed and unboxed safely with caller-owns semantics.
+- **Early return**: `return` within a `receive` arm jumps to the next actor message (`continue __actor_loop`), allowing clean early short-circuiting even from within nested `for` and `while` loops.
+- **Graceful termination**: Closing the actor mailbox via `actor_stop(mailbox)` or sender drop signals tag 0, immediately exiting the actor loop without CPU spinning.
+- **Zero-leak mailbox draining**: When an actor loop exits, any unhandled envelope payloads remaining in the mailbox are drained and freed (`actor_free_payload`), guaranteeing zero leaks.
 
 ### Actor design patterns
 

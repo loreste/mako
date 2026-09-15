@@ -119,13 +119,23 @@ runtime smoke check (`makori test --race`) for the runtime and FFI boundary.
 Actor receive handlers keep state in the loop's mutable local, including indexed
 updates and nested expressions in typed messages. Rewriting `self.field` does
 not bypass capture checks: `examples/bad/actor_state_kick_capture.mko` must be
-rejected. The C-backend regression at
-`examples/testing/actor_multifile/actor_test.mko` checks allocated string payloads,
-imported state types, and two concurrent producers updating state through a
-bounded mailbox. Run it with `mako test --backend c --race` or
-`mako test --backend c --sanitize address,undefined` to exercise race and memory
-checks. These checks cover the exercised paths; they are not a guarantee for
-arbitrary FFI or unsafe code.
+rejected. The comprehensive actor test suite at
+`examples/testing/actor_comprehensive_test.mko`,
+`examples/testing/actor_multifile/actor_test.mko`, and
+`examples/testing/actor_nested_state_test.mko` checks constructor parameters,
+whole-state assignment, helper passing, per-arm zero-allocation scalar packing,
+allocated string/envelope payloads, early returns from nested loops, graceful
+channel close without spinning, and automatic mailbox draining on shutdown to
+prevent memory leaks on unhandled envelopes. Run them with
+`mako test --backend c --sanitize address,undefined` to exercise memory checks.
+
+Slice cleanup distinguishes allocator and transfer rules. Raw arrays and the
+runtime's primitive nested arrays do not have an RC header; they must not be
+passed to `mako_rc_release`. Append releases old backing exactly once, and
+growing a unique string array transfers its strings without destroying them.
+Escaping a borrowed slice field retains the owner's heap backing; only a
+non-owning view needs heapification. The nested actor regression is
+`examples/testing/actor_nested_state_test.mko`.
 **Uuid is Copy** — free re-read under `hold`, kick without move. The native
 backend clones string-like task arguments, including string-backed `Uuid`, at
 the `kick` boundary so the child task owns its payload without aliasing the

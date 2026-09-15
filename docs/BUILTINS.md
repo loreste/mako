@@ -2638,6 +2638,7 @@ HTTP seed path `/debug/hot_sites` via `profile_http_route`.
 | `actor_len` | `actor_len(mailbox: chan[int]) -> int` | Current queued message count in mailbox |
 | `actor_cap` | `actor_cap(mailbox: chan[int]) -> int` | Capacity of actor mailbox |
 | `actor_stop` | `actor_stop(mailbox: chan[int]) -> void` | Stop an actor |
+| `actor_free_payload` | `actor_free_payload(payload: int) -> void` | Free a boxed envelope payload pointer |
 
 ---
 

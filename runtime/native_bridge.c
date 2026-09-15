@@ -1680,6 +1680,10 @@ int64_t mako_native_str_last_index_ptr(MakoNativeString *hay, MakoNativeString *
     return mako_str_last_index(bridge_borrow_str(hay), bridge_borrow_str(needle));
 }
 
+void mako_native_actor_free_payload(int64_t packed) {
+    mako_actor_free_payload(packed);
+}
+
 void mako_native_actor_stop(MakoChan *a) {
     if (a) mako_actor_stop(a);
 }

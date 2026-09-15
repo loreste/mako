@@ -1,0 +1,70 @@
+struct ActorColumn { values: []string }
+struct ActorTable { columns: []ActorColumn }
+struct ActorDatabase { tables: []ActorTable, user: string }
+
+fn actor_db_none() -> ActorDatabase {
+    return ActorDatabase { tables: make([]ActorTable, 0, 4), user: "" }
+}
+
+fn actor_db_open(path: string) -> ActorDatabase {
+    let mut db = actor_db_none()
+    db.user = path + "-user"
+    db.tables = append(db.tables, ActorTable {
+        columns: [ActorColumn { values: [path + "-value"] }],
+    })
+    return db
+}
+
+actor NestedEngine {
+    db: ActorDatabase = actor_db_none()
+    sids: []int = make([]int, 0, 64)
+    users: []string = make([]string, 0, 64)
+    receive Init(path: string, reply: chan[int]) {
+        self.db = actor_db_open(path)
+        self.sids = append(self.sids, 1)
+        self.users = append(self.users, path)
+        let _ = reply.send(len(self.db.tables))
+    }
+    receive Read(reply: chan[string]) {
+        let _ = reply.send(self.db.tables[0].columns[0].values[0])
+    }
+    receive Bye { let _ = 0 }
+}
+
+fn TestActorNestedStateStartupAndReplacement() {
+    let engine = NestedEngine_spawn()
+    crew:fail_fast t {
+        let job = t.kick(NestedEngine_loop(engine))
+        let ready = make(chan[int], 1)
+        let reply = make(chan[string], 1)
+        // Cross the 64-element state capacity to exercise backing replacement.
+        for i in 80 {
+            assert(NestedEngine_send(engine, NestedEngine_Init(int_to_string(i), ready)))
+            assert_eq(ready.recv(), 1)
+            assert(NestedEngine_send(engine, NestedEngine_Read(reply)))
+            assert(reply.recv() == int_to_string(i) + "-value")
+        }
+        assert(NestedEngine_send(engine, NestedEngine_Bye()))
+        let _ = job.join()
+    }
+}
+
+struct ActorSliceOwner { values: []int }
+
+fn actor_copy_owner(source: ActorSliceOwner) -> ActorSliceOwner {
+    return ActorSliceOwner { values: source.values }
+}
+
+fn TestBorrowedSharedFieldSurvivesReturnedStruct() {
+    let original = ActorSliceOwner { values: [11, 22] }
+    let alias = actor_copy_owner(original)
+    let copy = actor_copy_owner(alias)
+    assert_eq(original.values[0], 11)
+    assert_eq(alias.values[1], 22)
+    assert_eq(copy.values[0], 11)
+}
+
+fn main() {
+    TestActorNestedStateStartupAndReplacement()
+    TestBorrowedSharedFieldSurvivesReturnedStruct()
+}

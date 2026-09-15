@@ -11200,6 +11200,12 @@ static inline void *mako_actor_unbox_payload(int64_t packed) {
     return (void *)(intptr_t)(packed & 0x0000ffffffffffffLL);
 }
 
+/* Free a boxed payload pointer. */
+static inline void mako_actor_free_payload(int64_t packed) {
+    void *p = (void *)(intptr_t)(packed & 0x0000ffffffffffffLL);
+    if (p) free(p);
+}
+
 static inline MakoActor *mako_actor_spawn(int64_t mailbox_cap) {
     return mako_chan_new(mailbox_cap < 1 ? 8 : mailbox_cap);
 }

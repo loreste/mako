@@ -465,7 +465,12 @@ fn rewrite_self_fields(expr: &mut Expr, state_name: &str) {
             rewrite_self_fields(collection, state_name);
             rewrite_self_fields(mapper, state_name);
         }
-        Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) | Expr::Ident(_) => {}
+        Expr::Ident(name) => {
+            if name == "self" {
+                *name = state_name.into();
+            }
+        }
+        Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => {}
     }
 }
 
@@ -479,7 +484,13 @@ fn rewrite_self_block(b: &mut Block, state_name: &str) {
 // binding, including statements nested inside typed envelope dispatch arms.
 fn rewrite_self_stmt(s: &mut Stmt, state_name: &str) {
     match s {
-        Stmt::Let { init, .. } | Stmt::LetMulti { init, .. } | Stmt::Assign { value: init, .. } => {
+        Stmt::Assign { name, value } => {
+            if name == "self" {
+                *name = state_name.into();
+            }
+            rewrite_self_fields(value, state_name);
+        }
+        Stmt::Let { init, .. } | Stmt::LetMulti { init, .. } => {
             rewrite_self_fields(init, state_name);
         }
         Stmt::Expr(e) | Stmt::Return(Some(e)) => rewrite_self_fields(e, state_name),
@@ -615,107 +626,199 @@ mod actor_self_tests {
     }
 }
 
-/// Rewrite  in actor receive arms to  (next message).
+/// Rewrite `return` in actor receive arms to `continue __actor_loop` (next message).
 fn rewrite_return_to_continue(stmts: &mut Vec<Stmt>) {
-    for s in stmts.iter_mut() {
+    let mut new_stmts = Vec::with_capacity(stmts.len());
+    for s in stmts.drain(..) {
         match s {
             Stmt::Return(None) => {
-                *s = Stmt::Continue(None);
+                new_stmts.push(Stmt::Continue(Some("__actor_loop".into())));
             }
-            Stmt::Return(Some(_)) => {
-                // return <expr> → evaluate expr (for side effects), then continue
-                let expr = if let Stmt::Return(Some(e)) = std::mem::replace(s, Stmt::Continue(None)) {
-                    e
-                } else {
-                    unreachable!()
-                };
-                // Replace with: { expr; continue; }
-                // But we can't create a block stmt easily, so just drop the value and continue
-                *s = Stmt::Continue(None);
-                // ponytail: if the return value matters, the user should use a local
+            Stmt::Return(Some(e)) => {
+                new_stmts.push(Stmt::Expr(e));
+                new_stmts.push(Stmt::Continue(Some("__actor_loop".into())));
             }
-            Stmt::If { then_block, else_block, .. } => {
+            Stmt::If { cond, mut then_block, else_block, init } => {
                 rewrite_return_to_continue(&mut then_block.stmts);
-                if let Some(eb) = else_block {
+                let else_block = else_block.map(|mut eb| {
                     rewrite_return_to_continue(&mut eb.stmts);
-                }
+                    eb
+                });
+                new_stmts.push(Stmt::If { cond, then_block, else_block, init });
             }
-            Stmt::While { body, .. } | Stmt::For { body, .. } => {
+            Stmt::While { cond, mut body, label } => {
                 rewrite_return_to_continue(&mut body.stmts);
+                new_stmts.push(Stmt::While { cond, body, label });
             }
-            _ => {}
+            Stmt::For { label, binders, is_range, iter, mut body } => {
+                rewrite_return_to_continue(&mut body.stmts);
+                new_stmts.push(Stmt::For { label, binders, is_range, iter, body });
+            }
+            Stmt::CFor { label, init, cond, post, mut body } => {
+                rewrite_return_to_continue(&mut body.stmts);
+                new_stmts.push(Stmt::CFor { label, init, cond, post, body });
+            }
+            Stmt::IfLet { pattern, scrutinee, mut then_block, else_block } => {
+                rewrite_return_to_continue(&mut then_block.stmts);
+                let else_block = else_block.map(|mut eb| {
+                    rewrite_return_to_continue(&mut eb.stmts);
+                    eb
+                });
+                new_stmts.push(Stmt::IfLet { pattern, scrutinee, then_block, else_block });
+            }
+            Stmt::Defer { mut body } => {
+                rewrite_return_to_continue(&mut body.stmts);
+                new_stmts.push(Stmt::Defer { body });
+            }
+            Stmt::Select { timeout_ms, arms, default_arm } => {
+                let arms = arms.into_iter().map(|(n, mut b)| {
+                    rewrite_return_to_continue(&mut b.stmts);
+                    (n, b)
+                }).collect();
+                let default_arm = default_arm.map(|mut b| {
+                    rewrite_return_to_continue(&mut b.stmts);
+                    b
+                });
+                new_stmts.push(Stmt::Select { timeout_ms, arms, default_arm });
+            }
+            Stmt::Unsafe { mut body } => {
+                rewrite_return_to_continue(&mut body.stmts);
+                new_stmts.push(Stmt::Unsafe { body });
+            }
+            other => new_stmts.push(other),
         }
     }
+    *stmts = new_stmts;
+}
+
+fn arm_needs_envelope(arm: &ReceiveArm) -> bool {
+    arm.params.len() > 1
+        || (arm.params.len() == 1
+            && !matches!(
+                arm.params[0].1,
+                TypeExpr::Named(ref n) if n == "int" || n == "int64"
+            ))
 }
 
 fn expand_actor(actor: ActorDef) -> Vec<Item> {
     let name = &actor.name;
     let mut items = Vec::new();
     let state_ty = format!("{name}_State");
-    let has_state = !actor.fields.is_empty();
+    let mut actor_fields = actor.fields.clone();
+
+    // Ensure all ctor params are registered as state fields so they can be accessed as self.param
+    for (pname, pty) in &actor.ctor_params {
+        if let Some(existing) = actor_fields.iter_mut().find(|(f, _, _)| f == pname) {
+            if existing.2.is_none() {
+                existing.2 = Some(Expr::Ident(pname.clone()));
+            }
+        } else {
+            actor_fields.push((pname.clone(), pty.clone(), Some(Expr::Ident(pname.clone()))));
+        }
+    }
+
+    let has_state = !actor_fields.is_empty();
+    let has_ctor = !actor.ctor_params.is_empty();
 
     // Owned state struct (if any fields).
     if has_state {
         items.push(Item::Struct(StructDef {
             name: state_ty.clone(),
             type_params: Vec::new(),
-            fields: actor.fields.clone(),
+            fields: actor_fields.clone(),
             derives: Vec::new(),
             exported: false,
             source_file: None,
         }));
     }
 
-    // Message constructors: Session_Invite() -> pack(tag, 0)
-    // or Session_Inc(delta) -> pack(tag, delta) for receive Inc(delta).
-    // Determine if this actor needs envelope structs (any non-int or multi-param receives).
-    let needs_envelope = actor.receives.iter().any(|arm| {
-        arm.params.len() > 1
-            || arm.params.iter().any(|(_, ty)| !matches!(ty, TypeExpr::Named(n) if n == "int" || n == "int64"))
-    });
+    // Constructor envelope struct if constructor has parameters.
+    let ctor_env_name = format!("{name}_Ctor_Env");
+    if has_ctor {
+        items.push(Item::Struct(StructDef {
+            name: ctor_env_name.clone(),
+            type_params: Vec::new(),
+            fields: actor
+                .ctor_params
+                .iter()
+                .map(|(n, ty)| (n.clone(), ty.clone(), None))
+                .collect(),
+            derives: Vec::new(),
+            exported: false,
+            source_file: None,
+        }));
+    }
 
-    // Generate per-message envelope struct if needed.
-    if needs_envelope {
-        for arm in &actor.receives {
-            if !arm.params.is_empty() {
-                let env_name = format!("{name}_{}_Env", arm.message);
-                items.push(Item::Struct(StructDef {
-                    name: env_name,
-                    type_params: Vec::new(),
-                    fields: arm.params.iter().map(|(n, ty)| (n.clone(), ty.clone(), None)).collect(),
-                    derives: Vec::new(),
-                    exported: false,
-                    source_file: None,
-                }));
-            }
+    // Generate per-message envelope struct only for arms that actually need it.
+    for arm in &actor.receives {
+        if arm_needs_envelope(arm) {
+            let env_name = format!("{name}_{}_Env", arm.message);
+            items.push(Item::Struct(StructDef {
+                name: env_name,
+                type_params: Vec::new(),
+                fields: arm
+                    .params
+                    .iter()
+                    .map(|(n, ty)| (n.clone(), ty.clone(), None))
+                    .collect(),
+                derives: Vec::new(),
+                exported: false,
+                source_file: None,
+            }));
         }
     }
 
+    // Message constructors: Session_Invite() -> pack(tag, 0)
+    // or Session_Inc(delta) -> pack(tag, delta) for receive Inc(delta: int) (zero-alloc),
+    // or Session_Msg(args...) -> pack(tag, box_payload(env)) for envelope arms.
     for (i, arm) in actor.receives.iter().enumerate() {
         let tag = (i + 1) as i64;
         let (params, pack_args) = if arm.params.is_empty() {
             (vec![], vec![Expr::Int(tag), Expr::Int(0)])
-        } else if !needs_envelope && arm.params.len() == 1 {
-            // Legacy int-only path
-            let (ref pname, _) = arm.params[0];
+        } else if !arm_needs_envelope(arm) {
+            // Fast zero-alloc path: single scalar
+            let (ref pname, ref pty) = arm.params[0];
             (
-                vec![Param { name: pname.clone(), ty: TypeExpr::Named("int".into()), mutable: false, variadic: false }],
+                vec![Param {
+                    name: pname.clone(),
+                    ty: pty.clone(),
+                    mutable: false,
+                    variadic: false,
+                }],
                 vec![Expr::Int(tag), Expr::Ident(pname.clone())],
             )
         } else {
             // Envelope path: construct struct, box pointer
             let env_name = format!("{name}_{}_Env", arm.message);
-            let fn_params: Vec<Param> = arm.params.iter().map(|(n, ty)| Param {
-                name: n.clone(), ty: ty.clone(), mutable: false, variadic: false,
-            }).collect();
-            let lit_fields: Vec<(String, Expr)> = arm.params.iter().map(|(n, _)| (n.clone(), Expr::Ident(n.clone()))).collect();
-            let construct = Expr::StructLit { name: env_name, fields: lit_fields, update: None };
+            let fn_params: Vec<Param> = arm
+                .params
+                .iter()
+                .map(|(n, ty)| Param {
+                    name: n.clone(),
+                    ty: ty.clone(),
+                    mutable: false,
+                    variadic: false,
+                })
+                .collect();
+            let lit_fields: Vec<(String, Expr)> = arm
+                .params
+                .iter()
+                .map(|(n, _)| (n.clone(), Expr::Ident(n.clone())))
+                .collect();
+            let construct = Expr::StructLit {
+                name: env_name,
+                fields: lit_fields,
+                update: None,
+            };
             (
                 fn_params,
-                vec![Expr::Int(tag), Expr::Call {
-                    callee: Box::new(Expr::Ident("actor_box_payload".into())),
-                    args: vec![construct],
-                }],
+                vec![
+                    Expr::Int(tag),
+                    Expr::Call {
+                        callee: Box::new(Expr::Ident("actor_box_payload".into())),
+                        args: vec![construct],
+                    },
+                ],
             )
         };
         items.push(Item::Fn(FnDef {
@@ -740,10 +843,61 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         }));
     }
 
+    const CTOR_TAG: i64 = 0x7FFF;
+
     // Session_spawn(...ctor_args) -> chan[int] (default mailbox 16)
-    let ctor_fn_params: Vec<Param> = actor.ctor_params.iter().map(|(n, ty)| Param {
-        name: n.clone(), ty: ty.clone(), mutable: false, variadic: false,
-    }).collect();
+    let ctor_fn_params: Vec<Param> = actor
+        .ctor_params
+        .iter()
+        .map(|(n, ty)| Param {
+            name: n.clone(),
+            ty: ty.clone(),
+            mutable: false,
+            variadic: false,
+        })
+        .collect();
+
+    let mut spawn_stmts = vec![Stmt::Let {
+        name: "__mbox".into(),
+        mutable: false,
+        ownership: Ownership::None,
+        ty: None,
+        init: Expr::Call {
+            callee: Box::new(Expr::Ident("actor_spawn".into())),
+            args: vec![Expr::Int(16)],
+        },
+    }];
+
+    if has_ctor {
+        let lit_fields: Vec<(String, Expr)> = actor
+            .ctor_params
+            .iter()
+            .map(|(n, _)| (n.clone(), Expr::Ident(n.clone())))
+            .collect();
+        let construct = Expr::StructLit {
+            name: ctor_env_name.clone(),
+            fields: lit_fields,
+            update: None,
+        };
+        spawn_stmts.push(Stmt::Expr(Expr::Call {
+            callee: Box::new(Expr::Ident("actor_send".into())),
+            args: vec![
+                Expr::Ident("__mbox".into()),
+                Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_pack".into())),
+                    args: vec![
+                        Expr::Int(CTOR_TAG),
+                        Expr::Call {
+                            callee: Box::new(Expr::Ident("actor_box_payload".into())),
+                            args: vec![construct],
+                        },
+                    ],
+                },
+            ],
+        }));
+    }
+    spawn_stmts.push(Stmt::Return(Some(Expr::Ident("__mbox".into()))));
+
     items.push(Item::Fn(FnDef {
         type_bounds: std::collections::HashMap::new(),
         name: format!("{name}_spawn"),
@@ -754,10 +908,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             vec![TypeExpr::Named("int".into())],
         )),
         body: Block {
-            stmts: vec![Stmt::Return(Some(Expr::Call {
-                callee: Box::new(Expr::Ident("actor_spawn".into())),
-                args: vec![Expr::Int(16)],
-            }))],
+            stmts: spawn_stmts,
             source_lines: Box::default(),
         },
         exported: false,
@@ -772,9 +923,52 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     let mut spawn_cap_params = vec![Param {
         name: "__cap".into(),
         ty: TypeExpr::Named("int".into()),
-        mutable: false, variadic: false,
+        mutable: false,
+        variadic: false,
     }];
     spawn_cap_params.extend(ctor_fn_params.clone());
+
+    let mut spawn_cap_stmts = vec![Stmt::Let {
+        name: "__mbox".into(),
+        mutable: false,
+        ownership: Ownership::None,
+        ty: None,
+        init: Expr::Call {
+            callee: Box::new(Expr::Ident("actor_spawn".into())),
+            args: vec![Expr::Ident("__cap".into())],
+        },
+    }];
+
+    if has_ctor {
+        let lit_fields: Vec<(String, Expr)> = actor
+            .ctor_params
+            .iter()
+            .map(|(n, _)| (n.clone(), Expr::Ident(n.clone())))
+            .collect();
+        let construct = Expr::StructLit {
+            name: ctor_env_name.clone(),
+            fields: lit_fields,
+            update: None,
+        };
+        spawn_cap_stmts.push(Stmt::Expr(Expr::Call {
+            callee: Box::new(Expr::Ident("actor_send".into())),
+            args: vec![
+                Expr::Ident("__mbox".into()),
+                Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_pack".into())),
+                    args: vec![
+                        Expr::Int(CTOR_TAG),
+                        Expr::Call {
+                            callee: Box::new(Expr::Ident("actor_box_payload".into())),
+                            args: vec![construct],
+                        },
+                    ],
+                },
+            ],
+        }));
+    }
+    spawn_cap_stmts.push(Stmt::Return(Some(Expr::Ident("__mbox".into()))));
+
     items.push(Item::Fn(FnDef {
         type_bounds: std::collections::HashMap::new(),
         name: format!("{name}_spawn_cap"),
@@ -785,10 +979,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             vec![TypeExpr::Named("int".into())],
         )),
         body: Block {
-            stmts: vec![Stmt::Return(Some(Expr::Call {
-                callee: Box::new(Expr::Ident("actor_spawn".into())),
-                args: vec![Expr::Ident("__cap".into())],
-            }))],
+            stmts: spawn_cap_stmts,
             source_lines: Box::default(),
         },
         exported: false,
@@ -808,11 +999,15 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             Param {
                 name: "__mbox".into(),
                 ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]),
-                mutable: false, variadic: false },
+                mutable: false,
+                variadic: false,
+            },
             Param {
                 name: "__tag".into(),
                 ty: TypeExpr::Named("int".into()),
-                mutable: false, variadic: false },
+                mutable: false,
+                variadic: false,
+            },
         ],
         ret: Some(TypeExpr::Named("bool".into())),
         body: Block {
@@ -839,10 +1034,71 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         init: Expr::Int(1),
     }];
 
+    if has_ctor {
+        loop_stmts.push(Stmt::Let {
+            name: "__ctor_m".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_recv".into())),
+                args: vec![Expr::Ident("__mbox".into())],
+            },
+        });
+        loop_stmts.push(Stmt::If {
+            init: None,
+            cond: Expr::Binary {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_msg_tag".into())),
+                    args: vec![Expr::Ident("__ctor_m".into())],
+                }),
+                right: Box::new(Expr::Int(0)),
+            },
+            then_block: Block {
+                stmts: vec![Stmt::Return(Some(Expr::Int(0)))],
+                source_lines: Box::default(),
+            },
+            else_block: None,
+        });
+        loop_stmts.push(Stmt::Let {
+            name: "__ctor_pl".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_msg_payload".into())),
+                args: vec![Expr::Ident("__ctor_m".into())],
+            },
+        });
+        loop_stmts.push(Stmt::Let {
+            name: "__ctor_env".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: Some(TypeExpr::Named(ctor_env_name.clone())),
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_unbox_payload".into())),
+                args: vec![Expr::Ident("__ctor_pl".into())],
+            },
+        });
+        for (pname, pty) in &actor.ctor_params {
+            loop_stmts.push(Stmt::Let {
+                name: pname.clone(),
+                mutable: false,
+                ownership: Ownership::None,
+                ty: Some(pty.clone()),
+                init: Expr::Field {
+                    base: Box::new(Expr::Ident("__ctor_env".into())),
+                    field: pname.clone(),
+                },
+            });
+        }
+    }
+
     if has_state {
         // Zero/defaults via partial lit + field defaults, or empty positional.
         let mut lit_fields = Vec::new();
-        for (fname, _, def) in &actor.fields {
+        for (fname, _, def) in &actor_fields {
             if let Some(d) = def {
                 lit_fields.push((fname.clone(), d.clone()));
             }
@@ -889,6 +1145,25 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 args: vec![Expr::Ident("__m".into())],
             },
         },
+        Stmt::If {
+            init: None,
+            cond: Expr::Binary {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Ident("__tag".into())),
+                right: Box::new(Expr::Int(0)),
+            },
+            then_block: Block {
+                stmts: vec![
+                    Stmt::Assign {
+                        name: "__run".into(),
+                        value: Expr::Int(0),
+                    },
+                    Stmt::Break(None),
+                ],
+                source_lines: Box::default(),
+            },
+            else_block: None,
+        },
         Stmt::Let {
             name: "__pl".into(),
             mutable: false,
@@ -901,22 +1176,31 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
     ];
 
+    let mut envelope_tags = Vec::new();
+    if has_ctor {
+        envelope_tags.push(CTOR_TAG);
+    }
+
     for (i, arm) in actor.receives.iter().enumerate() {
         let tag = (i + 1) as i64;
+        let needs_env = arm_needs_envelope(arm);
+        if needs_env {
+            envelope_tags.push(tag);
+        }
         let mut arm_block = arm.body.clone();
         if has_state {
             rewrite_self_block(&mut arm_block, "__st");
         }
         let mut arm_stmts = Vec::new();
         if !arm.params.is_empty() {
-            if !needs_envelope && arm.params.len() == 1 {
-                // Legacy int path
-                let (ref pname, _) = arm.params[0];
+            if !needs_env {
+                // Legacy / fast scalar path (zero allocation)
+                let (ref pname, ref pty) = arm.params[0];
                 arm_stmts.push(Stmt::Let {
                     name: pname.clone(),
                     mutable: false,
                     ownership: Ownership::None,
-                    ty: Some(TypeExpr::Named("int".into())),
+                    ty: Some(pty.clone()),
                     init: Expr::Ident("__pl".into()),
                 });
             } else {
@@ -970,12 +1254,14 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         });
     }
 
-    // If state has a field `n` or `count`, return it on exit; else 0.
+    // If state has an int field `n`, `count`, etc., return it on exit; else 0.
     let ret_expr = if has_state {
-        if let Some((fname, _, _)) = actor
-            .fields
+        if let Some((fname, _, _)) = actor_fields
             .iter()
-            .find(|(n, _, _)| n == "n" || n == "count" || n == "value" || n == "result" || n == "total" || n == "state")
+            .find(|(n, ty, _)| {
+                (n == "n" || n == "count" || n == "value" || n == "result" || n == "total" || n == "state")
+                    && matches!(ty, TypeExpr::Named(t) if t == "int" || t == "int64")
+            })
         {
             Expr::Field {
                 base: Box::new(Expr::Ident("__st".into())),
@@ -989,7 +1275,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     };
 
     loop_stmts.push(Stmt::While {
-        label: None,
+        label: Some("__actor_loop".into()),
         cond: Expr::Binary {
             op: BinOp::Eq,
             left: Box::new(Expr::Ident("__run".into())),
@@ -1000,6 +1286,88 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             source_lines: Box::default(),
         },
     });
+
+    // Drain any remaining unhandled envelope payloads on exit to prevent leaks
+    if !envelope_tags.is_empty() {
+        let mut drain_stmts = vec![
+            Stmt::Let {
+                name: "__dm".into(),
+                mutable: false,
+                ownership: Ownership::None,
+                ty: None,
+                init: Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_recv".into())),
+                    args: vec![Expr::Ident("__mbox".into())],
+                },
+            },
+            Stmt::Let {
+                name: "__dtag".into(),
+                mutable: false,
+                ownership: Ownership::None,
+                ty: None,
+                init: Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_msg_tag".into())),
+                    args: vec![Expr::Ident("__dm".into())],
+                },
+            },
+            Stmt::Let {
+                name: "__dpl".into(),
+                mutable: false,
+                ownership: Ownership::None,
+                ty: None,
+                init: Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_msg_payload".into())),
+                    args: vec![Expr::Ident("__dm".into())],
+                },
+            },
+        ];
+
+        let tag_match_cond = envelope_tags.iter().fold(None, |acc, &t| {
+            let cmp = Expr::Binary {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Ident("__dtag".into())),
+                right: Box::new(Expr::Int(t)),
+            };
+            match acc {
+                None => Some(cmp),
+                Some(prev) => Some(Expr::Binary {
+                    op: BinOp::Or,
+                    left: Box::new(prev),
+                    right: Box::new(cmp),
+                }),
+            }
+        }).unwrap();
+
+        drain_stmts.push(Stmt::If {
+            init: None,
+            cond: tag_match_cond,
+            then_block: Block {
+                stmts: vec![Stmt::Expr(Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_free_payload".into())),
+                    args: vec![Expr::Ident("__dpl".into())],
+                })],
+                source_lines: Box::default(),
+            },
+            else_block: None,
+        });
+
+        loop_stmts.push(Stmt::While {
+            label: None,
+            cond: Expr::Binary {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_len".into())),
+                    args: vec![Expr::Ident("__mbox".into())],
+                }),
+                right: Box::new(Expr::Int(0)),
+            },
+            body: Block {
+                stmts: drain_stmts,
+                source_lines: Box::default(),
+            },
+        });
+    }
+
     loop_stmts.push(Stmt::Expr(Expr::Call {
         callee: Box::new(Expr::Ident("actor_stop".into())),
         args: vec![Expr::Ident("__mbox".into())],
@@ -1013,7 +1381,9 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         params: vec![Param {
             name: "__mbox".into(),
             ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]),
-            mutable: false, variadic: false }],
+            mutable: false,
+            variadic: false,
+        }],
         ret: Some(TypeExpr::Named("int".into())),
         body: Block {
             stmts: loop_stmts,

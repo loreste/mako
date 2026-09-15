@@ -3507,6 +3507,9 @@ impl Codegen {
                 callee.as_ref(),
                 Expr::Ident(name) if Self::builtin_returns_borrowed_string(name)
             ),
+            // A string received from a channel transfers its allocation to
+            // the receiver, including when used directly in a comparison.
+            Expr::Method { method, .. } if method == "recv" => true,
             _ => false,
         }
     }
@@ -3945,18 +3948,20 @@ impl Codegen {
 
     /// Heapify a POD slice view on escape (return / store). Identity if `cap>0`.
     fn ensure_slice_owned(&mut self, c_ty: &str, val: String) -> String {
-        let (own_fn, free_fn) = match c_ty {
-            "MakoIntArray" => ("mako_int_array_to_owned", "mako_int_array_free"),
-            "MakoByteArray" => ("mako_byte_array_to_owned", "mako_byte_array_free"),
-            "MakoFloatArray" => ("mako_float_array_to_owned", "mako_float_array_free"),
-            "MakoBoolArray" => ("mako_bool_array_to_owned", "mako_bool_array_free"),
+        let own_fn = match c_ty {
+            "MakoIntArray" => "mako_int_array_to_owned",
+            "MakoByteArray" => "mako_byte_array_to_owned",
+            "MakoFloatArray" => "mako_float_array_to_owned",
+            "MakoBoolArray" => "mako_bool_array_to_owned",
             _ => return val,
         };
+        let source = self.fresh("view");
+        self.emit_line(format_args!("{c_ty} {source} = {val};"));
         let tmp = self.fresh("own");
-        self.emit_line(format_args!("{c_ty} {tmp} = {own_fn}({val});"));
-        // Free the source if to_owned made a copy (data pointers differ).
-        // This prevents the RC-bumped clone from leaking when to_owned detaches.
-        self.emit_line(format_args!("if ({tmp}.data != {val}.data) {free_fn}({val});"));
+        // Ownership transfer/retaining is handled before this helper. Existing
+        // heap backing is already safe to escape, even when shared. Detaching
+        // and freeing it here can release a borrowed field owned by the caller.
+        self.emit_line(format_args!("{c_ty} {tmp} = {source}.cap > 0 ? {source} : {own_fn}({source});"));
         tmp
     }
 
@@ -4585,11 +4590,38 @@ impl Codegen {
     /// free the previous value only when backing storage changed. Always-free
     /// before assign UAFs `db.tables = replace_table(db.tables, …)` when the
     /// callee returns the same slice header (issue #51).
-    fn emit_assign_owned_value(&mut self, dest: &str, cty: &str, val: &str, free_fn: &str) {
+    fn append_releases_backing(&self, cty: &str) -> bool {
+        cty.starts_with("MakoRaw")
+            || cty.strip_prefix("MakoArr_").is_some_and(|element| {
+                !self.struct_own_field_frees(element).is_empty()
+            })
+    }
+
+    fn slice_backing_release(cty: &str) -> &'static str {
+        match cty {
+            "MakoArr_arr_int" | "MakoArr_arr_string"
+            | "MakoArr_arr_float" | "MakoArr_arr_bool"
+            | "MakoArr_arr_byte" => "free",
+            _ => "mako_rc_release",
+        }
+    }
+
+    fn emit_assign_owned_value(&mut self, dest: &str, cty: &str, val: &str, free_fn: &str, is_append: bool) {
+        if is_append && self.append_releases_backing(cty) {
+            self.emit_line(format_args!("{dest} = {val};"));
+            return;
+        }
         let old = self.fresh("old_own");
         self.emit_line(format_args!("{cty} {old} = {dest};"));
         self.emit_line(format_args!("{dest} = {val};"));
-        self.emit_reassign_free(cty, &old, dest, free_fn);
+        if is_append {
+            // Append transfers existing elements on unique growth. Only drop
+            // the superseded backing; deep-freeing it would free moved values.
+            let release = Self::slice_backing_release(cty);
+            self.emit_line(format_args!("if ({old}.data != {dest}.data && {old}.cap > 0 && {old}.data) {release}({old}.data);"));
+        } else {
+            self.emit_reassign_free(cty, &old, dest, free_fn);
+        }
     }
 
     /// Emit free of one Own local (respects conditional `__own` freer flag).
@@ -15805,7 +15837,9 @@ impl Codegen {
                             | "MakoBoolArray"
                     ) || slice_cty.starts_with("MakoArr_")
                       || slice_cty.starts_with("MakoRaw");
-                    let old_ptr = if is_slice && self.current_arena.is_none() {
+                    let old_ptr = if is_self_append && is_slice
+                        && !self.append_releases_backing(&slice_cty)
+                        && self.current_arena.is_none() {
                         let op = self.fresh("old_data");
                         let oc = self.fresh("old_cap");
                         self.emit_line(format_args!("void *{op} = {mn}.data;"));
@@ -15843,8 +15877,9 @@ impl Codegen {
                         self.emit_line(format_args!("{mn} = {val};"));
                     }
                     if let Some((op, oc)) = old_ptr {
+                        let release = Self::slice_backing_release(&slice_cty);
                         self.emit_line(format_args!(
-                            "if ({op} != {mn}.data && {oc} > 0 && {op}) mako_rc_release({op});"
+                            "if ({op} != {mn}.data && {oc} > 0 && {op}) {release}({op});"
                         ));
                     }
                     if cond_own {
@@ -16018,11 +16053,10 @@ impl Codegen {
                 } else {
                     (vty, v)
                 };
-                // Heapify POD stack/view slices before storing into maps/nested arrays.
-                v = self.ensure_slice_owned(&vty, v);
                 // Move live owns / clone aliases & field borrows so container free
                 // does not double-free with a still-live source owner.
                 v = self.prepare_own_store_rhs(value, &vty, v);
+                v = self.ensure_slice_owned(&vty, v);
                 // Layout-compatible tuple retag: (int, Option[string]) map vs lit that
                 // monomorphized as MakoTup_int_opt_int (None leaves no string metadata).
                 if let Some(exp_vty) = self.map_value_c_ty(&bty) {
@@ -16156,6 +16190,10 @@ impl Codegen {
             }
             Stmt::FieldAssign { base, field, value } => {
                 // Chained index+field: w.routes[0].path = "x"
+                let destination = Expr::Field { base: Box::new(base.clone()), field: field.clone() };
+                let is_append = matches!(value, Expr::Call { callee, args }
+                    if matches!(callee.as_ref(), Expr::Ident(name) if name == "append")
+                    && args.first() == Some(&destination));
                 // Use _get_ptr to get an lvalue pointer into the array element.
                 // Type checker guarantees an indexed field-assign base is a struct array.
                 if let Expr::Index {
@@ -16168,8 +16206,8 @@ impl Codegen {
                         let (_, idx) = self.emit_expr(index);
                         let (vty, v) = self.emit_expr(value);
                         let (vty, v) = Self::coerce_user_struct_value(&vty, v);
-                        let v = self.ensure_slice_owned(&vty, v);
                         let v = self.prepare_own_store_rhs(value, &vty, v);
+                        let v = self.ensure_slice_owned(&vty, v);
                         let tmp = self.fresh("ifield");
                         self.emit_line(format_args!("int64_t {tmp} = {idx};"));
                         let sn = sn.to_string();
@@ -16184,6 +16222,7 @@ impl Codegen {
                                 &vty,
                                 &v,
                                 &field_free,
+                                is_append,
                             );
                             return;
                         }
@@ -16195,10 +16234,10 @@ impl Codegen {
                 let (vty, v) = self.emit_expr(value);
                 let (vty, v) = Self::coerce_user_struct_value(&vty, v);
                 // Escape POD stack/views into long-lived struct fields.
-                let v = self.ensure_slice_owned(&vty, v);
                 // Move live owns / clone aliases & field borrows — struct field free
                 // at drop must not double-free with a still-live source.
                 let v = self.prepare_own_store_rhs(value, &vty, v);
+                let v = self.ensure_slice_owned(&vty, v);
                 let arrow = if bty.ends_with('*') && !bty.starts_with("Mako") {
                     "->"
                 } else {
@@ -16211,7 +16250,7 @@ impl Codegen {
                             if self.own_cond_flags.contains(&mn) {
                                 self.emit_line(format_args!("if ({mn}__own) {{"));
                                 self.indent += 1;
-                                self.emit_assign_owned_value(&dest, &vty, &v, &field_free);
+                                self.emit_assign_owned_value(&dest, &vty, &v, &field_free, is_append);
                                 self.indent -= 1;
                                 self.emit_line(format_args!("}} else {{"));
                                 self.indent += 1;
@@ -16220,7 +16259,7 @@ impl Codegen {
                                 self.emit_line(format_args!("}}"));
                                 self.emit_line(format_args!("{mn}__own = 1;"));
                             } else {
-                                self.emit_assign_owned_value(&dest, &vty, &v, &field_free);
+                                self.emit_assign_owned_value(&dest, &vty, &v, &field_free, is_append);
                             }
                             if Self::own_free_fn(&bty).is_some()
                                 || !self.struct_own_field_frees(&bty).is_empty()
@@ -24787,6 +24826,11 @@ impl Codegen {
                             // Return the masked payload as int64; the Let handler
                             // casts to the declared struct type via __ACTOR_UNBOX marker.
                             return ("__ACTOR_UNBOX".into(), format!("({pv} & 0x0000ffffffffffffLL)"));
+                        }
+                        "actor_free_payload" if args.len() == 1 => {
+                            let (_, pv) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_actor_free_payload({pv});"));
+                            return ("void".into(), "".into());
                         }
                         "actor_msg_tag" => {
                             let (_, m) = self.emit_expr(&args[0]);
@@ -35994,14 +36038,13 @@ impl Codegen {
                 for (fname, fexpr) in fields {
                     let (fty, v) = self.emit_expr(fexpr);
                     let (fty, v) = Self::coerce_user_struct_value(&fty, v);
-                    // Heapify POD stack/view slices stored in struct fields.
-                    let v = self.ensure_slice_owned(&fty, v);
                     // Move a fresh/live owner into the field, but clone a borrowed alias.
                     // A bare move of a parameter stored the caller's buffer in
                     // the returned struct (`st_0.s = s`), so the struct outlived
                     // a borrow it did not own — safe only because the caller was
                     // then forced to leak the original.
                     let v = self.prepare_own_store_rhs(fexpr, &fty, v);
+                    let v = self.ensure_slice_owned(&fty, v);
                     self.line(&format!("{tmp}.{fname} = {v};"));
                 }
                 (cty, tmp)
@@ -36096,9 +36139,9 @@ impl Codegen {
                 for (i, vexpr) in values.iter().enumerate() {
                     let (fty, v) = self.emit_expr(vexpr);
                     let (fty, v) = Self::coerce_user_struct_value(&fty, v);
-                    let v = self.ensure_slice_owned(&fty, v);
                     // Same as the named form: move a live owner, clone a borrow.
                     let v = self.prepare_own_store_rhs(vexpr, &fty, v);
+                    let v = self.ensure_slice_owned(&fty, v);
                     if let Some(fname) = field_names.get(i) {
                         self.line(&format!("{tmp}.{fname} = {v};"));
                     }
@@ -42832,8 +42875,9 @@ fn main() {
             "nested arr[i].field = append(...) must dest-destroy the old header (issue #53):\n{ins}"
         );
         assert!(
-            ins.contains("mako_str_array_free") || ins.contains("mako_int_array_free"),
-            "nested field append must free replaced slice headers:\n{ins}"
+            ins.contains("mako_rc_release(__mako_old_own_")
+                && !ins.contains("mako_str_array_free(__mako_old_own_"),
+            "append must release old backing without freeing transferred strings:\n{ins}"
         );
     }
 

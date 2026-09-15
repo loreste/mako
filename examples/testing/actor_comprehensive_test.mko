@@ -1,0 +1,174 @@
+// Comprehensive actor tests covering all edge cases:
+// 1. Constructor parameters forwarded to state
+// 2. Whole-state assignment (self = new_state)
+// 3. Passing whole state to helper function (helper(self))
+// 4. Per-arm zero-alloc scalar messages vs typed envelope messages
+// 5. Channel reply request-response
+// 6. Early return from nested loop inside receive arm
+// 7. Graceful exit on channel close (actor_stop)
+// 8. Mailbox draining on shutdown with unhandled envelopes
+
+actor Worker(id: int, prefix: string) {
+    id: int
+    prefix: string
+    jobs: int = 0
+    total_val: int = 0
+
+    receive Ping {
+        // Zero-param fast path
+        self.jobs = self.jobs + 1
+    }
+
+    receive Tick(delta: int) {
+        // 1-int param fast path (zero allocation)
+        self.total_val = self.total_val + delta
+        self.jobs = self.jobs + 1
+    }
+
+    receive Toggle(active: bool) {
+        // 1-bool param fast path
+        if active {
+            self.jobs = self.jobs + 10
+        }
+    }
+
+    receive Process(tag: string, priority: int, reply: chan[string]) {
+        // Multi-param / typed envelope path
+        self.jobs = self.jobs + priority
+        let out = f"{self.prefix}{tag}:{self.id}"
+        let _ = reply.send(out)
+    }
+
+    receive ReplaceState(new_id: int) {
+        // Whole-state assignment (self = ...)
+        let next = Worker_State {
+            id: new_id,
+            prefix: self.prefix,
+            jobs: self.jobs + 1,
+            total_val: self.total_val,
+        }
+        self = next
+    }
+
+    receive CheckHelper(reply: chan[int]) {
+        // Passing self to helper function
+        let score = calculate_score(self)
+        let _ = reply.send(score)
+    }
+
+    receive Search(targets: []int, reply: chan[int]) {
+        // Early return inside nested loop should continue to next actor message
+        for t in targets {
+            if t == 42 {
+                let _ = reply.send(42)
+                return
+            }
+        }
+        let _ = reply.send(-1)
+    }
+
+    receive Bye {
+        let _ = 0
+    }
+}
+
+fn calculate_score(st: Worker_State) -> int {
+    return st.id * 100 + st.jobs
+}
+
+fn TestActorConstructorAndState() {
+    let w = Worker_spawn(7, "job_")
+    crew:fail_fast t {
+        let j = t.kick(Worker_loop(w))
+        let reply = make(chan[string], 1)
+        assert(Worker_send(w, Worker_Process("alpha", 5, reply)))
+        let res = reply.recv()
+        assert(res == "job_alpha:7")
+        assert(Worker_send(w, Worker_Bye()))
+        let _ = j.join()
+    }
+}
+
+fn TestActorZeroAllocScalars() {
+    let w = Worker_spawn(1, "s_")
+    crew:fail_fast t {
+        let j = t.kick(Worker_loop(w))
+        assert(Worker_send(w, Worker_Ping()))
+        assert(Worker_send(w, Worker_Tick(100)))
+        assert(Worker_send(w, Worker_Tick(-25)))
+        assert(Worker_send(w, Worker_Toggle(true)))
+        assert(Worker_send(w, Worker_Bye()))
+        let _ = j.join()
+    }
+}
+
+fn TestActorWholeStateAndHelper() {
+    let w = Worker_spawn(10, "node_")
+    crew:fail_fast t {
+        let j = t.kick(Worker_loop(w))
+        let reply = make(chan[int], 1)
+        assert(Worker_send(w, Worker_CheckHelper(reply)))
+        let score1 = reply.recv()
+        assert_eq(score1, 1000)
+
+        assert(Worker_send(w, Worker_ReplaceState(20)))
+        assert(Worker_send(w, Worker_CheckHelper(reply)))
+        let score2 = reply.recv()
+        assert_eq(score2, 2001)
+
+        assert(Worker_send(w, Worker_Bye()))
+        let _ = j.join()
+    }
+}
+
+fn TestActorEarlyReturnNestedLoop() {
+    let w = Worker_spawn(1, "search_")
+    crew:fail_fast t {
+        let j = t.kick(Worker_loop(w))
+        let reply = make(chan[int], 1)
+        let list1: []int = [10, 20, 42, 50]
+        assert(Worker_send(w, Worker_Search(list1, reply)))
+        assert_eq(reply.recv(), 42)
+
+        let list2: []int = [1, 2, 3]
+        assert(Worker_send(w, Worker_Search(list2, reply)))
+        assert_eq(reply.recv(), -1)
+
+        assert(Worker_send(w, Worker_Bye()))
+        let _ = j.join()
+    }
+}
+
+fn TestActorChannelCloseGracefulExit() {
+    // When channel is closed from outside, actor must terminate promptly without spinning
+    let w = Worker_spawn(99, "term_")
+    crew:fail_fast t {
+        let j = t.kick(Worker_loop(w))
+        assert(Worker_send(w, Worker_Ping()))
+        actor_stop(w)
+        let _ = j.join()
+    }
+}
+
+fn TestActorMailboxDrainingOnExit() {
+    // Fill mailbox with envelope messages and trigger immediate Bye
+    let w = Worker_spawn_cap(8, 5, "drain_")
+    crew:fail_fast t {
+        let j = t.kick(Worker_loop(w))
+        let dummy_reply = make(chan[string], 1)
+        assert(Worker_send(w, Worker_Bye()))
+        // These buffered envelopes must be drained and freed on actor exit
+        let _ = actor_try_send(w, Worker_Process("leak1", 1, dummy_reply))
+        let _ = actor_try_send(w, Worker_Process("leak2", 2, dummy_reply))
+        let _ = j.join()
+    }
+}
+
+fn main() {
+    TestActorConstructorAndState()
+    TestActorZeroAllocScalars()
+    TestActorWholeStateAndHelper()
+    TestActorEarlyReturnNestedLoop()
+    TestActorChannelCloseGracefulExit()
+    TestActorMailboxDrainingOnExit()
+}

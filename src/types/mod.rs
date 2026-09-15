@@ -18002,6 +18002,10 @@ impl TypeChecker {
                             }
                             return Ok(Type::Int);
                         }
+                        "actor_free_payload" if args.len() == 1 => {
+                            let _ = self.check_expr(&args[0])?;
+                            return Ok(Type::Void);
+                        }
                         "dbg_str" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             if t != Type::String {

@@ -2,19 +2,21 @@
 
 ## 0.6.35
 
-- Fix actor `self.field` resolution in indexed assignments and nested receive
-  bodies, including typed messages in multi-file projects (#63). State reads in
-  match guards, interpolated strings, and other nested expressions now use the
-  same actor state binding.
-- Expand deferred actors before type checking in `mako check` and `mako lint`,
-  so generated actor functions resolve in those commands as they do in builds.
-
-- Actor early return in receive arms:
-  - `return` inside a `receive` arm now continues to the next message instead of exiting the actor loop function, enabling guard-style short-circuit logic without extra nesting.
-- Actor constructor parameters:
-  - Actors accept constructor params at spawn time: `actor Engine(wal_path: string) { ... }` generates `Engine_spawn(wal_path)`. Parameters are evaluated once at spawn and forwarded to field initialisers.
-- Self aliasing workaround documented:
-  - When multiple `self.field` reads appear in the same call expression, binding to locals first avoids aliasing issues in the generated C code.
+- Comprehensive Actor Feature Suite and Memory Safety:
+  - Constructor parameters: `actor Name(ctor_params...) { ... }` generates `Name_spawn(ctor_params...)` and `Name_spawn_cap(cap, ctor_params...)`, automatically registering parameters as state fields accessible on `self.param` across all receive arms.
+  - Whole-state assignment: `self = new_state` in receive arms allows complete atomic state transitions.
+  - Whole-state helper passing: `helper(self)` passes the mutable actor state struct to external functions.
+  - Per-arm zero-allocation fast path: 0-parameter messages and single `int`/`int64` scalar messages bypass heap allocations entirely, bit-packing tags and 48-bit payloads (`mako_actor_pack`), enabling Rust-speed scalar message throughput even in mixed actors.
+  - Typed message payloads: complex parameters (`string`, `chan[T]`, slices, structs) are automatically packed into typed envelope structs with caller-owns semantics.
+  - Labeled early return in receive arms: `return` inside a `receive` arm targets `continue __actor_loop`, cleanly aborting message handling and resuming the actor loop without exiting the function or breaking prematurely from nested `for`/`while` loops.
+  - Graceful channel close: detects tag 0 when the actor mailbox is closed (`actor_stop`), cleanly terminating the actor loop without 100% CPU spinning.
+  - Mailbox draining on shutdown: automatically drains and frees unhandled envelope payloads (`actor_free_payload`) on exit, guaranteeing zero memory leaks even if messages remain buffered when the actor stops.
+  - Fix actor `self.field` resolution in indexed assignments, match guards, interpolated strings, and nested receive bodies in multi-file projects (#63).
+  - Expand deferred actors before type checking in `mako check` and `mako lint` so generated actor functions resolve consistently.
+- Memory Safety & Slice Allocator Fixes:
+  - Added `MakoArr_arr_byte` to `slice_backing_release` using matching `free()`, resolving double-free and invalid-free crashes on nested byte slices.
+  - Distinguish slice append buffer growth from reassignments to eliminate double-free of transferred elements.
+  - Add comprehensive adversarial actor tests (`examples/testing/actor_comprehensive_test.mko` and `examples/testing/actor_nested_state_test.mko`) passing cleanly under AddressSanitizer.
 
 ## 0.6.34
 
