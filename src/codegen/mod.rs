@@ -4117,8 +4117,9 @@ impl Codegen {
                 ));
             }
             "MakoStrArray" => {
+                // Free individual string elements before releasing backing.
                 self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
+                    "if ({old}.data != {new}.data) mako_str_array_free({old});"
                 ));
             }
             other if other.starts_with("MakoArr_") => {
@@ -16851,6 +16852,20 @@ impl Codegen {
                     && lt == "MakoString"
                     && rt == "MakoString"
                 {
+                    // Free owned string temps after comparison.
+                    let left_owned = Self::expr_is_owned_print_temp(left) && !self.own_drop_live.contains(&lv);
+                    let right_owned = Self::expr_is_owned_print_temp(right) && !self.own_drop_live.contains(&rv);
+                    if left_owned || right_owned {
+                        let tmp = self.fresh("seq");
+                        self.emit_line(format_args!("bool {tmp} = mako_str_eq({lv}, {rv});"));
+                        if left_owned { self.emit_line(format_args!("mako_str_free({lv});")); }
+                        if right_owned { self.emit_line(format_args!("mako_str_free({rv});")); }
+                        return if *op == BinOp::Eq {
+                            ("bool".into(), tmp)
+                        } else {
+                            ("bool".into(), format!("(!{tmp})"))
+                        };
+                    }
                     let eq = format!("mako_str_eq({lv}, {rv})");
                     return if *op == BinOp::Eq {
                         ("bool".into(), eq)
@@ -36367,6 +36382,15 @@ impl Codegen {
                         let lit = self.fresh("elit");
                         self.line(&format!("{c_elem} {lit}[] = {{ {} }};", vals.join(", ")));
                         self.line(&format!("{outer} {tmp} = {ctor}({lit}, {});", elems.len()));
+                        // Free owned string element temps (array_of clones them).
+                        if c_elem == "MakoString" {
+                            for (expr, val) in elems.iter().zip(&vals) {
+                                if Self::expr_is_owned_print_temp(expr) {
+                                    self.emit_line(format_args!("mako_str_free({val});"));
+                                    self.note_own_drop_moved(val);
+                                }
+                            }
+                        }
                         return (outer.to_string(), tmp);
                     }
                     // Element is itself a slice (`[a]` where a is []int): build
