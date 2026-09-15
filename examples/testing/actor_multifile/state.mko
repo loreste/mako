@@ -1,0 +1,12 @@
+struct Database {
+    current_user: string = ""
+    in_tx: int = 0
+}
+
+fn db_open(user: string) -> Database {
+    return Database { current_user: user, in_tx: 1 }
+}
+
+fn make_user(prefix: string, suffix: string) -> string {
+    return prefix + suffix
+}

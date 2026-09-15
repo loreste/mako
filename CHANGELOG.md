@@ -2,6 +2,13 @@
 
 ## 0.6.35
 
+- Fix actor `self.field` resolution in indexed assignments and nested receive
+  bodies, including typed messages in multi-file projects (#63). State reads in
+  match guards, interpolated strings, and other nested expressions now use the
+  same actor state binding.
+- Expand deferred actors before type checking in `mako check` and `mako lint`,
+  so generated actor functions resolve in those commands as they do in builds.
+
 - Actor early return in receive arms:
   - `return` inside a `receive` arm now continues to the next message instead of exiting the actor loop function, enabling guard-style short-circuit logic without extra nesting.
 - Actor constructor parameters:

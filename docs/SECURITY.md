@@ -115,6 +115,17 @@ state. The adversarial fixtures are
 `examples/bad/kick_mutable_closure_capture.mko`,
 `kick_mutable_lambda_capture.mko`, and `fan_capture.mko`. TSan remains a
 runtime smoke check (`makori test --race`) for the runtime and FFI boundary.
+
+Actor receive handlers keep state in the loop's mutable local, including indexed
+updates and nested expressions in typed messages. Rewriting `self.field` does
+not bypass capture checks: `examples/bad/actor_state_kick_capture.mko` must be
+rejected. The C-backend regression at
+`examples/testing/actor_multifile/actor_test.mko` checks allocated string payloads,
+imported state types, and two concurrent producers updating state through a
+bounded mailbox. Run it with `mako test --backend c --race` or
+`mako test --backend c --sanitize address,undefined` to exercise race and memory
+checks. These checks cover the exercised paths; they are not a guarantee for
+arbitrary FFI or unsafe code.
 **Uuid is Copy** — free re-read under `hold`, kick without move. The native
 backend clones string-like task arguments, including string-backed `Uuid`, at
 the `kick` boundary so the child task owns its payload without aliasing the

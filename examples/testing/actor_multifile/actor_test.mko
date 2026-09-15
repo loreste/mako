@@ -1,0 +1,85 @@
+pull "state.mko"
+
+// Regression for #63: typed receive state, imported types, and indexed writes.
+actor FayEngine {
+    db: Database = db_open("")
+    slots: []int = make([]int, 1)
+
+    receive Init(user: string, reply: chan[string]) {
+        self.db = db_open(user)
+        let _ = reply.send(self.db.current_user)
+    }
+    receive Exec(sid: int, user: string, reply: chan[string], done: chan[int]) {
+        self.db.current_user = user
+        self.slots[sid] = self.db.in_tx + 6
+        for i in [0] {
+            self.slots[i] = self.slots[i] + 1
+        }
+        let snapshot = f"{self.db.current_user}"
+        assert(snapshot == user)
+        let result = match sid {
+            n if n == self.db.in_tx - 1 => self.slots[n],
+            _ => 0,
+        }
+        assert_eq(result, 8)
+        let _ = reply.send(self.db.current_user)
+        let _ = done.send(self.slots[sid])
+    }
+    receive Bye { let _ = 0 }
+}
+
+fn TestActorMultifileState() {
+    let engine = FayEngine_spawn()
+    crew:fail_fast t {
+        let job = t.kick(FayEngine_loop(engine))
+        let reply = make(chan[string], 1)
+        let done = make(chan[int], 1)
+        assert(FayEngine_send(engine, FayEngine_Init(make_user("hel", "lo"), reply)))
+        assert(reply.recv() == "hello")
+        assert(FayEngine_send(engine, FayEngine_Exec(0, make_user("fa", "y"), reply, done)))
+        assert(reply.recv() == "fay")
+        assert_eq(done.recv(), 8)
+        assert(FayEngine_send(engine, FayEngine_Bye()))
+        let _ = job.join()
+    }
+}
+
+actor Totals {
+    slots: []int = make([]int, 2)
+    receive Add(slot: int, delta: int) {
+        self.slots[slot] = self.slots[slot] + delta
+    }
+    receive Read(reply: chan[int]) {
+        let left = self.slots[0]
+        let right = self.slots[1]
+        let _ = reply.send(left + right)
+    }
+    receive Bye { let _ = 0 }
+}
+
+fn send_updates(mailbox: chan[int], slot: int) {
+    for i in 200 {
+        assert(Totals_send(mailbox, Totals_Add(slot, 1)))
+    }
+}
+
+fn TestActorConcurrentProducers() {
+    let mailbox = Totals_spawn_cap(2)
+    crew:fail_fast t {
+        let actor_job = t.kick(Totals_loop(mailbox))
+        let left = t.kick(send_updates(mailbox, 0))
+        let right = t.kick(send_updates(mailbox, 1))
+        let _ = left.join()
+        let _ = right.join()
+        let reply = make(chan[int], 1)
+        assert(Totals_send(mailbox, Totals_Read(reply)))
+        assert_eq(reply.recv(), 400)
+        assert(Totals_send(mailbox, Totals_Bye()))
+        let _ = actor_job.join()
+    }
+}
+
+fn main() {
+    TestActorMultifileState()
+    TestActorConcurrentProducers()
+}

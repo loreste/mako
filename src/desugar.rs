@@ -379,7 +379,11 @@ fn rewrite_self_fields(expr: &mut Expr, state_name: &str) {
             rewrite_self_fields(left, state_name);
             rewrite_self_fields(right, state_name);
         }
-        Expr::Unary { expr: e, .. } | Expr::Try(e) | Expr::Join(e) => {
+        Expr::Unary { expr: e, .. }
+        | Expr::Try(e)
+        | Expr::Join(e)
+        | Expr::Kick { expr: e, .. }
+        | Expr::ChanOpen { cap: e, .. } => {
             rewrite_self_fields(e, state_name);
         }
         Expr::Call { callee, args } => {
@@ -398,7 +402,21 @@ fn rewrite_self_fields(expr: &mut Expr, state_name: &str) {
             rewrite_self_fields(base, state_name);
             rewrite_self_fields(index, state_name);
         }
-        Expr::Array(xs) | Expr::Tuple(xs) => {
+        Expr::Slice {
+            base,
+            low,
+            high,
+            max,
+        } => {
+            rewrite_self_fields(base, state_name);
+            for bound in [low, high, max].into_iter().flatten() {
+                rewrite_self_fields(bound, state_name);
+            }
+        }
+        Expr::Array(xs)
+        | Expr::Tuple(xs)
+        | Expr::StructLitPos { values: xs, .. }
+        | Expr::Convert { args: xs, .. } => {
             for x in xs {
                 rewrite_self_fields(x, state_name);
             }
@@ -414,6 +432,9 @@ fn rewrite_self_fields(expr: &mut Expr, state_name: &str) {
         Expr::Match { scrutinee, arms } => {
             rewrite_self_fields(scrutinee, state_name);
             for a in arms {
+                if let Some(guard) = &mut a.guard {
+                    rewrite_self_fields(guard, state_name);
+                }
                 rewrite_self_fields(&mut a.body, state_name);
             }
         }
@@ -428,44 +449,169 @@ fn rewrite_self_fields(expr: &mut Expr, state_name: &str) {
             rewrite_self_block(else_block, state_name);
         }
         Expr::Lambda { body, .. } => rewrite_self_fields(body, state_name),
-        _ => {}
+        Expr::StringInterp(parts) => {
+            for part in parts {
+                if let InterpPart::Expr(expr, _) = part {
+                    rewrite_self_fields(expr, state_name);
+                }
+            }
+        }
+        Expr::Make { len, cap, .. } => {
+            for value in [len, cap].into_iter().flatten() {
+                rewrite_self_fields(value, state_name);
+            }
+        }
+        Expr::Fan { collection, mapper } => {
+            rewrite_self_fields(collection, state_name);
+            rewrite_self_fields(mapper, state_name);
+        }
+        Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) | Expr::Ident(_) => {}
     }
 }
 
 fn rewrite_self_block(b: &mut Block, state_name: &str) {
     for s in &mut b.stmts {
-        match s {
-            Stmt::Let { init, .. } | Stmt::Assign { value: init, .. } => {
-                rewrite_self_fields(init, state_name);
+        rewrite_self_stmt(s, state_name);
+    }
+}
+
+// Keep this exhaustive: every receive-body expression must use the same state
+// binding, including statements nested inside typed envelope dispatch arms.
+fn rewrite_self_stmt(s: &mut Stmt, state_name: &str) {
+    match s {
+        Stmt::Let { init, .. } | Stmt::LetMulti { init, .. } | Stmt::Assign { value: init, .. } => {
+            rewrite_self_fields(init, state_name);
+        }
+        Stmt::Expr(e) | Stmt::Return(Some(e)) => rewrite_self_fields(e, state_name),
+        Stmt::If {
+            init,
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            if let Some(init) = init {
+                rewrite_self_stmt(init, state_name);
             }
-            Stmt::Expr(e) | Stmt::Return(Some(e)) => rewrite_self_fields(e, state_name),
-            Stmt::If {
-                cond,
-                then_block,
-                else_block,
-                ..
-            } => {
-                rewrite_self_fields(cond, state_name);
-                rewrite_self_block(then_block, state_name);
-                if let Some(eb) = else_block {
-                    rewrite_self_block(eb, state_name);
-                }
+            rewrite_self_fields(cond, state_name);
+            rewrite_self_block(then_block, state_name);
+            if let Some(eb) = else_block {
+                rewrite_self_block(eb, state_name);
             }
-            Stmt::While { cond, body, .. } => {
-                rewrite_self_fields(cond, state_name);
+        }
+        Stmt::While { cond, body, .. } => {
+            rewrite_self_fields(cond, state_name);
+            rewrite_self_block(body, state_name);
+        }
+        Stmt::IfLet {
+            scrutinee,
+            then_block,
+            else_block,
+            ..
+        } => {
+            rewrite_self_fields(scrutinee, state_name);
+            rewrite_self_block(then_block, state_name);
+            if let Some(eb) = else_block {
+                rewrite_self_block(eb, state_name);
+            }
+        }
+        Stmt::LetCommaOk { base, index, .. } => {
+            rewrite_self_fields(base, state_name);
+            rewrite_self_fields(index, state_name);
+        }
+        Stmt::IndexAssign { base, index, value } => {
+            rewrite_self_fields(base, state_name);
+            rewrite_self_fields(index, state_name);
+            rewrite_self_fields(value, state_name);
+        }
+        Stmt::For { iter, body, .. } => {
+            rewrite_self_fields(iter, state_name);
+            rewrite_self_block(body, state_name);
+        }
+        Stmt::CFor {
+            init,
+            cond,
+            post,
+            body,
+            ..
+        } => {
+            rewrite_self_stmt(init, state_name);
+            rewrite_self_fields(cond, state_name);
+            rewrite_self_stmt(post, state_name);
+            rewrite_self_block(body, state_name);
+        }
+        Stmt::Defer { body }
+        | Stmt::Crew { body, .. }
+        | Stmt::Arena { body, .. }
+        | Stmt::Unsafe { body } => rewrite_self_block(body, state_name),
+        Stmt::Select {
+            timeout_ms,
+            arms,
+            default_arm,
+        } => {
+            rewrite_self_fields(timeout_ms, state_name);
+            for (_, body) in arms {
                 rewrite_self_block(body, state_name);
             }
-            Stmt::FieldAssign { base, value, .. } => {
-                // `self.n = …` → FieldAssign { base: Ident("self"), field: "n" }
-                if matches!(base, Expr::Ident(s) if s == "self") {
-                    *base = Expr::Ident(state_name.into());
-                } else {
-                    rewrite_self_fields(base, state_name);
-                }
-                rewrite_self_fields(value, state_name);
+            if let Some(body) = default_arm {
+                rewrite_self_block(body, state_name);
             }
-            _ => {}
         }
+        Stmt::FieldAssign { base, value, .. } => {
+            // `self.n = …` → FieldAssign { base: Ident("self"), field: "n" }
+            if matches!(base, Expr::Ident(s) if s == "self") {
+                *base = Expr::Ident(state_name.into());
+            } else {
+                rewrite_self_fields(base, state_name);
+            }
+            rewrite_self_fields(value, state_name);
+        }
+        Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod actor_self_tests {
+    use super::*;
+    use crate::{lexer::Lexer, parser::Parser, types::TypeChecker};
+
+    #[test]
+    fn actor_self_state_also_resolves_in_single_file() {
+        // The multi-file CLI fixture must also work with its units combined:
+        // indexed state writes were skipped regardless of the number of files.
+        let source = format!(
+            "{}\n{}",
+            include_str!("../examples/testing/actor_multifile/state.mko"),
+            include_str!("../examples/testing/actor_multifile/actor_test.mko")
+                .replace("pull \"state.mko\"", "")
+        );
+        let parsed = Parser::new(Lexer::new(&source).tokenize().unwrap())
+            .parse()
+            .unwrap();
+        let mut program = desugar(parsed, None);
+        desugar_if_let_all(&mut program);
+        TypeChecker::new().check(&program).unwrap();
+    }
+
+    #[test]
+    fn actor_multifile_check_paths_expand_deferred_actors() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/testing/actor_multifile/actor_test.mko");
+        assert!(crate::tooling::check_file(&path).is_ok());
+        let (ok, report) = crate::tooling::check_file_json_report(&path);
+        assert!(ok, "{report}");
+    }
+
+    #[test]
+    fn actor_self_rewrite_preserves_mutable_capture_rejection() {
+        let source = include_str!("../examples/bad/actor_state_kick_capture.mko");
+        let parsed = Parser::new(Lexer::new(source).tokenize().unwrap())
+            .parse()
+            .unwrap();
+        let mut program = desugar(parsed, None);
+        desugar_if_let_all(&mut program);
+        let error = TypeChecker::new().check(&program).unwrap_err();
+        assert!(error.to_string().contains("mutable capture"), "{error}");
     }
 }
 

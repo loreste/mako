@@ -1,0 +1,26 @@
+// EXPECT: mutable capture
+// Rewriting actor self must not let a worker share mutable actor state.
+fn apply(f: fn(int) -> int, n: int) -> int {
+    return f(n)
+}
+
+actor Counter {
+    count: int = 0
+    receive Add(delta: int) {
+        crew workers {
+            let job = workers.kick(apply(|n| self.count + n, delta))
+            let _ = job.join()
+        }
+    }
+    receive Bye { let _ = 0 }
+}
+
+fn main() {
+    let counter = Counter_spawn()
+    crew t {
+        let job = t.kick(Counter_loop(counter))
+        let _ = Counter_send(counter, Counter_Add(1))
+        let _ = Counter_send(counter, Counter_Bye())
+        let _ = job.join()
+    }
+}

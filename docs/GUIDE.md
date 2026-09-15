@@ -1467,6 +1467,16 @@ fn main() {
 }
 ```
 
+`self.field` also works in indexed assignments (`self.slots[i] = value`) and
+nested receive-body expressions and statements. This applies to both integer
+messages and typed payloads (`string`, `chan[T]`, or multiple parameters),
+including projects where state types and helpers come from other files. See
+`examples/testing/actor_multifile/actor_test.mko` for a runnable example.
+Actor state remains local to the receive loop: capturing it in a kicked worker
+is rejected as a mutable capture. Use messages to coordinate concurrent work.
+Run the typed-message example with `--backend c`; the native backend does not
+yet lower typed actor envelopes.
+
 ### 10.3 Generated Actor API
 
 For an actor declared as `actor Name`:

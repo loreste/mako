@@ -74,6 +74,7 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
     let mut program = merge_path_dependencies(path, program).map_err(|e| {
         Diagnostic::error(&path_s, &src, Span::unknown(), e).emit();
     })?;
+    desugar::desugar_if_let_all(&mut program);
     if is_test_file(path) {
         program
             .items
@@ -286,6 +287,7 @@ fn check_file_structured(path: &Path) -> Result<Program, Diagnostic> {
         .map_err(|e| Diagnostic::error(&path_s, &src, Span::unknown(), e))?;
     let mut program = merge_path_dependencies(path, program)
         .map_err(|e| Diagnostic::error(&path_s, &src, Span::unknown(), e))?;
+    desugar::desugar_if_let_all(&mut program);
     if is_test_file(path) {
         program
             .items

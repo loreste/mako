@@ -714,6 +714,15 @@ cancelled).
 
 ### Actors with owned state and message payloads
 
+Receive handlers access state through `self.field`, including indexed writes
+such as `self.slots[i] = value` and nested control flow. Typed payloads and
+multi-file projects use the same state binding; state types and helper functions
+may be defined in imported files. A complete example is
+`examples/testing/actor_multifile/actor_test.mko`.
+Capturing mutable actor state in a kicked worker is rejected; communicate through
+messages to keep state updates in the receive loop.
+Use `--backend c` for typed actor envelopes; native lowering is not yet supported.
+
 Actors can maintain private internal state fields and accept parameters in message handlers:
 
 ```mko
