@@ -1,0 +1,209 @@
+// Adversarial memory safety tests: push every ownership boundary
+
+// ---- COW slice stress ----
+
+fn TestCowStressCloneAppend() {
+    // Clone a slice, append to both — COW must detach correctly
+    for round in 50 {
+        let mut xs = [1, 2, 3]
+        let mut ys = make([]int, 3, 3)
+        let _ = copy(ys, xs)
+        xs = append(xs, round)
+        ys = append(ys, round * 2)
+        assert_eq(len(xs), 4)
+        assert_eq(len(ys), 4)
+        assert_eq(xs[3], round)
+        assert_eq(ys[3], round * 2)
+        assert_eq(xs[0], 1)
+        assert_eq(ys[0], 1)
+    }
+}
+
+fn TestCowStringSliceOverwrite() {
+    // Overwrite every element in a string slice — frees must not double-free
+    let mut ss: []string = ["a", "b", "c", "d", "e"]
+    for i in 5 {
+        ss[i] = "replaced_" + string(i)
+    }
+    if ss[0] != "replaced_0" { exit(1) }
+    if ss[4] != "replaced_4" { exit(1) }
+    // Reassign entire slice — old strings must all be freed
+    ss = ["x"]
+    if ss[0] != "x" { exit(1) }
+}
+
+fn TestCowNestedSliceDrop() {
+    // Nested [][]int: outer drop must free each inner slice
+    let mut grid = make([][]int, 0, 8)
+    for i in 20 {
+        let mut row = make([]int, 0, 4)
+        row = append(row, i)
+        row = append(row, i * 2)
+        grid = append(grid, row)
+    }
+    assert_eq(len(grid), 20)
+    assert_eq(grid[19][1], 38)
+    // grid goes out of scope — must free 20 inner slices + outer
+}
+
+// ---- Raw array stress ----
+
+fn consume_raw(xs: raw []int) -> int {
+    let mut sum = 0
+    for v in xs { sum = sum + v }
+    return sum
+}
+
+fn TestRawArrayStressAllocFree() {
+    for round in 100 {
+        let mut xs: raw []int = make(raw []int, 0, 1)
+        for i in 50 {
+            xs = append(xs, i * round)
+        }
+        assert_eq(len(xs), 50)
+        assert_eq(xs[0], 0)
+        // xs auto-dropped at end of loop iteration
+    }
+}
+
+fn TestRawStringArrayDrops() {
+    // Raw string array: each string must be freed on drop
+    let mut ss: raw []string = make(raw []string, 0, 8)
+    for i in 30 {
+        ss = append(ss, "item_" + string(i))
+    }
+    assert_eq(len(ss), 30)
+    // Overwrite elements — old strings freed
+    ss[0] = "new_first"
+    ss[29] = "new_last"
+    if ss[0] != "new_first" { exit(1) }
+    // ss dropped at scope exit: must free all 30 strings + backing
+}
+
+// ---- Scope exit cleanup ----
+
+fn TestNestedScopeDropOrder() {
+    let mut outer = [100, 200, 300]
+    {
+        let mut inner1: []string = ["hello", "world"]
+        {
+            let mut inner2: raw []int = make(raw []int, 3, 3)
+            inner2[0] = 1
+            // inner2 freed here (raw: unconditional free)
+        }
+        inner1 = append(inner1, "!")
+        assert_eq(len(inner1), 3)
+        // inner1 freed here (COW: rc release)
+    }
+    outer = append(outer, 400)
+    assert_eq(len(outer), 4)
+    // outer freed here
+}
+
+fn TestReassignInLoop() {
+    // Each iteration reassigns — old backing must be freed
+    let mut xs: []string = []
+    for i in 50 {
+        xs = ["iter_" + string(i)]
+        if xs[0] != "iter_" + string(i) { exit(1) }
+    }
+    assert_eq(len(xs), 1)
+}
+
+// ---- Map ownership ----
+
+fn TestMapStringValueDrop() {
+    let mut m = make(map[string]string, 4)
+    m["a"] = "alpha"
+    m["b"] = "beta"
+    m["c"] = "gamma"
+    // Overwrite — old value must be freed
+    m["a"] = "ALPHA"
+    if m["a"] != "ALPHA" { exit(1) }
+    // Delete — value freed
+    delete(m, "b")
+    assert_eq(len(m), 2)
+    // m dropped at scope exit: must free all keys + values
+}
+
+// ---- Channel ownership ----
+
+fn TestChannelStringOwnership() {
+    let ch = make(chan[string], 4)
+    crew t {
+        let j = t.kick(chan_string_producer(ch))
+        for i in 10 {
+            let msg = ch.recv()
+            if len(msg) == 0 { exit(1) }
+        }
+        let _ = j.join()
+    }
+}
+
+fn chan_string_producer(ch: chan[string]) -> int {
+    for i in 10 {
+        let _ = ch.send("msg_" + string(i))
+    }
+    ch.close()
+    return 0
+}
+
+// ---- Struct ownership ----
+
+struct OwnedPair {
+    key: string
+    value: string
+}
+
+fn TestStructOwnedFieldDrop() {
+    let mut pairs: []OwnedPair = []
+    for i in 20 {
+        pairs = append(pairs, OwnedPair { key: "k" + string(i), value: "v" + string(i) })
+    }
+    assert_eq(len(pairs), 20)
+    // pairs dropped: must free 20 key strings + 20 value strings + backing
+}
+
+// ---- Result/Option ownership ----
+
+fn maybe_parse(s: string) -> Result[int, string] {
+    if s == "bad" {
+        return Err("parse failed: " + s)
+    }
+    return Ok(42)
+}
+
+fn TestResultStringOwnership() {
+    for i in 20 {
+        let r = maybe_parse("good")
+        match r {
+            Ok(v) => assert_eq(v, 42),
+            Err(e) => exit(1),
+        }
+    }
+    for i in 20 {
+        let r = maybe_parse("bad")
+        match r {
+            Ok(v) => exit(1),
+            Err(e) => {
+                if e != "parse failed: bad" { exit(1) }
+            },
+        }
+    }
+}
+
+fn main() {
+    TestCowStressCloneAppend()
+    TestCowStringSliceOverwrite()
+    TestCowNestedSliceDrop()
+    TestRawArrayStressAllocFree()
+    TestRawStringArrayDrops()
+    TestNestedScopeDropOrder()
+    TestReassignInLoop()
+    TestMapStringValueDrop()
+    TestChannelStringOwnership()
+    TestStructOwnedFieldDrop()
+    TestResultStringOwnership()
+    // Note: C backend has known string temp leaks in loop concat/struct/result paths.
+    // Raw array, COW clone/append, and scope cleanup are verified leak-free.
+}
