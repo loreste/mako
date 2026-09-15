@@ -6898,9 +6898,20 @@ impl Codegen {
             }
             let _ = writeln!(self.out, "        }}");
         }
-        // Caller dest-destroys the old header (same contract as
-        // mako_str_array_append / mako_slice_append). Freeing here plus
-        // field-assign dest-destroy double-freed unique growth.
+        // Free old elements' owned fields before releasing old backing.
+        // The clones above created independent copies in nd; the originals
+        // in s.data are now orphaned and must be freed.
+        let struct_field_frees = self.struct_own_field_frees(&c_name);
+        if !struct_field_frees.is_empty() {
+            let _ = writeln!(self.out, "        if (!mako_rc_shared(s.data)) {{");
+            let _ = writeln!(self.out, "            for (size_t i = 0; i < s.len; i++) {{");
+            for (path, free_fn) in &struct_field_frees {
+                let _ = writeln!(self.out, "                {free_fn}(s.data[i].{path});");
+            }
+            let _ = writeln!(self.out, "            }}");
+            let _ = writeln!(self.out, "        }}");
+            let _ = writeln!(self.out, "        mako_rc_release(s.data);");
+        }
         let _ = writeln!(self.out, "        s.data = nd;");
         let _ = writeln!(self.out, "        s.cap = ncap;");
         let _ = writeln!(self.out, "    }}");
@@ -15789,7 +15800,8 @@ impl Codegen {
                             | "MakoStrArray"
                             | "MakoFloatArray"
                             | "MakoBoolArray"
-                    );
+                    ) || slice_cty.starts_with("MakoArr_")
+                      || slice_cty.starts_with("MakoRaw");
                     let old_ptr = if is_slice && self.current_arena.is_none() {
                         let op = self.fresh("old_data");
                         let oc = self.fresh("old_cap");
