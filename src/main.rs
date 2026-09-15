@@ -4046,9 +4046,11 @@ fn compile_to_ast_with(file: &Path, incr: &incremental::IncrOptions) -> Result<a
         Diagnostic::error(&path, &src, Span::unknown(), e).emit();
     })?;
     // Package-per-directory: compile entry + sibling units as one package.
-    let program = tooling::merge_package_dir_siblings(file, program).map_err(|e| {
+    let mut program = tooling::merge_package_dir_siblings(file, program).map_err(|e| {
         Diagnostic::error(&path, &src, Span::unknown(), e).emit();
     })?;
+    // Re-run if-let/embed desugar on merged program (imported/sibling files may have IfLet).
+    desugar::desugar_if_let_all(&mut program);
     let mut program = tooling::merge_path_dependencies(file, program).map_err(|e| {
         Diagnostic::error(&path, &src, Span::unknown(), e).emit();
     })?;

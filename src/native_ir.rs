@@ -4637,7 +4637,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.drop_loop_body_scope(&owned_before, &locals_before);
                 self.terminate(Terminator::Jump(cont_target))?;
             }
-            Stmt::IfLet { .. } => unreachable!("if let desugared before IR"),
+            Stmt::IfLet { .. } => { return Err(IrError("internal: if let was not desugared".into())); },
             Stmt::Unsafe { body } => {
                 self.lower_block(body)?;
             }

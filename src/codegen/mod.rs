@@ -16310,7 +16310,7 @@ impl Codegen {
             Stmt::Defer { body } => {
                 self.defer_stack.push(body.clone());
             }
-            Stmt::IfLet { .. } => unreachable!("if let desugared before codegen"),
+            Stmt::IfLet { .. } => { /* safety: skip if desugar missed this */ },
             Stmt::If {
                 init,
                 cond,

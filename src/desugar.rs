@@ -44,12 +44,24 @@ pub fn desugar(mut program: Program, source_path: Option<&str>) -> Program {
     kept.extend(extras);
     let mut prog = Program { items: kept };
     for item in &mut prog.items {
-        if let Item::Fn(f) = item {
-            let base_dir = source_path
-                .and_then(|p| std::path::Path::new(p).parent())
-                .map(|p| p.to_path_buf());
-            desugar_if_let_block(&mut f.body);
-            resolve_embed_block(&mut f.body, base_dir.as_deref());
+        match item {
+            Item::Fn(f) => {
+                let base_dir = source_path
+                    .and_then(|p| std::path::Path::new(p).parent())
+                    .map(|p| p.to_path_buf());
+                desugar_if_let_block(&mut f.body);
+                resolve_embed_block(&mut f.body, base_dir.as_deref());
+            }
+            Item::On(on) => {
+                for m in &mut on.methods {
+                    desugar_if_let_block(&mut m.body);
+                    let base_dir = source_path
+                        .and_then(|p| std::path::Path::new(p).parent())
+                        .map(|p| p.to_path_buf());
+                    resolve_embed_block(&mut m.body, base_dir.as_deref());
+                }
+            }
+            _ => {}
         }
     }
     prog
@@ -761,4 +773,21 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     }));
 
     items
+}
+
+/// Re-run if-let desugaring on a merged program (after resolve_imports / merge).
+/// Imported and merged files may contain IfLet that the initial desugar missed.
+pub fn desugar_if_let_all(program: &mut Program) {
+    for item in &mut program.items {
+        match item {
+            Item::Fn(f) => desugar_if_let_block(&mut f.body),
+            Item::On(on) => {
+                for m in &mut on.methods {
+                    desugar_if_let_block(&mut m.body);
+                    resolve_embed_block(&mut m.body, None);
+                }
+            }
+            _ => {}
+        }
+    }
 }

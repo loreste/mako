@@ -16824,7 +16824,7 @@ impl TypeChecker {
                 self.pending_defers.push(body.clone());
                 Ok(())
             }
-            Stmt::IfLet { .. } => unreachable!("if let desugared before typecheck"),
+            Stmt::IfLet { .. } => { return Err(TypeError::new("internal: if let was not desugared — this is a compiler bug").hint("please report this issue")); },
             Stmt::For {
                 label,
                 binders,
