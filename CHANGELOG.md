@@ -2,6 +2,8 @@
 
 ## 0.6.35
 
+- Fix native typed-actor envelope ownership: queued payloads stay alive until receipt, and receivers release their envelopes and owned fields after handling each message.
+
 - Comprehensive Actor Feature Suite and Memory Safety:
   - Constructor parameters: `actor Name(ctor_params...) { ... }` generates `Name_spawn(ctor_params...)` and `Name_spawn_cap(cap, ctor_params...)`, automatically registering parameters as state fields accessible on `self.param` across all receive arms.
   - Whole-state assignment: `self = new_state` in receive arms allows complete atomic state transitions.

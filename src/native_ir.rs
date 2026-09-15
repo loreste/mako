@@ -3433,8 +3433,12 @@ impl<'a> FunctionLowerer<'a> {
                         });
                         (f, false)
                     } else if matches!(ty, Type::Struct(_)) && inferred == Type::I64 {
-                        // Env-pack borrow of cloned struct.
-                        (value, false)
+                        // Actor envelopes transfer ownership from the mailbox to
+                        // this binding. Other env-pack pointers remain borrowed.
+                        let actor_envelope = matches!(init, Expr::Call { callee, args }
+                            if matches!(callee.as_ref(), Expr::Ident(n) if n == "actor_unbox_payload")
+                                && args.len() == 1);
+                        (value, actor_envelope)
                     } else if ty == Type::ShareInt && inferred == Type::I64 {
                         (value, false)
                     } else if ty == Type::IntSlice && matches!(inferred, Type::IntSlice) {
@@ -16629,6 +16633,21 @@ impl<'a> FunctionLowerer<'a> {
         function: &str,
         args: &[Expr],
     ) -> Result<Option<(Value, Type, bool)>, IrError> {
+        if function == "actor_box_payload" && args.len() == 1 {
+            let (value, ty, owned) = self.lower_expr(&args[0])?;
+            if !matches!(ty, Type::Struct(_)) {
+                return Err(IrError::new("native IR: actor envelope must be a struct"));
+            }
+            // Native structs are already heap blocks. Transfer an owned
+            // temporary, or clone a borrowed value before handing it off.
+            // Generic runtime-call cleanup would free the queued envelope.
+            let value = if owned {
+                value
+            } else {
+                self.emit_clone(value, ty)
+            };
+            return Ok(Some((value, Type::I64, false)));
+        }
         if matches!(function, "error_trace" | "error_wrap_trace") {
             let expected = if function == "error_trace" { 1 } else { 2 };
             if args.len() != expected {
@@ -17982,12 +18001,6 @@ impl<'a> FunctionLowerer<'a> {
             "actor_pack" if args.len() == 2 => Some((
                 "mako_native_actor_pack",
                 &[Type::I64, Type::I64],
-                Some(Type::I64),
-                false,
-            )),
-            "actor_box_payload" if args.len() == 1 => Some((
-                "mako_native_actor_box_payload",
-                &[Type::I64],
                 Some(Type::I64),
                 false,
             )),

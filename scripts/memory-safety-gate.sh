@@ -126,7 +126,8 @@ if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep
   # the dedicated native-memory-safety CI job. This list covers fixtures
   # that compile on both backends.
   for f in examples/testing/memory_safety_contract_test.mko \
-           examples/testing/leak_detector_test.mko; do
+           examples/testing/leak_detector_test.mko \
+           examples/testing/actor_typed_payload_test.mko; do
     if ! "$mako_bin" test "$repo_dir/$f" --backend native --sanitize leak \
          >/tmp/mako-ms-native-leak.out 2>&1; then
       echo "memory-safety-gate: native LSan FAILED on $f" >&2
@@ -148,7 +149,8 @@ if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep
   ms_native_asan_failed=0
   # map_struct_key_test leaks 16 bytes via native struct-key map allocation
   # (mako_native_struct_make_ptr). Tracked as a known native-backend leak.
-  for f in examples/native/owned_handle_drop/native_owned_handle_drop_test.mko; do
+  for f in examples/native/owned_handle_drop/native_owned_handle_drop_test.mko \
+           examples/testing/actor_typed_payload_test.mko; do
     if ! "$mako_bin" test "$repo_dir/$f" --backend native --sanitize address \
          >/tmp/mako-ms-native-asan.out 2>&1; then
       echo "memory-safety-gate: native ASan FAILED on $f" >&2

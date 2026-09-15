@@ -321,6 +321,14 @@ The runtime enforces:
 - No data races across thread boundaries for kicked tasks or channel messaging.
 - Bounds checking on all slice/array indexing in debug and release builds.
 
+Typed actor messages own their heap envelopes while queued. On receipt, the
+generated receive scope takes ownership and releases the envelope and its owned
+fields after handling the message. The native backend must preserve this transfer;
+freeing a boxed temporary at the sender produces a use-after-free at the receiver.
+`scripts/memory-safety-gate.sh` checks `actor_typed_payload_test.mko` with native
+AddressSanitizer and LeakSanitizer on Linux. On macOS, use GuardMalloc and `leaks`
+to check the native executable, since native sanitizer startup is unreliable there.
+
 ---
 
 ## Running with lldb (manual)
