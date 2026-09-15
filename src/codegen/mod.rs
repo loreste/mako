@@ -3945,15 +3945,18 @@ impl Codegen {
 
     /// Heapify a POD slice view on escape (return / store). Identity if `cap>0`.
     fn ensure_slice_owned(&mut self, c_ty: &str, val: String) -> String {
-        let own_fn = match c_ty {
-            "MakoIntArray" => "mako_int_array_to_owned",
-            "MakoByteArray" => "mako_byte_array_to_owned",
-            "MakoFloatArray" => "mako_float_array_to_owned",
-            "MakoBoolArray" => "mako_bool_array_to_owned",
+        let (own_fn, free_fn) = match c_ty {
+            "MakoIntArray" => ("mako_int_array_to_owned", "mako_int_array_free"),
+            "MakoByteArray" => ("mako_byte_array_to_owned", "mako_byte_array_free"),
+            "MakoFloatArray" => ("mako_float_array_to_owned", "mako_float_array_free"),
+            "MakoBoolArray" => ("mako_bool_array_to_owned", "mako_bool_array_free"),
             _ => return val,
         };
         let tmp = self.fresh("own");
         self.emit_line(format_args!("{c_ty} {tmp} = {own_fn}({val});"));
+        // Free the source if to_owned made a copy (data pointers differ).
+        // This prevents the RC-bumped clone from leaking when to_owned detaches.
+        self.emit_line(format_args!("if ({tmp}.data != {val}.data) {free_fn}({val});"));
         tmp
     }
 
