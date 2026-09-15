@@ -602,6 +602,22 @@ impl Parser {
     fn parse_actor(&mut self) -> Result<ActorDef, ParseError> {
         self.expect(TokenKind::Actor)?;
         let name = self.expect_ident()?;
+        // Optional constructor params: actor Engine(wal_path: string) { ... }
+        let ctor_params = if matches!(self.peek_kind(), TokenKind::LParen) {
+            self.bump();
+            let mut ps = Vec::new();
+            while !matches!(self.peek_kind(), TokenKind::RParen) {
+                let pname = self.expect_ident()?;
+                self.expect(TokenKind::Colon)?;
+                let pty = self.parse_type()?;
+                ps.push((pname, pty));
+                if matches!(self.peek_kind(), TokenKind::Comma) { self.bump(); } else { break; }
+            }
+            self.expect(TokenKind::RParen)?;
+            ps
+        } else {
+            vec![]
+        };
         self.expect(TokenKind::LBrace)?;
         let mut fields = Vec::new();
         let mut receives = Vec::new();
@@ -670,6 +686,7 @@ impl Parser {
         self.expect(TokenKind::RBrace)?;
         Ok(ActorDef {
             name,
+            ctor_params,
             fields,
             receives,
         })

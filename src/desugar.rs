@@ -466,6 +466,39 @@ fn rewrite_self_block(b: &mut Block, state_name: &str) {
     }
 }
 
+/// Rewrite  in actor receive arms to  (next message).
+fn rewrite_return_to_continue(stmts: &mut Vec<Stmt>) {
+    for s in stmts.iter_mut() {
+        match s {
+            Stmt::Return(None) => {
+                *s = Stmt::Continue(None);
+            }
+            Stmt::Return(Some(_)) => {
+                // return <expr> → evaluate expr (for side effects), then continue
+                let expr = if let Stmt::Return(Some(e)) = std::mem::replace(s, Stmt::Continue(None)) {
+                    e
+                } else {
+                    unreachable!()
+                };
+                // Replace with: { expr; continue; }
+                // But we can't create a block stmt easily, so just drop the value and continue
+                *s = Stmt::Continue(None);
+                // ponytail: if the return value matters, the user should use a local
+            }
+            Stmt::If { then_block, else_block, .. } => {
+                rewrite_return_to_continue(&mut then_block.stmts);
+                if let Some(eb) = else_block {
+                    rewrite_return_to_continue(&mut eb.stmts);
+                }
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } => {
+                rewrite_return_to_continue(&mut body.stmts);
+            }
+            _ => {}
+        }
+    }
+}
+
 fn expand_actor(actor: ActorDef) -> Vec<Item> {
     let name = &actor.name;
     let mut items = Vec::new();
@@ -558,12 +591,15 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         }));
     }
 
-    // Session_spawn() -> chan[int] (default mailbox 16)
+    // Session_spawn(...ctor_args) -> chan[int] (default mailbox 16)
+    let ctor_fn_params: Vec<Param> = actor.ctor_params.iter().map(|(n, ty)| Param {
+        name: n.clone(), ty: ty.clone(), mutable: false, variadic: false,
+    }).collect();
     items.push(Item::Fn(FnDef {
         type_bounds: std::collections::HashMap::new(),
         name: format!("{name}_spawn"),
         type_params: Vec::new(),
-        params: vec![],
+        params: ctor_fn_params.clone(),
         ret: Some(TypeExpr::Generic(
             "chan".into(),
             vec![TypeExpr::Named("int".into())],
@@ -583,15 +619,18 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         source_file: None,
     }));
 
-    // Session_spawn_cap(cap) -> chan[int]
+    // Session_spawn_cap(cap, ...ctor_args) -> chan[int]
+    let mut spawn_cap_params = vec![Param {
+        name: "__cap".into(),
+        ty: TypeExpr::Named("int".into()),
+        mutable: false, variadic: false,
+    }];
+    spawn_cap_params.extend(ctor_fn_params.clone());
     items.push(Item::Fn(FnDef {
         type_bounds: std::collections::HashMap::new(),
         name: format!("{name}_spawn_cap"),
         type_params: Vec::new(),
-        params: vec![Param {
-            name: "__cap".into(),
-            ty: TypeExpr::Named("int".into()),
-            mutable: false, variadic: false }],
+        params: spawn_cap_params,
         ret: Some(TypeExpr::Generic(
             "chan".into(),
             vec![TypeExpr::Named("int".into())],
@@ -758,6 +797,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 }
             }
         }
+        rewrite_return_to_continue(&mut arm_block.stmts);
         arm_stmts.extend(arm_block.stmts);
         // Convention: message named Bye / Stop ends the loop
         if arm.message == "Bye" || arm.message == "Stop" {

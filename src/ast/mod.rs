@@ -86,6 +86,8 @@ pub struct ConstDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActorDef {
     pub name: String,
+    /// Constructor params: `actor Engine(wal_path: string) { ... }`.
+    pub ctor_params: Vec<(String, TypeExpr)>,
     /// Optional owned state fields (`n: int = 0`); accessed as `self.n` in receives.
     pub fields: Vec<(String, TypeExpr, Option<Expr>)>,
     pub receives: Vec<ReceiveArm>,
