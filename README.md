@@ -189,6 +189,12 @@ message inspection, site history, reports, alerts, and traffic metrics.
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
 
+## New in 0.6.35
+
+- **Actor early return in receive arms:** `return` inside a `receive` arm now skips to the next message instead of exiting the actor loop, enabling guard-style short-circuit logic.
+- **Actor constructor parameters:** Actors accept constructor params at spawn time — `actor Engine(path: string) { ... }` / `Engine_spawn("/tmp/data.wal")`.
+- **Self aliasing workaround:** When multiple `self.field` reads appear in the same call, bind to locals first to avoid aliasing issues in generated C code.
+
 ## New in 0.6.34
 
 - **Actor typed payloads:** `receive` arms now accept `string`, multi-param, and struct payloads (not just `int`). Single `int` keeps zero-allocation packing; multi-param/non-int generates envelope structs. Closes #60.

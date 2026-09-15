@@ -1473,7 +1473,7 @@ For an actor declared as `actor Name`:
 
 | Generated Function | Signature | Description |
 |---|---|---|
-| `Name_spawn()` | `() -> Name` | Allocates actor and mailbox ring buffer |
+| `Name_spawn(ctor_args...)` | `(...) -> Name` | Allocates actor and mailbox ring buffer; forwards constructor params |
 | `Name_spawn_cap(cap)` | `(cap: int) -> Name` | Allocates actor with custom mailbox capacity |
 | `Name_send(actor, msg)` | `(actor: Name, msg: int) -> bool` | Sends message to actor mailbox (blocking) |
 | `Name_try_send(actor, msg)` | `(actor: Name, msg: int) -> int` | Non-blocking send; returns 1 on success, 0 if full |
@@ -1482,7 +1482,26 @@ For an actor declared as `actor Name`:
 | `Name_loop(actor)` | `(actor: Name) -> int` | Executes message processing loop in a crew task |
 | `Name_MsgName(payload...)` | `(...) -> int` | Packs message tag and typed payload(s) into an envelope. Accepts any type (`int`, `string`, `chan[T]`, structs). Single `int` params use zero-allocation packing; multi-param and non-int params generate a heap-allocated envelope struct. |
 
-### 10.4 Actor Supervision Pattern
+### 10.5 Early Return in Receive Arms
+
+`return` inside a `receive` arm skips the rest of that arm and continues to the next message — it does **not** exit the actor loop. This is useful for guard-style short-circuit logic:
+
+```mko
+actor Guard {
+    allowed: int = 0
+    receive Allow { self.allowed = 1 }
+    receive Check(reply: chan[int]) {
+        if self.allowed == 0 {
+            let _ = reply.send(-1)
+            return  // skip to next message
+        }
+        let _ = reply.send(42)
+    }
+    receive Bye { let _ = 0 }
+}
+```
+
+### 10.6 Actor Supervision Pattern
 
 Because actors run inside structured `crew` scopes, supervision is clean, robust, and leak-free. Supervisors coordinate workers, monitor message queues, and handle lifecycle events:
 

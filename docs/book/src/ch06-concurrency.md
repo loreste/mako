@@ -872,6 +872,43 @@ and never shared across threads. The mailbox is a bounded channel — unbounded
 growth is structurally impossible. Combined with `crew` scoping, actors cannot
 leak, orphan, or race on mutable state.
 
+### Early return in receive arms
+
+`return` inside a `receive` arm skips the rest of that arm and continues to
+the next message — it does **not** exit the actor loop:
+
+```mko
+actor Guard {
+    allowed: int = 0
+    receive Allow { self.allowed = 1 }
+    receive Check(reply: chan[int]) {
+        if self.allowed == 0 {
+            let _ = reply.send(-1)
+            return  // skip to next message
+        }
+        let _ = reply.send(42)
+    }
+    receive Bye { let _ = 0 }
+}
+```
+
+### Constructor arguments
+
+Actors can accept constructor parameters at spawn time:
+
+```mko
+actor Engine(wal_path: string) {
+    db: Database = db_open(wal_path)
+    receive Query(sql: string) { /* ... */ }
+    receive Bye { let _ = 0 }
+}
+
+let eng = Engine_spawn("/tmp/data.wal")
+```
+
+Constructor parameters are evaluated once at spawn and used to initialise
+fields. The generated `Name_spawn(args...)` function forwards them.
+
 ---
 
 ## Practical Concurrent Patterns

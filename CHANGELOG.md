@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.35
+
+- Actor early return in receive arms:
+  - `return` inside a `receive` arm now continues to the next message instead of exiting the actor loop function, enabling guard-style short-circuit logic without extra nesting.
+- Actor constructor parameters:
+  - Actors accept constructor params at spawn time: `actor Engine(wal_path: string) { ... }` generates `Engine_spawn(wal_path)`. Parameters are evaluated once at spawn and forwarded to field initialisers.
+- Self aliasing workaround documented:
+  - When multiple `self.field` reads appear in the same call expression, binding to locals first avoids aliasing issues in the generated C code.
+
 ## 0.6.34
 
 - Prevent iterator invalidation:

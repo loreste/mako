@@ -1080,6 +1080,54 @@ Single `int` parameters use the existing zero-allocation tag+value pack path.
 Multi-param and non-int receives generate a per-message envelope struct
 internally (heap-allocated).
 
+#### Constructor Arguments
+
+Actors can accept constructor parameters at spawn time:
+
+```mko
+actor Engine(wal_path: string) {
+    db: Database = db_open(wal_path)
+    receive Query(sql: string) { /* ... */ }
+    receive Bye { let _ = 0 }
+}
+
+let eng = Engine_spawn("/tmp/data.wal")
+```
+
+Constructor parameters are evaluated once at spawn and used to initialise
+fields. The generated `Name_spawn(args...)` function forwards them.
+
+#### Early Return in Receive Arms
+
+`return` inside a `receive` arm skips the rest of that arm and continues to
+the next message — it does **not** exit the actor loop:
+
+```mko
+actor Guard {
+    allowed: int = 0
+    receive Allow { self.allowed = 1 }
+    receive Check(reply: chan[int]) {
+        if self.allowed == 0 {
+            let _ = reply.send(-1)
+            return  // skip to next message
+        }
+        let _ = reply.send(42)
+    }
+    receive Bye { let _ = 0 }
+}
+```
+
+#### Self Aliasing Workaround
+
+When multiple `self.field` reads appear in the same call expression, bind
+them to locals first to avoid aliasing issues:
+
+```mko
+let s_tx = self.tx_state[slot]
+let s_u = self.users[slot]
+self.db = load_session(self.db, s_tx, s_u)
+```
+
 Actors desugar to a mailbox and a `crew` loop. The `Bye` or `Stop` variant
 ends the loop by convention.
 
