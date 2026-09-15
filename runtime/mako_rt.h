@@ -11190,6 +11190,16 @@ static inline int64_t mako_actor_msg_payload(int64_t m) {
     return p;
 }
 
+/* Box a heap-allocated struct pointer into an int64 for channel transport. */
+static inline int64_t mako_actor_box_payload(void *ptr) {
+    return (int64_t)(intptr_t)ptr;
+}
+
+/* Unbox an int64 back to a struct pointer. Caller owns the memory. */
+static inline void *mako_actor_unbox_payload(int64_t packed) {
+    return (void *)(intptr_t)(packed & 0x0000ffffffffffffLL);
+}
+
 static inline MakoActor *mako_actor_spawn(int64_t mailbox_cap) {
     return mako_chan_new(mailbox_cap < 1 ? 8 : mailbox_cap);
 }

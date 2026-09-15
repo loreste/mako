@@ -1,0 +1,66 @@
+// Actor typed payload tests: string, multi-param, and struct payloads
+
+actor Logger {
+    count: int = 0
+
+    receive Log(msg: string) {
+        self.count = self.count + 1
+    }
+    receive Bye {
+        let _ = 0
+    }
+}
+
+actor Calculator {
+    result: int = 0
+
+    receive Add(a: int, b: int) {
+        self.result = a + b
+    }
+    receive MulAdd(x: int, y: int, z: int) {
+        self.result = x * y + z
+    }
+    receive Bye {
+        let _ = 0
+    }
+}
+
+fn TestActorStringPayload() {
+    let l = Logger_spawn()
+    crew t {
+        let j = t.kick(Logger_loop(l))
+        assert(Logger_send(l, Logger_Log("hello")))
+        assert(Logger_send(l, Logger_Log("world")))
+        assert(Logger_send(l, Logger_Bye()))
+        let final_count = j.join()
+        assert_eq(final_count, 2)
+    }
+}
+
+fn TestActorMultiIntPayload() {
+    let c = Calculator_spawn()
+    crew t {
+        let j = t.kick(Calculator_loop(c))
+        let _ = Calculator_send(c, Calculator_Add(10, 20))
+        let _ = Calculator_send(c, Calculator_Bye())
+        let result = j.join()
+        assert_eq(result, 30)
+    }
+}
+
+fn TestActorTriplePayload() {
+    let c = Calculator_spawn()
+    crew t {
+        let j = t.kick(Calculator_loop(c))
+        let _ = Calculator_send(c, Calculator_MulAdd(3, 4, 5))
+        let _ = Calculator_send(c, Calculator_Bye())
+        let result = j.join()
+        assert_eq(result, 17)
+    }
+}
+
+fn main() {
+    TestActorStringPayload()
+    TestActorMultiIntPayload()
+    TestActorTriplePayload()
+}

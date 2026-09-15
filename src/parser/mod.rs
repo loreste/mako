@@ -609,28 +609,34 @@ impl Parser {
             if matches!(self.peek_kind(), TokenKind::Receive) {
                 self.bump();
                 let message = self.expect_ident()?;
-                // Optional int payload: `receive Inc(delta)` or `receive Inc(delta: int)`
-                let payload = if matches!(self.peek_kind(), TokenKind::LParen) {
+                // Typed payload params: `receive Exec(sid: int, sql: string)`
+                let params = if matches!(self.peek_kind(), TokenKind::LParen) {
                     self.bump();
-                    let pname = self.expect_ident()?;
-                    if matches!(self.peek_kind(), TokenKind::Colon) {
-                        self.bump();
-                        let ty = self.parse_type()?;
-                        if !matches!(ty, TypeExpr::Named(ref n) if n == "int" || n == "int64") {
-                            return Err(self.err(format!(
-                                "actor receive payload `{pname}` must be int (seed supports one int)"
-                            )));
+                    let mut ps = Vec::new();
+                    while !matches!(self.peek_kind(), TokenKind::RParen) {
+                        let pname = self.expect_ident()?;
+                        let pty = if matches!(self.peek_kind(), TokenKind::Colon) {
+                            self.bump();
+                            self.parse_type()?
+                        } else {
+                            TypeExpr::Named("int".into())
+                        };
+                        ps.push((pname, pty));
+                        if matches!(self.peek_kind(), TokenKind::Comma) {
+                            self.bump();
+                        } else {
+                            break;
                         }
                     }
                     self.expect(TokenKind::RParen)?;
-                    Some(pname)
+                    ps
                 } else {
-                    None
+                    vec![]
                 };
                 let body = self.parse_block()?;
                 receives.push(ReceiveArm {
                     message,
-                    payload,
+                    params,
                     body,
                 });
                 continue;

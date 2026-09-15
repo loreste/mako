@@ -15283,7 +15283,35 @@ impl Codegen {
                 } else {
                     (val, false)
                 };
-                self.line(&format!("{ty} {name} = {val};"));
+                // Use type annotation when emit_expr returns generic int64_t
+                // (field access from generated envelope structs).
+                let ty = if let Some(ann_ty) = ann {
+                    let ann_c = self.type_expr_c(ann_ty);
+                    if ty == "int64_t" && ann_c != "int64_t" {
+                        ann_c
+                    } else {
+                        ty
+                    }
+                } else {
+                    ty
+                };
+                // Actor envelope unbox: cast int64 to typed struct pointer, deref, free.
+                let ty = if ty == "__ACTOR_UNBOX" {
+                    if let Some(ann) = ann {
+                        let real_ty = self.type_expr_c(ann);
+                        let ptr = self.fresh("envp");
+                        self.line(&format!("{real_ty} *{ptr} = ({real_ty}*)(intptr_t){val};"));
+                        self.line(&format!("{real_ty} {name} = *{ptr};"));
+                        self.line(&format!("free({ptr});"));
+                        real_ty
+                    } else {
+                        self.line(&format!("int64_t {name} = {val};"));
+                        "int64_t".into()
+                    }
+                } else {
+                    self.line(&format!("{ty} {name} = {val};"));
+                    ty
+                };
 
                 if field_value_owned {
                     self.register_own_drop(name, &ty);
@@ -24709,6 +24737,20 @@ impl Codegen {
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_actor_pack({t}, {p})"));
+                        }
+                        "actor_box_payload" => {
+                            // Heap-allocate the struct/value and return pointer as int64.
+                            let (ety, ev) = self.emit_expr(&args[0]);
+                            let box_var = self.fresh("abox");
+                            self.line(&format!("{ety} *{box_var} = ({ety}*)malloc(sizeof({ety}));"));
+                            self.line(&format!("*{box_var} = {ev};"));
+                            return ("int64_t".into(), format!("(int64_t)(intptr_t){box_var}"));
+                        }
+                        "actor_unbox_payload" if args.len() == 1 => {
+                            let (_, pv) = self.emit_expr(&args[0]);
+                            // Return the masked payload as int64; the Let handler
+                            // casts to the declared struct type via __ACTOR_UNBOX marker.
+                            return ("__ACTOR_UNBOX".into(), format!("({pv} & 0x0000ffffffffffffLL)"));
                         }
                         "actor_msg_tag" => {
                             let (_, m) = self.emit_expr(&args[0]);

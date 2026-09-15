@@ -486,18 +486,55 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
 
     // Message constructors: Session_Invite() -> pack(tag, 0)
     // or Session_Inc(delta) -> pack(tag, delta) for receive Inc(delta).
+    // Determine if this actor needs envelope structs (any non-int or multi-param receives).
+    let needs_envelope = actor.receives.iter().any(|arm| {
+        arm.params.len() > 1
+            || arm.params.iter().any(|(_, ty)| !matches!(ty, TypeExpr::Named(n) if n == "int" || n == "int64"))
+    });
+
+    // Generate per-message envelope struct if needed.
+    if needs_envelope {
+        for arm in &actor.receives {
+            if !arm.params.is_empty() {
+                let env_name = format!("{name}_{}_Env", arm.message);
+                items.push(Item::Struct(StructDef {
+                    name: env_name,
+                    type_params: Vec::new(),
+                    fields: arm.params.iter().map(|(n, ty)| (n.clone(), ty.clone(), None)).collect(),
+                    derives: Vec::new(),
+                    exported: false,
+                    source_file: None,
+                }));
+            }
+        }
+    }
+
     for (i, arm) in actor.receives.iter().enumerate() {
         let tag = (i + 1) as i64;
-        let (params, pack_args) = if let Some(ref pname) = arm.payload {
+        let (params, pack_args) = if arm.params.is_empty() {
+            (vec![], vec![Expr::Int(tag), Expr::Int(0)])
+        } else if !needs_envelope && arm.params.len() == 1 {
+            // Legacy int-only path
+            let (ref pname, _) = arm.params[0];
             (
-                vec![Param {
-                    name: pname.clone(),
-                    ty: TypeExpr::Named("int".into()),
-                    mutable: false, variadic: false }],
+                vec![Param { name: pname.clone(), ty: TypeExpr::Named("int".into()), mutable: false, variadic: false }],
                 vec![Expr::Int(tag), Expr::Ident(pname.clone())],
             )
         } else {
-            (vec![], vec![Expr::Int(tag), Expr::Int(0)])
+            // Envelope path: construct struct, box pointer
+            let env_name = format!("{name}_{}_Env", arm.message);
+            let fn_params: Vec<Param> = arm.params.iter().map(|(n, ty)| Param {
+                name: n.clone(), ty: ty.clone(), mutable: false, variadic: false,
+            }).collect();
+            let lit_fields: Vec<(String, Expr)> = arm.params.iter().map(|(n, _)| (n.clone(), Expr::Ident(n.clone()))).collect();
+            let construct = Expr::StructLit { name: env_name, fields: lit_fields, update: None };
+            (
+                fn_params,
+                vec![Expr::Int(tag), Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_box_payload".into())),
+                    args: vec![construct],
+                }],
+            )
         };
         items.push(Item::Fn(FnDef {
             type_bounds: std::collections::HashMap::new(),
@@ -683,14 +720,43 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             rewrite_self_block(&mut arm_block, "__st");
         }
         let mut arm_stmts = Vec::new();
-        if let Some(ref pname) = arm.payload {
-            arm_stmts.push(Stmt::Let {
-                name: pname.clone(),
-                mutable: false,
-                ownership: Ownership::None,
-                ty: Some(TypeExpr::Named("int".into())),
-                init: Expr::Ident("__pl".into()),
-            });
+        if !arm.params.is_empty() {
+            if !needs_envelope && arm.params.len() == 1 {
+                // Legacy int path
+                let (ref pname, _) = arm.params[0];
+                arm_stmts.push(Stmt::Let {
+                    name: pname.clone(),
+                    mutable: false,
+                    ownership: Ownership::None,
+                    ty: Some(TypeExpr::Named("int".into())),
+                    init: Expr::Ident("__pl".into()),
+                });
+            } else {
+                // Envelope path: unbox pointer, extract fields
+                let env_name = format!("{name}_{}_Env", arm.message);
+                arm_stmts.push(Stmt::Let {
+                    name: "__env".into(),
+                    mutable: false,
+                    ownership: Ownership::None,
+                    ty: Some(TypeExpr::Named(env_name)),
+                    init: Expr::Call {
+                        callee: Box::new(Expr::Ident("actor_unbox_payload".into())),
+                        args: vec![Expr::Ident("__pl".into())],
+                    },
+                });
+                for (pname, pty) in &arm.params {
+                    arm_stmts.push(Stmt::Let {
+                        name: pname.clone(),
+                        mutable: false,
+                        ownership: Ownership::None,
+                        ty: Some(pty.clone()),
+                        init: Expr::Field {
+                            base: Box::new(Expr::Ident("__env".into())),
+                            field: pname.clone(),
+                        },
+                    });
+                }
+            }
         }
         arm_stmts.extend(arm_block.stmts);
         // Convention: message named Bye / Stop ends the loop
@@ -720,7 +786,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         if let Some((fname, _, _)) = actor
             .fields
             .iter()
-            .find(|(n, _, _)| n == "n" || n == "count" || n == "value")
+            .find(|(n, _, _)| n == "n" || n == "count" || n == "value" || n == "result" || n == "total" || n == "state")
         {
             Expr::Field {
                 base: Box::new(Expr::Ident("__st".into())),

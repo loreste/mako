@@ -6068,6 +6068,8 @@ impl TypeChecker {
             "actor_msg_payload".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
+        // actor_box_payload / actor_unbox_payload: registered dynamically
+        // in check_call_expr to accept any struct/string type.
         fns.insert(
             "tcp_listen".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
@@ -17986,6 +17988,19 @@ impl TypeChecker {
                             // Generic dbg: accepts any type, returns same type.
                             let t = self.check_expr(&args[0])?;
                             return Ok(t);
+                        }
+                        "actor_box_payload" if args.len() == 1 => {
+                            // Box any value into an int64 (pointer cast for channel transport).
+                            let _ = self.check_expr(&args[0])?;
+                            return Ok(Type::Int);
+                        }
+                        "actor_unbox_payload" if args.len() == 1 => {
+                            // Unbox int64 back to typed value. Type inferred from let binding.
+                            let _ = self.check_expr(&args[0])?;
+                            if let Some(ref expected) = self.current_expected {
+                                return Ok(expected.clone());
+                            }
+                            return Ok(Type::Int);
                         }
                         "dbg_str" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
