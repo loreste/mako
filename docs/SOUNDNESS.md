@@ -211,6 +211,16 @@ Related: [SECURITY.md](SECURITY.md) · [MEMORY_MODEL.md](MEMORY_MODEL.md) ·
 
 See also [ROADMAP.md](ROADMAP.md) · [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).
 
+## Actor isolation
+
+Actors provide memory-safe concurrency by construction: each actor's state
+fields are private and never shared across threads. The mailbox is a bounded
+channel (sized at spawn via `Name_spawn_cap(cap)`), preventing unbounded queue
+growth. Combined with structured `crew` scoping, actors cannot leak or race on
+mutable state.
+
+---
+
 ## Non-goals
 
 - Tracing GC

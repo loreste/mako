@@ -1069,7 +1069,27 @@ let c = Counter_spawn()                     // spawn actor (default mailbox cap)
 let c2 = Counter_spawn_cap(64)              // spawn actor with custom capacity
 let _ = Counter_send(c, Counter_Inc(5))     // send message with payload
 let loopj = t.kick(Counter_loop(c))         // run actor loop in crew
+let ok = actor_try_send(c, Counter_Inc(1))  // non-blocking send: 1=ok, 0=full
+let depth = actor_len(c)                    // queued message count
+let cap = actor_cap(c)                      // mailbox capacity
 ```
+
+#### Backpressure
+
+`actor_try_send` returns immediately without blocking. Use it to shed load
+when a mailbox is near capacity:
+
+```mko
+if actor_len(c) * 5 > actor_cap(c) * 4 {   // >80% full
+    print("dropping — mailbox backpressure")
+} else {
+    let _ = actor_try_send(c, Counter_Inc(1))
+}
+```
+
+> **Memory safety.** Actors have fully isolated state (`self.field`). There is
+> no shared mutable data between actors. The mailbox is a bounded channel —
+> unbounded growth is impossible by construction.
 
 ### 3.8 Foreign Declarations
 

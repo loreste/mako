@@ -1469,7 +1469,10 @@ For an actor declared as `actor Name`:
 |---|---|---|
 | `Name_spawn()` | `() -> Name` | Allocates actor and mailbox ring buffer |
 | `Name_spawn_cap(cap)` | `(cap: int) -> Name` | Allocates actor with custom mailbox capacity |
-| `Name_send(actor, msg)` | `(actor: Name, msg: int) -> bool` | Sends message to actor mailbox |
+| `Name_send(actor, msg)` | `(actor: Name, msg: int) -> bool` | Sends message to actor mailbox (blocking) |
+| `Name_try_send(actor, msg)` | `(actor: Name, msg: int) -> int` | Non-blocking send; returns 1 on success, 0 if full |
+| `actor_len(actor)` | `(actor: Name) -> int` | Current queued message count (mailbox depth) |
+| `actor_cap(actor)` | `(actor: Name) -> int` | Mailbox capacity |
 | `Name_loop(actor)` | `(actor: Name) -> int` | Executes message processing loop in a crew task |
 | `Name_MsgName(payload...)` | `(...) -> int` | Packs message tag and optional payload into an envelope |
 

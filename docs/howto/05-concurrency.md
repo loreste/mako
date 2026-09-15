@@ -302,9 +302,31 @@ Generated functions for an actor named `Foo`:
 | Function | Purpose |
 |----------|---------|
 | `Foo_spawn()` | Create mailbox, return handle |
-| `Foo_send(handle, msg)` | Enqueue a message |
+| `Foo_spawn_cap(cap)` | Create mailbox with custom capacity |
+| `Foo_send(handle, msg)` | Enqueue a message (blocking) |
 | `Foo_loop(handle)` | Process messages until stop |
 | `Foo_Invite()` | Construct a message tag |
+| `actor_try_send(handle, msg)` | Non-blocking send; returns 1 on success, 0 if full |
+| `actor_len(handle)` | Current queued message count |
+| `actor_cap(handle)` | Mailbox capacity |
+
+**Non-blocking backpressure:**
+
+```mko
+if actor_try_send(session, Session_Timer()) == 0 {
+    print("mailbox full — message dropped")
+}
+```
+
+**Telemetry:**
+
+```mko
+print_int(actor_len(session))   // queued messages
+print_int(actor_cap(session))   // capacity
+```
+
+**Best practice:** always send a `Bye` or `Stop` message for clean shutdown
+rather than letting the crew scope force-cancel the actor loop.
 
 ## Practical pattern: worker pool
 

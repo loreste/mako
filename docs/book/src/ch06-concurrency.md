@@ -824,6 +824,35 @@ fn main() {
 
 Under structured nurseries (`crew:fail_fast`), if any child actor encounters an error or panic, the nursery cooperatively cancels all sibling actors, guaranteeing clean shutdown without leaving orphan worker processes.
 
+### Mailbox inspection and backpressure
+
+`actor_try_send` is a non-blocking send that returns `1` on success, `0` if the
+mailbox is full. Combine with `actor_len` / `actor_cap` for load shedding:
+
+```mko
+fn dispatch(w: Worker, msg: int) -> int {
+    // shed load when mailbox >80% full
+    if actor_len(w) * 5 > actor_cap(w) * 4 {
+        print("backpressure — dropping message")
+        return 0
+    }
+    return actor_try_send(w, msg)
+}
+```
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `actor_try_send(actor, msg)` | `int` (1/0) | Non-blocking send |
+| `actor_len(actor)` | `int` | Current queued message count |
+| `actor_cap(actor)` | `int` | Mailbox capacity |
+
+### Actor memory safety
+
+Actors guarantee isolation: each actor's state fields (`self.field`) are private
+and never shared across threads. The mailbox is a bounded channel — unbounded
+growth is structurally impossible. Combined with `crew` scoping, actors cannot
+leak, orphan, or race on mutable state.
+
 ---
 
 ## Practical Concurrent Patterns
