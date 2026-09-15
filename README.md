@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.34).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.35).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
