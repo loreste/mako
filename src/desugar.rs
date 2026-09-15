@@ -24,7 +24,10 @@ pub fn desugar(mut program: Program, source_path: Option<&str>) -> Program {
     for item in program.items.drain(..) {
         match item {
             Item::Actor(actor) => {
-                extras.extend(expand_actor(actor));
+                // Defer actor expansion to after merge (desugar_if_let_all)
+                // so types from imported/merged files are available.
+                kept.push(Item::Actor(actor));
+                continue;
             }
             Item::On(on) => {
                 extras.extend(expand_on(on));
@@ -884,6 +887,18 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
 /// Re-run if-let desugaring on a merged program (after resolve_imports / merge).
 /// Imported and merged files may contain IfLet that the initial desugar missed.
 pub fn desugar_if_let_all(program: &mut Program) {
+    // Expand deferred actors now that all types from merged files are available.
+    let mut actor_items = Vec::new();
+    program.items.retain(|item| {
+        if let Item::Actor(actor) = item {
+            actor_items.extend(expand_actor(actor.clone()));
+            false
+        } else {
+            true
+        }
+    });
+    program.items.extend(actor_items);
+
     for item in &mut program.items {
         match item {
             Item::Fn(f) => desugar_if_let_block(&mut f.body),

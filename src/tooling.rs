@@ -3890,6 +3890,8 @@ pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), Tes
     program =
         merge_package_dir_siblings(test_file, program).map_err(TestPackageLoadError::Invalid)?;
     program = merge_path_dependencies(test_file, program).map_err(TestPackageLoadError::Invalid)?;
+    // Post-merge desugar: expand actors, if-let, embed in merged files.
+    crate::desugar::desugar_if_let_all(&mut program);
     program
         .items
         .retain(|item| !matches!(item, Item::Fn(f) if f.name == "main"));
