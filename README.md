@@ -191,6 +191,7 @@ message inspection, site history, reports, alerts, and traffic metrics.
 
 ## New in 0.6.34
 
+- **Actor typed payloads:** `receive` arms now accept `string`, multi-param, and struct payloads (not just `int`). Single `int` keeps zero-allocation packing; multi-param/non-int generates envelope structs. Closes #60.
 - **Iterator invalidation prevention:** Compile-time error when mutating, reassigning, or appending to a slice while iterating over it in a `for` loop body, eliminating use-after-free and reallocation crashes.
 - **Channel trylock fast path & race elimination:** Switched channel spinlocks to platform-native mutex trylocks (`pthread_mutex_trylock` / SRWLock), fully eliminating TSan races while keeping 1.21x vs Rust uncontended channel throughput.
 - **Stack size safety & configurability:** Restored 8MB default thread stack to prevent stack overflows on deeply nested calls (e.g. FayDB SQL engine); added `sched_set_stack_size()` API for custom workloads.

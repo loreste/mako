@@ -295,7 +295,8 @@ fn main() {
 ```
 
 An actor desugars to a mailbox channel and a crew loop. Send `Bye` (or `Stop`)
-to end the loop by convention.
+to end the loop by convention. Receive arms accept any type (`string`, structs,
+`chan[T]`, multi-param) — not just `int`.
 
 Generated functions for an actor named `Foo`:
 

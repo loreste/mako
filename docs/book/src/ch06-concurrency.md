@@ -745,6 +745,25 @@ fn main() {
 }
 ```
 
+### Typed message payloads
+
+Receive arms accept any type — `string`, multi-param, `chan[T]`, or structs — not just `int`:
+
+```mko
+actor DB {
+    receive Query(sid: int, sql: string, reply: chan[string]) {
+        chan_send(reply, "result")
+    }
+    receive Log(msg: string) {
+        print(msg)
+    }
+    receive Bye { let _ = 0 }
+}
+```
+
+Single `int` parameters keep the zero-allocation tag+value pack path. Multi-param
+and non-int receives generate a per-message envelope struct (heap-allocated).
+
 ### Actor design patterns
 
 **State machine actor**: use the receive handlers to transition between states.

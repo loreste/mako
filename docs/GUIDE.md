@@ -1440,6 +1440,12 @@ actor Counter {
     receive Set(v: int) {
         self.n = v
     }
+    receive Log(msg: string) {
+        print(msg)
+    }
+    receive Add(a: int, b: int) {
+        self.n = a + b
+    }
     receive Bye {
         let _ = 0
     }
@@ -1474,7 +1480,7 @@ For an actor declared as `actor Name`:
 | `actor_len(actor)` | `(actor: Name) -> int` | Current queued message count (mailbox depth) |
 | `actor_cap(actor)` | `(actor: Name) -> int` | Mailbox capacity |
 | `Name_loop(actor)` | `(actor: Name) -> int` | Executes message processing loop in a crew task |
-| `Name_MsgName(payload...)` | `(...) -> int` | Packs message tag and optional payload into an envelope |
+| `Name_MsgName(payload...)` | `(...) -> int` | Packs message tag and typed payload(s) into an envelope. Accepts any type (`int`, `string`, `chan[T]`, structs). Single `int` params use zero-allocation packing; multi-param and non-int params generate a heap-allocated envelope struct. |
 
 ### 10.4 Actor Supervision Pattern
 

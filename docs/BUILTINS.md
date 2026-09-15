@@ -2632,7 +2632,7 @@ HTTP seed path `/debug/hot_sites` via `profile_http_route`.
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `actor_spawn` | `actor_spawn(mailbox_size: int) -> chan[int]` | Spawn an actor with a mailbox |
-| `actor_send` | `actor_send(mailbox: chan[int], msg: int) -> bool` | Send a message to an actor |
+| `actor_send` | `actor_send(mailbox: chan[int], msg: int) -> bool` | Send a message to an actor. For generated `Name_MsgName(payload...)` constructors, payloads accept arbitrary typed params (`string`, `int`, `chan[T]`, structs); single `int` params use zero-allocation packing, multi-param/non-int params use envelope structs. |
 | `actor_try_send` | `actor_try_send(mailbox: chan[int], msg: int) -> int` | Non-blocking send to actor mailbox (returns 1 on success, 0 if full) |
 | `actor_recv` | `actor_recv(mailbox: chan[int]) -> int` | Receive a message from a mailbox |
 | `actor_len` | `actor_len(mailbox: chan[int]) -> int` | Current queued message count in mailbox |

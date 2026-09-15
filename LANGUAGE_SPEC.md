@@ -1059,6 +1059,27 @@ actor Counter {
 }
 ```
 
+Receive arms accept arbitrary typed payloads — not just `int`:
+
+```mko
+actor Logger {
+    receive Log(msg: string) {
+        print(msg)
+    }
+    receive Add(a: int, b: int) {
+        print_int(a + b)
+    }
+    receive Exec(sid: int, sql: string, reply: chan[string]) {
+        chan_send(reply, "ok")
+    }
+    receive Bye { let _ = 0 }
+}
+```
+
+Single `int` parameters use the existing zero-allocation tag+value pack path.
+Multi-param and non-int receives generate a per-message envelope struct
+internally (heap-allocated).
+
 Actors desugar to a mailbox and a `crew` loop. The `Bye` or `Stop` variant
 ends the loop by convention.
 
