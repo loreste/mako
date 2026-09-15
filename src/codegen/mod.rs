@@ -15083,6 +15083,12 @@ impl Codegen {
                         self.job_ok_kinds.insert(name.clone(), ok);
                     }
                 }
+                // Override type from annotation when emit_expr returns int64_t
+                // (field access from actor envelopes, chan types, etc.)
+                let ty = if let Some(ann_ty) = ann {
+                    let ann_c = self.type_expr_c(ann_ty);
+                    if ty == "int64_t" && ann_c != "int64_t" { ann_c } else { ty }
+                } else { ty };
                 self.locals.insert(name.clone(), ty.clone());
                 self.note_own_bind_scope(&mangle(name));
                 // Annotated lets: Result/Option nest metadata from the type.
