@@ -17985,6 +17985,24 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
+            "actor_box_payload" if args.len() == 1 => Some((
+                "mako_native_actor_box_payload",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "actor_unbox_payload" if args.len() == 1 => Some((
+                "mako_native_actor_unbox_payload",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "actor_free_payload" if args.len() == 1 => Some((
+                "mako_native_actor_free_payload",
+                &[Type::I64],
+                None,
+                false,
+            )),
             "str_slice" if args.len() == 3 => Some((
                 "mako_native_str_slice_ptr",
                 &[Type::Str, Type::I64, Type::I64],

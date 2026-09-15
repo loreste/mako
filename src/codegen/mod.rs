@@ -24821,6 +24821,11 @@ impl Codegen {
                             self.line(&format!("*{box_var} = {ev};"));
                             return ("int64_t".into(), format!("(int64_t)(intptr_t){box_var}"));
                         }
+                        "actor_free_payload" if args.len() == 1 => {
+                            let (_, pv) = self.emit_expr(&args[0]);
+                            self.emit_line(format_args!("free((void*)(intptr_t)({pv} & 0x0000ffffffffffffLL));"));
+                            return ("void".into(), "/*void*/".into());
+                        }
                         "actor_unbox_payload" if args.len() == 1 => {
                             let (_, pv) = self.emit_expr(&args[0]);
                             // Return the masked payload as int64; the Let handler

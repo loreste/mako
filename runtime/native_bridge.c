@@ -1664,6 +1664,14 @@ int64_t mako_native_actor_pack(int64_t tag, int64_t payload) {
     return mako_actor_pack(tag, payload);
 }
 
+int64_t mako_native_actor_box_payload(int64_t ptr) {
+    return mako_actor_box_payload((void*)(intptr_t)ptr);
+}
+
+int64_t mako_native_actor_unbox_payload(int64_t packed) {
+    return (int64_t)(intptr_t)mako_actor_unbox_payload(packed);
+}
+
 int64_t mako_native_str_index_ptr(MakoNativeString *hay, MakoNativeString *needle) {
     return mako_str_index(bridge_borrow_str(hay), bridge_borrow_str(needle));
 }

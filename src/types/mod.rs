@@ -17994,6 +17994,10 @@ impl TypeChecker {
                             let _ = self.check_expr(&args[0])?;
                             return Ok(Type::Int);
                         }
+                        "actor_free_payload" if args.len() == 1 => {
+                            let _ = self.check_expr(&args[0])?;
+                            return Ok(Type::Void);
+                        }
                         "actor_unbox_payload" if args.len() == 1 => {
                             // Unbox int64 back to typed value. Type inferred from let binding.
                             let _ = self.check_expr(&args[0])?;
