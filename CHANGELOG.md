@@ -2,6 +2,10 @@
 
 ## 0.6.35
 
+- C backend: reclaim copied `bytes(string)` buffers on normal and early scope
+  exits, preserving returned ownership and borrowed views. Add a dedicated
+  LeakSanitizer regression for repeated disk-page-style scans (#64).
+
 - Document release-artifact verification, sanitizer/build-profile differences, and correct pgbench database arguments when investigating application throughput regressions (#64).
 
 - Single-port actor loops batch up to 16 ready messages per receive lock, preserving FIFO, early returns, and typed cleanup of prefetched messages on shutdown. Named ports retain per-message priority checks. `actor_len` excludes the bounded in-flight batch.

@@ -1,0 +1,38 @@
+// Run with LeakSanitizer: disk page scans must release each copied byte buffer.
+fn scan_page(page: string, stop: int) -> int {
+    let raw = bytes(page)
+    let mut i = 0
+    while i < len(raw) {
+        if int(raw[i]) == stop { return i }
+        i = i + 1
+    }
+    return len(raw)
+}
+
+fn page_bytes(page: string) -> []byte {
+    let raw = bytes(page)
+    return raw
+}
+
+fn inspect_view(page: string) -> int {
+    let view = as_bytes(page)
+    return len(view)
+}
+
+export fn TestByteConversionCleanup() {
+    let page = str_repeat("hello\n", 256)
+    let mut i = 0
+    while i < 1000 {
+        assert_eq(scan_page(page, 10), 5)
+        assert_eq(scan_page(page, 0), len(page))
+        assert_eq(inspect_view(page), len(page))
+        let copied = page_bytes(page)
+        assert_eq(int(copied[0]), 104)
+        assert_eq(len(copied), len(page))
+        i = i + 1
+    }
+}
+
+fn main() {
+    TestByteConversionCleanup()
+}

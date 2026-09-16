@@ -1,5 +1,11 @@
 # Memory safety · no GC
 
+On the C backend, `bytes(text)` copies a string into an owned byte buffer.
+The copy is released on scope exit, including early returns, unless returned
+to the caller. `as_bytes(text)` remains a borrowed view whose backing string
+must stay alive. The byte-conversion regression runs with LeakSanitizer in CI;
+repeated page scans must not retain one copied buffer per read (issue #64).
+
 String-slice COW detachment deep-clones owned string elements because the caller
 retains responsibility for releasing the old header. This prevents detached
 arrays from becoming duplicate owners of the same string allocation on macOS and

@@ -3443,14 +3443,24 @@ impl Codegen {
             // aliases in some C lowering paths. Direct runtime Own types have
             // unambiguous clone/transfer behavior and are safe to reclaim.
             Expr::Match { .. } | Expr::IfExpr { .. } => Self::own_free_fn(c_ty).is_some(),
+            // String-to-byte conversion copies the backing buffer. Identity
+            // conversions of an existing byte slice do not allocate.
+            Expr::Convert { args, .. } => {
+                c_ty == "MakoByteArray"
+                    && args.len() == 1
+                    && self.peek_expr_c_ty(&args[0]) == "MakoString"
+            }
             Expr::Binary {
                 op: crate::ast::BinOp::Add,
                 ..
             } => true,
-            Expr::Call { callee, .. } => matches!(
+            Expr::Call { callee, args } => matches!(
                 callee.as_ref(),
                 Expr::Ident(name)
                     if name == "read_file"
+                        || (name == "bytes"
+                            && args.len() == 1
+                            && self.peek_expr_c_ty(&args[0]) == "MakoString")
                         || name == "str_repeat"
                         || name == "actor_spawn"
                         // Builtins that return a freshly malloc'd owned string;

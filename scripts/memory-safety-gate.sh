@@ -49,6 +49,7 @@ fixtures=(
   examples/testing/double_free_guard_test.mko
   examples/testing/own_drop_slice_test.mko
   examples/testing/leak_detector_test.mko
+  examples/testing/byte_conversion_cleanup_test.mko
   examples/testing/match_own_free_test.mko
   examples/testing/own_branch_regress_test.mko
   examples/testing/native_byte_slice_arg_test.mko
