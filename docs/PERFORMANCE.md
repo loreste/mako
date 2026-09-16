@@ -4,7 +4,7 @@ The mature path compiles through C. LLVM release emits objects directly and
 links with embedded lld/runtime inputs, using LLVM’s `default<O3>` pipeline.
 No GC, no interpreter, no VM tax.
 
-On Linux with glibc, integer channel mutexes adaptively spin for brief contention
+On Linux with glibc, integer channels with more than one slot adaptively spin for brief contention
 before parking. Queue state and condition-variable predicates remain protected
 by the same mutex; other platforms keep their native mutex implementation.
 

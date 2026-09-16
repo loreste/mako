@@ -5958,11 +5958,15 @@ static inline MakoChan *mako_chan_new(int64_t capacity) {
     /* These critical sections only touch queue metadata. Adaptive mutexes
      * avoid a futex round trip for brief producer/consumer contention while
      * retaining the same mutex/condition-variable synchronization contract. */
-    pthread_mutexattr_t attr;
-    pthread_mutexattr_init(&attr);
-    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ADAPTIVE_NP);
-    pthread_mutex_init(&c->mu, &attr);
-    pthread_mutexattr_destroy(&attr);
+    if (cap > 1) {
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ADAPTIVE_NP);
+        pthread_mutex_init(&c->mu, &attr);
+        pthread_mutexattr_destroy(&attr);
+    } else {
+        pthread_mutex_init(&c->mu, NULL);
+    }
 #else
     pthread_mutex_init(&c->mu, NULL);
 #endif

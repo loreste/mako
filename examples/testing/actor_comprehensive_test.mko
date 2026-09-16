@@ -158,8 +158,8 @@ fn TestActorMailboxDrainingOnExit() {
         let dummy_reply = make(chan[string], 1)
         assert(Worker_send(w, Worker_Bye()))
         // These buffered envelopes must be drained and freed on actor exit
-        let _ = actor_try_send(w, Worker_Process("leak1", 1, dummy_reply))
-        let _ = actor_try_send(w, Worker_Process("leak2", 2, dummy_reply))
+        let _ = Worker_try_send(w, Worker_Process("leak1", 1, dummy_reply))
+        let _ = Worker_try_send(w, Worker_Process("leak2", 2, dummy_reply))
         let _ = j.join()
     }
 }
