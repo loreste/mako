@@ -70,6 +70,8 @@ fixtures=(
   examples/testing/hot_site_test.mko
   examples/testing/actor_typed_payload_test.mko
   examples/testing/actor_comprehensive_test.mko
+  examples/testing/actor_batch_test.mko
+  examples/testing/actor_sharding_test.mko
   examples/testing/actor_adversarial_memsafe_test.mko
   examples/testing/actor_nested_state_test.mko
   examples/testing/actor_ports_test.mko
@@ -135,6 +137,8 @@ if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep
            examples/testing/closure_lifetime_test.mko \
            examples/testing/actor_typed_payload_test.mko \
            examples/testing/actor_comprehensive_test.mko \
+           examples/testing/actor_batch_test.mko \
+           examples/testing/actor_sharding_test.mko \
            examples/testing/actor_adversarial_memsafe_test.mko; do
     if ! "$mako_bin" test "$repo_dir/$f" --backend native --sanitize leak \
          >/tmp/mako-ms-native-leak.out 2>&1; then
@@ -159,6 +163,8 @@ if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep
   # (mako_native_struct_make_ptr). Tracked as a known native-backend leak.
   for f in examples/native/owned_handle_drop/native_owned_handle_drop_test.mko \
            examples/testing/actor_typed_payload_test.mko \
+           examples/testing/actor_batch_test.mko \
+           examples/testing/actor_sharding_test.mko \
            examples/testing/actor_adversarial_memsafe_test.mko; do
     if ! "$mako_bin" test "$repo_dir/$f" --backend native --sanitize address \
          >/tmp/mako-ms-native-asan.out 2>&1; then

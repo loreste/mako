@@ -1508,11 +1508,31 @@ message on failure: the caller must retry it or call `Name_drop_message` once.
 Shutdown closes all mailboxes before draining them, so racing sends either enter
 the drain or fail. Each typed envelope must be sent or disposed exactly once.
 
-Owned slice fields, including slices nested in structs, are copied when building
-a typed message. Sender-side mutation cannot change the queued snapshot. This is
-linear in the payload size; scalar messages still allocate nothing. Mutable maps,
+Owned slice fields, including slices nested in structs, are isolated when building
+a typed message. Shared or borrowed storage is copied; an exclusively owned heap
+backing can transfer without copying, with separate checks for nested slices.
+Sender-side mutation cannot change the queued snapshot. Copying shared payloads is
+linear in their size; scalar messages still allocate nothing. Mutable maps,
 raw arrays, and resource types without a mailbox-copy contract are rejected as
 payloads. Keep them in actor state and send commands plus reply channels instead.
+
+Single-port loops receive up to 16 available messages per lock acquisition. They
+never wait to fill a batch. FIFO order and early returns are preserved; shutdown
+drops the unprocessed batch suffix before draining the closed mailbox.
+`actor_len` counts queued messages, excluding up to 16 messages already owned by
+the loop. Allow for this bounded in-flight batch when choosing a memory budget.
+Named-port loops check port priority before each message and do not prefetch.
+Their nonblocking poll uses `actor_try_recv`, avoiding temporary Result objects.
+
+Single boolean messages also allocate no envelope. Two-`int`/`int64` messages
+pack inline when both values are in `[-8388608, 8388607]`; larger pairs use an
+envelope without truncation. Other typed messages retain their normal ownership.
+
+For parallel state processing, route independent keys to separate actors. See
+[`examples/actor_sharded.mko`](../examples/actor_sharded.mko): bounded mailboxes,
+per-key FIFO routing, query replies, and joined shutdown. Keep one transaction's
+state on one shard; cross-shard atomicity needs an explicit coordination protocol.
+Changing the shard count requires draining or migrating state before rerouting.
 
 ### 10.3.1 Named ports
 

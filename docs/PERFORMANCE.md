@@ -39,6 +39,33 @@ Use bounded capacities for backpressure, keep handlers short, and measure before
 choosing a shard count. These scheduling-sensitive measurements are diagnostic;
 the existing performance gates remain enforced.
 
+Single-port actors receive up to 16 ready messages under one lock. Named ports
+retain per-message priority checks. Small boolean messages and pairs of signed
+24-bit integers avoid envelope allocations; larger pairs retain heap fallback.
+Shared slice payloads still copy for isolation; exclusive heap backing can move.
+See `examples/actor_sharded.mko` for explicit routing of independent state.
+
+During local Apple arm64 validation, five-sample medians for eight producers at
+capacity 1024 improved from 30.69 ms to 9.99 ms for 200,000 messages (about 3.07×).
+At capacity 64 the same case improved from 130.26 ms to 54.92 ms (2.37×).
+These are sequential before/after measurements, not portable guarantees. A
+direct-lock actor send candidate did not improve contended throughput (10.36 ms
+and 56.24 ms respectively), so the existing send implementation was retained.
+The mailbox continues to use a mutex: batching reduces acquisitions without
+introducing lock-free reclamation or weakening close and ownership guarantees.
+Named-port polling uses a raw actor word instead of allocating a Result. Channel
+handles in shard arrays and native structs retain their references; final array
+release claims cleanup atomically so concurrent releases cannot skip destructors.
+
+Run `./scripts/bench-actor-payloads.sh` to measure small integer pairs, booleans,
+fresh slice messages, and low-load send-to-handler latency (p50/p95/p99 after
+warmup). Set `MAKO_BENCH_BASELINE=/path/to/older/mako` to alternate the same
+workload between compiler revisions, and `MAKO_BENCH_SAMPLES` for sample count.
+Both compilers use the selected working-tree runtime headers; this isolates
+compiler changes, rather than comparing complete historical installations.
+These latency measurements are diagnostic and should run on an otherwise quiet
+host. Inline-allocation assertions live in `actor_batch_test.mko`.
+
 On the local Apple arm64 validation host, seven alternating before/after runs
 of the wakeup change improved the 1,024-slot cases by 1.17–1.38× with 2–8
 producers. The 64-slot/eight-producer case was unchanged within noise. These are

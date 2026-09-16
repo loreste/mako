@@ -1,0 +1,49 @@
+actor PayloadCounter {
+    n: int = 0
+    receive Pair(a: int, b: int) { self.n = self.n + a + b }
+    receive Flag(active: bool) { if active { self.n = self.n + 1 } }
+    receive Values(xs: []int) { self.n = self.n + xs[0] }
+    receive Ping(sent: int, reply: chan[int]) { let _ = reply.send(now_ns() - sent) }
+    receive Stop { let _ = 0 }
+}
+
+fn fresh_values() -> []int { return [1, 2, 3, 4] }
+
+fn measure_payload(mode: int, count: int) {
+    let a = PayloadCounter_spawn_cap(1024)
+    let start = now_ns()
+    crew workers {
+        let task = workers.kick(PayloadCounter_loop(a))
+        for _ in count {
+            if mode == 0 { assert(PayloadCounter_send(a, PayloadCounter_Pair(1, 2))) }
+            if mode == 1 { assert(PayloadCounter_send(a, PayloadCounter_Flag(true))) }
+            if mode == 2 { assert(PayloadCounter_send(a, PayloadCounter_Values(fresh_values()))) }
+        }
+        assert(PayloadCounter_send(a, PayloadCounter_Stop()))
+        if mode == 0 { assert_eq(task.join(), count * 3) }
+        else { assert_eq(task.join(), count) }
+    }
+    print_int(now_ns() - start)
+}
+
+fn main() {
+    measure_payload(0, 200000)
+    measure_payload(1, 200000)
+    measure_payload(2, 20000)
+    let a = PayloadCounter_spawn_cap(64)
+    let reply = make(chan[int], 1)
+    crew workers {
+        let task = workers.kick(PayloadCounter_loop(a))
+        // Warm up before collecting send-to-handler latency at low load.
+        for _ in 100 {
+            assert(PayloadCounter_send(a, PayloadCounter_Ping(now_ns(), reply)))
+            let _ = reply.recv()
+        }
+        for _ in 1000 {
+            assert(PayloadCounter_send(a, PayloadCounter_Ping(now_ns(), reply)))
+            print_int(reply.recv())
+        }
+        assert(PayloadCounter_send(a, PayloadCounter_Stop()))
+        let _ = task.join()
+    }
+}

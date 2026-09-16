@@ -1,0 +1,55 @@
+actor RoutedCounter {
+    count: int = 0
+    receive Add(value: int) { self.count = self.count + value }
+    receive Stop { let _ = 0 }
+}
+
+fn write_shard(a: chan[int], n: int) -> int {
+    for _ in n { assert(RoutedCounter_send(a, RoutedCounter_Add(1))) }
+    return n
+}
+
+fn TestShardingKeepsEachKeyOnOneOwner() {
+    let mut shards = make([]chan[int], 0, 8)
+    let totals = make(chan[int], 8)
+    crew consumers {
+        for _ in 8 {
+            let shard = RoutedCounter_spawn_cap(32)
+            shards = append(shards, shard)
+            let _ = consumers.kick(finish_shard(shard, totals))
+        }
+        crew producers {
+            for key in 32 {
+                let _ = producers.kick(write_shard(shards[key % len(shards)], 100))
+            }
+        }
+        for shard in shards { assert(RoutedCounter_send(shard, RoutedCounter_Stop())) }
+        for _ in 8 { assert_eq(totals.recv(), 400) }
+    }
+}
+
+fn finish_shard(a: chan[int], totals: chan[int]) -> int {
+    let n = RoutedCounter_loop(a)
+    let _ = totals.send(n)
+    return n
+}
+
+fn TestChannelSliceAliasGrowth() {
+    let a = make(chan[int], 1)
+    let b = make(chan[int], 1)
+    let mut slots = make([]chan[int], 0, 1)
+    slots = append(slots, a)
+    let alias = slots
+    slots = append(slots, b)
+    assert(slots[0].send(42))
+    assert_eq(alias[0].recv(), 42)
+    assert(slots[1].send(7))
+    assert_eq(b.recv(), 7)
+    a.close()
+    b.close()
+}
+
+fn main() {
+    TestShardingKeepsEachKeyOnOneOwner()
+    TestChannelSliceAliasGrowth()
+}

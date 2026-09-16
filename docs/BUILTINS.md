@@ -2632,15 +2632,24 @@ HTTP seed path `/debug/hot_sites` via `profile_http_route`.
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `actor_spawn` | `actor_spawn(mailbox_size: int) -> chan[int]` | Allocate one mailbox ring. Generated `Name_spawn` uses this once (single-port) or once per named port. |
-| `actor_send` | `actor_send(mailbox: chan[int], msg: int) -> bool` | Send a message to an actor. For generated `Name_MsgName(payload...)` constructors, payloads accept arbitrary typed params (`string`, `int`, `chan[T]`, structs); single `int` params use zero-allocation 48-bit packing (out-of-range values abort), multi-param/non-int params send a boxed envelope pointer with the tag stored in the envelope. |
+| `actor_send` | `actor_send(mailbox: chan[int], msg: int) -> bool` | Send a message to an actor. For generated `Name_MsgName(payload...)` constructors, payloads accept arbitrary typed params (`string`, `int`, `chan[T]`, structs); single `int` params use zero-allocation 48-bit packing (out-of-range values abort), booleans and pairs of signed 24-bit integers also pack inline; other params send a boxed envelope pointer with the tag stored in the envelope. |
 | `actor_try_send` | `actor_try_send(mailbox: chan[int], msg: int) -> int` | Non-blocking send to actor mailbox (returns 1 on success, 0 if full) |
 | `actor_recv` | `actor_recv(mailbox: chan[int]) -> int` | Receive a message from a mailbox |
+| `actor_try_recv` | `actor_try_recv(mailbox: chan[int]) -> int` | Nonblocking actor poll: transfers one message, or returns zero when empty. Zero is reserved for empty/closed actor mailboxes; discard owned messages with the matching generated drop helper. |
+| `actor_recv_batch` | `actor_recv_batch(mailbox: chan[int], dst: []int) -> int` | Wait for one message or close, then transfer up to `min(len(dst), 16)` ready messages into caller-owned writable storage. Returns the count, zero on closed-empty or empty destination. Never waits to fill a batch. Caller must process or destroy every returned typed message before reusing the slots. | 
 | `actor_len` | `actor_len(mailbox: chan[int]) -> int` | Current queued message count in mailbox |
 | `actor_cap` | `actor_cap(mailbox: chan[int]) -> int` | Capacity of actor mailbox |
 | `actor_stop` | `actor_stop(mailbox: chan[int]) -> void` | Stop an actor (one mailbox). Multi-port actors call this per port on shutdown. |
 | `actor_free_payload` | `actor_free_payload(payload: int) -> void` | Free a boxed envelope shell. Shutdown drain prefers typed unbox so nested owners are dropped. |
 
 ---
+
+Generated single-port actor loops prefetch at most 16 messages. `actor_len` reports
+only the mailbox queue, excluding that in-flight batch. Named-port loops do not
+prefetch, preserving per-message priority checks. Single booleans and pairs of
+integers in the signed 24-bit range pack without envelopes; larger pairs use
+full-width envelopes. Raw batch receivers own all returned messages and must
+use the matching generated `Name_drop_message` for any discarded typed message.
 
 ## 52. Bytes & UTF-8
 

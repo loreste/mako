@@ -6037,6 +6037,14 @@ impl TypeChecker {
             Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Int)),
         );
         fns.insert(
+            "actor_try_recv".into(),
+            Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "actor_recv_batch".into(),
+            Type::Fn(vec![Type::Chan(Box::new(Type::Int)), Type::Array(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
             "actor_stop".into(),
             Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Void)),
         );

@@ -747,7 +747,7 @@ may be defined in imported files. A complete example is
 `examples/testing/actor_multifile/actor_test.mko`.
 Capturing mutable actor state in a kicked worker is rejected; communicate through
 messages to keep state updates in the receive loop.
-Use `--backend c` for typed actor envelopes; native lowering is not yet supported.
+Typed actor envelopes are supported by both the C and native backends.
 
 Actors can maintain private internal state fields and accept parameters in message handlers:
 
@@ -822,12 +822,25 @@ actor DB {
 ```
 
 - **Per-arm zero-allocation**: 0-param arms and single-integer arms (`int`/`int64`) bypass heap allocation, packing a 15-bit tag and a signed 48-bit payload with bit 63 set so the word cannot be confused with a heap pointer. Values outside signed 48-bit abort.
-- **Typed envelopes**: Arms with multiple parameters or non-integer types generate per-arm envelope structs. The tag is stored in the envelope; the mailbox carries the full pointer (not a 48-bit truncation).
+- **Small typed messages**: Single booleans allocate nothing. Pairs of `int`/`int64` values use two signed 24-bit fields when both fit; larger values fall back to a full envelope without truncation.
+- **Typed envelopes**: Other typed messages generate per-arm envelope structs. The tag is stored in the envelope; the mailbox carries the full pointer (not a 48-bit truncation). Shared slices are snapshotted; exclusively owned heap backing can transfer after recursive isolation checks.
 - **Early return**: `return` within a `receive` arm jumps to the next actor message (`continue __actor_loop`) after dropping that arm's owned envelope fields, including from nested `for` and `while` loops.
 - **Graceful termination**: Closing the actor mailbox via `actor_stop(mailbox)` or sender drop signals 0, immediately exiting the actor loop without CPU spinning.
 - **Mailbox draining**: When an actor loop exits, remaining envelopes are unboxed by tag and their nested strings, slices, and channels are freed.
 
 ### Actor design patterns
+
+Single-port loops prefetch at most 16 ready messages under one lock, without
+waiting to fill the batch. FIFO and early-return behavior are unchanged. On
+shutdown, unused prefetched envelopes are destroyed before the closed mailbox
+is drained. `actor_len` excludes this bounded in-flight batch. Named-port loops
+continue to check priority before each message instead of batching.
+
+**Keyed shards**: Route independent keys to separate actor mailboxes for parallel
+work. [The sharding example](../../../examples/actor_sharded.mko) uses four actors,
+bounded queues, query replies, and structured shutdown. One key always goes to
+one state owner. Keep a transaction on one shard; cross-shard transactions and
+changing shard counts require an explicit coordination or migration protocol.
 
 **State machine actor**: use the receive handlers to transition between states.
 Each message type represents an event in the state machine.

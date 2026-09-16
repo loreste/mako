@@ -1082,7 +1082,7 @@ fn main() { let _ = Gate_spawn() }
         let _ = fn_named(&program, "Gate_Bye_send");
         let loop_fn = fn_named(&program, "Gate_loop");
         assert!(
-            stmts_have_method(&loop_fn.body.stmts, "try_recv"),
+            stmts_call(&loop_fn.body.stmts, "actor_try_recv"),
             "multi-port loop try_recv's each mailbox"
         );
         assert!(
@@ -1334,8 +1334,148 @@ fn arm_needs_envelope(arm: &ReceiveArm) -> bool {
         || (arm.params.len() == 1
             && !matches!(
                 arm.params[0].1,
-                TypeExpr::Named(ref n) if n == "int" || n == "int64"
+                TypeExpr::Named(ref n) if n == "int" || n == "int64" || n == "bool"
             ))
+}
+
+fn actor_scalar_decode(ty: &TypeExpr) -> Expr {
+    let payload = Expr::Ident("__pl".into());
+    if matches!(ty, TypeExpr::Named(n) if n == "bool") {
+        Expr::Binary {
+            op: BinOp::Ne,
+            left: Box::new(payload),
+            right: Box::new(Expr::Int(0)),
+        }
+    } else {
+        payload
+    }
+}
+
+fn actor_pair_inline(arm: &ReceiveArm) -> bool {
+    arm.params.len() == 2
+        && arm
+            .params
+            .iter()
+            .all(|(_, ty)| matches!(ty, TypeExpr::Named(n) if n == "int" || n == "int64"))
+}
+
+fn actor_binary(op: BinOp, left: Expr, right: Expr) -> Expr {
+    Expr::Binary {
+        op,
+        left: Box::new(left),
+        right: Box::new(right),
+    }
+}
+
+// Two signed 24-bit integers fit the existing 48-bit inline payload. Values
+// outside that range use the normal envelope, preserving the full int range.
+fn actor_message_ctor_body(arm: &ReceiveArm, tag: i64, fallback: Expr) -> Vec<Stmt> {
+    if arm.params.len() == 1 && matches!(&arm.params[0].1, TypeExpr::Named(n) if n == "bool") {
+        return vec![
+            Stmt::If {
+                init: None,
+                cond: Expr::Ident(arm.params[0].0.clone()),
+                then_block: Block {
+                    stmts: vec![Stmt::Return(Some(actor_batch_call(
+                        "actor_pack",
+                        vec![Expr::Int(tag), Expr::Int(1)],
+                    )))],
+                    source_lines: Box::default(),
+                },
+                else_block: None,
+            },
+            Stmt::Return(Some(actor_batch_call(
+                "actor_pack",
+                vec![Expr::Int(tag), Expr::Int(0)],
+            ))),
+        ];
+    }
+    if !actor_pair_inline(arm) {
+        return vec![Stmt::Return(Some(fallback))];
+    }
+    let a = Expr::Ident(arm.params[0].0.clone());
+    let b = Expr::Ident(arm.params[1].0.clone());
+    let fits = |x: Expr| {
+        actor_binary(
+            BinOp::And,
+            actor_binary(BinOp::Ge, x.clone(), Expr::Int(-8388608)),
+            actor_binary(BinOp::Le, x, Expr::Int(8388607)),
+        )
+    };
+    let packed = actor_batch_call(
+        "actor_pack",
+        vec![
+            Expr::Int(tag),
+            actor_binary(
+                BinOp::Add,
+                actor_binary(BinOp::Mul, a.clone(), Expr::Int(16777216)),
+                actor_binary(BinOp::BitAnd, b.clone(), Expr::Int(16777215)),
+            ),
+        ],
+    );
+    vec![
+        Stmt::If {
+            init: None,
+            cond: actor_binary(BinOp::And, fits(a), fits(b)),
+            then_block: Block {
+                stmts: vec![Stmt::Return(Some(packed))],
+                source_lines: Box::default(),
+            },
+            else_block: None,
+        },
+        Stmt::Return(Some(fallback)),
+    ]
+}
+
+fn actor_pair_dispatch(arm: &ReceiveArm, body: &Block, fallback: Vec<Stmt>) -> Vec<Stmt> {
+    if !actor_pair_inline(arm) {
+        return fallback;
+    }
+    let payload = Expr::Ident("__pl".into());
+    let low = actor_binary(BinOp::BitAnd, payload.clone(), Expr::Int(16777215));
+    let values = [
+        actor_binary(
+            BinOp::Div,
+            actor_binary(BinOp::Sub, payload, low.clone()),
+            Expr::Int(16777216),
+        ),
+        actor_binary(
+            BinOp::Sub,
+            actor_binary(BinOp::BitXor, low, Expr::Int(8388608)),
+            Expr::Int(8388608),
+        ),
+    ];
+    let mut stmts: Vec<Stmt> = arm
+        .params
+        .iter()
+        .zip(values)
+        .map(|((name, ty), init)| Stmt::Let {
+            name: name.clone(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: Some(ty.clone()),
+            init,
+        })
+        .collect();
+    stmts.extend(body.stmts.clone());
+    if arm.message == "Bye" || arm.message == "Stop" {
+        stmts.push(Stmt::Assign {
+            name: "__run".into(),
+            value: Expr::Int(0),
+        });
+    }
+    vec![Stmt::If {
+        init: None,
+        cond: actor_binary(BinOp::Lt, Expr::Ident("__m".into()), Expr::Int(0)),
+        then_block: Block {
+            stmts,
+            source_lines: Box::default(),
+        },
+        else_block: Some(Block {
+            stmts: fallback,
+            source_lines: Box::default(),
+        }),
+    }]
 }
 
 const ACTOR_TAG_FIELD: &str = "__actor_tag";
@@ -1486,18 +1626,16 @@ fn mailbox_drain_named(mbox: &str, envelopes: &[(i64, String)]) -> Vec<Stmt> {
             ty: None,
             init: Expr::Call {
                 callee: Box::new(Expr::Ident("actor_msg_payload".into())),
-                args: vec![Expr::Ident(dm)],
+                args: vec![Expr::Ident(dm.clone())],
             },
         },
     ];
     for (tag, env_name) in envelopes {
         drain_stmts.push(Stmt::If {
             init: None,
-            cond: Expr::Binary {
-                op: BinOp::Eq,
-                left: Box::new(Expr::Ident(dtag.clone())),
-                right: Box::new(Expr::Int(*tag)),
-            },
+            cond: actor_binary(BinOp::And,
+                actor_binary(BinOp::Gt, Expr::Ident(dm.clone()), Expr::Int(0)),
+                actor_binary(BinOp::Eq, Expr::Ident(dtag.clone()), Expr::Int(*tag))),
             then_block: Block {
                 stmts: vec![Stmt::Let {
                     name: denv.clone(),
@@ -1871,25 +2009,21 @@ fn expand_actor_ports(
     }
     let mut while_body: Vec<Stmt> = Vec::new();
     for p in port_order {
+        let got = format!("__got_{p}");
+        while_body.push(Stmt::Let { name: got.clone(), mutable: false, ownership: Ownership::None,
+            ty: None, init: actor_batch_call("actor_try_recv", vec![Expr::Ident(p.clone())]) });
         let mut then_stmts = vec![Stmt::Let {
             name: "__m".into(),
             mutable: false,
             ownership: Ownership::None,
             ty: None,
-            init: Expr::Ident("__got".into()),
+            init: Expr::Ident(got.clone()),
         }];
         then_stmts.extend(process.clone());
         then_stmts.push(Stmt::Continue(Some("__actor_loop".into())));
-        while_body.push(Stmt::IfLet {
-            pattern: Pattern::Variant {
-                name: "Ok".into(),
-                bindings: vec![Pattern::Ident("__got".into())],
-            },
-            scrutinee: Expr::Method {
-                receiver: Box::new(Expr::Ident(p.clone())),
-                method: "try_recv".into(),
-                args: vec![],
-            },
+        while_body.push(Stmt::If {
+            init: None,
+            cond: actor_binary(BinOp::Ne, Expr::Ident(got), Expr::Int(0)),
             then_block: Block {
                 stmts: then_stmts,
                 source_lines: Box::default(),
@@ -2038,7 +2172,7 @@ fn actor_process_from_m(actor: &ActorDef, name: &str, has_state: bool) -> Vec<St
                     mutable: false,
                     ownership: Ownership::None,
                     ty: Some(pty.clone()),
-                    init: Expr::Ident("__pl".into()),
+                    init: actor_scalar_decode(pty),
                 });
             } else {
                 let env_name = format!("{name}_{}_Env", arm.message);
@@ -2067,14 +2201,14 @@ fn actor_process_from_m(actor: &ActorDef, name: &str, has_state: bool) -> Vec<St
             }
         }
         rewrite_return_to_continue(&mut arm_block.stmts);
-        arm_stmts.extend(arm_block.stmts);
+        arm_stmts.extend(arm_block.stmts.clone());
         if arm.message == "Bye" || arm.message == "Stop" {
             arm_stmts.push(Stmt::Assign {
                 name: "__run".into(),
                 value: Expr::Int(0),
             });
         }
-        dispatch_arms.push((tag, arm_stmts));
+        dispatch_arms.push((tag, actor_pair_dispatch(arm, &arm_block, arm_stmts)));
     }
     let mut dispatch_else: Option<Block> = None;
     for (tag, arm_stmts) in dispatch_arms.into_iter().rev() {
@@ -2099,6 +2233,43 @@ fn actor_process_from_m(actor: &ActorDef, name: &str, has_state: bool) -> Vec<St
         stmts.extend(block.stmts);
     }
     stmts
+}
+
+// A receiver owns its prefetched messages. Keeping the cursor in the loop
+// scope makes early returns safe; shutdown explicitly drops the unused suffix.
+fn actor_batch_let(name: &str, init: Expr) -> Stmt {
+    Stmt::Let {
+        name: name.into(),
+        mutable: true,
+        ownership: Ownership::None,
+        ty: None,
+        init,
+    }
+}
+
+fn actor_batch_call(name: &str, args: Vec<Expr>) -> Expr {
+    Expr::Call {
+        callee: Box::new(Expr::Ident(name.into())),
+        args,
+    }
+}
+
+fn actor_batch_index() -> Expr {
+    Expr::Index {
+        base: Box::new(Expr::Ident("__batch".into())),
+        index: Box::new(Expr::Ident("__batch_i".into())),
+    }
+}
+
+fn actor_batch_advance() -> Stmt {
+    Stmt::Assign {
+        name: "__batch_i".into(),
+        value: Expr::Binary {
+            op: BinOp::Add,
+            left: Box::new(Expr::Ident("__batch_i".into())),
+            right: Box::new(Expr::Int(1)),
+        },
+    }
 }
 
 fn expand_actor(actor: ActorDef) -> Vec<Item> {
@@ -2186,7 +2357,10 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 }],
                 Expr::Call {
                     callee: Box::new(Expr::Ident("actor_pack".into())),
-                    args: vec![Expr::Int(tag), Expr::Ident(pname.clone())],
+                    args: vec![Expr::Int(tag),
+                        if matches!(pty, TypeExpr::Named(n) if n == "bool") {
+                            Expr::Int(0) // Boolean constructor emits explicit 0/1 branches.
+                        } else { Expr::Ident(pname.clone()) }],
                 },
             )
         } else {
@@ -2214,7 +2388,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             params,
             ret: Some(TypeExpr::Named("int".into())),
             body: Block {
-                stmts: vec![Stmt::Return(Some(packed))],
+                stmts: actor_message_ctor_body(arm, tag, packed),
                 source_lines: Box::default(),
             },
             exported: false,
@@ -2530,17 +2704,31 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         });
     }
 
+    loop_stmts.extend([
+        actor_batch_let("__batch", Expr::Make { ty: TypeExpr::Array(Box::new(TypeExpr::Named("int".into()))), len: Some(Box::new(Expr::Int(16))), cap: None }),
+        actor_batch_let("__batch_i", Expr::Int(0)),
+        actor_batch_let("__batch_n", Expr::Int(0)),
+    ]);
     let mut while_body: Vec<Stmt> = vec![
+        Stmt::If {
+            init: None,
+            cond: Expr::Binary { op: BinOp::Eq, left: Box::new(Expr::Ident("__batch_i".into())), right: Box::new(Expr::Ident("__batch_n".into())) },
+            then_block: Block { stmts: vec![
+                Stmt::Assign { name: "__batch_n".into(), value: actor_batch_call("actor_recv_batch", vec![Expr::Ident("__mbox".into()), Expr::Ident("__batch".into())]) },
+                Stmt::Assign { name: "__batch_i".into(), value: Expr::Int(0) },
+                Stmt::If { init: None,
+                    cond: Expr::Binary { op: BinOp::Eq, left: Box::new(Expr::Ident("__batch_n".into())), right: Box::new(Expr::Int(0)) },
+                    then_block: Block { stmts: vec![Stmt::Break(None)], source_lines: Box::default() }, else_block: None },
+            ], source_lines: Box::default() }, else_block: None,
+        },
         Stmt::Let {
             name: "__m".into(),
             mutable: false,
             ownership: Ownership::None,
             ty: None,
-            init: Expr::Call {
-                callee: Box::new(Expr::Ident("actor_recv".into())),
-                args: vec![Expr::Ident("__mbox".into())],
-            },
+            init: actor_batch_index(),
         },
+        actor_batch_advance(),
         Stmt::Let {
             name: "__tag".into(),
             mutable: false,
@@ -2600,7 +2788,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                     mutable: false,
                     ownership: Ownership::None,
                     ty: Some(pty.clone()),
-                    init: Expr::Ident("__pl".into()),
+                    init: actor_scalar_decode(pty),
                 });
             } else {
                 // Envelope path: unbox pointer, extract fields
@@ -2630,7 +2818,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             }
         }
         rewrite_return_to_continue(&mut arm_block.stmts);
-        arm_stmts.extend(arm_block.stmts);
+        arm_stmts.extend(arm_block.stmts.clone());
         // Convention: message named Bye / Stop ends the loop
         if arm.message == "Bye" || arm.message == "Stop" {
             arm_stmts.push(Stmt::Assign {
@@ -2638,7 +2826,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 value: Expr::Int(0),
             });
         }
-        dispatch_arms.push((tag, arm_stmts));
+        dispatch_arms.push((tag, actor_pair_dispatch(arm, &arm_block, arm_stmts)));
     }
 
     // else-if chain so a hit does not keep testing later tags.
@@ -2700,6 +2888,17 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
     });
 
+    // Close first so a blocked producer cannot escape shutdown cleanup while
+    // prefetched messages are destroyed. Preserve typed ownership for the tail.
+    loop_stmts.push(close_mailbox("__mbox"));
+    loop_stmts.push(Stmt::While {
+        label: None,
+        cond: Expr::Binary { op: BinOp::Lt, left: Box::new(Expr::Ident("__batch_i".into())), right: Box::new(Expr::Ident("__batch_n".into())) },
+        body: Block { stmts: vec![
+            Stmt::Expr(actor_batch_call(&format!("{name}_drop_message"), vec![actor_batch_index()])),
+            actor_batch_advance(),
+        ], source_lines: Box::default() },
+    });
     // Drain remaining envelopes by typed unbox so nested strings/chans/slices free.
     loop_stmts.extend(mailbox_drain_stmts(&envelopes));
 

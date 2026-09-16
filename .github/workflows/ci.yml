@@ -488,6 +488,9 @@ jobs:
       - name: Race-test concurrent suite
         run: |
           ./target/release/mako test --race --backend c examples/testing/actor_multifile/actor_test.mko
+          ./target/release/mako test --race --backend c examples/testing/actor_batch_test.mko
+          ./target/release/mako test --race --backend c examples/testing/actor_sharding_test.mko
+          ./target/release/mako test --race --backend c examples/testing/actor_adversarial_memsafe_test.mko
           ./target/release/mako test --race examples/testing/crew_fan_test.mko
           ./target/release/mako test --race examples/testing/kick_send_test.mko
           ./target/release/mako test --race examples/testing/kick_share_test.mko

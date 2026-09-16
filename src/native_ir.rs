@@ -231,6 +231,14 @@ pub enum MapValKind {
 }
 
 impl MapValKind {
+    pub(crate) fn channel_ownership_kind(self) -> i64 {
+        match self {
+            Self::ChanI | Self::ChanF => 9,
+            Self::ChanS => 10,
+            Self::ChanPStruct(_) | Self::ChanPOther => 11,
+            _ => 0,
+        }
+    }
     fn from_type(ty: Type) -> Self {
         match ty {
             Type::IntSlice => MapValKind::IntSlice,
@@ -506,15 +514,29 @@ impl Type {
         matches!(
             self,
             Type::Opaque
-                | Type::Builder
-                | Type::ChanI
-                | Type::ChanS
-                | Type::ChanF
-                | Type::ChanP(_)
-                | Type::Arena
-                | Type::Nursery
-                | Type::Task
+            | Type::Builder
+            | Type::Arena
+            | Type::Nursery
+            | Type::Task
         )
+    }
+
+    pub(crate) fn channel_clone_fn(self) -> Option<&'static str> {
+        match self {
+            Type::ChanI | Type::ChanF => Some("mako_native_chan_clone"),
+            Type::ChanS => Some("mako_native_chan_str_clone"),
+            Type::ChanP(_) => Some("mako_native_chan_ptr_clone"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn channel_drop_fn(self) -> Option<&'static str> {
+        match self {
+            Type::ChanI | Type::ChanF => Some("mako_native_chan_drop"),
+            Type::ChanS => Some("mako_native_chan_str_drop"),
+            Type::ChanP(_) => Some("mako_native_chan_ptr_drop"),
+            _ => None,
+        }
     }
 
     /// String/slice types whose headers may be consumed by runtime APIs
@@ -17566,6 +17588,18 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
+            "actor_recv_batch" if args.len() == 2 => Some((
+                "mako_native_actor_recv_batch",
+                &[Type::ChanI, Type::IntSlice],
+                Some(Type::I64),
+                false,
+            )),
+            "actor_try_recv" if args.len() == 1 => Some((
+                "mako_native_chan_try_recv",
+                &[Type::ChanI],
+                Some(Type::I64),
+                false,
+            )),
             "actor_msg_tag" if args.len() == 1 => Some((
                 "mako_native_actor_msg_tag",
                 &[Type::I64],
@@ -32233,7 +32267,7 @@ impl<'a> FunctionLowerer<'a> {
             }),
             Type::ChanI | Type::ChanS | Type::ChanF | Type::ChanP(_) => self.emit(Inst::Call {
                 out: None,
-                function: "mako_native_chan_drop".into(),
+                function: ty.channel_drop_fn().unwrap().into(),
                 args: vec![value],
                 ret: None,
             }),
@@ -32310,7 +32344,7 @@ impl<'a> FunctionLowerer<'a> {
                 ret: None,
             }),
             Type::PtrSlice(vk) => {
-                if matches!(vk, MapValKind::OwnedOpaque(_)) {
+                if matches!(vk, MapValKind::OwnedOpaque(_)) || vk.channel_ownership_kind() != 0 {
                     let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                     self.emit(Inst::Call {
                         out: None,
@@ -32878,6 +32912,7 @@ impl<'a> FunctionLowerer<'a> {
             | MapValKind::StructKeyOwnedOpaque(_, OpaqueKind::Interface) => (7, None),
             MapValKind::OwnedOpaque(OpaqueKind::HttpRequest)
             | MapValKind::StructKeyOwnedOpaque(_, OpaqueKind::HttpRequest) => (8, None),
+            channel if channel.channel_ownership_kind() != 0 => (channel.channel_ownership_kind(), None),
             _ => (0, None),
         };
         let kind = self.const_int(drop_kind, Type::I64);
@@ -33513,11 +33548,13 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![value],
                 ret: Some(Type::BoolSlice),
             }),
-            Type::ChanI
-            | Type::ChanS
-            | Type::ChanF
-            | Type::ChanP(_)
-            | Type::Arena
+            Type::ChanI | Type::ChanS | Type::ChanF | Type::ChanP(_) => self.emit(Inst::Call {
+                out: Some(out),
+                function: ty.channel_clone_fn().unwrap().into(),
+                args: vec![value],
+                ret: Some(ty),
+            }),
+            Type::Arena
             | Type::Nursery
             | Type::Opaque
             | Type::Task => {
@@ -33552,7 +33589,7 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![value],
                 ret: Some(ty),
             }),
-            Type::PtrSlice(vk) if matches!(vk, MapValKind::OwnedOpaque(_)) => {
+            Type::PtrSlice(vk) if matches!(vk, MapValKind::OwnedOpaque(_)) || vk.channel_ownership_kind() != 0 => {
                 let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                 self.emit(Inst::Call {
                     out: Some(out),

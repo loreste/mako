@@ -1916,6 +1916,10 @@ fn emit_struct_clone(
                 let call = fb.ins().call(f, &[loaded]);
                 fb.inst_results(call)[0]
             }
+            t if t.channel_clone_fn().is_some() => {
+                let call = call_runtime_fn(fb, module, t.channel_clone_fn().unwrap(), &[loaded], true)?;
+                fb.inst_results(call)[0]
+            }
             IrType::ShareInt => {
                 // RC bump; reuses declare-on-demand import like Call.
                 let mut sig = module.make_signature();
@@ -1986,11 +1990,11 @@ fn emit_struct_clone(
                 )?;
                 fb.inst_results(call)[0]
             }
-            IrType::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) => {
+            IrType::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) || vk.channel_ownership_kind() != 0 => {
                 let vkind: i64 = match vk {
                     native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::Interface) => 7,
                     native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::HttpRequest) => 8,
-                    _ => 0,
+                    _ => vk.channel_ownership_kind() as _,
                 };
                 let vk_v = fb.ins().iconst(types::I64, vkind);
                 let zero = fb.ins().iconst(types::I64, 0);
@@ -2146,11 +2150,11 @@ fn emit_struct_drop(
                     false,
                 )?;
             }
-            IrType::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) => {
+            IrType::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) || vk.channel_ownership_kind() != 0 => {
                 let vkind: i64 = match vk {
                     native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::Interface) => 7,
                     native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::HttpRequest) => 8,
-                    _ => 0,
+                    _ => vk.channel_ownership_kind() as _,
                 };
                 let vk_v = fb.ins().iconst(types::I64, vkind);
                 let zero = fb.ins().iconst(types::I64, 0);
@@ -2199,6 +2203,9 @@ fn emit_struct_drop(
                     .map_err(|e| NativeError::new(e.to_string()))?;
                 let f = module.declare_func_in_func(id, &mut fb.func);
                 fb.ins().call(f, &[loaded]);
+            }
+            t if t.channel_drop_fn().is_some() => {
+                call_runtime_fn(fb, module, t.channel_drop_fn().unwrap(), &[loaded], false)?;
             }
             _ => {}
         }

@@ -1,0 +1,40 @@
+// Keyed actors: one owner per key, bounded mailboxes, structured shutdown.
+// Keep keys that participate in one transaction on the same shard.
+actor AccountShard {
+    balances: []int = make([]int, 32, 32)
+    receive Credit(key: int, amount: int) {
+        self.balances[key] = self.balances[key] + amount
+    }
+    receive Balance(key: int, reply: chan[int]) {
+        let _ = reply.send(self.balances[key])
+    }
+    receive Stop { let _ = 0 }
+}
+
+fn TestKeyedActors() {
+    let mut shards = make([]chan[int], 0, 4)
+    let reply = make(chan[int], 1)
+    crew workers {
+        for _ in 4 {
+            let shard = AccountShard_spawn_cap(64)
+            shards = append(shards, shard)
+            let _ = workers.kick(AccountShard_loop(shard))
+        }
+        for _ in 100 {
+            for key in 32 {
+                assert(AccountShard_send(shards[key % len(shards)], AccountShard_Credit(key, 1)))
+            }
+        }
+        // A query follows earlier credits in the same mailbox.
+        for key in 32 {
+            assert(AccountShard_send(shards[key % len(shards)], AccountShard_Balance(key, reply)))
+            assert_eq(reply.recv(), 100)
+        }
+        for shard in shards { assert(AccountShard_send(shard, AccountShard_Stop())) }
+    }
+}
+
+fn main() {
+    TestKeyedActors()
+    print("32 accounts verified across 4 actor shards")
+}

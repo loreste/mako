@@ -3452,6 +3452,7 @@ impl Codegen {
                 Expr::Ident(name)
                     if name == "read_file"
                         || name == "str_repeat"
+                        || name == "actor_spawn"
                         // Builtins that return a freshly malloc'd owned string;
                         // their results must be reclaimed at scope exit or a
                         // long-running server leaks one buffer per request.
@@ -5051,11 +5052,32 @@ impl Codegen {
         if matches!(c_ty, "MakoIntArray" | "MakoFloatArray" | "MakoByteArray" | "MakoBoolArray" | "MakoStrArray")
             || c_ty.starts_with("MakoArr_")
         {
+            // The literal already owns this reference. A uniquely owned heap
+            // backing can move into the envelope without copying. Views and
+            // pooled byte buffers must still detach; nested slices need their
+            // own uniqueness checks even when the outer backing is exclusive.
+            let pool_check = if c_ty == "MakoByteArray" { format!(" || (({val}).cap & MAKO_POOL_CAP_FLAG)") } else { String::new() };
+            self.line(&format!("if (({val}).cap == 0{pool_check} || mako_rc_shared(({val}).data)) {{"));
+            self.indent += 1;
             let snapshot = self.clone_actor_value(c_ty, val);
             if let Some(free) = Self::own_free_fn(c_ty) {
                 self.line(&format!("{free}({val});"));
             }
             self.line(&format!("{val} = {snapshot};"));
+            self.indent -= 1;
+            if let Some(tag) = c_ty.strip_prefix("MakoArr_") {
+                self.line("} else {");
+                self.indent += 1;
+                let index = self.fresh("actor_move_i");
+                let elem = self.arr_elem_c_ty(tag);
+                self.line(&format!("for (size_t {index} = 0; {index} < ({val}).len; ++{index}) {{"));
+                self.indent += 1;
+                self.detach_actor_slices(&elem, &format!("({val}).data[{index}]"));
+                self.indent -= 1;
+                self.line("}");
+                self.indent -= 1;
+            }
+            self.line("}");
         } else if let Some(info) = self.structs.values().find(|s| s.c_name == c_ty).cloned() {
             for (field, ty) in info.fields {
                 self.detach_actor_slices(&ty, &format!("{val}.{field}"));
@@ -7195,6 +7217,9 @@ impl Codegen {
             "MakoFloatArray" => Some("mako_float_array_free"),
             "MakoBoolArray" => Some("mako_bool_array_free"),
             "MakoByteArray" => Some("mako_byte_array_free"),
+            "MakoChan*" => Some("mako_chan_free"),
+            "MakoChanStr*" => Some("mako_chan_str_free"),
+            "MakoChanPtr*" => Some("mako_chan_ptr_free"),
             _ => None,
         };
         // For struct elements, collect field-level frees before emitting.
@@ -7205,7 +7230,7 @@ impl Codegen {
         };
         let _ = writeln!(self.out, "static inline void {pref}_free({mt} a) {{");
         let _ = writeln!(self.out, "    if (!(a.cap > 0 && a.data)) return;");
-        let _ = writeln!(self.out, "    if (!mako_rc_shared(a.data)) {{");
+        let _ = writeln!(self.out, "    if (mako_rc_release_last(a.data)) {{");
         if let Some(ef) = deep {
             let _ = writeln!(
                 self.out,
@@ -7219,8 +7244,8 @@ impl Codegen {
             }
             let _ = writeln!(self.out, "        }}");
         }
+        let _ = writeln!(self.out, "        free((char *)a.data - MAKO_RC_HEADER);");
         let _ = writeln!(self.out, "    }}");
-        let _ = writeln!(self.out, "    mako_rc_release(a.data);");
         let _ = writeln!(self.out, "}}");
         // O(1) RC clone: retain backing data, return shallow copy
         let _ = writeln!(self.out, "static inline {mt} {pref}_clone({mt} a) {{");
@@ -7282,6 +7307,12 @@ impl Codegen {
             self.out,
             "        if (s.len) memcpy(nd, s.data, s.len * sizeof({elem_c}));"
         );
+        if matches!(elem_c, "MakoChan*" | "MakoChanStr*" | "MakoChanPtr*") {
+            let clone = Self::own_clone_fn(elem_c).expect("channel clone");
+            let _ = writeln!(self.out, "        if (mako_rc_shared(s.data)) {{");
+            let _ = writeln!(self.out, "            for (size_t i = 0; i < s.len; ++i) nd[i] = {clone}(nd[i]);");
+            let _ = writeln!(self.out, "        }}");
+        }
         let _ = writeln!(self.out, "        s.data = nd; s.cap = ncap;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "    s.data[s.len++] = v; return s;");
@@ -16887,7 +16918,7 @@ impl Codegen {
                     }
                 }
                 // Local binding first (may be a function pointer).
-                if let Some(ty) = self.locals.get(n).cloned() {
+                if let Some(ty) = self.locals.get(n).or_else(|| self.locals.get(&mangle(n))).cloned() {
                     return (ty, mangle(n));
                 }
                 // Named function as a first-class value → MakoFn bare fat pointer.
@@ -24989,10 +25020,17 @@ impl Codegen {
                             self.line(&format!("bool {tmp} = mako_actor_send({a}, {m}) != 0;"));
                             return ("bool".into(), tmp);
                         }
-                        "actor_recv" => {
+                        "actor_recv" | "actor_try_recv" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("ar");
-                            self.line(&format!("int64_t {tmp} = mako_actor_recv({a});"));
+                            self.line(&format!("int64_t {tmp} = mako_{name}({a});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "actor_recv_batch" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, dst) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("arb");
+                            self.line(&format!("int64_t {tmp} = mako_actor_recv_batch({a}, {dst});"));
                             return ("int64_t".into(), tmp);
                         }
                         "actor_stop" => {
@@ -36190,7 +36228,9 @@ impl Codegen {
                                 }
                                 if Self::own_free_fn(aty).is_some()
                                     && !self.own_drop_live.contains(&arg_vals[i])
-                                    && matches!(args.get(i), Some(Expr::Call { .. }))
+                                    && (matches!(args.get(i), Some(Expr::Call { .. }))
+                                        || (aty == "MakoString" && matches!(args.get(i),
+                                            Some(Expr::Binary { op: BinOp::Add, .. } | Expr::StringInterp(_)))))
                                 {
                                     let cap = self.fresh("trs");
                                     let cty = aty.clone();

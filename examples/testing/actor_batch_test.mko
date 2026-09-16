@@ -1,0 +1,134 @@
+// Batch FIFO, partial batches, and cleanup after Stop within a prefetched batch.
+actor BatchOrder {
+    n: int = 0
+    receive Add(sequence: int) {
+        assert_eq(sequence, self.n)
+        self.n = self.n + 1
+        if sequence % 3 == 0 { return }
+    }
+    receive Check(reply: chan[int]) { let _ = reply.send(self.n) }
+    receive Stop { let _ = 0 }
+    receive Unreachable(text: string, values: []int) { assert(false) }
+}
+
+fn TestBatchPreservesOrderAndEarlyReturns() {
+    let a = BatchOrder_spawn_cap(64)
+    for i in 47 { assert(BatchOrder_send(a, BatchOrder_Add(i))) }
+    let reply = make(chan[int], 1)
+    assert(BatchOrder_send(a, BatchOrder_Check(reply)))
+    assert(BatchOrder_send(a, BatchOrder_Stop()))
+    // These span both the prefetched suffix and the remaining mailbox.
+    for i in 15 {
+        assert(BatchOrder_send(a, BatchOrder_Unreachable("tail-" + int_to_string(i), [i, i + 1])))
+    }
+    crew workers {
+        let task = workers.kick(BatchOrder_loop(a))
+        assert_eq(reply.recv(), 47)
+        let _ = task.join()
+    }
+    assert_eq(actor_len(a), 0)
+}
+
+fn TestBatchSingleSlotAndClosedPrefix() {
+    let a = BatchOrder_spawn_cap(1)
+    let reply = make(chan[int], 1)
+    crew workers {
+        let task = workers.kick(BatchOrder_loop(a))
+        for i in 40 { assert(BatchOrder_send(a, BatchOrder_Add(i))) }
+        assert(BatchOrder_send(a, BatchOrder_Check(reply)))
+        assert_eq(reply.recv(), 40)
+        actor_stop(a)
+        let _ = task.join()
+    }
+}
+
+fn TestRawBatchIsBoundedAndDoesNotWaitToFill() {
+    let a = actor_spawn(32)
+    let dst = make([]int, 32, 32)
+    for i in 20 { assert(actor_send(a, actor_pack(1, i))) }
+    actor_stop(a)
+    assert_eq(actor_recv_batch(a, dst), 16)
+    for i in 16 { assert_eq(actor_msg_payload(dst[i]), i) }
+    assert_eq(actor_recv_batch(a, dst), 4)
+    for i in 4 { assert_eq(actor_msg_payload(dst[i]), i + 16) }
+    assert_eq(actor_recv_batch(a, dst), 0)
+    let b = actor_spawn(4)
+    assert(actor_send(b, actor_pack(1, 42)))
+    assert_eq(actor_recv_batch(b, dst), 1)
+    assert_eq(actor_msg_payload(dst[0]), 42)
+    actor_stop(b)
+}
+
+actor PackedPair {
+    first: int = 0
+    second: int = 0
+    receive Set(a: int, b: int) { self.first = a; self.second = b }
+    receive Get(reply: chan[int]) {
+        let _ = reply.send(self.first)
+        let _ = reply.send(self.second)
+    }
+    receive Stop { let _ = 0 }
+}
+
+actor PortPair {
+    n: int = 0
+    receive Pair(a: int, b: int) on work { self.n = a + b }
+    receive Read(reply: chan[int]) on work { let _ = reply.send(self.n) }
+    receive Stop on control { let _ = 0 }
+}
+
+fn TestInlinePairOnNamedPort() {
+    let a = PortPair_spawn_cap(32)
+    let reply = make(chan[int], 1)
+    crew workers {
+        let task = workers.kick(PortPair_loop(a))
+        assert(PortPair_Pair_send(a, -8388608, 8388607))
+        assert(PortPair_Read_send(a, reply))
+        assert_eq(reply.recv(), -1)
+        assert(PortPair_Pair_send(a, 8388608, 1))
+        assert(PortPair_Read_send(a, reply))
+        assert_eq(reply.recv(), 8388609)
+        assert(PortPair_Stop_send(a))
+        let _ = task.join()
+    }
+}
+
+fn TestInlinePairBoundariesAndHeapFallback() {
+    let a = PackedPair_spawn_cap(64)
+    let reply = make(chan[int], 2)
+    crew workers {
+        let task = workers.kick(PackedPair_loop(a))
+        for x in [-8388609, -8388608, -1, 0, 1, 8388607, 8388608, 9223372036854775807] {
+            for y in [-8388609, -8388608, -1, 0, 1, 8388607, 8388608] {
+                let message = PackedPair_Set(x, y)
+                if x >= -8388608 && x <= 8388607 && y >= -8388608 && y <= 8388607 {
+                    assert(message < 0)
+                } else { assert(message > 0) }
+                assert(PackedPair_send(a, message))
+                assert(PackedPair_send(a, PackedPair_Get(reply)))
+                assert_eq(reply.recv(), x)
+                assert_eq(reply.recv(), y)
+            }
+        }
+        assert(PackedPair_send(a, PackedPair_Stop()))
+        let _ = task.join()
+    }
+    // Both inline and fallback messages must be safe to reject or drain.
+    assert(!PackedPair_send(a, PackedPair_Set(1, 2)))
+    assert(!PackedPair_send(a, PackedPair_Set(8388608, -8388609)))
+    let b = PackedPair_spawn_cap(64)
+    assert(PackedPair_send(b, PackedPair_Stop()))
+    for _ in 20 {
+        assert(PackedPair_send(b, PackedPair_Set(1, -2)))
+        assert(PackedPair_send(b, PackedPair_Set(8388608, -8388609)))
+    }
+    crew drainers { let _ = drainers.kick(PackedPair_loop(b)) }
+}
+
+fn main() {
+    TestBatchPreservesOrderAndEarlyReturns()
+    TestBatchSingleSlotAndClosedPrefix()
+    TestRawBatchIsBoundedAndDoesNotWaitToFill()
+    TestInlinePairBoundariesAndHeapFallback()
+    TestInlinePairOnNamedPort()
+}

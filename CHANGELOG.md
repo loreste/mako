@@ -2,6 +2,12 @@
 
 ## 0.6.35
 
+- Single-port actor loops batch up to 16 ready messages per receive lock, preserving FIFO, early returns, and typed cleanup of prefetched messages on shutdown. Named ports retain per-message priority checks. `actor_len` excludes the bounded in-flight batch.
+- Boolean messages and pairs of integers in the signed 24-bit range avoid envelope allocation; larger pairs fall back to full-width envelopes. Actor payload isolation can transfer exclusive slice backing while continuing to snapshot shared and borrowed storage recursively.
+- Add a keyed sharding example, batch/packing boundary tests, and sanitizer/race coverage for batched shutdown. Document mailbox contention measurements and per-shard transaction constraints.
+- Reclaim raw `actor_spawn` handles at scope exit and temporary concatenated/interpolated strings passed into generated message constructors.
+- Channel slices release their elements after the final reference and retain channels across copy-on-write growth. Native channel aliases and struct fields retain/release the correct mailbox representation. Named-port polling uses allocation-free `actor_try_recv`, avoiding temporary Result allocations; C ownership lookup also preserves mangled port names such as `exec`.
+
 - Native function values now release their wrappers and reference-counted capture environments after calls, scope exit, and worker handoff. Aliases and returned closures retain their storage independently, including after an explicit `fn_drop` of another binding.
 - C function-value aliases retain their shared capture environment, preventing double-free; temporary callbacks with immutable captures are reclaimed at scope exit.
 - Keep small-function inlining optional so recursive functions compile with GCC. Linux/glibc integer channels with more than one slot use adaptive mutexes to reduce short lock-contention waits.

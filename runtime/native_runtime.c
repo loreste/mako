@@ -1738,6 +1738,13 @@ void mako_native_struct_slice_drop_ptr(
     free(slice);
 }
 
+extern void *mako_native_chan_clone(void *);
+extern void *mako_native_chan_str_clone(void *);
+extern void *mako_native_chan_ptr_clone(void *);
+extern void mako_native_chan_drop(void *);
+extern void mako_native_chan_str_drop(void *);
+extern void mako_native_chan_ptr_drop(void *);
+
 /* Value kinds for content-keyed maps:
  * 0 scalar/shared handle, 1 string, 2 struct, 3 []int, 4 []string,
  * 5 []float, 6 []struct, 7 interface, 8 HTTP request. */
@@ -1778,6 +1785,9 @@ static void mako_native_struct_map_value_drop(
         case 8:
             mako_native_http_request_drop_ptr(value);
             break;
+        case 9: mako_native_chan_drop((void *)(intptr_t)value); break;
+        case 10: mako_native_chan_str_drop((void *)(intptr_t)value); break;
+        case 11: mako_native_chan_ptr_drop((void *)(intptr_t)value); break;
         default:
             break;
     }
@@ -1822,6 +1832,9 @@ static int64_t mako_native_struct_map_value_clone(
             );
         case 8:
             return mako_native_http_request_clone_ptr(value);
+        case 9: return (int64_t)(intptr_t)mako_native_chan_clone((void *)(intptr_t)value);
+        case 10: return (int64_t)(intptr_t)mako_native_chan_str_clone((void *)(intptr_t)value);
+        case 11: return (int64_t)(intptr_t)mako_native_chan_ptr_clone((void *)(intptr_t)value);
         default:
             return value;
     }

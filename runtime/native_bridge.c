@@ -374,12 +374,12 @@ MakoChan *mako_native_chan_clone(MakoChan *c) {
     return mako_chan_clone(c);
 }
 
-MakoChanStr *mako_native_chan_str_clone(MakoChanStr *c) {
-    return mako_chan_str_clone(c);
+MakoChan *mako_native_chan_str_clone(MakoChan *c) {
+    return mako_chan_clone(c);
 }
 
-MakoChanPtr *mako_native_chan_ptr_clone(MakoChanPtr *c) {
-    return mako_chan_ptr_clone(c);
+MakoChan *mako_native_chan_ptr_clone(MakoChan *c) {
+    return mako_chan_clone(c);
 }
 
 int64_t mako_native_chan_send(MakoChan *c, int64_t v) {
@@ -407,6 +407,11 @@ void mako_native_chan_drop(MakoChan *c) {
     if (!c) return;
     mako_chan_free(c);
 }
+
+/* Native typed channels transport pointer words through the integer mailbox;
+ * they do not use the C backend's MakoChanStr/MakoChanPtr layouts. */
+void mako_native_chan_str_drop(MakoChan *c) { mako_chan_free(c); }
+void mako_native_chan_ptr_drop(MakoChan *c) { mako_chan_free(c); }
 
 // ---- uuid / log -------------------------------------------------------------
 
@@ -475,6 +480,11 @@ typedef struct {
     int64_t owned;
 } MakoNativeIntSlice;
 MakoNativeIntSlice *mako_native_int_slice_make_ptr(size_t len, size_t cap);
+
+int64_t mako_native_actor_recv_batch(MakoChan *c, MakoNativeIntSlice *dst) {
+    if (!dst) return 0;
+    return mako_actor_recv_batch(c, (MakoIntArray){.data = dst->data, .len = dst->len});
+}
 typedef struct {
     double *data;
     size_t len;
