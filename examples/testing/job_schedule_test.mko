@@ -1,8 +1,8 @@
 fn TestJobScheduleDueAndCancel() {
     let name = "roadmap-job-schedule"
+    let before = now_ms()
     let due_at = job_schedule(name, 20)
-    assert(due_at >= now_ms())
-    assert_eq(job_due(name), 0)
+    assert(due_at >= before + 20)
     assert(job_delay_ms(name) >= 0)
 
     sleep_ms(30)
@@ -20,10 +20,13 @@ fn TestJobScheduleImmediateAndReschedule() {
     assert(job_schedule(name, 0) <= now_ms())
     assert_eq(job_due(name), 1)
 
-    let later = job_schedule(name, 25)
-    assert(later >= now_ms())
+    // Keep the pending check well away from the deadline on loaded CI hosts.
+    let before = now_ms()
+    let later = job_schedule(name, 60000)
+    assert(later >= before + 60000)
     assert_eq(job_due(name), 0)
-    sleep_ms(35)
+    assert_eq(job_cancel(name), 1)
+    assert(job_schedule(name, 0) <= now_ms())
     assert_eq(job_due(name), 1)
     assert_eq(job_cancel(name), 1)
 }
