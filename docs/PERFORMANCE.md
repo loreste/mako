@@ -24,6 +24,43 @@ and single-producer actor delivery (`actor200k`) are measured against Rust `sync
 as 1.5× regression budgets; on a quiet Apple arm64 host the uncontended channel
 path is typically under 1.0× Rust.
 
+### Verify the artifact before comparing throughput
+
+`mako build` defaults to a debug build. Build deployment and benchmark artifacts
+explicitly, using the same application revision, compiler, runtime headers, and
+settings on both sides of a comparison:
+
+```bash
+mako build --backend c --release --no-incremental app.mko -o out/app-release
+```
+
+Record the exact command, source revision, binary checksum, target, and compiler
+version. Check the executable actually running on the deployment host: on Linux,
+`readlink /proc/PID/exe` identifies it, and `sha256sum /proc/PID/exe` hashes the
+running artifact even if its pathname has since been replaced. An installed
+compiler version alone does not establish how an application binary was built.
+Debug or sanitizer-instrumented artifacts can dominate a throughput result.
+Run sanitizer correctness checks separately and retain their flags in the report.
+Optimized safe Mako indexing still retains bounds checks; release builds do not
+opt out of ownership or mailbox synchronization.
+
+Host C release builds use `-O3 -flto`; the Zig cross-compilation path currently
+uses `-O2` without LTO. Record that distinction when comparing deployment builds.
+Use the same dataset, queries, durability settings, client concurrency, and
+benchmark tool options. Alternate run order and report multiple samples.
+
+For PostgreSQL-compatible workloads, pgbench takes the database name as a
+**positional argument**. Its `-d` option enables per-message debug logging and can
+add substantial client-side work:
+
+```bash
+pgbench -h 127.0.0.1 -p 5444 -U fay -n -c 1 -j 1 -T 10 -f queries.sql faydb
+```
+
+Check successful transaction counts and returned rows before interpreting TPS.
+When a deployment is slow, profile its actual executable and SQL path before
+attributing the result to an actor mailbox change.
+
 ### Actor contention and scaling
 
 Run `./scripts/bench-actor-scaling.sh` on a quiet host after `cargo build --release`.

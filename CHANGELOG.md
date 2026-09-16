@@ -2,6 +2,8 @@
 
 ## 0.6.35
 
+- Document release-artifact verification, sanitizer/build-profile differences, and correct pgbench database arguments when investigating application throughput regressions (#64).
+
 - Single-port actor loops batch up to 16 ready messages per receive lock, preserving FIFO, early returns, and typed cleanup of prefetched messages on shutdown. Named ports retain per-message priority checks. `actor_len` excludes the bounded in-flight batch.
 - Boolean messages and pairs of integers in the signed 24-bit range avoid envelope allocation; larger pairs fall back to full-width envelopes. Actor payload isolation can transfer exclusive slice backing while continuing to snapshot shared and borrowed storage recursively.
 - Add a keyed sharding example, batch/packing boundary tests, and sanitizer/race coverage for batched shutdown. Document mailbox contention measurements and per-shard transaction constraints.
