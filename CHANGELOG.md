@@ -2,6 +2,9 @@
 
 ## 0.6.35
 
+- Native function values now release their reference-counted wrappers and owned captures after calls, scope exit, and worker handoff. Aliases and returned closures retain their storage independently.
+- Keep small-function inlining optional so recursive functions compile with GCC. Linux/glibc integer channels use adaptive mutexes to reduce short lock-contention waits.
+
 - Close actor mailboxes before draining to prevent concurrent sends escaping cleanup. Generated send helpers consume and destroy rejected envelopes; `Name_try_send` and `Name_drop_message` cover nonblocking and unsent messages.
 - Snapshot mutable slice payloads, recursively through structs, before actor enqueue; reject payload types without an isolation contract. Preserve the zero-allocation scalar path. Buffered channel wakeups now stop issuing redundant signals once all waiting peers have work.
 - Preserve closure-local returns inside actor handlers. Add concurrent shutdown, closed/full mailbox, and owned-payload regression tests on both backends.

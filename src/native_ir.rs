@@ -468,7 +468,8 @@ impl Type {
     fn is_heap(self) -> bool {
         matches!(
             self,
-            Type::Str
+            Type::FnPtr
+                | Type::Str
                 | Type::IntSlice
                 | Type::FloatSlice
                 | Type::ByteSlice
@@ -513,7 +514,6 @@ impl Type {
                 | Type::Arena
                 | Type::Nursery
                 | Type::Task
-                | Type::FnPtr
         )
     }
 
@@ -934,6 +934,30 @@ fn struct_clone_helper(id: u32) -> Function {
         entry: BlockId(0),
         next_value: 2,
     }
+}
+
+fn lambda_drop_helper(name: String, captures: &[(String, Type)]) -> Function {
+    let pack = Value(0);
+    let mut next = 1;
+    let mut instructions = Vec::new();
+    for (i, (_, ty)) in captures.iter().enumerate() {
+        if !matches!(ty, Type::Str | Type::Struct(_) | Type::FnPtr) { continue; }
+        let index = Value(next);
+        let value = Value(next + 1);
+        next += 2;
+        instructions.push(Inst::ConstInt { out: index, value: i as i64, ty: Type::I64 });
+        instructions.push(Inst::Call { out: Some(value), function: "mako_native_pack_get".into(), args: vec![pack, index], ret: Some(*ty) });
+        instructions.push(match ty {
+            Type::Str => Inst::DropString { value },
+            Type::Struct(id) => Inst::DropStruct { value, struct_id: *id },
+            Type::FnPtr => Inst::Call { out: None, function: "mako_native_fn_release".into(), args: vec![value], ret: None },
+            _ => unreachable!(),
+        });
+    }
+    instructions.push(Inst::Call { out: None, function: "mako_native_pack_free".into(), args: vec![pack], ret: None });
+    Function { name, params: vec![("pack".into(), pack, Type::I64)], ret: None,
+        blocks: vec![BasicBlock { instructions, terminator: Some(Terminator::Return(None)) }],
+        entry: BlockId(0), next_value: next }
 }
 
 /// Registry of aggregate layouts. Named structs are resolved up front;
@@ -5576,7 +5600,7 @@ impl<'a> FunctionLowerer<'a> {
         let code = self.value();
         self.emit(Inst::FuncAddr {
             out: code,
-            function: name,
+            function: name.clone(),
         });
         // Pack capture values into env (or 0).
         let env = if has_env {
@@ -5617,9 +5641,9 @@ impl<'a> FunctionLowerer<'a> {
                         ret: Some(Type::I64),
                     });
                     v = bits;
-                } else if *cty == Type::Str {
+                } else if matches!(*cty, Type::Str | Type::FnPtr) {
                     // Clone string into env so capture owns independent data.
-                    v = self.emit_clone(v, Type::Str);
+                    v = self.emit_clone(v, *cty);
                 } else if let Type::Struct(sid) = *cty {
                     // Clone struct so capture owns independent storage.
                     let clone = self.value();
@@ -5662,6 +5686,14 @@ impl<'a> FunctionLowerer<'a> {
             args: vec![code, env],
             ret: Some(Type::FnPtr),
         });
+        if has_env {
+            let drop_name = format!("{name}_drop_env");
+            self.kick_stubs.as_deref_mut().ok_or_else(|| IrError::new("native IR: missing closure cleanup collector"))?
+                .push(lambda_drop_helper(drop_name.clone(), &captures));
+            let drop_addr = self.value();
+            self.emit(Inst::FuncAddr { out: drop_addr, function: drop_name });
+            self.emit(Inst::Call { out: None, function: "mako_native_fn_set_drop".into(), args: vec![out, drop_addr], ret: None });
+        }
         Ok((out, Type::FnPtr, true))
     }
 
@@ -5723,12 +5755,11 @@ impl<'a> FunctionLowerer<'a> {
             return Err(IrError::new("native IR: indirect call expects fn pointer"));
         }
         let result = self.lower_indirect_call_fp(fp, args)?;
-        // Drop temporary fat-fn after call (env pack is intentionally retained
-        // for the call; free the MakoFn box only — env pack is leaked for now).
+        // Release temporary fat-fn and its capture pack after the call.
         if fo {
             self.emit(Inst::Call {
                 out: None,
-                function: "mako_native_fn_drop".into(),
+                function: "mako_native_fn_release".into(),
                 args: vec![fp],
                 ret: None,
             });
@@ -5994,6 +6025,8 @@ impl<'a> FunctionLowerer<'a> {
             }
             // By-value fn params: move fat-fn out of the local so the source is bare.
             if ty == Type::FnPtr || params[i] == Type::FnPtr {
+                let owns_local = matches!(arg, Expr::Ident(name) if self.heap_owned.get(name) == Some(&true));
+                if !owned && !owns_local { v = self.emit_clone(v, Type::FnPtr); }
                 self.move_fnptr_local(arg);
             }
             if ty.is_consumable_header() {
@@ -6033,7 +6066,7 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![pack, idx, v],
                 ret: None,
             });
-            if owned && ty.is_heap() && !ty.is_consumable_header() && !matches!(ty, Type::Struct(_))
+            if owned && ty.is_heap() && !ty.is_consumable_header() && !matches!(ty, Type::Struct(_) | Type::FnPtr)
             {
                 // Pack holds a borrow of the pointer for the join lifetime.
                 // Heap temps (struct lits, etc.) are stored in a stack local so
@@ -6221,6 +6254,12 @@ impl<'a> FunctionLowerer<'a> {
         // callee returns (the callee borrows and must not free them).
         for (arg, pty) in call_args.iter().zip(params.iter()) {
             match *pty {
+                Type::FnPtr => emit(Inst::Call {
+                    out: None,
+                    function: "mako_native_fn_release".into(),
+                    args: vec![*arg],
+                    ret: None,
+                }),
                 Type::Struct(id) => {
                     emit(Inst::DropStruct {
                         value: *arg,
@@ -32160,6 +32199,12 @@ impl<'a> FunctionLowerer<'a> {
     /// Emit the type-appropriate drop for an owned heap value.
     fn emit_drop(&mut self, value: Value, ty: Type) {
         match ty {
+            Type::FnPtr => self.emit(Inst::Call {
+                out: None,
+                function: "mako_native_fn_release".into(),
+                args: vec![value],
+                ret: None,
+            }),
             Type::Str => self.emit(Inst::DropString { value }),
             Type::IntSlice => self.emit(Inst::DropSlice { value }),
             Type::FloatSlice => self.emit(Inst::Call {
@@ -33436,6 +33481,12 @@ impl<'a> FunctionLowerer<'a> {
     fn emit_clone(&mut self, value: Value, ty: Type) -> Value {
         let out = self.value();
         match ty {
+            Type::FnPtr => self.emit(Inst::Call {
+                out: Some(out),
+                function: "mako_native_fn_clone".into(),
+                args: vec![value],
+                ret: Some(ty),
+            }),
             Type::Str => self.emit(Inst::StringClone { out, value }),
             Type::IntSlice => self.emit(Inst::SliceClone { out, slice: value }),
             Type::FloatSlice => self.emit(Inst::Call {
@@ -33463,8 +33514,7 @@ impl<'a> FunctionLowerer<'a> {
             | Type::Arena
             | Type::Nursery
             | Type::Opaque
-            | Type::Task
-            | Type::FnPtr => {
+            | Type::Task => {
                 // Handles are not deep-cloned; share the pointer (caller owns).
                 return value;
             }

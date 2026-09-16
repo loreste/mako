@@ -9710,6 +9710,30 @@ int64_t mako_native_fn_drop(int64_t f) {
     p->drop_env = NULL;
     return 0;
 }
+/* Keep the public MakoFn prefix; native ownership also tracks box aliases. */
+typedef struct { MakoFn fn; atomic_uint refs; } MakoNativeFn;
+void mako_native_fn_set_drop(int64_t f, int64_t drop) {
+    ((MakoFn *)(intptr_t)f)->drop_env = (void (*)(void *))(intptr_t)drop;
+}
+int64_t mako_native_fn_clone(int64_t f) {
+    if (!f) return 0;
+    atomic_uint *refs = &((MakoNativeFn *)(intptr_t)f)->refs;
+    unsigned old = atomic_load_explicit(refs, memory_order_relaxed);
+    for (;;) {
+        if (old == 0 || old == UINT_MAX) mako_abort("function: invalid retain count");
+        if (atomic_compare_exchange_weak_explicit(refs, &old, old + 1,
+                memory_order_relaxed, memory_order_relaxed)) break;
+    }
+    return f;
+}
+void mako_native_fn_release(int64_t f) {
+    if (!f) return;
+    MakoNativeFn *p = (MakoNativeFn *)(intptr_t)f;
+    if (atomic_fetch_sub_explicit(&p->refs, 1, memory_order_acq_rel) == 1) {
+        mako_native_fn_drop(f);
+        free(p);
+    }
+}
 int64_t mako_native_tls_hs_is_app(void) { return mako_tls_hs_is_app(); }
 int64_t mako_native_tls_server_new_mtls_ptr(
     MakoNativeString *cert, MakoNativeString *key, MakoNativeString *ca
@@ -10267,11 +10291,13 @@ int64_t mako_native_deadline_remaining_ms(int64_t d) {
 
 /* Fat fn pointer: heap MakoFn { code, env, drop }. */
 int64_t mako_native_fn_box(int64_t code, int64_t env) {
-    MakoFn *p = (MakoFn *)calloc(1, sizeof(MakoFn));
-    if (!p) abort();
+    MakoNativeFn *box = (MakoNativeFn *)calloc(1, sizeof(MakoNativeFn));
+    if (!box) abort();
+    atomic_init(&box->refs, 1);
+    MakoFn *p = &box->fn;
     p->fn = (void *)(intptr_t)code;
     p->env = (void *)(intptr_t)env;
-    p->drop_env = NULL; /* pack_free not needed for i64 packs here; leak env pack is ok for tests */
+    p->drop_env = NULL; /* Native capture packs use plain free. */
     return (int64_t)(intptr_t)p;
 }
 

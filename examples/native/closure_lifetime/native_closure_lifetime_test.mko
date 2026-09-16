@@ -1,0 +1,29 @@
+// Native function wrapper ownership: aliases, returned captures, and call temporaries.
+fn lifetime_adder(base: int) -> fn(int) -> int {
+    return fn(x) { return x + base }
+}
+
+fn lifetime_apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+}
+
+fn TestClosureAliasesAndReturnedCapture() {
+    let f: fn(int) -> int = lifetime_adder(2)
+    let alias: fn(int) -> int = f
+    assert_eq(f(40), 42)
+    assert_eq(alias(41), 43)
+    assert_eq(lifetime_apply(f, 40), 42)
+    assert_eq(f(42), 44)
+}
+
+fn TestTemporaryClosureCaptureCleanup() {
+    for i in 20 {
+        let text = str_repeat("x", i + 1)
+        assert_eq(lifetime_apply(fn(x) { return x + len(text) }, 1), i + 2)
+    }
+}
+
+fn main() {
+    TestClosureAliasesAndReturnedCapture()
+    TestTemporaryClosureCaptureCleanup()
+}

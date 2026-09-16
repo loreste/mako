@@ -4,6 +4,10 @@ The mature path compiles through C. LLVM release emits objects directly and
 links with embedded lld/runtime inputs, using LLVM’s `default<O3>` pipeline.
 No GC, no interpreter, no VM tax.
 
+On Linux with glibc, integer channel mutexes adaptively spin for brief contention
+before parking. Queue state and condition-variable predicates remain protected
+by the same mutex; other platforms keep their native mutex implementation.
+
 LLVM release currently covers scalar CFG and owned strings. On one Apple arm64
 box, Fibonacci compiled in 20.1 ms (LLVM) vs 251.9 ms (C), and ran in 146.5 ms
 vs 148.9 ms (Mako C), 147.8 ms (hand C), 148.0 ms (Rust). Correctness gate:

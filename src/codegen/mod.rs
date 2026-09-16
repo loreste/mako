@@ -14177,7 +14177,7 @@ impl Codegen {
         if Self::c_hot_inline_fn(f) {
             let _ = writeln!(
                 self.out,
-                "static inline __attribute__((always_inline)) {ret} {name}({params}) {{"
+                "static inline {ret} {name}({params}) {{"
             );
         } else {
             let _ = writeln!(self.out, "{ret} {name}({params}) {{");

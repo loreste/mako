@@ -132,6 +132,7 @@ if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep
   # that compile on both backends.
   for f in examples/testing/memory_safety_contract_test.mko \
            examples/testing/leak_detector_test.mko \
+           examples/native/closure_lifetime/native_closure_lifetime_test.mko \
            examples/testing/actor_typed_payload_test.mko \
            examples/testing/actor_comprehensive_test.mko \
            examples/testing/actor_adversarial_memsafe_test.mko; do
