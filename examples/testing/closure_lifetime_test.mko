@@ -1,4 +1,4 @@
-// Native function wrapper ownership: aliases, returned captures, and call temporaries.
+// Function wrapper ownership: aliases, returned captures, and call temporaries.
 fn lifetime_adder(base: int) -> fn(int) -> int {
     return fn(x) { return x + base }
 }

@@ -12812,6 +12812,9 @@ impl Codegen {
     /// A user-struct pointer is a borrow. Returning or storing `(*p)` without
     /// cloning would alias the caller's fields with a new destructor.
     fn clone_escaped_struct_borrow(&mut self, expr: &Expr, c_ty: &str, val: String) -> String {
+        if c_ty == "MakoFn" && matches!(expr, Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }) {
+            return format!("mako_fn_clone({val})");
+        }
         if !self.c_ty_owns_fields(c_ty) {
             return val;
         }
@@ -15469,7 +15472,9 @@ impl Codegen {
                     && self.current_arena.is_none()
                     && !self.struct_own_field_frees(&ty).is_empty()
                     && matches!(init, Expr::Call { .. } | Expr::Method { .. });
-                let (val, field_value_owned) = if clone_ident_own {
+                let (val, field_value_owned) = if ty == "MakoFn" && matches!(init, Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }) {
+                    (format!("mako_fn_clone({val})"), false)
+                } else if clone_ident_own {
                     (self.clone_own_val(&ty, &val), false)
                 } else if *ownership != Ownership::Share && self.current_arena.is_none() {
                     if matches!(init, Expr::Index { .. })
@@ -36166,6 +36171,23 @@ impl Codegen {
                             // references a variable that exists in the C scope.
                             for i in 0..arg_vals.len() {
                                 let aty = &arg_tys[i];
+                                let owned_callback = match args.get(i) {
+                                    Some(Expr::Lambda { params, body }) => {
+                                        let mut assigned = std::collections::HashSet::new();
+                                        Self::collect_assigned_idents_in_expr(body, &mut assigned);
+                                        // Mutable capture cells can still be used by the outer
+                                        // binding after this inner scope exits.
+                                        !assigned.iter().any(|n| self.locals.contains_key(n) && !params.contains(n))
+                                    }
+                                    Some(Expr::Call { .. }) => true,
+                                    _ => false,
+                                };
+                                if aty == "MakoFn" && owned_callback {
+                                    let cap = self.fresh("fn_arg");
+                                    self.line(&format!("MakoFn {cap} = {};", arg_vals[i]));
+                                    self.register_fn_env_local(&cap);
+                                    arg_vals[i] = cap;
+                                }
                                 if Self::own_free_fn(aty).is_some()
                                     && !self.own_drop_live.contains(&arg_vals[i])
                                     && matches!(args.get(i), Some(Expr::Call { .. }))
@@ -38085,6 +38107,7 @@ impl Codegen {
                                                 let mn = mangle(n);
                                                 self.line(&format!("{mn}.env = NULL;"));
                                                 self.line(&format!("{mn}.drop_env = NULL;"));
+                                                self.line(&format!("{mn}.env_refs = NULL;"));
                                                 self.note_fn_env_dropped(&mn);
                                                 self.note_fn_env_dropped(n);
                                             }

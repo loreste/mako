@@ -1110,6 +1110,13 @@ that only returns `Some(self.current)` will not terminate). See
 
 ### Mutable captures
 
+Function-value aliases retain the capture environment until the last owning
+binding is released. Returned closures retain their captured values. The native
+backend also releases function wrappers after calls and worker completion;
+the C backend reclaims temporary callbacks with immutable captures at scope exit.
+Use an explicit function type on returned-function bindings, for example
+`let f: fn(int) -> int = make_adder(2)`.
+
 Lambdas that **assign** to outer `let mut` ints route those captures through a
 heap cell (single- and multi-statement bodies). Everyday by-value capture still
 works (`|x| x + n`). Across **`kick`**, non-Sync mut captures are rejected —

@@ -348,13 +348,17 @@ typedef struct {
     void *fn;
     void *env;
     void (*drop_env)(void *);
+    atomic_uint *env_refs;
 } MakoFn;
+
+static inline void mako_abort(const char *msg);
 
 static inline MakoFn mako_fn_bare(void *fn) {
     MakoFn f;
     f.fn = fn;
     f.env = NULL;
     f.drop_env = NULL;
+    f.env_refs = NULL;
     return f;
 }
 
@@ -363,6 +367,24 @@ static inline MakoFn mako_fn_closure(void *fn, void *env, void (*drop_env)(void 
     f.fn = fn;
     f.env = env;
     f.drop_env = drop_env;
+    f.env_refs = NULL;
+    if (env) {
+        f.env_refs = (atomic_uint *)malloc(sizeof(atomic_uint));
+        if (!f.env_refs) mako_abort("function: out of memory");
+        atomic_init(f.env_refs, 1);
+    }
+    return f;
+}
+
+static inline MakoFn mako_fn_clone(MakoFn f) {
+    if (f.env && f.env_refs) {
+        unsigned old = atomic_load_explicit(f.env_refs, memory_order_relaxed);
+        for (;;) {
+            if (old == 0 || old == UINT_MAX) mako_abort("function: invalid retain count");
+            if (atomic_compare_exchange_weak_explicit(f.env_refs, &old, old + 1,
+                    memory_order_relaxed, memory_order_relaxed)) break;
+        }
+    }
     return f;
 }
 
@@ -370,14 +392,18 @@ static inline MakoFn mako_fn_closure(void *fn, void *env, void (*drop_env)(void 
 static inline void mako_fn_drop(MakoFn *f) {
     if (!f) return;
     if (f->env) {
-        if (f->drop_env) {
-            f->drop_env(f->env);
-        } else {
-            free(f->env);
+        if (!f->env_refs || atomic_fetch_sub_explicit(f->env_refs, 1, memory_order_acq_rel) == 1) {
+            if (f->drop_env) {
+                f->drop_env(f->env);
+            } else {
+                free(f->env);
+            }
+            free(f->env_refs);
         }
         f->env = NULL;
     }
     f->drop_env = NULL;
+    f->env_refs = NULL;
     /* keep f->fn so a dropped-but-bare call path still works if env was null */
 }
 
