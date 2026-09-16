@@ -5,6 +5,13 @@ The copy is released on scope exit, including early returns, unless returned
 to the caller. `as_bytes(text)` remains a borrowed view whose backing string
 must stay alive. The byte-conversion regression runs with LeakSanitizer in CI;
 repeated page scans must not retain one copied buffer per read (issue #64).
+Temporary owned strings passed to builder and TCP write operations are released
+after use, including failed writes. Token arrays from `str_fields` are owned and
+released at scope exit; escaping tokens retain independent ownership.
+`len(bytes(text))` reads the string's byte length without allocating a byte copy.
+Struct channels clone payloads for independent ownership. Temporary source
+structs are reclaimed after sends, including full, timed-out, and closed sends;
+named payloads remain available to their caller.
 
 String-slice COW detachment deep-clones owned string elements because the caller
 retains responsibility for releasing the old header. This prevents detached

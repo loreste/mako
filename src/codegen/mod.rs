@@ -384,6 +384,20 @@ impl Codegen {
         self.emit_str_arg(expr)
     }
 
+    /// Struct channel sends clone their payload. Reclaim a temporary source
+    /// after that copy, on both accepted and rejected sends. Named values and
+    /// borrowed fields/indexes keep their existing owner.
+    fn drop_channel_struct_temp(&mut self, expr: &Expr, ty: &str, value: &str) {
+        let fresh = matches!(expr, Expr::StructLit { .. } | Expr::StructLitPos { .. })
+            || matches!(expr, Expr::Call { callee, .. }
+                if matches!(callee.as_ref(), Expr::Ident(n) if self.fn_ret_types.contains_key(n)));
+        if fresh && !self.own_drop_live.contains(value) {
+            for (field, free_fn) in self.struct_own_field_frees(ty) {
+                self.emit_line(format_args!("{free_fn}({value}.{field});"));
+            }
+        }
+    }
+
     /// True when any scalar-key map of this value monomorph is used.
     fn want_scalar_val(&self, val_tag: &str) -> bool {
         self.want_map("i", val_tag)
@@ -2636,7 +2650,7 @@ impl Codegen {
         // a builtin handing back a freshly allocated handle that `own_free_fn`
         // knows how to release. Without it the scope-exit drop is never
         // emitted and every builder leaks its struct and buffer.
-        matches!(name, "env_keys" | "read_dir" | "str_builder" | "str_split")
+        matches!(name, "env_keys" | "read_dir" | "str_builder" | "str_split" | "str_fields")
     }
 
     fn builtin_returns_borrowed_string(name: &str) -> bool {
@@ -17916,13 +17930,13 @@ impl Codegen {
                         }
                         "builder_write" => {
                             let (_, b) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             self.line(&format!("mako_str_builder_write({b}, {s});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "builder_write_slice" => {
                             let (_, b) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let (_, o) = self.emit_expr(&args[2]);
                             let (_, l) = self.emit_expr(&args[3]);
                             self.line(&format!(
@@ -25147,14 +25161,14 @@ impl Codegen {
                         }
                         "tcp_write" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tw");
                             self.line(&format!("int64_t {tmp} = mako_tcp_write({f}, {s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "tcp_write_all" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("twa");
                             self.line(&format!("int64_t {tmp} = mako_tcp_write_all({f}, {s});"));
                             return ("int64_t".into(), tmp);
@@ -35539,6 +35553,18 @@ impl Codegen {
                             return ("int64_t".into(), "mako_chan_select_value()".into());
                         }
                         "len" => {
+                            // Byte conversion preserves a string's byte length.
+                            // Avoid allocating a copy solely to inspect its size;
+                            // retain normal cleanup for an owned string argument.
+                            if let Expr::Call { callee, args: converted } = &args[0] {
+                                if matches!(callee.as_ref(), Expr::Ident(n) if n == "bytes")
+                                    && converted.len() == 1
+                                    && self.peek_expr_c_ty(&converted[0]) == "MakoString"
+                                {
+                                    let value = self.emit_str_arg_borrow(&converted[0]);
+                                    return ("int64_t".into(), format!("mako_str_len({value})"));
+                                }
+                            }
                             let (ty, v) = self.emit_expr(&args[0]);
                             // Raw arrays: same struct layout, len is at same offset.
                             if ty.starts_with("MakoRaw") {
@@ -38477,6 +38503,7 @@ impl Codegen {
                             self.line(&format!(
                                 "bool {tmp} = mako_chan_ptr_send({rv}, {boxn}) != 0;"
                             ));
+                            self.drop_channel_struct_temp(&args[0], &cname, &v);
                             self.emit_line(format_args!("if (!{tmp}) {{"));
                             self.indent += 1;
                             for (field, free_fn) in self.struct_own_field_frees(&cname) {
@@ -38558,6 +38585,7 @@ impl Codegen {
                                     "int64_t {tmp} = mako_chan_ptr_send_timeout({rv}, {boxn}, {ms});"
                                 ));
                             }
+                            self.drop_channel_struct_temp(&args[0], &cname, &v);
                             self.emit_line(format_args!("if ({tmp} != 1) {{"));
                             self.indent += 1;
                             for (field, free_fn) in self.struct_own_field_frees(&cname) {

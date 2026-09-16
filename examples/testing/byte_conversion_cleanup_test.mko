@@ -19,6 +19,54 @@ fn inspect_view(page: string) -> int {
     return len(view)
 }
 
+struct TokenChoice { value: string }
+
+fn receive_token(messages: chan[TokenChoice]) -> string {
+    let message = messages.recv()
+    return message.value
+}
+
+fn choose_token(text: string) -> TokenChoice {
+    let fields = str_fields(text)
+    let chosen = fields[1]
+    return TokenChoice { value: chosen }
+}
+
+fn response_text(text: string) -> string {
+    let output = str_builder()
+    builder_write(output, str_to_upper(text))
+    builder_write_slice(output, str_repeat("!", 3), 0, 1)
+    return builder_string(output)
+}
+
+export fn TestQueryTemporaryCleanup() {
+    let messages = chan_open[TokenChoice](1)
+    let mut i = 0
+    while i < 1000 {
+        let choice = choose_token("select value from table")
+        assert(str_eq(choice.value, "value"))
+        let response = response_text("hello")
+        assert(str_eq(response, "HELLO!"))
+        assert_eq(len(bytes(str_repeat("hé", 3))), 9)
+        assert_eq(tcp_write(-1, response_text("hello")), -1)
+        assert_eq(tcp_write_all(-1, response_text("hello")), -1)
+        let _ = messages.send(TokenChoice { value: str_repeat("reply", 4) })
+        assert_eq(messages.try_send(TokenChoice { value: str_repeat("full", 4) }), 0)
+        assert_eq(messages.send_timeout(TokenChoice { value: str_repeat("timeout", 4) }, 0), 0)
+        let reply = receive_token(messages)
+        assert_eq(len(reply), 20)
+        i = i + 1
+    }
+    let named = TokenChoice { value: "still owned by caller" }
+    let _ = messages.send(named)
+    let received = receive_token(messages)
+    assert(str_eq(received, named.value))
+    messages.close()
+    let _ = messages.send(TokenChoice { value: str_repeat("closed", 4) })
+    let _ = messages.try_send(TokenChoice { value: str_repeat("closed", 4) })
+    let _ = messages.send_timeout(TokenChoice { value: str_repeat("closed", 4) }, 0)
+}
+
 export fn TestByteConversionCleanup() {
     let page = str_repeat("hello\n", 256)
     let mut i = 0
@@ -35,4 +83,5 @@ export fn TestByteConversionCleanup() {
 
 fn main() {
     TestByteConversionCleanup()
+    TestQueryTemporaryCleanup()
 }

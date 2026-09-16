@@ -5,6 +5,11 @@
 - C backend: reclaim copied `bytes(string)` buffers on normal and early scope
   exits, preserving returned ownership and borrowed views. Add a dedicated
   LeakSanitizer regression for repeated disk-page-style scans (#64).
+- Reclaim temporary strings used by builders and TCP writes and owned token
+  arrays from `str_fields`. Avoid the byte-buffer allocation in
+  `len(bytes(text))`, including when the source string is temporary (#64).
+- Release temporary struct payloads after channel sends have made their owned
+  copy, including rejected and timed-out sends (#64).
 
 - Document release-artifact verification, sanitizer/build-profile differences, and correct pgbench database arguments when investigating application throughput regressions (#64).
 
