@@ -2,7 +2,7 @@
 
 ## 0.6.35
 
-- Native function values now release their reference-counted wrappers and owned captures after calls, scope exit, and worker handoff. Aliases and returned closures retain their storage independently.
+- Native function values now release their wrappers and reference-counted capture environments after calls, scope exit, and worker handoff. Aliases and returned closures retain their storage independently, including after an explicit `fn_drop` of another binding.
 - C function-value aliases retain their shared capture environment, preventing double-free; temporary callbacks with immutable captures are reclaimed at scope exit.
 - Keep small-function inlining optional so recursive functions compile with GCC. Linux/glibc integer channels with more than one slot use adaptive mutexes to reduce short lock-contention waits.
 

@@ -3359,6 +3359,12 @@ impl<'a> FunctionLowerer<'a> {
                     }
                 }
                 match inferred {
+                    Type::FnPtr => {
+                        if !owned {
+                            value = self.emit_clone(value, inferred);
+                            owned = true;
+                        }
+                    }
                     // Map headers are pointer handles: keep borrows so nested
                     // mutation through retrieved maps is shared (Go-like).
                     Type::MapII

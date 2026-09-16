@@ -23,7 +23,17 @@ fn TestTemporaryClosureCaptureCleanup() {
     }
 }
 
+fn TestExplicitDropPreservesAlias() {
+    let f: fn(int) -> int = lifetime_adder(2)
+    let alias: fn(int) -> int = f
+    fn_drop(f)
+    assert_eq(fn_has_env(f), 0)
+    assert_eq(fn_has_env(alias), 1)
+    assert_eq(alias(40), 42)
+}
+
 fn main() {
     TestClosureAliasesAndReturnedCapture()
     TestTemporaryClosureCaptureCleanup()
+    TestExplicitDropPreservesAlias()
 }
