@@ -175,7 +175,7 @@
         },
         {
           "name": "keyword.declaration.mako",
-          "match": "\\b(fn|func|let|var|mut|struct|enum|actor|receive|interface|extern|const|import|pull|package|pack|export|as)\\b"
+          "match": "\\b(fn|func|let|var|mut|struct|enum|actor|receive|interface|extern|const|import|pull|package|pack|export|as|on)\\b"
         },
         {
           "name": "keyword.operator.logical.mako",

@@ -213,11 +213,15 @@ See also [ROADMAP.md](ROADMAP.md) · [ROADMAP_IMPL.md](../ROADMAP_IMPL.md).
 
 ## Actor isolation
 
-Actors provide memory-safe concurrency by construction: each actor's state
-fields are private and never shared across threads. The mailbox is a bounded
-channel (sized at spawn via `Name_spawn_cap(cap)`), preventing unbounded queue
-growth. Combined with structured `crew` scoping, actors cannot leak or race on
-mutable state.
+Actors isolate mutable state by construction: each actor's fields are private
+and never shared across threads. The mailbox is a bounded channel (sized at
+spawn via `Name_spawn_cap(cap)`). Named ports (`receive Msg on port`) add more
+mailboxes to that same loop; they do not share `self`. Receive-arm `return` continues the actor loop
+after dropping that arm's owned envelope fields; shutdown drain unboxes leftover
+envelopes by tag and frees nested owners. Scalar int payloads that do not fit
+signed 48-bit packing abort. Combined with structured `crew` scoping, actors do
+not race on actor state; envelope lifetime is enforced by those drop paths, not
+by a tracing GC.
 
 ---
 

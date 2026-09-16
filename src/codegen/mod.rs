@@ -112,6 +112,9 @@ pub struct Codegen {
     own_cond_flags: std::collections::HashSet<String>,
     /// `own_drop_scopes.len()` at each loop body entry (for break/continue cleanup).
     loop_drop_bases: Vec<usize>,
+    /// Labeled loop drop bases so `continue outer` frees owns between that
+    /// loop and the continue site, not only the innermost loop body.
+    loop_label_drop_bases: HashMap<String, usize>,
     /// Mutable closure captures: maps original var name → heap cell C variable name.
     /// When a local is mutably captured, reads/writes go through `*cell` in outer scope.
     mut_capture_cells: HashMap<String, String>,
@@ -151,6 +154,8 @@ pub struct Codegen {
     current_result_err_enum: Option<String>,
     /// Local/temp name → Result Err enum C type (for match on locals).
     result_err_enums: HashMap<String, String>,
+    /// Locals whose Result error comes from an owning producer, not a bag borrow.
+    owned_result_errors: std::collections::HashSet<String>,
     /// Function name → Result Err enum C type.
     fn_result_err_enum: HashMap<String, String>,
     /// Function name → Ok payload kind: "int" | "string" | "float" | "struct".
@@ -268,6 +273,7 @@ impl Codegen {
             own_bind_scope: std::collections::HashMap::new(),
             own_cond_flags: std::collections::HashSet::new(),
             loop_drop_bases: Vec::new(),
+            loop_label_drop_bases: HashMap::new(),
             mut_capture_cells: HashMap::new(),
             mut_self_fns: std::collections::HashSet::new(),
             mut_ptr_params: HashMap::new(),
@@ -284,6 +290,7 @@ impl Codegen {
             pending_tuple_typedefs: Vec::new(),
             current_result_err_enum: None,
             result_err_enums: HashMap::new(),
+            owned_result_errors: std::collections::HashSet::new(),
             fn_result_err_enum: HashMap::new(),
             fn_result_ok_kind: HashMap::new(),
             fn_result_ok_struct: HashMap::new(),
@@ -359,10 +366,7 @@ impl Codegen {
             Expr::StringInterp(_) | Expr::Slice { .. } => true,
             _ => false,
         };
-        if ty == "MakoString"
-            && !self.own_drop_live.contains(&v)
-            && is_owned_str_expr
-        {
+        if ty == "MakoString" && !self.own_drop_live.contains(&v) && is_owned_str_expr {
             let cap = self.fresh("sa");
             self.emit_line(format_args!("MakoString {cap} = {v};"));
             self.note_own_bind_scope(&cap);
@@ -2565,7 +2569,9 @@ impl Codegen {
     /// Compile-time length for string and array literals.
     fn expr_is_fresh_own(init: &Expr) -> bool {
         match init {
-            Expr::Array(_) | Expr::Make { .. } | Expr::Convert { .. } | Expr::ChanOpen { .. } => true,
+            Expr::Array(_) | Expr::Make { .. } | Expr::Convert { .. } | Expr::ChanOpen { .. } => {
+                true
+            }
             // Struct lits may own string/slice fields — free fields on drop.
             Expr::StructLit { .. } | Expr::StructLitPos { .. } => true,
             // Owned strings: `str_from_cstr` / f-string finish / concat.
@@ -3490,7 +3496,7 @@ impl Codegen {
     /// A string expression materialized solely for `print` and owned by that
     /// call site. Indexing and fields are borrows and must never be reclaimed
     /// here even though some other index operations return owning containers.
-    fn expr_is_owned_print_temp(expr: &Expr) -> bool {
+    fn expr_is_owned_print_temp(&self, expr: &Expr) -> bool {
         match expr {
             Expr::StringInterp(_) | Expr::Match { .. } | Expr::IfExpr { .. } => true,
             // String slice s[low:high] allocates a new buffer.
@@ -3510,6 +3516,11 @@ impl Codegen {
             // A string received from a channel transfers its allocation to
             // the receiver, including when used directly in a comparison.
             Expr::Method { method, .. } if method == "recv" => true,
+            // String-valued map lookups return clones, unlike array indexing.
+            Expr::Index { base, .. } => matches!(
+                self.peek_expr_c_ty(base).as_str(),
+                "MakoMapSS*" | "MakoMapFS*" | "MakoMapBS*"
+            ),
             _ => false,
         }
     }
@@ -3961,7 +3972,9 @@ impl Codegen {
         // Ownership transfer/retaining is handled before this helper. Existing
         // heap backing is already safe to escape, even when shared. Detaching
         // and freeing it here can release a borrowed field owned by the caller.
-        self.emit_line(format_args!("{c_ty} {tmp} = {source}.cap > 0 ? {source} : {own_fn}({source});"));
+        self.emit_line(format_args!(
+            "{c_ty} {tmp} = {source}.cap > 0 ? {source} : {own_fn}({source});"
+        ));
         tmp
     }
 
@@ -4137,9 +4150,7 @@ impl Codegen {
             }
             _ => {
                 let cond = Self::owning_field_replaced_cond(c_ty, old, new);
-                self.emit_line(format_args!(
-                    "if ({cond}) {free_fn}({old});"
-                ));
+                self.emit_line(format_args!("if ({cond}) {free_fn}({old});"));
             }
         }
     }
@@ -4152,11 +4163,37 @@ impl Codegen {
         }
     }
 
+    fn push_loop_drop_base(&mut self, label: Option<&str>) {
+        let base = self.own_drop_scopes.len().saturating_sub(1);
+        self.loop_drop_bases.push(base);
+        if let Some(lab) = label {
+            self.loop_label_drop_bases.insert(lab.to_string(), base);
+        }
+    }
+
+    fn pop_loop_drop_base(&mut self, label: Option<&str>) {
+        self.loop_drop_bases.pop();
+        if let Some(lab) = label {
+            self.loop_label_drop_bases.remove(lab);
+        }
+    }
+
     /// SAFE-006: free owns/shares from loop-body scopes before break/continue.
     /// Does **not** clear tracking — the non-break path still frees at scope exit.
     /// Only the break/continue C branch executes these frees.
-    fn emit_loop_exit_cleanup(&mut self) {
-        let base = self.loop_drop_bases.last().copied().unwrap_or(0);
+    ///
+    /// `label` is the target loop for labeled break/continue. Using the innermost
+    /// base for `continue outer` skipped envelope drops in actor receive arms.
+    fn emit_loop_exit_cleanup(&mut self, label: Option<&str>) {
+        let base = if let Some(lab) = label {
+            self.loop_label_drop_bases
+                .get(lab)
+                .copied()
+                .or_else(|| self.loop_drop_bases.last().copied())
+                .unwrap_or(0)
+        } else {
+            self.loop_drop_bases.last().copied().unwrap_or(0)
+        };
         // Free owns in scopes from base..end (inner first).
         for i in (base..self.own_drop_scopes.len()).rev() {
             let entries = self.own_drop_scopes[i].clone();
@@ -4592,21 +4629,27 @@ impl Codegen {
     /// callee returns the same slice header (issue #51).
     fn append_releases_backing(&self, cty: &str) -> bool {
         cty.starts_with("MakoRaw")
-            || cty.strip_prefix("MakoArr_").is_some_and(|element| {
-                !self.struct_own_field_frees(element).is_empty()
-            })
+            || cty
+                .strip_prefix("MakoArr_")
+                .is_some_and(|element| !self.struct_own_field_frees(element).is_empty())
     }
 
     fn slice_backing_release(cty: &str) -> &'static str {
         match cty {
-            "MakoArr_arr_int" | "MakoArr_arr_string"
-            | "MakoArr_arr_float" | "MakoArr_arr_bool"
+            "MakoArr_arr_int" | "MakoArr_arr_string" | "MakoArr_arr_float" | "MakoArr_arr_bool"
             | "MakoArr_arr_byte" => "free",
             _ => "mako_rc_release",
         }
     }
 
-    fn emit_assign_owned_value(&mut self, dest: &str, cty: &str, val: &str, free_fn: &str, is_append: bool) {
+    fn emit_assign_owned_value(
+        &mut self,
+        dest: &str,
+        cty: &str,
+        val: &str,
+        free_fn: &str,
+        is_append: bool,
+    ) {
         if is_append && self.append_releases_backing(cty) {
             self.emit_line(format_args!("{dest} = {val};"));
             return;
@@ -4839,7 +4882,6 @@ impl Codegen {
         }
     }
 
-
     /// Move an owned field out of a unique owning local without allocating.
     /// Shared, indexed, and other borrowed sources still clone. Cloning a
     /// unique owner's field aliases storage with the parent destructor.
@@ -4853,8 +4895,7 @@ impl Codegen {
         // registered through the deferred call-result path rather than the
         // ordinary local-owner set. Treat them as movable here so extracting
         // an owned field transfers the RC owner instead of leaking it.
-        if (!self.own_drop_live.contains(&owner)
-            && !self.call_result_owners.contains(&owner))
+        if (!self.own_drop_live.contains(&owner) && !self.call_result_owners.contains(&owner))
             || self.share_live.contains(&owner)
         {
             return None;
@@ -4967,6 +5008,59 @@ impl Codegen {
             }
         }
         tmp
+    }
+
+    /// Actor messages cross a thread boundary: slice RC retention alone is not
+    /// isolation, because ordinary slice indexing can mutate shared backing.
+    fn clone_actor_value(&mut self, c_ty: &str, val: &str) -> String {
+        let array: Option<(String, String)> = match c_ty {
+            "MakoIntArray" => Some(("int64_t".into(), "mako_int_array_make".into())),
+            "MakoFloatArray" => Some(("double".into(), "mako_float_array_make".into())),
+            "MakoByteArray" => Some(("uint8_t".into(), "mako_byte_array_make".into())),
+            "MakoBoolArray" => Some(("bool".into(), "mako_bool_array_make".into())),
+            "MakoStrArray" => Some(("MakoString".into(), "mako_str_array_make".into())),
+            _ => c_ty.strip_prefix("MakoArr_").map(|tag|
+                (self.arr_elem_c_ty(tag), format!("mako_arr_{tag}_make"))),
+        };
+        if let Some((elem, make)) = array {
+            let out = self.fresh("actor_copy");
+            let index = self.fresh("actor_i");
+            self.line(&format!("{c_ty} {out} = {make}((int64_t)({val}).len, (int64_t)({val}).len);"));
+            self.line(&format!("for (size_t {index} = 0; {index} < ({val}).len; ++{index}) {{"));
+            self.indent += 1;
+            let item = self.clone_actor_value(&elem, &format!("({val}).data[{index}]"));
+            self.line(&format!("{out}.data[{index}] = {item};"));
+            self.indent -= 1;
+            self.line("}");
+            return out;
+        }
+        if let Some(info) = self.structs.values().find(|s| s.c_name == c_ty).cloned() {
+            let out = self.fresh("actor_struct");
+            self.line(&format!("{c_ty} {out} = {val};"));
+            for (field, ty) in info.fields {
+                let value = self.clone_actor_value(&ty, &format!("({val}).{field}"));
+                self.line(&format!("{out}.{field} = {value};"));
+            }
+            return out;
+        }
+        if Self::own_free_fn(c_ty).is_some() { self.clone_own_val(c_ty, val) }
+        else { val.to_string() }
+    }
+
+    fn detach_actor_slices(&mut self, c_ty: &str, val: &str) {
+        if matches!(c_ty, "MakoIntArray" | "MakoFloatArray" | "MakoByteArray" | "MakoBoolArray" | "MakoStrArray")
+            || c_ty.starts_with("MakoArr_")
+        {
+            let snapshot = self.clone_actor_value(c_ty, val);
+            if let Some(free) = Self::own_free_fn(c_ty) {
+                self.line(&format!("{free}({val});"));
+            }
+            self.line(&format!("{val} = {snapshot};"));
+        } else if let Some(info) = self.structs.values().find(|s| s.c_name == c_ty).cloned() {
+            for (field, ty) in info.fields {
+                self.detach_actor_slices(&ty, &format!("{val}.{field}"));
+            }
+        }
     }
 
     /// If `expr` is a returned local that we own, transfer it (skip free).
@@ -5093,7 +5187,7 @@ impl Codegen {
             elems.len()
         ));
         for (expr, val) in elems.iter().zip(&vals) {
-            if Self::expr_is_owned_print_temp(expr) {
+            if self.expr_is_owned_print_temp(expr) {
                 self.emit_line(format_args!("mako_str_free({val});"));
                 self.note_own_drop_moved(val);
             }
@@ -5277,6 +5371,22 @@ impl Codegen {
                 }
             }
         }
+        // Seed names first so a struct field of a later struct (actor handles
+        // appended after EngClient) does not collapse to int64_t.
+        for item in &program.items {
+            if let Item::Struct(s) = item {
+                if s.type_params.is_empty() {
+                    self.structs
+                        .entry(s.name.clone())
+                        .or_insert_with(|| StructInfo {
+                            c_name: s.name.clone(),
+                            fields: Vec::new(),
+                            field_types: Vec::new(),
+                            defaults: HashMap::new(),
+                        });
+                }
+            }
+        }
         for item in &program.items {
             if let Item::Struct(s) = item {
                 if s.type_params.is_empty() {
@@ -5325,11 +5435,39 @@ impl Codegen {
                 let _ = writeln!(self.out, "typedef struct {ty} {ty};");
             }
         }
-        // Emit C structs + []T helpers + gated scalar-key maps.
-        for item in &program.items {
-            if let Item::Struct(s) = item {
-                if s.type_params.is_empty() {
-                    self.emit_struct_typedef(s);
+        // Emit C structs in dependency order so a field of a later struct
+        // (actor handle appended after EngClient) is a complete type.
+        {
+            let mut pending: Vec<&StructDef> = program
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Struct(s) if s.type_params.is_empty() => Some(s),
+                    _ => None,
+                })
+                .collect();
+            let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
+            while !pending.is_empty() {
+                let before = pending.len();
+                pending.retain(|s| {
+                    let ready = s.fields.iter().all(|(_, t, _)| match t {
+                        TypeExpr::Named(n) if self.structs.contains_key(n) => {
+                            emitted.contains(n) || n == &s.name
+                        }
+                        _ => true,
+                    });
+                    if ready {
+                        self.emit_struct_typedef(s);
+                        emitted.insert(s.name.clone());
+                        false
+                    } else {
+                        true
+                    }
+                });
+                if pending.len() == before {
+                    for s in pending.drain(..) {
+                        self.emit_struct_typedef(s);
+                    }
                 }
             }
         }
@@ -5530,7 +5668,12 @@ impl Codegen {
                         .cloned()
                         .unwrap_or_else(|| "void".into());
                     let params = self.c_params_resolved(f);
-                    let _ = writeln!(self.out, "{ret} {name}({params});", name = mangle(&f.name));
+                    let name = mangle(&f.name);
+                    if Self::c_hot_inline_fn(f) {
+                        let _ = writeln!(self.out, "static inline {ret} {name}({params});");
+                    } else {
+                        let _ = writeln!(self.out, "{ret} {name}({params});");
+                    }
                 }
                 Item::ExternC(ext) => {
                     let ret = self
@@ -6939,7 +7082,10 @@ impl Codegen {
         let struct_field_frees = self.struct_own_field_frees(&c_name);
         if !struct_field_frees.is_empty() {
             let _ = writeln!(self.out, "        if (!mako_rc_shared(s.data)) {{");
-            let _ = writeln!(self.out, "            for (size_t i = 0; i < s.len; i++) {{");
+            let _ = writeln!(
+                self.out,
+                "            for (size_t i = 0; i < s.len; i++) {{"
+            );
             for (path, free_fn) in &struct_field_frees {
                 let _ = writeln!(self.out, "                {free_fn}(s.data[i].{path});");
             }
@@ -13940,6 +14086,14 @@ impl Codegen {
         }
     }
 
+    fn c_hot_inline_fn(f: &FnDef) -> bool {
+        !f.exported
+            && !f.is_live
+            && f.name != "main"
+            && !f.name.ends_with("_loop")
+            && f.body.stmts.len() <= 2
+    }
+
     fn emit_fn(&mut self, f: &FnDef) {
         if let Some(source_file) = &f.source_file {
             self.source_file = Some(source_file.clone());
@@ -13962,9 +14116,11 @@ impl Codegen {
         self.own_bind_scope.clear();
         self.own_cond_flags.clear();
         self.loop_drop_bases.clear();
+        self.loop_label_drop_bases.clear();
         // Mut capture cells are per-function (heap cells for sequential outer mut).
         self.mut_capture_cells.clear();
         self.result_err_enums.clear();
+        self.owned_result_errors.clear();
         self.result_ok_kinds.clear();
         self.result_ok_structs.clear();
         self.result_option_inners.clear();
@@ -14017,11 +14173,15 @@ impl Codegen {
         if self.source_file.is_some() {
             let _ = writeln!(self.out, "#line 1 \"<mako-codegen>\"");
         }
-        let _ = writeln!(
-            self.out,
-            "{ret} {name}({params}) {{",
-            name = mangle(&f.name)
-        );
+        let name = mangle(&f.name);
+        if Self::c_hot_inline_fn(f) {
+            let _ = writeln!(
+                self.out,
+                "static inline __attribute__((always_inline)) {ret} {name}({params}) {{"
+            );
+        } else {
+            let _ = writeln!(self.out, "{ret} {name}({params}) {{");
+        }
         self.indent = 1;
 
         // Mutable owning parameters borrow the caller's value. Take a retained
@@ -14101,7 +14261,7 @@ impl Codegen {
         }
 
         // Emit function-entry trace (call stack + optional MAKO_TRACE output).
-        {
+        if !Self::c_hot_inline_fn(f) {
             let (src, line) = self.current_source_loc();
             let fn_name = escape_c(&f.name);
             let src_c = escape_c(&src);
@@ -14314,10 +14474,9 @@ impl Codegen {
             ));
             self.indent += 1;
             self.push_share_scope();
-            self.loop_drop_bases
-                .push(self.own_drop_scopes.len().saturating_sub(1));
+            self.push_loop_drop_base(label);
             self.emit_body(body);
-            self.loop_drop_bases.pop();
+            self.pop_loop_drop_base(label);
             self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -14363,10 +14522,9 @@ impl Codegen {
             }
             self.line(&format!("{i} += {w};"));
             self.push_share_scope();
-            self.loop_drop_bases
-                .push(self.own_drop_scopes.len().saturating_sub(1));
+            self.push_loop_drop_base(label);
             self.emit_body(body);
-            self.loop_drop_bases.pop();
+            self.pop_loop_drop_base(label);
             self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -14405,10 +14563,9 @@ impl Codegen {
                 _ => {}
             }
             self.push_share_scope();
-            self.loop_drop_bases
-                .push(self.own_drop_scopes.len().saturating_sub(1));
+            self.push_loop_drop_base(label);
             self.emit_body(body);
-            self.loop_drop_bases.pop();
+            self.pop_loop_drop_base(label);
             self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -14441,10 +14598,9 @@ impl Codegen {
                 _ => {}
             }
             self.push_share_scope();
-            self.loop_drop_bases
-                .push(self.own_drop_scopes.len().saturating_sub(1));
+            self.push_loop_drop_base(label);
             self.emit_body(body);
-            self.loop_drop_bases.pop();
+            self.pop_loop_drop_base(label);
             self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -14492,10 +14648,9 @@ impl Codegen {
                 _ => {}
             }
             self.push_share_scope();
-            self.loop_drop_bases
-                .push(self.own_drop_scopes.len().saturating_sub(1));
+            self.push_loop_drop_base(label);
             self.emit_body(body);
-            self.loop_drop_bases.pop();
+            self.pop_loop_drop_base(label);
             self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -14695,10 +14850,9 @@ impl Codegen {
                 _ => {}
             }
             self.push_share_scope();
-            self.loop_drop_bases
-                .push(self.own_drop_scopes.len().saturating_sub(1));
+            self.push_loop_drop_base(label);
             self.emit_body(body);
-            self.loop_drop_bases.pop();
+            self.pop_loop_drop_base(label);
             self.pop_share_scope();
             if let Some(lab) = label {
                 self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -14769,10 +14923,9 @@ impl Codegen {
                         _ => {}
                     }
                     self.push_share_scope();
-                    self.loop_drop_bases
-                        .push(self.own_drop_scopes.len().saturating_sub(1));
+                    self.push_loop_drop_base(label);
                     self.emit_body(body);
-                    self.loop_drop_bases.pop();
+                    self.pop_loop_drop_base(label);
                     self.pop_share_scope();
                     if let Some(lab) = label {
                         self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -14794,8 +14947,7 @@ impl Codegen {
         // SAFE-003/004: own-drop scope must be the loop body so locals like
         // `let mut cur` free inside the C block (not after `}` where they are out of scope).
         self.push_share_scope();
-        self.loop_drop_bases
-            .push(self.own_drop_scopes.len().saturating_sub(1));
+        self.push_loop_drop_base(label);
 
         match binders {
             [] => {}
@@ -14823,7 +14975,7 @@ impl Codegen {
         }
 
         self.emit_body(body);
-        self.loop_drop_bases.pop();
+        self.pop_loop_drop_base(label);
         self.pop_share_scope();
         if let Some(lab) = label {
             self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -15134,9 +15286,20 @@ impl Codegen {
                 // (field access from actor envelopes, chan types, etc.)
                 let ty = if let Some(ann_ty) = ann {
                     let ann_c = self.type_expr_c(ann_ty);
-                    if ty == "int64_t" && ann_c != "int64_t" { ann_c } else { ty }
-                } else { ty };
+                    if ty == "int64_t" && ann_c != "int64_t" {
+                        ann_c
+                    } else {
+                        ty
+                    }
+                } else {
+                    ty
+                };
                 self.locals.insert(name.clone(), ty.clone());
+                let owns_error = ty == "MakoResultInt" && self.expr_owns_result_error(init);
+                self.owned_result_errors.remove(name);
+                if owns_error {
+                    self.owned_result_errors.insert(name.clone());
+                }
                 self.note_own_bind_scope(&mangle(name));
                 // Annotated lets: Result/Option nest metadata from the type.
                 if let Some(ann_ty) = ann {
@@ -15365,6 +15528,21 @@ impl Codegen {
                     self.line(&format!("{ty} {name} = {val};"));
                     ty
                 };
+
+                // Result aliases need independent error storage before either
+                // binding can transfer its final error payload to a match arm.
+                if ty == "MakoResultInt"
+                    && matches!(init, Expr::Ident(n) if self.owned_result_errors.contains(n))
+                {
+                    self.line(&format!("if (!{name}.ok) {{"));
+                    self.indent += 1;
+                    self.line(&format!("if ({name}.err_kind == 0) {{ {name}.err = mako_str_clone({name}.err); }} else {{"));
+                    self.line(&format!("{name}.err_s0 = mako_str_clone({name}.err_s0);"));
+                    self.line(&format!("{name}.err_s1 = mako_str_clone({name}.err_s1);"));
+                    self.line("}");
+                    self.indent -= 1;
+                    self.line("}");
+                }
 
                 if field_value_owned {
                     self.register_own_drop(name, &ty);
@@ -15836,10 +16014,12 @@ impl Codegen {
                             | "MakoFloatArray"
                             | "MakoBoolArray"
                     ) || slice_cty.starts_with("MakoArr_")
-                      || slice_cty.starts_with("MakoRaw");
-                    let old_ptr = if is_self_append && is_slice
+                        || slice_cty.starts_with("MakoRaw");
+                    let old_ptr = if is_self_append
+                        && is_slice
                         && !self.append_releases_backing(&slice_cty)
-                        && self.current_arena.is_none() {
+                        && self.current_arena.is_none()
+                    {
                         let op = self.fresh("old_data");
                         let oc = self.fresh("old_cap");
                         self.emit_line(format_args!("void *{op} = {mn}.data;"));
@@ -16190,7 +16370,10 @@ impl Codegen {
             }
             Stmt::FieldAssign { base, field, value } => {
                 // Chained index+field: w.routes[0].path = "x"
-                let destination = Expr::Field { base: Box::new(base.clone()), field: field.clone() };
+                let destination = Expr::Field {
+                    base: Box::new(base.clone()),
+                    field: field.clone(),
+                };
                 let is_append = matches!(value, Expr::Call { callee, args }
                     if matches!(callee.as_ref(), Expr::Ident(name) if name == "append")
                     && args.first() == Some(&destination));
@@ -16246,59 +16429,51 @@ impl Codegen {
                 if let Expr::Ident(base_name) = base {
                     let mn = mangle(base_name);
                     if let Some(field_free) = Self::own_free_fn(&vty) {
-                            let dest = format!("{b}{arrow}{field}");
-                            if self.own_cond_flags.contains(&mn) {
-                                self.emit_line(format_args!("if ({mn}__own) {{"));
-                                self.indent += 1;
-                                self.emit_assign_owned_value(&dest, &vty, &v, &field_free, is_append);
-                                self.indent -= 1;
-                                self.emit_line(format_args!("}} else {{"));
-                                self.indent += 1;
-                                self.emit_line(format_args!("{dest} = {v};"));
-                                self.indent -= 1;
-                                self.emit_line(format_args!("}}"));
-                                self.emit_line(format_args!("{mn}__own = 1;"));
-                            } else {
-                                self.emit_assign_owned_value(&dest, &vty, &v, &field_free, is_append);
-                            }
-                            if Self::own_free_fn(&bty).is_some()
-                                || !self.struct_own_field_frees(&bty).is_empty()
-                            {
-                                self.register_own_drop(&mn, &bty);
-                                self.scope_drop_safe.insert(mn);
-                            }
-                            return;
-                        } else if !self.struct_own_field_frees(&vty).is_empty() {
-                            if self.own_cond_flags.contains(&mn) {
-                                self.emit_line(format_args!("if ({mn}__own) {{"));
-                                self.indent += 1;
-                                self.emit_assign_owning_struct(
-                                    &format!("{b}{arrow}{field}"),
-                                    &vty,
-                                    &v,
-                                );
-                                self.indent -= 1;
-                                self.emit_line(format_args!("}} else {{"));
-                                self.indent += 1;
-                                self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
-                                self.indent -= 1;
-                                self.emit_line(format_args!("}}"));
-                                self.emit_line(format_args!("{mn}__own = 1;"));
-                            } else {
-                                self.emit_assign_owning_struct(
-                                    &format!("{b}{arrow}{field}"),
-                                    &vty,
-                                    &v,
-                                );
-                            }
-                            if Self::own_free_fn(&bty).is_some()
-                                || !self.struct_own_field_frees(&bty).is_empty()
-                            {
-                                self.register_own_drop(&mn, &bty);
-                                self.scope_drop_safe.insert(mn);
-                            }
-                            return;
+                        let dest = format!("{b}{arrow}{field}");
+                        if self.own_cond_flags.contains(&mn) {
+                            self.emit_line(format_args!("if ({mn}__own) {{"));
+                            self.indent += 1;
+                            self.emit_assign_owned_value(&dest, &vty, &v, &field_free, is_append);
+                            self.indent -= 1;
+                            self.emit_line(format_args!("}} else {{"));
+                            self.indent += 1;
+                            self.emit_line(format_args!("{dest} = {v};"));
+                            self.indent -= 1;
+                            self.emit_line(format_args!("}}"));
+                            self.emit_line(format_args!("{mn}__own = 1;"));
+                        } else {
+                            self.emit_assign_owned_value(&dest, &vty, &v, &field_free, is_append);
                         }
+                        if Self::own_free_fn(&bty).is_some()
+                            || !self.struct_own_field_frees(&bty).is_empty()
+                        {
+                            self.register_own_drop(&mn, &bty);
+                            self.scope_drop_safe.insert(mn);
+                        }
+                        return;
+                    } else if !self.struct_own_field_frees(&vty).is_empty() {
+                        if self.own_cond_flags.contains(&mn) {
+                            self.emit_line(format_args!("if ({mn}__own) {{"));
+                            self.indent += 1;
+                            self.emit_assign_owning_struct(&format!("{b}{arrow}{field}"), &vty, &v);
+                            self.indent -= 1;
+                            self.emit_line(format_args!("}} else {{"));
+                            self.indent += 1;
+                            self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
+                            self.indent -= 1;
+                            self.emit_line(format_args!("}}"));
+                            self.emit_line(format_args!("{mn}__own = 1;"));
+                        } else {
+                            self.emit_assign_owning_struct(&format!("{b}{arrow}{field}"), &vty, &v);
+                        }
+                        if Self::own_free_fn(&bty).is_some()
+                            || !self.struct_own_field_frees(&bty).is_empty()
+                        {
+                            self.register_own_drop(&mn, &bty);
+                            self.scope_drop_safe.insert(mn);
+                        }
+                        return;
+                    }
                     if Self::own_free_fn(&bty).is_some()
                         || !self.struct_own_field_frees(&bty).is_empty()
                     {
@@ -16399,7 +16574,7 @@ impl Codegen {
             Stmt::Defer { body } => {
                 self.defer_stack.push(body.clone());
             }
-            Stmt::IfLet { .. } => { /* safety: skip if desugar missed this */ },
+            Stmt::IfLet { .. } => { /* safety: skip if desugar missed this */ }
             Stmt::If {
                 init,
                 cond,
@@ -16462,10 +16637,9 @@ impl Codegen {
                 let (_, c) = self.emit_expr(cond);
                 self.emit_line(format_args!("if (!({c})) break;"));
                 self.push_share_scope();
-                self.loop_drop_bases
-                    .push(self.own_drop_scopes.len().saturating_sub(1));
+                self.push_loop_drop_base(label.as_deref());
                 self.emit_body(body);
-                self.loop_drop_bases.pop();
+                self.pop_loop_drop_base(label.as_deref());
                 self.pop_share_scope();
                 if let Some(lab) = label {
                     self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -16477,19 +16651,19 @@ impl Codegen {
                 }
             }
             Stmt::Break(None) => {
-                self.emit_loop_exit_cleanup();
+                self.emit_loop_exit_cleanup(None);
                 self.line("break;");
             }
             Stmt::Break(Some(lab)) => {
-                self.emit_loop_exit_cleanup();
+                self.emit_loop_exit_cleanup(Some(lab));
                 self.emit_line(format_args!("goto __mako_break_{lab};"));
             }
             Stmt::Continue(None) => {
-                self.emit_loop_exit_cleanup();
+                self.emit_loop_exit_cleanup(None);
                 self.line("continue;");
             }
             Stmt::Continue(Some(lab)) => {
-                self.emit_loop_exit_cleanup();
+                self.emit_loop_exit_cleanup(Some(lab));
                 self.emit_line(format_args!("goto __mako_cont_{lab};"));
             }
             Stmt::For {
@@ -16521,10 +16695,9 @@ impl Codegen {
                 let (_, c) = self.emit_expr(cond);
                 self.emit_line(format_args!("if (!({c})) break;"));
                 self.push_share_scope();
-                self.loop_drop_bases
-                    .push(self.own_drop_scopes.len().saturating_sub(1));
+                self.push_loop_drop_base(label.as_deref());
                 self.emit_body(body);
-                self.loop_drop_bases.pop();
+                self.pop_loop_drop_base(label.as_deref());
                 self.pop_share_scope();
                 if let Some(lab) = label {
                     self.emit_line(format_args!("__mako_cont_{lab}: ;"));
@@ -16541,16 +16714,24 @@ impl Codegen {
                 self.locals.insert(name.clone(), "MakoNursery".into());
                 self.emit_line(format_args!("MakoNursery {name} = mako_nursery_new();"));
                 match policy {
-                    CrewPolicy::Race => self.emit_line(format_args!("mako_nursery_set_policy(&{name}, MAKO_NURSERY_RACE);")),
-                    CrewPolicy::Any => self.emit_line(format_args!("mako_nursery_set_policy(&{name}, MAKO_NURSERY_ANY);")),
-                    CrewPolicy::FailFast => self.emit_line(format_args!("mako_nursery_set_policy(&{name}, MAKO_NURSERY_FAIL_FAST);")),
-                    CrewPolicy::All => {},
+                    CrewPolicy::Race => self.emit_line(format_args!(
+                        "mako_nursery_set_policy(&{name}, MAKO_NURSERY_RACE);"
+                    )),
+                    CrewPolicy::Any => self.emit_line(format_args!(
+                        "mako_nursery_set_policy(&{name}, MAKO_NURSERY_ANY);"
+                    )),
+                    CrewPolicy::FailFast => self.emit_line(format_args!(
+                        "mako_nursery_set_policy(&{name}, MAKO_NURSERY_FAIL_FAST);"
+                    )),
+                    CrewPolicy::All => {}
                 }
                 self.crew_stack.push(name.clone());
                 self.emit_body(body);
                 self.crew_stack.pop();
                 match policy {
-                    CrewPolicy::Race => self.emit_line(format_args!("mako_nursery_race_join(&{name});")),
+                    CrewPolicy::Race => {
+                        self.emit_line(format_args!("mako_nursery_race_join(&{name});"))
+                    }
                     _ => self.emit_line(format_args!("mako_nursery_cancel_join(&{name});")),
                 }
             }
@@ -16592,7 +16773,8 @@ impl Codegen {
                 if all_str {
                     self.line(&format!("MakoChanStr *{arr}[{n}];"));
                     for (i, (ch, _)) in arms.iter().enumerate() {
-                        self.emit_line(format_args!("{arr}[{i}] = {ch};"));
+                        let ch_c = mangle(ch);
+                        self.emit_line(format_args!("{arr}[{i}] = {ch_c};"));
                     }
                     self.line(&format!(
                         "int64_t {which} = mako_chan_str_selectn({arr}, {n}, {ms});"
@@ -16600,7 +16782,8 @@ impl Codegen {
                 } else if all_ptr {
                     self.line(&format!("MakoChanPtr *{arr}[{n}];"));
                     for (i, (ch, _)) in arms.iter().enumerate() {
-                        self.emit_line(format_args!("{arr}[{i}] = {ch};"));
+                        let ch_c = mangle(ch);
+                        self.emit_line(format_args!("{arr}[{i}] = {ch_c};"));
                     }
                     self.line(&format!(
                         "int64_t {which} = mako_chan_ptr_selectn({arr}, {n}, {ms});"
@@ -16608,7 +16791,8 @@ impl Codegen {
                 } else {
                     self.line(&format!("MakoChan *{arr}[{n}];"));
                     for (i, (ch, _)) in arms.iter().enumerate() {
-                        self.emit_line(format_args!("{arr}[{i}] = {ch};"));
+                        let ch_c = mangle(ch);
+                        self.emit_line(format_args!("{arr}[{i}] = {ch_c};"));
                     }
                     self.line(&format!(
                         "int64_t {which} = mako_chan_selectn({arr}, {n}, {ms});"
@@ -16823,7 +17007,7 @@ impl Codegen {
                         } else {
                             self.emit_expr(right).1
                         };
-                        return match op {
+                        let comparison = match op {
                             BinOp::Eq => ("bool".into(), format!("mako_str_eq({lv}, {rv})")),
                             BinOp::Ne => ("bool".into(), format!("(!mako_str_eq({lv}, {rv}))")),
                             BinOp::Lt => {
@@ -16842,6 +17026,22 @@ impl Codegen {
                             ),
                             _ => unreachable!(),
                         };
+                        let left_owned = self.expr_is_owned_print_temp(left)
+                            && !self.own_drop_live.contains(&lv);
+                        let right_owned = self.expr_is_owned_print_temp(right)
+                            && !self.own_drop_live.contains(&rv);
+                        if left_owned || right_owned {
+                            let tmp = self.fresh("scmp");
+                            self.emit_line(format_args!("bool {tmp} = {};", comparison.1));
+                            if left_owned {
+                                self.emit_line(format_args!("mako_str_free({lv});"));
+                            }
+                            if right_owned {
+                                self.emit_line(format_args!("mako_str_free({rv});"));
+                            }
+                            return ("bool".into(), tmp);
+                        }
+                        return comparison;
                     }
                 }
                 // Compile-time string concatenation: "hello" + " world" → "hello world"
@@ -16907,13 +17107,19 @@ impl Codegen {
                     && rt == "MakoString"
                 {
                     // Free owned string temps after comparison.
-                    let left_owned = Self::expr_is_owned_print_temp(left) && !self.own_drop_live.contains(&lv);
-                    let right_owned = Self::expr_is_owned_print_temp(right) && !self.own_drop_live.contains(&rv);
+                    let left_owned =
+                        self.expr_is_owned_print_temp(left) && !self.own_drop_live.contains(&lv);
+                    let right_owned =
+                        self.expr_is_owned_print_temp(right) && !self.own_drop_live.contains(&rv);
                     if left_owned || right_owned {
                         let tmp = self.fresh("seq");
                         self.emit_line(format_args!("bool {tmp} = mako_str_eq({lv}, {rv});"));
-                        if left_owned { self.emit_line(format_args!("mako_str_free({lv});")); }
-                        if right_owned { self.emit_line(format_args!("mako_str_free({rv});")); }
+                        if left_owned {
+                            self.emit_line(format_args!("mako_str_free({lv});"));
+                        }
+                        if right_owned {
+                            self.emit_line(format_args!("mako_str_free({rv});"));
+                        }
                         return if *op == BinOp::Eq {
                             ("bool".into(), tmp)
                         } else {
@@ -17089,7 +17295,7 @@ impl Codegen {
                             match ty.as_str() {
                                 "MakoString" => {
                                     self.emit_line(format_args!("mako_print_str({v});"));
-                                    if Self::expr_is_owned_print_temp(&args[0]) {
+                                    if self.expr_is_owned_print_temp(&args[0]) {
                                         self.emit_line(format_args!("mako_str_free({v});"));
                                         self.note_own_drop_moved(&v);
                                     }
@@ -24809,33 +25015,49 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "actor_pack" => {
+                            if let (Expr::Int(tag), Expr::Int(payload)) = (&args[0], &args[1]) {
+                                let ext = payload >> 47;
+                                if ext == 0 || ext == -1 {
+                                    let packed = (1i64 << 63)
+                                        | ((tag & 0x7fff) << 48)
+                                        | (payload & 0x0000ffffffffffff);
+                                    return ("int64_t".into(), packed.to_string());
+                                }
+                            }
                             let (_, t) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_actor_pack({t}, {p})"));
                         }
                         "actor_box_payload" => {
-                            // Heap-allocate the struct/value and return pointer as int64.
+                            // Heap-allocate the struct/value and return the full pointer.
                             let (ety, ev) = self.emit_expr(&args[0]);
+                            let snapshot = if matches!(&args[0], Expr::StructLit { .. } | Expr::StructLitPos { .. }) {
+                                // The literal already owns strings and channel clones.
+                                // Only mutable slice backing needs a separate snapshot.
+                                self.detach_actor_slices(&ety, &ev);
+                                ev.clone()
+                            } else {
+                                self.clone_actor_value(&ety, &ev)
+                            };
                             let box_var = self.fresh("abox");
-                            self.line(&format!("{ety} *{box_var} = ({ety}*)malloc(sizeof({ety}));"));
-                            self.line(&format!("*{box_var} = {ev};"));
+                            self.line(&format!(
+                                "{ety} *{box_var} = ({ety}*)malloc(sizeof({ety}));"
+                            ));
+                            self.line(&format!(
+                                "if (!{box_var}) mako_abort(\"actor envelope OOM\");"
+                            ));
+                            self.line(&format!("*{box_var} = {snapshot};"));
                             return ("int64_t".into(), format!("(int64_t)(intptr_t){box_var}"));
                         }
                         "actor_free_payload" if args.len() == 1 => {
                             let (_, pv) = self.emit_expr(&args[0]);
-                            self.emit_line(format_args!("free((void*)(intptr_t)({pv} & 0x0000ffffffffffffLL));"));
+                            self.line(&format!("mako_actor_free_payload({pv});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "actor_unbox_payload" if args.len() == 1 => {
                             let (_, pv) = self.emit_expr(&args[0]);
-                            // Return the masked payload as int64; the Let handler
-                            // casts to the declared struct type via __ACTOR_UNBOX marker.
-                            return ("__ACTOR_UNBOX".into(), format!("({pv} & 0x0000ffffffffffffLL)"));
-                        }
-                        "actor_free_payload" if args.len() == 1 => {
-                            let (_, pv) = self.emit_expr(&args[0]);
-                            self.line(&format!("mako_actor_free_payload({pv});"));
-                            return ("void".into(), "".into());
+                            // Full pointer; the Let handler casts via __ACTOR_UNBOX.
+                            return ("__ACTOR_UNBOX".into(), pv);
                         }
                         "actor_msg_tag" => {
                             let (_, m) = self.emit_expr(&args[0]);
@@ -35395,7 +35617,11 @@ impl Codegen {
                         }
                         "delete" => {
                             let (ty, m) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = if self.peek_expr_c_ty(&args[1]) == "MakoString" {
+                                self.emit_str_arg(&args[1])
+                            } else {
+                                self.emit_expr(&args[1]).1
+                            };
                             if ty == "MakoMapSI*" {
                                 self.line(&format!("mako_map_si_delete({m}, {k});"));
                             } else if ty == "MakoMapII*" {
@@ -35584,7 +35810,8 @@ impl Codegen {
                         }
                         "append" => {
                             let (sty, s) = self.emit_expr(&args[0]);
-                            let (vty, mut v) = if sty == "MakoStrArray" || sty == "MakoRawStrArray" {
+                            let (vty, mut v) = if sty == "MakoStrArray" || sty == "MakoRawStrArray"
+                            {
                                 ("MakoString".into(), self.emit_str_arg(&args[1]))
                             } else {
                                 let (vty, v) = self.emit_expr(&args[1]);
@@ -35625,7 +35852,7 @@ impl Codegen {
                                         "MakoStrArray {tmp} = mako_str_array_append({s}, {v});"
                                     ));
                                 }
-                                if Self::expr_is_owned_print_temp(&args[1]) {
+                                if self.expr_is_owned_print_temp(&args[1]) {
                                     self.emit_line(format_args!("mako_str_free({v});"));
                                     self.note_own_drop_moved(&v);
                                 }
@@ -35713,10 +35940,15 @@ impl Codegen {
                             let (dty, d) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
                             if dty == "MakoRawIntArray" {
-                                return ("int64_t".into(), format!("mako_raw_slice_copy({d}, {s})"));
+                                return (
+                                    "int64_t".into(),
+                                    format!("mako_raw_slice_copy({d}, {s})"),
+                                );
                             }
-                            if dty == "MakoRawByteArray" || dty == "MakoRawFloatArray"
-                                || dty == "MakoRawBoolArray" || dty == "MakoRawStrArray"
+                            if dty == "MakoRawByteArray"
+                                || dty == "MakoRawFloatArray"
+                                || dty == "MakoRawBoolArray"
+                                || dty == "MakoRawStrArray"
                             {
                                 // Generic raw copy: memmove min(dst.len, src.len) elements.
                                 let tmp = self.fresh("cn");
@@ -36448,7 +36680,7 @@ impl Codegen {
                         // Free owned string element temps (array_of clones them).
                         if c_elem == "MakoString" {
                             for (expr, val) in elems.iter().zip(&vals) {
-                                if Self::expr_is_owned_print_temp(expr) {
+                                if self.expr_is_owned_print_temp(expr) {
                                     self.emit_line(format_args!("mako_str_free({val});"));
                                     self.note_own_drop_moved(val);
                                 }
@@ -37008,13 +37240,17 @@ impl Codegen {
                     _ => None,
                 };
                 let nested_elem_c = match ty {
-                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner) if matches!(inner.as_ref(), TypeExpr::Array(_)) => {
+                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner)
+                        if matches!(inner.as_ref(), TypeExpr::Array(_)) =>
+                    {
                         Some(self.type_expr_c(inner))
                     }
                     _ => None,
                 };
                 let map_elem_c = match ty {
-                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner) if matches!(inner.as_ref(), TypeExpr::Map(_, _)) => {
+                    TypeExpr::Array(inner) | TypeExpr::RawArray(inner)
+                        if matches!(inner.as_ref(), TypeExpr::Map(_, _)) =>
+                    {
                         Some(self.type_expr_c(inner))
                     }
                     _ => None,
@@ -37152,7 +37388,12 @@ impl Codegen {
         match expr {
             Expr::Index { base, index } => {
                 let (bty, b) = self.emit_expr(base);
-                let (_, i) = self.emit_expr(index);
+                let i = if bty.starts_with("MakoMap") && self.peek_expr_c_ty(index) == "MakoString"
+                {
+                    self.emit_str_arg(index)
+                } else {
+                    self.emit_expr(index).1
+                };
                 if bty == "MakoMapSI*" {
                     if let Some(opty) = self.opaque_map_vals.get(&b).cloned() {
                         let out = self.fresh("omg");
@@ -37305,25 +37546,35 @@ impl Codegen {
                 self.emit_line(format_args!("int64_t {tmp} = {i};"));
                 // Raw arrays: direct element access (same struct layout, bounds check inline).
                 if bty == "MakoRawIntArray" {
-                    self.line(&format!("if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"));
+                    self.line(&format!(
+                        "if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"
+                    ));
                     return ("int64_t".into(), format!("{b}.data[{tmp}]"));
                 }
                 if bty == "MakoRawByteArray" {
-                    self.line(&format!("if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"));
+                    self.line(&format!(
+                        "if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"
+                    ));
                     return ("int64_t".into(), format!("(int64_t){b}.data[{tmp}]"));
                 }
                 if bty == "MakoRawStrArray" {
-                    self.line(&format!("if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"));
+                    self.line(&format!(
+                        "if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"
+                    ));
                     let out = self.fresh("sg");
                     self.line(&format!("MakoString {out} = {b}.data[{tmp}];"));
                     return ("MakoString".into(), out);
                 }
                 if bty == "MakoRawFloatArray" {
-                    self.line(&format!("if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"));
+                    self.line(&format!(
+                        "if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"
+                    ));
                     return ("double".into(), format!("{b}.data[{tmp}]"));
                 }
                 if bty == "MakoRawBoolArray" {
-                    self.line(&format!("if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"));
+                    self.line(&format!(
+                        "if ({tmp} < 0 || (uint64_t){tmp} >= {b}.len) abort();"
+                    ));
                     return ("bool".into(), format!("{b}.data[{tmp}]"));
                 }
                 if bty == "MakoByteArray" {
@@ -37977,15 +38228,31 @@ impl Codegen {
                         let elem = self.fresh("me");
                         let fn_name = match &args[0] {
                             Expr::Ident(n) => mangle(n),
-                            _ => { let (_, v) = self.emit_expr(&args[0]); v }
+                            _ => {
+                                let (_, v) = self.emit_expr(&args[0]);
+                                v
+                            }
                         };
-                        let elem_c = if rty.contains("Str") { "MakoString" }
-                            else if rty.contains("Float") { "double" }
-                            else if rty.contains("Bool") { "bool" }
-                            else { "int64_t" };
-                        let make_fn = rty.replace("Mako", "mako_").replace("Array", "_array_make").to_lowercase();
-                        self.line(&format!("{} {out} = {}((int64_t){src}.len, (int64_t){src}.len);", rty, make_fn));
-                        self.line(&format!("for (size_t {idx} = 0; {idx} < {src}.len; {idx}++) {{"));
+                        let elem_c = if rty.contains("Str") {
+                            "MakoString"
+                        } else if rty.contains("Float") {
+                            "double"
+                        } else if rty.contains("Bool") {
+                            "bool"
+                        } else {
+                            "int64_t"
+                        };
+                        let make_fn = rty
+                            .replace("Mako", "mako_")
+                            .replace("Array", "_array_make")
+                            .to_lowercase();
+                        self.line(&format!(
+                            "{} {out} = {}((int64_t){src}.len, (int64_t){src}.len);",
+                            rty, make_fn
+                        ));
+                        self.line(&format!(
+                            "for (size_t {idx} = 0; {idx} < {src}.len; {idx}++) {{"
+                        ));
                         self.indent += 1;
                         self.line(&format!("{elem_c} {elem} = {src}.data[{idx}];"));
                         self.line(&format!("{out}.data[{idx}] = {fn_name}({elem});"));
@@ -38001,19 +38268,37 @@ impl Codegen {
                         let wi = self.fresh("fw");
                         let fn_name = match &args[0] {
                             Expr::Ident(n) => mangle(n),
-                            _ => { let (_, v) = self.emit_expr(&args[0]); v }
+                            _ => {
+                                let (_, v) = self.emit_expr(&args[0]);
+                                v
+                            }
                         };
-                        let elem_c = if rty.contains("Str") { "MakoString" }
-                            else if rty.contains("Float") { "double" }
-                            else if rty.contains("Bool") { "bool" }
-                            else { "int64_t" };
-                        let make_fn = rty.replace("Mako", "mako_").replace("Array", "_array_make").to_lowercase();
-                        self.line(&format!("{} {out} = {}((int64_t){src}.len, (int64_t){src}.len);", rty, make_fn));
+                        let elem_c = if rty.contains("Str") {
+                            "MakoString"
+                        } else if rty.contains("Float") {
+                            "double"
+                        } else if rty.contains("Bool") {
+                            "bool"
+                        } else {
+                            "int64_t"
+                        };
+                        let make_fn = rty
+                            .replace("Mako", "mako_")
+                            .replace("Array", "_array_make")
+                            .to_lowercase();
+                        self.line(&format!(
+                            "{} {out} = {}((int64_t){src}.len, (int64_t){src}.len);",
+                            rty, make_fn
+                        ));
                         self.line(&format!("size_t {wi} = 0;"));
-                        self.line(&format!("for (size_t {idx} = 0; {idx} < {src}.len; {idx}++) {{"));
+                        self.line(&format!(
+                            "for (size_t {idx} = 0; {idx} < {src}.len; {idx}++) {{"
+                        ));
                         self.indent += 1;
                         self.line(&format!("{elem_c} {elem} = {src}.data[{idx}];"));
-                        self.line(&format!("if ({fn_name}({elem})) {{ {out}.data[{wi}++] = {elem}; }}"));
+                        self.line(&format!(
+                            "if ({fn_name}({elem})) {{ {out}.data[{wi}++] = {elem}; }}"
+                        ));
                         self.indent -= 1;
                         self.line(&format!("}}"));
                         self.line(&format!("{out}.len = {wi};"));
@@ -38024,12 +38309,17 @@ impl Codegen {
                         let (init_ty, init_val) = self.emit_expr(&args[0]);
                         let fn_name = match &args[1] {
                             Expr::Ident(n) => mangle(n),
-                            _ => { let (_, v) = self.emit_expr(&args[1]); v }
+                            _ => {
+                                let (_, v) = self.emit_expr(&args[1]);
+                                v
+                            }
                         };
                         let acc = self.fresh("acc");
                         let idx = self.fresh("ri");
                         self.line(&format!("{init_ty} {acc} = {init_val};"));
-                        self.line(&format!("for (size_t {idx} = 0; {idx} < {src}.len; {idx}++) {{"));
+                        self.line(&format!(
+                            "for (size_t {idx} = 0; {idx} < {src}.len; {idx}++) {{"
+                        ));
                         self.indent += 1;
                         self.line(&format!("{acc} = {fn_name}({acc}, {src}.data[{idx}]);"));
                         self.indent -= 1;
@@ -38037,10 +38327,25 @@ impl Codegen {
                         return (init_ty, acc);
                     }
                     "send" => {
-                        let (vty, v) = self.emit_expr(&args[0]);
+                        let (vty, mut v) =
+                            if rty == "MakoChanStr*" && matches!(&args[0], Expr::String(_)) {
+                                ("MakoString".into(), self.emit_str_arg(&args[0]))
+                            } else {
+                                self.emit_expr(&args[0])
+                            };
                         let tmp = self.fresh("ok");
                         if rty == "MakoChanStr*" {
+                            let owned = self.expr_is_owned_print_temp(&args[0])
+                                && !self.own_drop_live.contains(&v);
+                            if owned {
+                                let payload = self.fresh("send_payload");
+                                self.line(&format!("MakoString {payload} = {v};"));
+                                v = payload;
+                            }
                             self.line(&format!("bool {tmp} = mako_chan_str_send({rv}, {v}) != 0;"));
+                            if owned {
+                                self.line(&format!("mako_str_free({v});"));
+                            }
                         } else if rty == "MakoChanPtr*" {
                             let st = self
                                 .chan_ptr_elems
@@ -39284,6 +39589,20 @@ impl Codegen {
         }
     }
 
+    fn expr_owns_result_error(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Ident(name) => self.owned_result_errors.contains(name),
+            Expr::Call { callee, args } => match callee.as_ref() {
+                Expr::Ident(name) if name == "Err" => args
+                    .first()
+                    .is_some_and(|arg| self.expr_is_scope_drop_safe(arg, "MakoString")),
+                Expr::Ident(name) => name != "Ok",
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     fn emit_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> (String, String) {
         let (sty, sval) = self.emit_expr(scrutinee);
         let (sty, sval) = Self::coerce_user_struct_value(&sty, sval);
@@ -39589,7 +39908,16 @@ impl Codegen {
             self.push_share_scope();
             let arm_idx = self.own_drop_scopes.len().saturating_sub(1);
             let saved_live = self.own_drop_live.clone();
-            self.bind_pattern_locals(&scrut, &sty, &arm.pattern);
+            // A failed guard must leave the payload available to the next arm.
+            let own_error = self.expr_owns_result_error(scrutinee)
+                && arms.iter().all(|arm| arm.guard.is_none())
+                && match scrutinee {
+                    Expr::Ident(n) => !self.ident_used_after_current(n)
+                        && self.loop_drop_bases.last().is_none_or(|base|
+                            self.own_bind_scope.get(&mangle(n)).is_some_and(|scope| scope >= base)),
+                    _ => true,
+                };
+            self.bind_pattern_locals(&scrut, &sty, &arm.pattern, own_error);
             // Own transfers are registered inside bind_pattern_locals /
             // emit_option_some_bind (Result/Option payloads). Struct field
             // patterns are aliases and must not be free-registered.
@@ -39730,7 +40058,7 @@ impl Codegen {
         }
     }
 
-    fn bind_pattern_locals(&mut self, scrut: &str, sty: &str, pattern: &Pattern) {
+    fn bind_pattern_locals(&mut self, scrut: &str, sty: &str, pattern: &Pattern, own_error: bool) {
         match pattern {
             Pattern::Or(_) => {}
             Pattern::Struct { name: _, fields } => {
@@ -39768,7 +40096,7 @@ impl Codegen {
                                 .unwrap_or_else(|| "int64_t".into());
                             self.line(&format!("{cty} {tmp} = {scrut}.{fname};"));
                             self.locals.insert(tmp.clone(), cty.clone());
-                            self.bind_pattern_locals(&tmp, &cty, other);
+                            self.bind_pattern_locals(&tmp, &cty, other, false);
                         }
                     }
                 }
@@ -39845,7 +40173,7 @@ impl Codegen {
                             "int64_t"
                         };
                         self.locals.insert(tmp.clone(), nested_sty.into());
-                        self.bind_pattern_locals(&tmp, nested_sty, &bindings[0]);
+                        self.bind_pattern_locals(&tmp, nested_sty, &bindings[0], own_error);
                         return;
                     }
                     if sty == "MakoOptionInt" && name == "Some" {
@@ -39864,7 +40192,12 @@ impl Codegen {
                                 "if ({tmp}_p) {{ {tmp} = *{tmp}_p; free({tmp}_p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
                             ));
                             self.locals.insert(tmp.clone(), "MakoOptionInt".into());
-                            self.bind_pattern_locals(&tmp, "MakoOptionInt", &bindings[0]);
+                            self.bind_pattern_locals(
+                                &tmp,
+                                "MakoOptionInt",
+                                &bindings[0],
+                                own_error,
+                            );
                         } else if kind == "result" {
                             self.line(&format!(
                                 "MakoResultInt *{tmp}_p = (MakoResultInt*)mako_option_some_ptr({scrut});"
@@ -39874,7 +40207,12 @@ impl Codegen {
                                 "if ({tmp}_p) {{ {tmp} = *{tmp}_p; free({tmp}_p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
                             ));
                             self.locals.insert(tmp.clone(), "MakoResultInt".into());
-                            self.bind_pattern_locals(&tmp, "MakoResultInt", &bindings[0]);
+                            self.bind_pattern_locals(
+                                &tmp,
+                                "MakoResultInt",
+                                &bindings[0],
+                                own_error,
+                            );
                         } else {
                             // Leaf: unbox into tmp then recurse nested pattern.
                             let names = vec![tmp.clone()];
@@ -39884,7 +40222,7 @@ impl Codegen {
                                 .get(&tmp)
                                 .cloned()
                                 .unwrap_or_else(|| "int64_t".into());
-                            self.bind_pattern_locals(&tmp, &nested_sty, &bindings[0]);
+                            self.bind_pattern_locals(&tmp, &nested_sty, &bindings[0], own_error);
                         }
                         return;
                     }
@@ -40109,6 +40447,7 @@ impl Codegen {
                         }
                     } else if name == "Err" && bindings.len() == 1 {
                         let b = mangle(&bindings[0]);
+                        self.note_own_bind_scope(&b);
                         if let Some(cty) = self.result_err_enums.get(scrut).cloned() {
                             // Enum Err: reconstruct full enum value from packed fields.
                             self.locals.insert(bindings[0].clone(), cty.clone());
@@ -40122,12 +40461,19 @@ impl Codegen {
                                  {b}.s1 = {scrut}.err_s1;"
                             ));
                             // Enum payload may own string slots s0/s1.
+                            if !own_error {
+                                let cloned = self.clone_own_val(&cty, &b);
+                                self.line(&format!("{b} = {cloned};"));
+                            }
                             self.register_own_drop(&b, &cty);
                         } else {
                             self.locals.insert(bindings[0].clone(), "MakoString".into());
-                            self.line(&format!("MakoString {b} = {scrut}.err;"));
+                            let payload = if own_error { format!("{scrut}.err") }
+                                else { format!("mako_str_clone({scrut}.err)") };
+                            self.line(&format!("MakoString {b} = {payload};"));
                             self.register_own_drop(&b, "MakoString");
                         }
+                        self.scope_drop_safe.insert(b);
                     }
                 } else if sty == "MakoOptionInt" {
                     if name == "Some" && bindings.len() == 1 {
@@ -43111,7 +43457,8 @@ fn main() {
             "owning param must borrow:\n{generated}"
         );
         assert!(
-            rpc.contains("mako_chan_clone(__mako_cloned_") && rpc.contains("mako_chan_str_clone(__mako_cloned_"),
+            rpc.contains("mako_chan_clone(__mako_cloned_")
+                && rpc.contains("mako_chan_str_clone(__mako_cloned_"),
             "returned struct copy must retain channel fields:\n{generated}"
         );
     }

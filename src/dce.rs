@@ -64,6 +64,13 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
     // Check for unused imports (if source file is provided).
     // This runs after BFS so reachable_fns is complete.
 
+    let declared_types: HashSet<&str> = program.items.iter().filter_map(|item| match item {
+        Item::Struct(s) => Some(s.name.as_str()),
+        Item::Enum(e) => Some(e.name.as_str()),
+        Item::On(on) => Some(on.ty.as_str()),
+        _ => None,
+    }).collect();
+
     // Collect method names (bare names like "describe", "push") so we can
     // keep all `Type_method` implementations when the method is called.
     let method_names: HashSet<&str> = reachable_fns
@@ -89,10 +96,13 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
                     return true;
                 }
                 // Keep method implementations: if `describe` is called,
-                // keep `Dog_describe`, `Cat_describe`, etc.
+                // keep `Dog_describe`, `Cat_describe`. Do not keep
+                // `FayEngine_Shutdown_send` just because `send` is a method.
                 for method in &method_names {
-                    if f.name.ends_with(&format!("_{method}")) {
-                        return true;
+                    if let Some(prefix) = f.name.strip_suffix(&format!("_{method}")) {
+                        if declared_types.contains(prefix) {
+                            return true;
+                        }
                     }
                 }
                 false
@@ -981,6 +991,21 @@ mod tests {
     use super::*;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
+
+    #[test]
+    fn keeps_methods_on_types_with_underscores() {
+        let source = r#"
+struct lib__Named_Type { value: int }
+fn lib__Named_Type_describe(self: lib__Named_Type) -> int { return self.value }
+fn Unrelated_helper_describe() -> int { return 0 }
+fn main() { let item = lib__Named_Type { value: 42 }; print_int(item.describe()) }
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let kept = eliminate(&program, &["main".into()]);
+        assert!(kept.items.iter().any(|item| matches!(item, Item::Fn(f) if f.name == "lib__Named_Type_describe")));
+        assert!(!kept.items.iter().any(|item| matches!(item, Item::Fn(f) if f.name == "Unrelated_helper_describe")));
+    }
 
     #[test]
     fn keeps_enum_referenced_only_by_variant_construction_and_match() {

@@ -705,6 +705,32 @@ goodbye
 0
 ```
 
+### Named ports
+
+One actor is still one owner of `self`. Optional `receive Msg(...) on port`
+gives that loop more than one mailbox so a flood of work messages cannot fill
+the only queue and block Open/Bye/Init (the FayDB engine case).
+
+```mko
+actor Engine {
+    receive Exec(sql: string, reply: chan[string]) on exec {
+        let _ = reply.send(sql)
+    }
+    receive Open(reply: chan[string]) on control {
+        let _ = reply.send("ok")
+    }
+    receive Bye on control { let _ = 0 }
+}
+```
+
+`Engine_spawn()` returns a handle `Engine { control: chan[int], exec: chan[int] }`.
+Send with `Engine_Exec_send(h, sql, reply)` or `Engine_control_send(h, Engine_Bye())`.
+A port named `control` is polled first. Kick `Engine_loop(h)` as usual — the
+handle is Send because its fields are channels.
+
+Single-port actors still spawn a `chan[int]` mailbox. Tests:
+`examples/testing/actor_ports_test.mko`.
+
 ### Termination convention
 
 By convention, a `Bye` or `Stop` message type ends the actor loop. The loop
@@ -795,11 +821,11 @@ actor DB {
 }
 ```
 
-- **Per-arm zero-allocation**: 0-param arms and single-integer arms (`int`/`int64`) bypass heap allocation completely, using 16-bit tag and 48-bit payload bit-packing.
-- **Typed envelopes**: Arms with multiple parameters or non-integer types generate per-arm envelope structs, boxed and unboxed safely with caller-owns semantics.
-- **Early return**: `return` within a `receive` arm jumps to the next actor message (`continue __actor_loop`), allowing clean early short-circuiting even from within nested `for` and `while` loops.
-- **Graceful termination**: Closing the actor mailbox via `actor_stop(mailbox)` or sender drop signals tag 0, immediately exiting the actor loop without CPU spinning.
-- **Zero-leak mailbox draining**: When an actor loop exits, any unhandled envelope payloads remaining in the mailbox are drained and freed (`actor_free_payload`), guaranteeing zero leaks.
+- **Per-arm zero-allocation**: 0-param arms and single-integer arms (`int`/`int64`) bypass heap allocation, packing a 15-bit tag and a signed 48-bit payload with bit 63 set so the word cannot be confused with a heap pointer. Values outside signed 48-bit abort.
+- **Typed envelopes**: Arms with multiple parameters or non-integer types generate per-arm envelope structs. The tag is stored in the envelope; the mailbox carries the full pointer (not a 48-bit truncation).
+- **Early return**: `return` within a `receive` arm jumps to the next actor message (`continue __actor_loop`) after dropping that arm's owned envelope fields, including from nested `for` and `while` loops.
+- **Graceful termination**: Closing the actor mailbox via `actor_stop(mailbox)` or sender drop signals 0, immediately exiting the actor loop without CPU spinning.
+- **Mailbox draining**: When an actor loop exits, remaining envelopes are unboxed by tag and their nested strings, slices, and channels are freed.
 
 ### Actor design patterns
 
@@ -904,10 +930,11 @@ fn dispatch(w: Worker, msg: int) -> int {
 
 ### Actor memory safety
 
-Actors guarantee isolation: each actor's state fields (`self.field`) are private
-and never shared across threads. The mailbox is a bounded channel — unbounded
-growth is structurally impossible. Combined with `crew` scoping, actors cannot
-leak, orphan, or race on mutable state.
+Actors isolate state: each actor's fields (`self.field`) are private and never
+shared across threads. The mailbox is a bounded channel — unbounded growth is
+structurally impossible. Combined with `crew` scoping, actors do not race on
+actor state or orphan the loop task. Envelope payloads are dropped on the
+handle path, on early `return`, and on shutdown drain.
 
 ### Early return in receive arms
 

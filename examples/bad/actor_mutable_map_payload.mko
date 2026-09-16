@@ -1,0 +1,5 @@
+// Mutable map handles cannot silently alias state across an actor mailbox.
+actor RejectMap {
+    receive Put(values: map[string]int) { let _ = len(values) }
+}
+fn main() { let _ = RejectMap_spawn() }

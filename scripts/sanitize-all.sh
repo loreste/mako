@@ -62,7 +62,8 @@ tsan_tests=(
   wave29_queue_test wave30_queue_test wave31_queue_test wave32_queue_test
   wave33_queue_test wave34_queue_test wave35_queue_test wave36_queue_test
   wave37_queue_test wave38_queue_test chan_select_stress_test
-  kick_fn_test actor_test
+  kick_fn_test actor_test actor_adversarial_memsafe_test actor_comprehensive_test
+  actor_ports_test
 )
 for f in "${tsan_tests[@]}"; do
   result=$("$MAKO" test --race "examples/testing/${f}.mko" 2>&1 | tail -1)
@@ -90,6 +91,8 @@ own_tests=(
   capturing_closure_test struct_capture_test kick_fn_test
   generic_struct_test generic_enum_test generic_adversarial_test
   result_enum_test overflow_shutdown_test
+  actor_comprehensive_test actor_adversarial_memsafe_test actor_nested_state_test
+  actor_typed_payload_test actor_ports_test
 )
 for f in "${own_tests[@]}"; do
   ASAN_OPTIONS=detect_leaks=0 \

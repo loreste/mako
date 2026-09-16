@@ -1,0 +1,106 @@
+// Named actor ports: separate mailboxes, control-first poll, one isolated loop.
+// Run: mako test --backend c examples/testing/actor_ports_test.mko
+
+actor Gate {
+    n: int = 0
+
+    receive Work(done: chan[int]) on exec {
+        self.n = self.n + 1
+        let _ = done.send(self.n)
+    }
+
+    receive Ping(reply: chan[int]) on control {
+        let _ = reply.send(self.n)
+    }
+
+    receive Bye on control {
+        let _ = 0
+    }
+}
+
+fn TestActorPortsBasic() {
+    let g = Gate_spawn()
+    crew t {
+        let job = t.kick(Gate_loop(g))
+        let done = make(chan[int], 2)
+        assert(Gate_Work_send(g, done))
+        assert(Gate_Work_send(g, done))
+        assert_eq(done.recv(), 1)
+        assert_eq(done.recv(), 2)
+        let reply = make(chan[int], 1)
+        assert(Gate_Ping_send(g, reply))
+        assert_eq(reply.recv(), 2)
+        assert(Gate_Bye_send(g))
+        assert_eq(job.join(), 2)
+        // A rejected typed send must release its envelope and channel clone.
+        assert(!Gate_Work_send(g, done))
+        assert_eq(actor_len(g.exec), 0)
+        assert_eq(actor_len(g.control), 0)
+    }
+}
+
+fn TestActorPortHeadOfLine() {
+    // Fill exec without starting the loop. Control must still accept Ping
+    // (a single mailbox of cap 2 would block the third send forever).
+    let g = Gate_spawn_cap(2)
+    let done = make(chan[int], 2)
+    assert(Gate_Work_send(g, done))
+    assert(Gate_Work_send(g, done))
+    let reply = make(chan[int], 1)
+    assert(Gate_Ping_send(g, reply))
+    crew t {
+        let job = t.kick(Gate_loop(g))
+        assert_eq(reply.recv(), 0)
+        assert_eq(done.recv(), 1)
+        assert_eq(done.recv(), 2)
+        assert(Gate_Bye_send(g))
+        let _ = job.join()
+    }
+}
+
+fn TestActorPortSend() {
+    let g = Gate_spawn()
+    crew t {
+        let job = t.kick(Gate_loop(g))
+        let done = make(chan[int], 1)
+        assert(Gate_exec_send(g, Gate_Work(done)))
+        assert_eq(done.recv(), 1)
+        let reply = make(chan[int], 1)
+        assert(Gate_control_send(g, Gate_Ping(reply)))
+        assert_eq(reply.recv(), 1)
+        assert(Gate_control_send(g, Gate_Bye()))
+        assert_eq(job.join(), 1)
+    }
+}
+
+actor Named(id: string) {
+    id: string
+    receive Who(reply: chan[string]) on control {
+        let _ = reply.send(self.id)
+    }
+    receive Nop on exec {
+        let _ = 0
+    }
+    receive Bye on control {
+        let _ = 0
+    }
+}
+
+fn TestActorPortsCtor() {
+    let a = Named_spawn("hi")
+    crew t {
+        let job = t.kick(Named_loop(a))
+        let reply = make(chan[string], 1)
+        assert(Named_Who_send(a, reply))
+        assert(reply.recv() == "hi")
+        assert(Named_Bye_send(a))
+        assert_eq(job.join(), 0)
+    }
+}
+
+fn main() {
+    TestActorPortsBasic()
+    TestActorPortHeadOfLine()
+    TestActorPortSend()
+    TestActorPortsCtor()
+}

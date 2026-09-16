@@ -5868,6 +5868,24 @@ static inline void mako_chan_observe_depth(MakoChan *c, size_t depth) {
 #endif
 }
 
+/* Called under c->mu. Signaled waiters remain counted until they reacquire
+ * the mutex. Once the available work exceeds that count, each sleeping peer
+ * has already been signaled; additional signals cannot make progress. Keep
+ * one signal per newly available item/slot when multiple peers are waiting. */
+static inline void mako_chan_wake_receiver(MakoChan *c) {
+    if (c->waiters_recv > 0 &&
+        (c->cap == 0 || c->count <= (size_t)c->waiters_recv)) {
+        pthread_cond_signal(&c->can_recv);
+    }
+}
+
+static inline void mako_chan_wake_sender(MakoChan *c) {
+    if (c->waiters_send > 0 &&
+        c->cap - c->count <= (size_t)c->waiters_send) {
+        pthread_cond_signal(&c->can_send);
+    }
+}
+
 #if !defined(NDEBUG) || defined(MAKO_ENABLE_TRACE)
 static inline void mako_chan_trace_send(MakoChan *c, int64_t val) {
     if (MAKO_UNLIKELY(mako_trace_active() && mako_trace_mode_chan)) {
@@ -5930,9 +5948,10 @@ static inline MakoChan *mako_chan_clone(MakoChan *c) {
 }
 
 static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
-    /* trylock fast path: buffered, not full, no waiters — avoids condvar overhead. */
+    /* trylock fast path: buffered and not full. Wake a waiting receiver without
+     * dropping the mutex — actor mailboxes spend most sends in that case. */
     if (MAKO_LIKELY(c->cap > 0) && pthread_mutex_trylock(&c->mu) == 0) {
-        if (MAKO_LIKELY(c->count < c->cap && !c->closed && c->waiters_recv == 0)) {
+        if (MAKO_LIKELY(c->count < c->cap && !c->closed)) {
             if (MAKO_LIKELY(c->cap == 1)) {
                 c->inline_buf[0] = v;
                 c->count = 1;
@@ -5941,6 +5960,8 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
                 if (++c->tail == c->cap) c->tail = 0;
                 c->count++;
             }
+            mako_chan_observe_depth(c, c->count);
+            mako_chan_wake_receiver(c);
             pthread_mutex_unlock(&c->mu);
             mako_select_notify();
             mako_rt_counter_inc(&mako_rt_channel_sends);
@@ -5967,7 +5988,7 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
         c->count = 1;
         mako_rt_counter_inc(&mako_rt_channel_sends);
         mako_chan_observe_depth(c, 1);
-        if (c->waiters_recv > 0) pthread_cond_signal(&c->can_recv);
+        mako_chan_wake_receiver(c);
         while (c->count != 0 && !c->closed) {
             int64_t t0 = mako_now_ns();
             c->waiters_send++;
@@ -6000,7 +6021,7 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
     c->count++;
     mako_rt_counter_inc(&mako_rt_channel_sends);
     mako_chan_observe_depth(c, c->count);
-    if (c->waiters_recv > 0) pthread_cond_signal(&c->can_recv);
+    mako_chan_wake_receiver(c);
     pthread_mutex_unlock(&c->mu);
     mako_select_notify();
     mako_chan_trace_send(c, v);
@@ -6008,6 +6029,29 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
 }
 
 static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
+    if (MAKO_LIKELY(c->cap > 0) && pthread_mutex_trylock(&c->mu) == 0) {
+        if (MAKO_LIKELY(!c->closed && c->count < c->cap)) {
+            if (MAKO_LIKELY(c->cap == 1)) {
+                c->inline_buf[0] = v;
+                c->count = 1;
+            } else {
+                c->buf[c->tail] = v;
+                if (++c->tail == c->cap) c->tail = 0;
+                c->count++;
+            }
+            mako_chan_observe_depth(c, c->count);
+            mako_chan_wake_receiver(c);
+            pthread_mutex_unlock(&c->mu);
+            mako_select_notify();
+            mako_rt_counter_inc(&mako_rt_channel_sends);
+            return 1;
+        }
+        pthread_mutex_unlock(&c->mu);
+        if (c->cap > 0) {
+            mako_rt_counter_inc(&mako_rt_channel_try_send_drops);
+            return 0;
+        }
+    }
     pthread_mutex_lock(&c->mu);
     if (c->cap == 0) {
         /* Only succeed when a receiver is already waiting and handoff free. */
@@ -6020,7 +6064,7 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
         c->count = 1;
         mako_rt_counter_inc(&mako_rt_channel_sends);
         mako_chan_observe_depth(c, 1);
-        if (c->waiters_recv > 0) pthread_cond_signal(&c->can_recv);
+        mako_chan_wake_receiver(c);
         pthread_mutex_unlock(&c->mu);
         mako_select_notify();
         return 1;
@@ -6036,7 +6080,7 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
     c->count++;
     mako_rt_counter_inc(&mako_rt_channel_sends);
     mako_chan_observe_depth(c, c->count);
-    if (c->waiters_recv > 0) pthread_cond_signal(&c->can_recv);
+    mako_chan_wake_receiver(c);
     pthread_mutex_unlock(&c->mu);
     mako_select_notify();
     return 1;
@@ -6054,9 +6098,10 @@ static inline int64_t mako_chan_cap(MakoChan *c) {
 }
 
 static inline int64_t mako_chan_recv(MakoChan *c) {
-    /* trylock fast path: buffered, has data, no blocked senders. */
+    /* trylock fast path: buffered with data. Wake a waiting sender if the
+     * mailbox was full — same lock, no unlock/relock. */
     if (MAKO_LIKELY(c->cap > 0) && pthread_mutex_trylock(&c->mu) == 0) {
-        if (MAKO_LIKELY(c->count > 0 && c->waiters_send == 0)) {
+        if (MAKO_LIKELY(c->count > 0)) {
             int64_t v;
             if (MAKO_LIKELY(c->cap == 1)) {
                 v = c->inline_buf[0];
@@ -6066,6 +6111,7 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
                 if (++c->head == c->cap) c->head = 0;
                 c->count--;
             }
+            mako_chan_wake_sender(c);
             pthread_mutex_unlock(&c->mu);
             mako_rt_counter_inc(&mako_rt_channel_recvs);
             mako_chan_trace_recv(c, v);
@@ -6103,7 +6149,7 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
          * competing sender consumes the only signal. Buffered channels have
          * one waiter predicate and retain the one-peer fast path. */
         if (c->cap == 0) pthread_cond_broadcast(&c->can_send);
-        else pthread_cond_signal(&c->can_send);
+        else mako_chan_wake_sender(c);
     }
     pthread_mutex_unlock(&c->mu);
     mako_chan_trace_recv(c, v);
@@ -6135,7 +6181,7 @@ static inline int64_t mako_chan_recv_ok(MakoChan *c, int64_t *out) {
     mako_rt_counter_inc(&mako_rt_channel_recvs);
     if (c->waiters_send > 0) {
         if (c->cap == 0) pthread_cond_broadcast(&c->can_send);
-        else pthread_cond_signal(&c->can_send);
+        else mako_chan_wake_sender(c);
     }
     pthread_mutex_unlock(&c->mu);
     if (out) *out = v;
@@ -11173,21 +11219,45 @@ static inline void mako_exit(int64_t code) {
 /* ---- Actors (mailbox = owned channel; state lives in the actor loop) ---- */
 typedef MakoChan MakoActor;
 
-/* Packed message: high 16 bits = tag (1..65535), low 48 bits = signed payload seed. */
+/* Scalar messages: bit 63 set so they are distinct from heap pointers (user
+ * pointers are non-negative). Bits 48–62 = tag (15 bits), bits 0–47 = signed
+ * payload. Envelope messages are the raw boxed pointer (positive); tag lives
+ * in the envelope's first int64 field. Closed-empty recv is 0. */
+#define MAKO_ACTOR_PACK_SIGN (1ULL << 63)
+#define MAKO_ACTOR_PACK_TAG_MASK 0x7fffULL
+#define MAKO_ACTOR_PACK_PAYLOAD_MASK 0x0000ffffffffffffULL
+
 static inline int64_t mako_actor_pack(int64_t tag, int64_t payload) {
-    return (tag << 48) | (payload & 0x0000ffffffffffffLL);
+    /* Bits 47..63 must be a sign splat for a 48-bit payload. */
+    int64_t ext = payload >> 47;
+    if (MAKO_UNLIKELY(ext != 0 && ext != -1)) {
+        mako_abort("actor int payload exceeds 48-bit pack");
+    }
+    return (int64_t)(MAKO_ACTOR_PACK_SIGN
+                     | (((uint64_t)tag & MAKO_ACTOR_PACK_TAG_MASK) << 48)
+                     | ((uint64_t)payload & MAKO_ACTOR_PACK_PAYLOAD_MASK));
 }
 
 static inline int64_t mako_actor_msg_tag(int64_t m) {
-    return (int64_t)(((uint64_t)m) >> 48);
+    /* Packed scalars are negative (bit 63). Stop is 0. Envelopes are pointers. */
+    if (MAKO_LIKELY(m < 0)) {
+        return (int64_t)((((uint64_t)m) >> 48) & MAKO_ACTOR_PACK_TAG_MASK);
+    }
+    if (m == 0) {
+        return 0;
+    }
+    return *(const int64_t *)(void *)(intptr_t)m;
 }
 
 static inline int64_t mako_actor_msg_payload(int64_t m) {
-    int64_t p = (int64_t)(((uint64_t)m) & 0x0000ffffffffffffULL);
-    if (p & 0x0000800000000000LL) {
-        p |= (int64_t)0xffff000000000000LL; /* sign-extend 48 → 64 */
+    if (MAKO_LIKELY(m < 0)) {
+        int64_t p = (int64_t)(((uint64_t)m) & MAKO_ACTOR_PACK_PAYLOAD_MASK);
+        if (p & 0x0000800000000000LL) {
+            p |= (int64_t)0xffff000000000000LL; /* sign-extend 48 → 64 */
+        }
+        return p;
     }
-    return p;
+    return m; /* 0 (stop) or full envelope pointer */
 }
 
 /* Box a heap-allocated struct pointer into an int64 for channel transport. */
@@ -11197,12 +11267,15 @@ static inline int64_t mako_actor_box_payload(void *ptr) {
 
 /* Unbox an int64 back to a struct pointer. Caller owns the memory. */
 static inline void *mako_actor_unbox_payload(int64_t packed) {
-    return (void *)(intptr_t)(packed & 0x0000ffffffffffffLL);
+    if (packed <= 0) {
+        return NULL;
+    }
+    return (void *)(intptr_t)packed;
 }
 
-/* Free a boxed payload pointer. */
+/* Free a boxed payload pointer (shell only). Prefer typed unbox+field drops. */
 static inline void mako_actor_free_payload(int64_t packed) {
-    void *p = (void *)(intptr_t)(packed & 0x0000ffffffffffffLL);
+    void *p = mako_actor_unbox_payload(packed);
     if (p) free(p);
 }
 

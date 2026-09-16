@@ -211,16 +211,35 @@ impl Parser {
                     };
                     if !matches {
                         // Skip this item entirely — consume tokens until next item boundary
-                        while !matches!(self.peek_kind(), TokenKind::Fn | TokenKind::Func | TokenKind::Struct | TokenKind::Enum | TokenKind::Const | TokenKind::Export | TokenKind::Hash | TokenKind::Eof) {
+                        while !matches!(
+                            self.peek_kind(),
+                            TokenKind::Fn
+                                | TokenKind::Func
+                                | TokenKind::Struct
+                                | TokenKind::Enum
+                                | TokenKind::Const
+                                | TokenKind::Export
+                                | TokenKind::Hash
+                                | TokenKind::Eof
+                        ) {
                             self.bump();
                         }
                         return Ok(Item::Fn(crate::ast::FnDef {
                             name: "__cfg_excluded__".into(),
-                            type_params: vec![], params: vec![], ret: None,
-                            body: crate::ast::Block { stmts: vec![], source_lines: Box::default() },
-                            exported: false, is_const: false, is_live: false,
+                            type_params: vec![],
+                            params: vec![],
+                            ret: None,
+                            body: crate::ast::Block {
+                                stmts: vec![],
+                                source_lines: Box::default(),
+                            },
+                            exported: false,
+                            is_const: false,
+                            is_live: false,
                             stability: crate::ast::ApiStability::Unspecified,
-                            type_bounds: std::collections::HashMap::new(), contracts: vec![], source_file: None,
+                            type_bounds: std::collections::HashMap::new(),
+                            contracts: vec![],
+                            source_file: None,
                         }));
                     }
                 }
@@ -435,7 +454,10 @@ impl Parser {
                 let key = self.expect_ident()?;
                 self.expect(TokenKind::Assign)?;
                 let val = match self.peek_kind().clone() {
-                    TokenKind::String(s) => { self.bump(); s }
+                    TokenKind::String(s) => {
+                        self.bump();
+                        s
+                    }
                     _ => return Err(self.err("#[cfg] expects key = \"value\"".into())),
                 };
                 self.expect(TokenKind::RParen)?;
@@ -611,7 +633,11 @@ impl Parser {
                 self.expect(TokenKind::Colon)?;
                 let pty = self.parse_type()?;
                 ps.push((pname, pty));
-                if matches!(self.peek_kind(), TokenKind::Comma) { self.bump(); } else { break; }
+                if matches!(self.peek_kind(), TokenKind::Comma) {
+                    self.bump();
+                } else {
+                    break;
+                }
             }
             self.expect(TokenKind::RParen)?;
             ps
@@ -649,10 +675,17 @@ impl Parser {
                 } else {
                     vec![]
                 };
+                let port = if matches!(self.peek_kind(), TokenKind::On) {
+                    self.bump();
+                    Some(self.expect_ident()?)
+                } else {
+                    None
+                };
                 let body = self.parse_block()?;
                 receives.push(ReceiveArm {
                     message,
                     params,
+                    port,
                     body,
                 });
                 continue;
@@ -797,7 +830,9 @@ impl Parser {
                 params.push(Param {
                     name: pname,
                     ty,
-                    mutable, variadic: false });
+                    mutable,
+                    variadic: false,
+                });
                 if matches!(self.peek_kind(), TokenKind::Comma) {
                     self.bump();
                 } else {
@@ -869,7 +904,9 @@ impl Parser {
                                 go_receiver = Some(Param {
                                     name: rname,
                                     ty: rty,
-                                    mutable, variadic: false });
+                                    mutable,
+                                    variadic: false,
+                                });
                             } else {
                                 self.pos = save;
                             }
@@ -915,7 +952,9 @@ impl Parser {
                     params.push(Param {
                         name: first,
                         ty,
-                        mutable, variadic: false });
+                        mutable,
+                        variadic: false,
+                    });
                     if matches!(self.peek_kind(), TokenKind::Comma) {
                         self.bump();
                         continue;
@@ -929,13 +968,22 @@ impl Parser {
                     // Mako `a: T` or `a: ...T` (variadic)
                     self.bump();
                     let is_variadic = matches!(self.peek_kind(), TokenKind::DotDot);
-                    if is_variadic { self.bump(); }
+                    if is_variadic {
+                        self.bump();
+                    }
                     let inner_ty = self.parse_type()?;
-                    let ty = if is_variadic { TypeExpr::Array(Box::new(inner_ty)) } else { inner_ty };
+                    let ty = if is_variadic {
+                        TypeExpr::Array(Box::new(inner_ty))
+                    } else {
+                        inner_ty
+                    };
                     params.push(Param {
                         name: names.pop().unwrap(),
                         ty,
-                        mutable, variadic: is_variadic });                } else {
+                        mutable,
+                        variadic: is_variadic,
+                    });
+                } else {
                     // Collect `a, b` only for bare Go shared type `a, b int`
                     while matches!(self.peek_kind(), TokenKind::Comma) {
                         let save = self.pos;
@@ -976,7 +1024,9 @@ impl Parser {
                         params.push(Param {
                             name: pname,
                             ty: ty.clone(),
-                            mutable, variadic: false });
+                            mutable,
+                            variadic: false,
+                        });
                     }
                 }
                 if matches!(self.peek_kind(), TokenKind::Comma) {
@@ -1398,23 +1448,24 @@ impl Parser {
                         }
                     }
                 }
-                let parse_opts = |p: &mut Parser, policy: &mut CrewPolicy| -> Result<(), ParseError> {
-                    p.bump();
-                    let opt = p.expect_ident()?;
-                    if opt == "fail_fast" {
-                        p.expect(TokenKind::Assign)?;
-                        let v = p.parse_expr()?;
-                        if matches!(v, Expr::Bool(true)) {
-                            *policy = CrewPolicy::FailFast;
+                let parse_opts =
+                    |p: &mut Parser, policy: &mut CrewPolicy| -> Result<(), ParseError> {
+                        p.bump();
+                        let opt = p.expect_ident()?;
+                        if opt == "fail_fast" {
+                            p.expect(TokenKind::Assign)?;
+                            let v = p.parse_expr()?;
+                            if matches!(v, Expr::Bool(true)) {
+                                *policy = CrewPolicy::FailFast;
+                            }
+                        } else {
+                            return Err(p.err(format!(
+                                "unknown crew option `{opt}`, expected `fail_fast`"
+                            )));
                         }
-                    } else {
-                        return Err(p.err(format!(
-                            "unknown crew option `{opt}`, expected `fail_fast`"
-                        )));
-                    }
-                    p.expect(TokenKind::RParen)?;
-                    Ok(())
-                };
+                        p.expect(TokenKind::RParen)?;
+                        Ok(())
+                    };
                 if matches!(self.peek_kind(), TokenKind::LParen) {
                     parse_opts(self, &mut policy)?;
                 }
@@ -1759,10 +1810,15 @@ impl Parser {
         if matches!(self.peek_kind(), TokenKind::Let) {
             let save = self.pos;
             self.bump(); // consume let
-            // Lookahead: is next token a variant pattern (Uppercase ident + '(')?
+                         // Lookahead: is next token a variant pattern (Uppercase ident + '(')?
             let is_pattern = match self.peek_kind() {
-                TokenKind::Ident(n) => n.starts_with(|c: char| c.is_ascii_uppercase()) 
-                    && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::LParen | TokenKind::LBrace)),
+                TokenKind::Ident(n) => {
+                    n.starts_with(|c: char| c.is_ascii_uppercase())
+                        && matches!(
+                            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                            Some(TokenKind::LParen | TokenKind::LBrace)
+                        )
+                }
                 _ => matches!(self.peek_kind(), TokenKind::LParen), // tuple pattern
             };
             if is_pattern {

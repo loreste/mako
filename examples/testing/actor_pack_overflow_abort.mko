@@ -1,0 +1,6 @@
+// Runtime abort: signed 48-bit actor pack must not truncate. Not a `mako test`
+// fixture — `scripts/memory-safety-gate.sh` runs this and expects non-zero exit.
+fn main() {
+    let _ = actor_pack(1, 140737488355328)
+    print("unreachable")
+}

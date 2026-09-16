@@ -5365,7 +5365,8 @@ fn runtime_include_dir() -> Result<PathBuf, String> {
     // 1) Explicit override (install scripts / CI / brew wrappers)
     if let Ok(rt) = std::env::var("MAKO_RUNTIME") {
         let p = PathBuf::from(&rt);
-        let is_default_share = rt.ends_with("share/mako/runtime") || rt.ends_with("share/mako/runtime/");
+        let is_default_share =
+            rt.ends_with("share/mako/runtime") || rt.ends_with("share/mako/runtime/");
         if has_checkout && is_default_share {
             return Ok(checkout);
         }

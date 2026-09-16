@@ -168,9 +168,12 @@ actor Counter {
 // Counter_spawn() · Counter_send(m, Counter_Add(5)) · Counter_loop(m)
 ```
 
-Desugars to mailbox helpers; messages pack **tag + optional int payload**
-(`actor_pack` / `actor_msg_tag` / `actor_msg_payload`). `Bye`/`Stop` stops the
-loop. Tests: `actor_test.mko`.
+Desugars to mailbox helpers. Scalar messages pack a tag + signed 48-bit payload
+(`actor_pack` / `actor_msg_tag` / `actor_msg_payload`); typed envelopes send a
+full boxed pointer with the tag in the envelope. `Bye`/`Stop` stops the loop.
+Named ports (`receive Exec(...) on exec`) give the same isolated loop more than
+one mailbox so control is not stuck behind a full exec queue. Tests:
+`actor_test.mko`, `actor_ports_test.mko`.
 
 ## Interfaces
 

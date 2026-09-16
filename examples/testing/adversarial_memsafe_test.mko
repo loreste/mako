@@ -204,6 +204,5 @@ fn main() {
     TestChannelStringOwnership()
     TestStructOwnedFieldDrop()
     TestResultStringOwnership()
-    // Note: C backend has known string temp leaks in loop concat/struct/result paths.
-    // Raw array, COW clone/append, and scope cleanup are verified leak-free.
+    // This complete fixture is checked under LeakSanitizer in the memory gate.
 }

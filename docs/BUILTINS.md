@@ -2631,14 +2631,14 @@ HTTP seed path `/debug/hot_sites` via `profile_http_route`.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `actor_spawn` | `actor_spawn(mailbox_size: int) -> chan[int]` | Spawn an actor with a mailbox |
-| `actor_send` | `actor_send(mailbox: chan[int], msg: int) -> bool` | Send a message to an actor. For generated `Name_MsgName(payload...)` constructors, payloads accept arbitrary typed params (`string`, `int`, `chan[T]`, structs); single `int` params use zero-allocation packing, multi-param/non-int params use envelope structs. |
+| `actor_spawn` | `actor_spawn(mailbox_size: int) -> chan[int]` | Allocate one mailbox ring. Generated `Name_spawn` uses this once (single-port) or once per named port. |
+| `actor_send` | `actor_send(mailbox: chan[int], msg: int) -> bool` | Send a message to an actor. For generated `Name_MsgName(payload...)` constructors, payloads accept arbitrary typed params (`string`, `int`, `chan[T]`, structs); single `int` params use zero-allocation 48-bit packing (out-of-range values abort), multi-param/non-int params send a boxed envelope pointer with the tag stored in the envelope. |
 | `actor_try_send` | `actor_try_send(mailbox: chan[int], msg: int) -> int` | Non-blocking send to actor mailbox (returns 1 on success, 0 if full) |
 | `actor_recv` | `actor_recv(mailbox: chan[int]) -> int` | Receive a message from a mailbox |
 | `actor_len` | `actor_len(mailbox: chan[int]) -> int` | Current queued message count in mailbox |
 | `actor_cap` | `actor_cap(mailbox: chan[int]) -> int` | Capacity of actor mailbox |
-| `actor_stop` | `actor_stop(mailbox: chan[int]) -> void` | Stop an actor |
-| `actor_free_payload` | `actor_free_payload(payload: int) -> void` | Free a boxed envelope payload pointer |
+| `actor_stop` | `actor_stop(mailbox: chan[int]) -> void` | Stop an actor (one mailbox). Multi-port actors call this per port on shutdown. |
+| `actor_free_payload` | `actor_free_payload(payload: int) -> void` | Free a boxed envelope shell. Shutdown drain prefers typed unbox so nested owners are dropped. |
 
 ---
 

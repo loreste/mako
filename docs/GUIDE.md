@@ -1474,23 +1474,93 @@ including projects where state types and helpers come from other files. See
 `examples/testing/actor_multifile/actor_test.mko` for a runnable example.
 Actor state remains local to the receive loop: capturing it in a kicked worker
 is rejected as a mutable capture. Use messages to coordinate concurrent work.
-Run the typed-message example with `--backend c`; the native backend does not
-yet lower typed actor envelopes.
+Typed envelopes lower on both the C and native backends. Scalar int messages
+use 48-bit packing; values that do not fit abort.
 
 ### 10.3 Generated Actor API
 
-For an actor declared as `actor Name`:
+For a **single-port** actor (no `on port` on receive arms), spawn still returns
+the mailbox `chan[int]`:
 
 | Generated Function | Signature | Description |
 |---|---|---|
-| `Name_spawn(ctor_args...)` | `(...) -> Name` | Allocates actor and mailbox ring buffer; forwards constructor params |
-| `Name_spawn_cap(cap)` | `(cap: int) -> Name` | Allocates actor with custom mailbox capacity |
-| `Name_send(actor, msg)` | `(actor: Name, msg: int) -> bool` | Sends message to actor mailbox (blocking) |
-| `Name_try_send(actor, msg)` | `(actor: Name, msg: int) -> int` | Non-blocking send; returns 1 on success, 0 if full |
-| `actor_len(actor)` | `(actor: Name) -> int` | Current queued message count (mailbox depth) |
-| `actor_cap(actor)` | `(actor: Name) -> int` | Mailbox capacity |
-| `Name_loop(actor)` | `(actor: Name) -> int` | Executes message processing loop in a crew task |
-| `Name_MsgName(payload...)` | `(...) -> int` | Packs message tag and typed payload(s) into an envelope. Accepts any type (`int`, `string`, `chan[T]`, structs). Single `int` params use zero-allocation packing; multi-param and non-int params generate a heap-allocated envelope struct. |
+| `Name_spawn(ctor_args...)` | `(...) -> chan[int]` | Allocates a mailbox (default cap 16); forwards constructor params |
+| `Name_spawn_cap(cap, ctor_args...)` | `(cap: int, ...) -> chan[int]` | Allocates a mailbox with custom capacity and forwards constructor params |
+| `Name_send(actor, msg)` | `(mbox: chan[int], msg: int) -> bool` | Sends a packed/boxed message (blocking) |
+| `Name_try_send(actor, msg)` | `(mbox: chan[int], msg: int) -> int` | Non-blocking send; returns 1 on success, 0 if full or closed |
+| `actor_len(actor)` | `(mbox: chan[int]) -> int` | Current queued message count (mailbox depth) |
+| `actor_cap(actor)` | `(mbox: chan[int]) -> int` | Mailbox capacity |
+| `Name_loop(actor)` | `(mbox: chan[int]) -> int` | Message loop; run with `crew.kick` |
+| `Name_MsgName(payload...)` | `(...) -> int` | Packs supported scalar, string, channel, owned slice, and struct payloads. Single `int` params use zero-allocation packing; multi-param and non-int params generate a heap-allocated envelope struct. |
+
+Generated `Name_send` and `Name_try_send` consume the message on both success
+and failure. A rejected typed envelope is destroyed, including its owned fields.
+Do not retry or reuse that message; construct a new one. `Name_drop_message(msg)`
+disposes an unsent message. Low-level `actor_send` / `actor_try_send` retain the
+message on failure: the caller must retry it or call `Name_drop_message` once.
+Shutdown closes all mailboxes before draining them, so racing sends either enter
+the drain or fail. Each typed envelope must be sent or disposed exactly once.
+
+Owned slice fields, including slices nested in structs, are copied when building
+a typed message. Sender-side mutation cannot change the queued snapshot. This is
+linear in the payload size; scalar messages still allocate nothing. Mutable maps,
+raw arrays, and resource types without a mailbox-copy contract are rejected as
+payloads. Keep them in actor state and send commands plus reply channels instead.
+
+### 10.3.1 Named ports
+
+`receive Msg(...) on port` puts that message on a named mailbox. Two or more
+distinct ports keep **one isolated loop** (one owner of `self`) and **separate
+queues**, so Open/Bye/Init are not stuck behind a flood of Exec.
+
+```mko
+actor FayEngine {
+    receive Exec(sid: int, sql: string, reply: chan[string], done: chan[int]) on exec {
+        let _ = reply.send(sql)
+        let _ = done.send(sid)
+    }
+    receive Open(sid: int, reply: chan[string]) on control {
+        let _ = reply.send("ok")
+    }
+    receive Bye on control { let _ = 0 }
+}
+
+fn main() {
+    let eng = FayEngine_spawn_cap(256)
+    crew t {
+        let job = t.kick(FayEngine_loop(eng))
+        let reply = make(chan[string], 1)
+        let done = make(chan[int], 1)
+        let _ = FayEngine_Open_send(eng, 1, reply)
+        let _ = reply.recv()
+        let _ = FayEngine_Exec_send(eng, 1, "SELECT 1", reply, done)
+        let _ = reply.recv()
+        let _ = done.recv()
+        let _ = FayEngine_Bye_send(eng)
+        let _ = job.join()
+    }
+}
+```
+
+A port named `control` is always polled first (`try_recv` in port order, then
+`select timeout -1`). Tags stay global; dispatch is the same if-chain. Spawn
+returns a handle struct `Name { port: chan[int], … }` (Send: a struct of
+channels may cross `kick`). Per-port cap is the spawn cap.
+
+| Generated Function | Signature | Description |
+|---|---|---|
+| `Name_spawn(ctor_args...)` | `(...) -> Name` | Handle of one mailbox per port (default cap 16 each) |
+| `Name_spawn_cap(cap, ctor_args...)` | `(cap: int, ...) -> Name` | Same cap on every port |
+| `Name_port_send(h, msg)` | `(h: Name, msg: int) -> bool` | Send a packed message on that port |
+| `Name_Msg_send(h, payload...)` | `(h: Name, ...) -> bool` | Construct + send on the port that `receive Msg` named |
+| `Name_loop(h)` | `(h: Name) -> int` | Isolated loop over every port |
+
+Port send helpers have the same consume-on-success-or-failure rule. A single
+actor still processes one message at a time; ports isolate queues, not execution.
+Keep handlers short, and shard independent state across actors when work can run
+in parallel. A continuously busy control port can delay other ports.
+
+Single-port actors (no `on`) are unchanged. Tests: `examples/testing/actor_ports_test.mko`.
 
 ### 10.5 Early Return in Receive Arms
 

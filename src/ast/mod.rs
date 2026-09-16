@@ -98,6 +98,8 @@ pub struct ReceiveArm {
     pub message: String,
     /// Typed payload params: `receive Exec(sid: int, sql: string, reply: chan[string])`.
     pub params: Vec<(String, TypeExpr)>,
+    /// Named mailbox: `receive Exec(...) on exec`. `None` is the default port.
+    pub port: Option<String>,
     pub body: Block,
 }
 

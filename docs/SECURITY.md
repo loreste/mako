@@ -94,11 +94,12 @@ force an explicit choice: a loud name, an unsafe boundary, or a failing return.
 ### Concurrency Send seed (kick)
 
 `crew.kick(f(args…))` only accepts **Send** argument types: Copy scalars
-(including float and **Uuid**/ULID POD), **deep-POD structs**, `string` (heap-cloned),
-channels (RC-cloned so the worker drop cannot free the parent's mailbox),
-`ShareInt` / `AtomicInt` (RC clone), locked handles (`CMap` / `Mutex` /
+(including float and **Uuid**/ULID POD), **deep-POD structs**, structs whose
+**fields are all Send** (e.g. an actor handle of `chan[int]` ports), `string`
+(heap-cloned), channels (RC-cloned so the worker drop cannot free the parent's
+mailbox), `ShareInt` / `AtomicInt` (RC clone), locked handles (`CMap` / `Mutex` /
 `RWMutex`), and **Option/Result/tuple of Send** payloads (heap-boxed across spawn).  
-Rejected: arrays, maps, non-POD structs, `Arena`, nested `Crew`
+Rejected: arrays, maps, other non-Send structs, `Arena`, nested `Crew`
 (`examples/bad/kick_non_pod.mko`, `kick_array_arg.mko`).
 
 Slice refcounts govern allocation lifetime, not payload synchronization. Slices
@@ -121,13 +122,18 @@ updates and nested expressions in typed messages. Rewriting `self.field` does
 not bypass capture checks: `examples/bad/actor_state_kick_capture.mko` must be
 rejected. The comprehensive actor test suite at
 `examples/testing/actor_comprehensive_test.mko`,
-`examples/testing/actor_multifile/actor_test.mko`, and
-`examples/testing/actor_nested_state_test.mko` checks constructor parameters,
+`examples/testing/actor_multifile/actor_test.mko`,
+`examples/testing/actor_nested_state_test.mko`,
+`examples/testing/actor_adversarial_memsafe_test.mko`, and
+`examples/testing/actor_ports_test.mko` check constructor parameters,
 whole-state assignment, helper passing, per-arm zero-allocation scalar packing,
-allocated string/envelope payloads, early returns from nested loops, graceful
-channel close without spinning, and automatic mailbox draining on shutdown to
-prevent memory leaks on unhandled envelopes. Run them with
+allocated string/envelope payloads, early returns from nested loops (which must
+drop envelope fields), graceful channel close without spinning, and typed
+mailbox draining on shutdown so unhandled envelopes free nested strings, slices,
+and channels. Envelope pointers are not packed into 48 bits. Run them with
 `mako test --backend c --sanitize address,undefined` to exercise memory checks.
+LeakSanitizer (`detect_leaks=1`) is the check for drain/early-return leaks;
+AddressSanitizer alone does not prove the absence of leaks.
 
 Slice cleanup distinguishes allocator and transfer rules. Raw arrays and the
 runtime's primitive nested arrays do not have an RC header; they must not be

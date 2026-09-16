@@ -2572,7 +2572,9 @@ fn monomorphize_generics(
             .map(|p| crate::ast::Param {
                 name: p.name.clone(),
                 ty: subst_type_expr(&p.ty, &map),
-                mutable: p.mutable, variadic: false })
+                mutable: p.mutable,
+                variadic: false,
+            })
             .collect();
         let ret = tmpl.ret.as_ref().map(|t| subst_type_expr(t, &map));
         out.push(FnDef {
@@ -4641,7 +4643,9 @@ impl<'a> FunctionLowerer<'a> {
                 self.drop_loop_body_scope(&owned_before, &locals_before);
                 self.terminate(Terminator::Jump(cont_target))?;
             }
-            Stmt::IfLet { .. } => { return Err(IrError("internal: if let was not desugared".into())); },
+            Stmt::IfLet { .. } => {
+                return Err(IrError("internal: if let was not desugared".into()));
+            }
             Stmt::Unsafe { body } => {
                 self.lower_block(body)?;
             }
@@ -5440,7 +5444,9 @@ impl<'a> FunctionLowerer<'a> {
             fn_params.push(crate::ast::Param {
                 name: "__env".into(),
                 ty: TypeExpr::Named("int".into()),
-                mutable: false, variadic: false });
+                mutable: false,
+                variadic: false,
+            });
         }
         for (i, p) in params.iter().enumerate() {
             let ty = if let Some(t) = expected_param_tys.get(i) {
@@ -5463,7 +5469,9 @@ impl<'a> FunctionLowerer<'a> {
             fn_params.push(crate::ast::Param {
                 name: p.clone(),
                 ty,
-                mutable: false, variadic: false });
+                mutable: false,
+                variadic: false,
+            });
         }
         let mut body_stmts: Vec<Stmt> = Vec::new();
         if has_env {
@@ -18010,12 +18018,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(Type::I64),
                 false,
             )),
-            "actor_free_payload" if args.len() == 1 => Some((
-                "mako_native_actor_free_payload",
-                &[Type::I64],
-                None,
-                false,
-            )),
+            "actor_free_payload" if args.len() == 1 => {
+                Some(("mako_native_actor_free_payload", &[Type::I64], None, false))
+            }
             "str_slice" if args.len() == 3 => Some((
                 "mako_native_str_slice_ptr",
                 &[Type::Str, Type::I64, Type::I64],

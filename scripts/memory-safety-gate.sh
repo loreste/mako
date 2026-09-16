@@ -68,6 +68,11 @@ fixtures=(
   examples/testing/adapters_api_test.mko
   examples/testing/messaging_queue_test.mko
   examples/testing/hot_site_test.mko
+  examples/testing/actor_typed_payload_test.mko
+  examples/testing/actor_comprehensive_test.mko
+  examples/testing/actor_adversarial_memsafe_test.mko
+  examples/testing/actor_nested_state_test.mko
+  examples/testing/actor_ports_test.mko
 )
 
 run_backend() {
@@ -127,7 +132,9 @@ if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep
   # that compile on both backends.
   for f in examples/testing/memory_safety_contract_test.mko \
            examples/testing/leak_detector_test.mko \
-           examples/testing/actor_typed_payload_test.mko; do
+           examples/testing/actor_typed_payload_test.mko \
+           examples/testing/actor_comprehensive_test.mko \
+           examples/testing/actor_adversarial_memsafe_test.mko; do
     if ! "$mako_bin" test "$repo_dir/$f" --backend native --sanitize leak \
          >/tmp/mako-ms-native-leak.out 2>&1; then
       echo "memory-safety-gate: native LSan FAILED on $f" >&2
@@ -150,7 +157,8 @@ if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep
   # map_struct_key_test leaks 16 bytes via native struct-key map allocation
   # (mako_native_struct_make_ptr). Tracked as a known native-backend leak.
   for f in examples/native/owned_handle_drop/native_owned_handle_drop_test.mko \
-           examples/testing/actor_typed_payload_test.mko; do
+           examples/testing/actor_typed_payload_test.mko \
+           examples/testing/actor_adversarial_memsafe_test.mko; do
     if ! "$mako_bin" test "$repo_dir/$f" --backend native --sanitize address \
          >/tmp/mako-ms-native-asan.out 2>&1; then
       echo "memory-safety-gate: native ASan FAILED on $f" >&2
@@ -164,6 +172,40 @@ if [[ "$(uname -s)" == "Linux" ]] && "$mako_bin" build --help 2>/dev/null | grep
 else
   echo "memory-safety-gate: native ASan skipped (Linux-only)"
 fi
+
+echo "=== memory-safety-gate: actor 48-bit pack overflow aborts ==="
+for bad_case in actor_mutable_map_payload actor_state_kick_capture; do
+  if "$mako_bin" check "$repo_dir/examples/bad/$bad_case.mko" >/tmp/mako-actor-negative.out 2>&1; then
+    echo "memory-safety-gate: unsafe actor fixture unexpectedly accepted: $bad_case" >&2
+    exit 1
+  fi
+  case "$bad_case" in
+    actor_mutable_map_payload) expected="cannot be safely copied across a mailbox" ;;
+    actor_state_kick_capture) expected="mutable capture" ;;
+  esac
+  if ! grep -q "$expected" /tmp/mako-actor-negative.out; then
+    cat /tmp/mako-actor-negative.out >&2
+    exit 1
+  fi
+done
+if [[ "$(uname -s)" == "Linux" ]]; then
+  echo "=== memory-safety-gate: C string temporaries under LeakSanitizer ==="
+  "$mako_bin" test "$repo_dir/examples/testing/adversarial_memsafe_test.mko" \
+    --backend c --sanitize leak
+  "$mako_bin" test "$repo_dir/examples/testing/result_error_reuse_test.mko" \
+    --backend c --sanitize leak
+fi
+set +e
+"$mako_bin" run --backend c "$repo_dir/examples/testing/actor_pack_overflow_abort.mko" \
+  >/tmp/mako-actor-pack-ovf.out 2>&1
+ovf_status=$?
+set -e
+if [[ $ovf_status -eq 0 ]] || ! grep -q 'actor int payload exceeds 48-bit pack' /tmp/mako-actor-pack-ovf.out; then
+  echo "memory-safety-gate: actor_pack overflow must abort" >&2
+  cat /tmp/mako-actor-pack-ovf.out >&2 || true
+  exit 1
+fi
+echo "memory-safety-gate: actor_pack overflow aborted (exit $ovf_status)"
 
 echo "=== memory-safety-gate: ASan (optional if toolchain supports) ==="
 set +e

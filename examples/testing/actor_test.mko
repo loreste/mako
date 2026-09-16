@@ -90,4 +90,11 @@ fn TestActorPackHelpers() {
     assert_eq(actor_msg_payload(m), 42)
     let neg = actor_pack(1, -7)
     assert_eq(actor_msg_payload(neg), -7)
+    // Packed scalars are negative (bit 63) so they cannot alias heap pointers.
+    assert(m < 0)
+    assert(neg < 0)
+    let hi = actor_pack(3, 140737488355327) // 2^47-1
+    assert_eq(actor_msg_payload(hi), 140737488355327)
+    let lo = actor_pack(3, -140737488355328) // -2^47
+    assert_eq(actor_msg_payload(lo), -140737488355328)
 }

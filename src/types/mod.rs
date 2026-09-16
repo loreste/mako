@@ -6055,7 +6055,7 @@ impl TypeChecker {
             "actor_cap".into(),
             Type::Fn(vec![Type::Chan(Box::new(Type::Int))], Box::new(Type::Int)),
         );
-        // Packed actor messages: tag (high 16) + int payload (low 48).
+        // Packed actor scalars: bit 63 set, 15-bit tag, 48-bit payload.
         fns.insert(
             "actor_pack".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
@@ -16826,7 +16826,12 @@ impl TypeChecker {
                 self.pending_defers.push(body.clone());
                 Ok(())
             }
-            Stmt::IfLet { .. } => { return Err(TypeError::new("internal: if let was not desugared — this is a compiler bug").hint("please report this issue")); },
+            Stmt::IfLet { .. } => {
+                return Err(TypeError::new(
+                    "internal: if let was not desugared — this is a compiler bug",
+                )
+                .hint("please report this issue"));
+            }
             Stmt::For {
                 label,
                 binders,
@@ -17990,8 +17995,13 @@ impl TypeChecker {
                             return Ok(t);
                         }
                         "actor_box_payload" if args.len() == 1 => {
-                            // Box any value into an int64 (pointer cast for channel transport).
-                            let _ = self.check_expr(&args[0])?;
+                            let payload = self.check_expr(&args[0])?;
+                            if !self.is_actor_payload(&payload, 0) {
+                                return Err(TypeError::new(format!(
+                                    "actor payload {} cannot be safely copied across a mailbox",
+                                    payload.display()
+                                )).hint("use scalar/string/channel fields and owned slices or structs of those; keep mutable maps and opaque resources in actor state"));
+                            }
                             return Ok(Type::Int);
                         }
                         "actor_free_payload" if args.len() == 1 => {
@@ -18005,10 +18015,6 @@ impl TypeChecker {
                                 return Ok(expected.clone());
                             }
                             return Ok(Type::Int);
-                        }
-                        "actor_free_payload" if args.len() == 1 => {
-                            let _ = self.check_expr(&args[0])?;
-                            return Ok(Type::Void);
                         }
                         "dbg_str" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
@@ -18265,7 +18271,9 @@ impl TypeChecker {
                         "string" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             match t {
-                                Type::Array(inner) | Type::RawArray(inner) if *inner == Type::Byte => {
+                                Type::Array(inner) | Type::RawArray(inner)
+                                    if *inner == Type::Byte =>
+                                {
                                     return Ok(Type::String);
                                 }
                                 Type::String => return Ok(Type::String),
@@ -18533,7 +18541,11 @@ impl TypeChecker {
                                             vt.display()
                                         )));
                                     }
-                                    return Ok(if is_raw { Type::RawArray(inner) } else { Type::Array(inner) });
+                                    return Ok(if is_raw {
+                                        Type::RawArray(inner)
+                                    } else {
+                                        Type::Array(inner)
+                                    });
                                 }
                                 other => {
                                     return Err(TypeError::new(format!(
@@ -18715,10 +18727,8 @@ impl TypeChecker {
                     }
                     (Type::Array(elem) | Type::RawArray(elem), "filter") if args.len() == 1 => {
                         let saved = self.current_expected.clone();
-                        self.current_expected = Some(Type::Fn(
-                            vec![elem.as_ref().clone()],
-                            Box::new(Type::Bool),
-                        ));
+                        self.current_expected =
+                            Some(Type::Fn(vec![elem.as_ref().clone()], Box::new(Type::Bool)));
                         let fn_ty = self.check_expr(&args[0])?;
                         self.current_expected = saved;
                         match fn_ty {
@@ -19711,7 +19721,13 @@ impl TypeChecker {
                                 return Err(TypeError::new("make cap must be int"));
                             }
                         }
-                        let wrap = |inner: Box<Type>| if is_raw { Type::RawArray(inner) } else { Type::Array(inner) };
+                        let wrap = |inner: Box<Type>| {
+                            if is_raw {
+                                Type::RawArray(inner)
+                            } else {
+                                Type::Array(inner)
+                            }
+                        };
                         match inner.as_ref() {
                             Type::Int
                             | Type::Int64
@@ -20210,14 +20226,28 @@ impl TypeChecker {
                 // Mark raw []T args as moved after the call succeeds.
                 if let Expr::Ident(name) = callee.as_ref() {
                     // Don't move for builtins that don't take ownership (len, cap, print, etc.)
-                    if !matches!(name.as_str(), "len" | "cap" | "print" | "print_int" | "print_float"
-                        | "assert" | "assert_eq" | "assert_eq_str" | "eprintln" | "eprint"
-                        | "copy" | "append" | "string" | "str_eq") {
+                    if !matches!(
+                        name.as_str(),
+                        "len"
+                            | "cap"
+                            | "print"
+                            | "print_int"
+                            | "print_float"
+                            | "assert"
+                            | "assert_eq"
+                            | "assert_eq_str"
+                            | "eprintln"
+                            | "eprint"
+                            | "copy"
+                            | "append"
+                            | "string"
+                            | "str_eq"
+                    ) {
                         self.mark_raw_array_args_moved(args);
                     }
                 }
                 Ok(result)
-            },
+            }
             Expr::Method { .. } => self.check_method_expr(expr),
             Expr::Index { .. } => self.check_index_expr(expr),
             Expr::Slice { .. } => self.check_slice_expr(expr),
@@ -21919,13 +21949,78 @@ impl TypeChecker {
         }
     }
 
-    fn is_kick_sendable_ty(&self, t: &Type) -> bool {
+    fn is_actor_payload(&self, ty: &Type, depth: usize) -> bool {
+        if depth > 16 { return false; }
+        match ty {
+            Type::String | Type::Chan(_) => true,
+            Type::Array(elem) => self.is_actor_payload(elem, depth + 1),
+            Type::Struct { fields, .. } => fields.iter().all(|(_, field)| self.is_actor_payload(field, depth + 1)),
+            Type::Named(name) => self.types.get(name).is_some_and(|resolved| {
+                resolved != ty && self.is_actor_payload(resolved, depth + 1)
+            }),
+            Type::Enum { variants, .. } => variants.iter().all(|(_, fields)|
+                fields.iter().all(|field| is_copy_type(field) || *field == Type::String)),
+            _ => is_copy_type(ty),
+        }
+    }
+
+    fn struct_fields_all_send(&self, name: &str) -> bool {
+        self.struct_fields_all_send_depth(name, 0)
+    }
+
+    fn struct_fields_all_send_depth(&self, name: &str, depth: usize) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        match self.types.get(name) {
+            Some(Type::Struct { fields, .. }) => fields
+                .iter()
+                .all(|(_, ty)| self.is_kick_sendable_ty_depth(ty, depth + 1)),
+            _ => false,
+        }
+    }
+
+    fn is_kick_sendable_ty_depth(&self, t: &Type, depth: usize) -> bool {
+        if depth > 8 {
+            return false;
+        }
         if is_kick_sendable(t) {
             return true;
         }
         match t {
             Type::Named(n) if self.is_pod_struct(n) || self.is_pod_enum_depth(n, 0) => true,
+            Type::Named(n) => self.struct_fields_all_send_depth(n, depth + 1),
             Type::Struct { name, .. } if self.is_pod_struct(name) => true,
+            Type::Struct { name, .. } => self.struct_fields_all_send_depth(name, depth + 1),
+            Type::Option(inner) => self.is_kick_sendable_ty_depth(inner, depth + 1),
+            Type::Result(ok, err) => {
+                self.is_kick_sendable_ty_depth(ok, depth + 1)
+                    && self.is_kick_sendable_ty_depth(err, depth + 1)
+            }
+            Type::Tuple(elems) => elems
+                .iter()
+                .all(|e| self.is_kick_sendable_ty_depth(e, depth + 1)),
+            _ => false,
+        }
+    }
+
+    fn is_kick_sendable_ty(&self, t: &Type) -> bool {
+        if is_kick_sendable(t) {
+            return true;
+        }
+        match t {
+            Type::Named(n)
+                if self.is_pod_struct(n)
+                    || self.is_pod_enum_depth(n, 0)
+                    || self.struct_fields_all_send(n) =>
+            {
+                true
+            }
+            Type::Struct { name, .. }
+                if self.is_pod_struct(name) || self.struct_fields_all_send(name) =>
+            {
+                true
+            }
             // Fuller Send: sum types and products of sendable payloads.
             Type::Option(inner) => self.is_kick_sendable_ty(inner),
             Type::Result(ok, err) => self.is_kick_sendable_ty(ok) && self.is_kick_sendable_ty(err),
@@ -23035,7 +23130,9 @@ pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, 
             .map(|p| Param {
                 name: p.name.clone(),
                 ty: subst_type_expr(&p.ty, subst),
-                mutable: p.mutable, variadic: false })
+                mutable: p.mutable,
+                variadic: false,
+            })
             .collect(),
         ret: template.ret.as_ref().map(|t| subst_type_expr(t, subst)),
         body: subst_block(&template.body, subst),

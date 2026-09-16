@@ -32,7 +32,7 @@ Guided tour: [The Makori Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) ·
 | `struct` | Product type with named fields; generics: `struct Pair[T] { … }` (0.2.1) |
 | `enum` | Sum type with variants; generics: `enum Box[T] { … }` (0.2.1) |
 | `actor` | Actor type with `receive` arms |
-| `receive` | Actor message handler arm |
+| `receive` | Actor message handler arm (`receive Msg(...) on port` names a mailbox) |
 | `interface` | Named method set (light interfaces) |
 | `extern` | Foreign declaration (`extern "C" fn …`) |
 | `const` | Compile-time constant binding |
@@ -40,7 +40,7 @@ Guided tour: [The Makori Book](book/) · Current syntax: [GUIDE.md](GUIDE.md) ·
 | `let` | Local binding |
 | `mut` | Mutable parameter or binding marker |
 | `export` | Package-public declaration (`export fn` / `export struct` / `export on`) |
-| `on` | Method block: `on Point { fn distance(self) … }` (desugars to `Point_distance`) |
+| `on` | Method block: `on Point { fn distance(self) … }` (desugars to `Point_distance`). Also names an actor mailbox: `receive Exec(...) on exec`. |
 
 ## Control flow
 

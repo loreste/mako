@@ -1,0 +1,30 @@
+fn fresh_error() -> Result[int, string] { return Err("message-" + string(1)) }
+
+fn TestErrorRemainsValidAcrossMatches() {
+    let r = fresh_error()
+    match r { Ok(_) => assert(false), Err(e) => assert_eq_str(e, "message-1") }
+    match r { Ok(_) => assert(false), Err(e) => assert_eq_str(e, "message-1") }
+}
+
+fn TestErrorAliasHasIndependentLifetime() {
+    let r = fresh_error()
+    let alias = r
+    match alias { Ok(_) => assert(false), Err(e) => assert_eq_str(e, "message-1") }
+    match r { Ok(_) => assert(false), Err(e) => assert_eq_str(e, "message-1") }
+}
+
+fn TestErrorGuardDoesNotConsumeNextArm() {
+    let r = fresh_error()
+    match r {
+        Ok(_) => assert(false),
+        Err(e) if len(e) == 0 => assert(false),
+        Err(e) => assert_eq_str(e, "message-1"),
+    }
+    match r { Ok(_) => assert(false), Err(e) => assert_eq_str(e, "message-1") }
+}
+
+fn main() {
+    TestErrorRemainsValidAcrossMatches()
+    TestErrorAliasHasIndependentLifetime()
+    TestErrorGuardDoesNotConsumeNextArm()
+}

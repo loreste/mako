@@ -1,0 +1,59 @@
+// Matched with actor_scaling_rs.rs: fixed total work, bounded MPSC mailboxes.
+actor ScalingCounter {
+    n: int = 0
+    receive Add(delta: int) { self.n = self.n + delta }
+    receive Bye { let _ = 0 }
+}
+
+fn produce_scaling(a: chan[int], count: int) -> int {
+    for _ in count {
+        assert(ScalingCounter_send(a, ScalingCounter_Add(1)))
+    }
+    return count
+}
+
+fn measure_scaling(producers: int, capacity: int, shards: int) {
+    let total = 200000
+    let start = now_ns()
+    let mut sum = 0
+    // Shards have independent state owners; each gets an equal share of work.
+    // The shard workers run concurrently and join before returning.
+    let results = make(chan[int], shards)
+    crew workers {
+        for _ in shards {
+            let _ = workers.kick(run_scaling_shard(producers, capacity, total / shards, results))
+        }
+        for _ in shards { sum = sum + results.recv() }
+    }
+    assert_eq(sum, total)
+    let elapsed = now_ns() - start
+    print("actor_scaling")
+    print_int(producers)
+    print_int(capacity)
+    print_int(shards)
+    print_int(elapsed)
+}
+
+fn run_scaling_shard(producers: int, capacity: int, count: int, results: chan[int]) -> int {
+    let a = ScalingCounter_spawn_cap(capacity)
+    crew consumer {
+        let actor_job = consumer.kick(ScalingCounter_loop(a))
+        crew writers {
+            for _ in producers {
+                let _ = writers.kick(produce_scaling(a, count / producers))
+            }
+        }
+        assert(ScalingCounter_send(a, ScalingCounter_Bye()))
+        let _ = results.send(actor_job.join())
+    }
+    return 0
+}
+
+fn main() {
+    for capacity in [64, 1024] {
+        for producers in [1, 2, 4, 8] {
+            measure_scaling(producers, capacity, 1)
+        }
+    }
+    for shards in [2, 4, 8] { measure_scaling(1, 1024, shards) }
+}

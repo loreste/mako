@@ -68,6 +68,8 @@ contract.
 | Slice free | `MAKO_UNLIKELY(cap>0)` — free is cold; views and stack lits are no-ops |
 | `string_view` / `str_as_view` | **Zero-copy** reads; never free the view |
 | Small channels (`cap ≤ 4` / `cap == 0`) | **Zero-allocation ring** — inline 4-slot buffer (`inline_buf[4]`) in `MakoChan`, zero malloc on creation |
+| Channel send/recv (buffered, not full/empty) | **One mutex** — enqueue/dequeue and wake a waiter without unlock/relock |
+| Actor scalar messages | **Zero-alloc pack** (tag+payload in one `int64`) + always-inlined constructors; envelope pointers stay off this path |
 | Fully-initialized struct literals | **`memset` elision** — codegen skips zeroing when all fields are explicitly assigned, eliminating redundant cache writes |
 | Raw arrays (`raw []T`) | **Plain malloc, zero refcount** — bypasses atomic retain/release overhead for single-owner hot loops |
 | Iterator combinators (`map`/`filter`/`reduce`) | **Inline loops** — lowers directly to tight iteration with zero closure indirection overhead |

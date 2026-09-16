@@ -1,0 +1,287 @@
+// Adversarial actor memory-safety: early-return drops, typed drain, pack vs pointer,
+// ctor-stop drain, nested loops, heap (not interned) payloads, labeled continue.
+// Run: mako test --backend c --sanitize address,undefined examples/testing/actor_adversarial_memsafe_test.mko
+
+actor Hunt {
+    hits: int = 0
+    receive Find(need: int, xs: []int, reply: chan[int]) {
+        let mut i = 0
+        while i < len(xs) {
+            for _ in 2 {
+                if xs[i] == need {
+                    self.hits = self.hits + 1
+                    let _ = reply.send(i)
+                    return
+                }
+            }
+            i = i + 1
+        }
+        let _ = reply.send(-1)
+    }
+    receive Gate(code: int, msg: string, reply: chan[string]) {
+        if code == 0 {
+            let _ = reply.send("zero:" + msg)
+            return
+        }
+        if code < 0 {
+            let _ = reply.send("neg")
+            return
+        }
+        let _ = reply.send(msg)
+    }
+    receive Closure(reply: chan[int]) {
+        let value = actor_apply(fn(x) { return x + 1 }, 41)
+        let _ = reply.send(value)
+    }
+    receive Bye { let _ = 0 }
+}
+
+struct ActorSnapshot { label: string, values: []int }
+actor EnvelopeReader {
+    receive Read(payload: ActorSnapshot, reply: chan[int]) {
+        assert_eq_str(payload.label, "snapshot")
+        let _ = reply.send(payload.values[0])
+    }
+    receive Bye { let _ = 0 }
+}
+
+fn TestPayloadSnapshotDoesNotAliasSender() {
+    let reader = EnvelopeReader_spawn()
+    let reply = make(chan[int], 1)
+    let mut values = make([]int, 1, 1)
+    values[0] = 7
+    let payload = ActorSnapshot { label: "snapshot", values: values }
+    assert(EnvelopeReader_send(reader, EnvelopeReader_Read(payload, reply)))
+    values[0] = 99
+    crew workers {
+        let job = workers.kick(EnvelopeReader_loop(reader))
+        assert_eq(reply.recv(), 7)
+        assert(EnvelopeReader_send(reader, EnvelopeReader_Bye()))
+        let _ = job.join()
+    }
+}
+
+fn actor_apply(f: fn(int) -> int, x: int) -> int { return f(x) }
+
+actor Flood(id: string) {
+    id: string
+    n: int = 0
+    receive Note(tag: string, blob: []int, reply: chan[int]) {
+        self.n = self.n + 1
+        let _ = reply.send(len(blob) + len(self.id) + len(tag))
+    }
+    receive Dump(tag: string, blob: []int) {
+        self.n = self.n + len(blob) + len(tag)
+    }
+    receive Tick(delta: int) {
+        self.n = self.n + delta
+    }
+    receive Flip(active: bool) {
+        if active {
+            self.n = self.n + 1
+        }
+    }
+    receive Bye { let _ = 0 }
+}
+
+fn heap_tag(n: int) -> string {
+    return "tag-" + int_to_string(n)
+}
+
+fn heap_slice(n: int) -> []int {
+    let mut xs = make([]int, 0, 8)
+    let mut i = 0
+    while i < 8 {
+        xs = append(xs, n + i)
+        i = i + 1
+    }
+    return xs
+}
+
+fn TestLabeledContinueDropsInnerOwns() {
+    // Non-actor regression for labeled continue dropping owns outside the inner loop.
+    let mut n = 0
+    outer: for i in 20 {
+        let s = str_repeat("x", 8)
+        for j in 4 {
+            if j == 1 {
+                n = n + len(s) + i
+                continue outer
+            }
+        }
+    }
+    assert_eq(n, 20 * 8 + 190)
+}
+
+fn TestPackVsEnvelopeSign() {
+    let packed = actor_pack(2, 0)
+    assert(packed < 0)
+    assert_eq(actor_msg_tag(packed), 2)
+    let tick = Flood_Tick(3)
+    assert(tick < 0)
+    assert_eq(actor_msg_tag(tick), 3)
+    let env = Flood_Flip(true)
+    assert(env > 0)
+    assert_eq(actor_msg_tag(env), 4)
+    let f = Flood_spawn("sign")
+    crew:fail_fast t {
+        let j = t.kick(Flood_loop(f))
+        assert(Flood_send(f, env))
+        assert(Flood_send(f, tick))
+        assert(Flood_send(f, Flood_Bye()))
+        let _ = j.join()
+    }
+}
+
+fn TestEarlyReturnThenMoreMessages() {
+    let h = Hunt_spawn()
+    crew:fail_fast t {
+        let j = t.kick(Hunt_loop(h))
+        let reply = make(chan[int], 1)
+        let sreply = make(chan[string], 1)
+        let mut k = 0
+        while k < 40 {
+            let mut xs = make([]int, 0, 6)
+            xs = append(xs, 1)
+            xs = append(xs, 2)
+            xs = append(xs, 42)
+            xs = append(xs, 9)
+            assert(Hunt_send(h, Hunt_Find(42, xs, reply)))
+            assert_eq(reply.recv(), 2)
+            k = k + 1
+        }
+        k = 0
+        while k < 40 {
+            let mut ys = make([]int, 0, 4)
+            ys = append(ys, 7)
+            ys = append(ys, 8)
+            assert(Hunt_send(h, Hunt_Find(99, ys, reply)))
+            assert_eq(reply.recv(), -1)
+            k = k + 1
+        }
+        assert(Hunt_send(h, Hunt_Gate(0, heap_tag(1), sreply)))
+        assert(sreply.recv() == "zero:tag-1")
+        assert(Hunt_send(h, Hunt_Gate(-3, heap_tag(2), sreply)))
+        assert(sreply.recv() == "neg")
+        assert(Hunt_send(h, Hunt_Gate(4, heap_tag(3), sreply)))
+        assert(sreply.recv() == "tag-3")
+        assert(Hunt_send(h, Hunt_Closure(reply)))
+        assert_eq(reply.recv(), 42)
+        assert(Hunt_send(h, Hunt_Bye()))
+        assert_eq(j.join(), 0)
+    }
+}
+
+fn TestMixedScalarEnvelopeFlood() {
+    let f = Flood_spawn(heap_tag(7))
+    crew:fail_fast t {
+        let j = t.kick(Flood_loop(f))
+        let reply = make(chan[int], 1)
+        let mut i = 0
+        while i < 30 {
+            assert(Flood_send(f, Flood_Tick(1)))
+            assert(Flood_send(f, Flood_Flip(true)))
+            assert(Flood_send(f, Flood_Note(heap_tag(i), heap_slice(i), reply)))
+            let got = reply.recv()
+            assert(got > 0)
+            i = i + 1
+        }
+        assert(Flood_send(f, Flood_Tick(140737488355327)))
+        assert(Flood_send(f, Flood_Tick(-140737488355328)))
+        assert(Flood_send(f, Flood_Bye()))
+        let _ = j.join()
+    }
+}
+
+fn TestDrainHeapEnvelopesOnBye() {
+    let f = Flood_spawn_cap(16, heap_tag(0))
+    // Queue before starting the consumer: exercise both drain and full rejection.
+    assert(Flood_send(f, Flood_Bye()))
+    let mut i = 0
+    while i < 8 {
+        let _ = Flood_try_send(f, Flood_Dump(heap_tag(100 + i), heap_slice(100 + i)))
+        let _ = Flood_try_send(f, Flood_Flip(true))
+        i = i + 1
+    }
+    crew:fail_fast t {
+        let j = t.kick(Flood_loop(f))
+        let _ = j.join()
+    }
+}
+
+fn TestCtorStopDrainsHeapPrefix() {
+    let f = Flood_spawn(heap_tag(99))
+    crew:fail_fast t {
+        let j = t.kick(Flood_loop(f))
+        actor_stop(f)
+        let _ = j.join()
+    }
+}
+
+fn TestSendAfterStop() {
+    let f = Flood_spawn("id")
+    crew:fail_fast t {
+        let j = t.kick(Flood_loop(f))
+        actor_stop(f)
+        let _ = j.join()
+        let sent = Flood_send(f, Flood_Tick(1))
+        assert(!sent)
+        assert(!Flood_send(f, Flood_Dump(heap_tag(999), heap_slice(999))))
+        assert_eq(Flood_try_send(f, Flood_Dump(heap_tag(998), heap_slice(998))), 0)
+    }
+}
+
+fn TestEmptySliceMissAndHit() {
+    let h = Hunt_spawn()
+    crew:fail_fast t {
+        let j = t.kick(Hunt_loop(h))
+        let reply = make(chan[int], 1)
+        let empty: []int = make([]int, 0, 0)
+        assert(Hunt_send(h, Hunt_Find(1, empty, reply)))
+        assert_eq(reply.recv(), -1)
+        let mut one = make([]int, 0, 1)
+        one = append(one, 5)
+        assert(Hunt_send(h, Hunt_Find(5, one, reply)))
+        assert_eq(reply.recv(), 0)
+        assert(Hunt_send(h, Hunt_Bye()))
+        assert_eq(j.join(), 0)
+    }
+}
+
+fn race_flood(f: chan[int], base: int) -> int {
+    let mut accepted = 0
+    for i in 100 {
+        if Flood_send(f, Flood_Dump(heap_tag(base + i), heap_slice(i))) {
+            accepted = accepted + 1
+        }
+    }
+    return accepted
+}
+
+fn TestConcurrentShutdownOwnsEveryEnvelope() {
+    let f = Flood_spawn_cap(2, heap_tag(1))
+    crew:fail_fast t {
+        let actor_job = t.kick(Flood_loop(f))
+        let p1 = t.kick(race_flood(f, 0))
+        let p2 = t.kick(race_flood(f, 1000))
+        assert(Flood_send(f, Flood_Bye()))
+        let _ = p1.join()
+        let _ = p2.join()
+        let _ = actor_job.join()
+        assert_eq(actor_len(f), 0)
+        assert(!Flood_send(f, Flood_Dump(heap_tag(9999), heap_slice(0))))
+    }
+}
+
+fn main() {
+    TestPayloadSnapshotDoesNotAliasSender()
+    TestConcurrentShutdownOwnsEveryEnvelope()
+    TestLabeledContinueDropsInnerOwns()
+    TestPackVsEnvelopeSign()
+    TestEarlyReturnThenMoreMessages()
+    TestMixedScalarEnvelopeFlood()
+    TestDrainHeapEnvelopesOnBye()
+    TestCtorStopDrainsHeapPrefix()
+    TestSendAfterStop()
+    TestEmptySliceMissAndHit()
+}

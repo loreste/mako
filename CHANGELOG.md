@@ -2,6 +2,23 @@
 
 ## 0.6.35
 
+- Close actor mailboxes before draining to prevent concurrent sends escaping cleanup. Generated send helpers consume and destroy rejected envelopes; `Name_try_send` and `Name_drop_message` cover nonblocking and unsent messages.
+- Snapshot mutable slice payloads, recursively through structs, before actor enqueue; reject payload types without an isolation contract. Preserve the zero-allocation scalar path. Buffered channel wakeups now stop issuing redundant signals once all waiting peers have work.
+- Preserve closure-local returns inside actor handlers. Add concurrent shutdown, closed/full mailbox, and owned-payload regression tests on both backends.
+- Reclaim C string temporaries used by channel sends, map lookups/deletes, and literal comparisons, plus owned unguarded Result error bindings; preserve borrowed payloads. The adversarial string fixture reports zero leaked allocations.
+- Add `scripts/bench-actor-scaling.sh`: matched Rust/Mako measurements for 1–8 producers and 1–8 independent actor shards, with bounded queues and checked message totals.
+- C backend: struct typedefs emit in field-dependency order, and struct names are registered before field types are lowered, so a handle struct defined after its users (actor ports) is a complete type rather than `int64_t`.
+- DCE keeps `Type_method` (`Dog_describe`) and no longer keeps every `*_send` because `send` is a method (`FayEngine_Shutdown_send`).
+- `select` channel names that collide with C/POSIX (`exec`, `read`, …) are mangled the same way as locals, so a select on those identifiers compiles.
+- Named actor ports: `receive Exec(...) on exec` / `receive Bye on control` give one isolated actor multiple `chan[int]` mailboxes. Spawn returns a handle struct of those ports; `Name_Msg_send(h, …)` and `Name_port_send(h, msg)` post to the right queue. The loop `try_recv`s in port order (a port named `control` is always first) then parks on `select timeout -1`. Single-port actors are unchanged (`chan[int]` mailbox). Tests: `examples/testing/actor_ports_test.mko`.
+- Kick Send: structs whose fields are all Send (e.g. a handle of channels) may cross `crew.kick`.
+- Actor / channel speed: buffered send/recv wakes a waiting peer on the same lock (no unlock/relock); actor dispatch is an else-if chain; generated message constructors are `always_inline`; `actor_pack` of constant ints is folded. `chan50k` and new `actor200k` (single producer vs Rust `sync_channel(64)`) sit at a 1.5× regression budget.
+- Adversarial actor tests: `examples/testing/actor_adversarial_memsafe_test.mko` (early-return reuse, heap envelopes, drain, ctor-stop, pack vs pointer) plus `actor_pack_overflow_abort.mko` in the memory-safety gate.
+- Actor envelope lifetime:
+  - Labeled `continue` (including `return` in a receive arm) now drops owns between the target loop and the continue site, so early returns no longer leak envelope strings, slices, or channels.
+  - Shutdown drain unboxes remaining envelopes by tag and runs field destructors instead of a shallow `free()` of the shell.
+  - Envelope pointers are sent as full `int64` values with the tag in the envelope's first field. Scalar `actor_pack` sets bit 63 so packed ints cannot be confused with heap pointers; payloads that do not fit signed 48-bit abort rather than truncate.
+  - Constructor-path stop (`tag == 0` before state init) drains and closes the mailbox before returning.
 - Fix native typed-actor envelope ownership: queued payloads stay alive until receipt, and receivers release their envelopes and owned fields after handling each message.
 
 - Comprehensive Actor Feature Suite and Memory Safety:
@@ -12,7 +29,7 @@
   - Typed message payloads: complex parameters (`string`, `chan[T]`, slices, structs) are automatically packed into typed envelope structs with caller-owns semantics.
   - Labeled early return in receive arms: `return` inside a `receive` arm targets `continue __actor_loop`, cleanly aborting message handling and resuming the actor loop without exiting the function or breaking prematurely from nested `for`/`while` loops.
   - Graceful channel close: detects tag 0 when the actor mailbox is closed (`actor_stop`), cleanly terminating the actor loop without 100% CPU spinning.
-  - Mailbox draining on shutdown: automatically drains and frees unhandled envelope payloads (`actor_free_payload`) on exit, guaranteeing zero memory leaks even if messages remain buffered when the actor stops.
+  - Mailbox draining on shutdown: unboxes leftover envelopes by tag and drops nested owners (strings, slices, channels) rather than a shallow `free()` of the shell.
   - Fix actor `self.field` resolution in indexed assignments, match guards, interpolated strings, and nested receive bodies in multi-file projects (#63).
   - Expand deferred actors before type checking in `mako check` and `mako lint` so generated actor functions resolve consistently.
 - Memory Safety & Slice Allocator Fixes:

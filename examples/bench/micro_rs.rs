@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 use std::hint::black_box;
 use std::sync::mpsc::sync_channel;
+use std::thread;
 use std::time::Instant;
 
 struct Pair {
@@ -86,6 +87,26 @@ fn bench_channels() -> i64 {
     black_box(sum)
 }
 
+fn bench_actor() -> i64 {
+    let n = opaque_add(200_000, 0);
+    let (tx, rx) = sync_channel::<i64>(64);
+    let h = thread::spawn(move || {
+        let mut acc = 0i64;
+        loop {
+            match rx.recv() {
+                Ok(0) | Err(_) => break,
+                Ok(d) => acc += d,
+            }
+        }
+        acc
+    });
+    for _ in 0..n {
+        tx.send(1).unwrap();
+    }
+    tx.send(0).unwrap();
+    black_box(h.join().unwrap())
+}
+
 fn main() {
     let _ = bench_fib();
     let _ = bench_struct();
@@ -93,6 +114,7 @@ fn main() {
     let _ = bench_map();
     let _ = bench_strings();
     let _ = bench_channels();
+    let _ = bench_actor();
 
     let t0 = Instant::now();
     let f = bench_fib();
@@ -107,6 +129,8 @@ fn main() {
     let t5 = Instant::now();
     let ch = bench_channels();
     let t6 = Instant::now();
+    let ac = bench_actor();
+    let t7 = Instant::now();
 
     println!("lang");
     println!("rust");
@@ -128,4 +152,7 @@ fn main() {
     println!("chan50k");
     println!("{ch}");
     println!("{}", t6.duration_since(t5).as_nanos());
+    println!("actor200k");
+    println!("{ac}");
+    println!("{}", t7.duration_since(t6).as_nanos());
 }

@@ -5645,7 +5645,8 @@ mod tests {
             params: vec![Param {
                 name: "n".into(),
                 ty: TypeExpr::Named("int".into()),
-                mutable: false, variadic: false,
+                mutable: false,
+                variadic: false,
             }],
             ret: Some(TypeExpr::Named("int".into())),
             body: Block {

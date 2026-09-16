@@ -71,18 +71,29 @@ pub fn desugar(mut program: Program, source_path: Option<&str>) -> Program {
 }
 
 fn resolve_embed_block(block: &mut Block, base: Option<&std::path::Path>) {
-    for s in &mut block.stmts { resolve_embed_stmt(s, base); }
+    for s in &mut block.stmts {
+        resolve_embed_stmt(s, base);
+    }
 }
 fn resolve_embed_stmt(stmt: &mut Stmt, base: Option<&std::path::Path>) {
     match stmt {
         Stmt::Let { init, .. } | Stmt::Assign { value: init, .. } => resolve_embed_expr(init, base),
         Stmt::Expr(e) | Stmt::Return(Some(e)) => resolve_embed_expr(e, base),
-        Stmt::If { cond, then_block, else_block, .. } => {
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
             resolve_embed_expr(cond, base);
             resolve_embed_block(then_block, base);
-            if let Some(eb) = else_block { resolve_embed_block(eb, base); }
+            if let Some(eb) = else_block {
+                resolve_embed_block(eb, base);
+            }
         }
-        Stmt::While { body, .. } | Stmt::Defer { body } | Stmt::Unsafe { body } => resolve_embed_block(body, base),
+        Stmt::While { body, .. } | Stmt::Defer { body } | Stmt::Unsafe { body } => {
+            resolve_embed_block(body, base)
+        }
         Stmt::For { body, .. } => resolve_embed_block(body, base),
         _ => {}
     }
@@ -94,8 +105,14 @@ fn resolve_embed_expr(expr: &mut Expr, base: Option<&std::path::Path>) {
                 if let Expr::String(path) = &args[0] {
                     let full = base.map(|b| b.join(path)).unwrap_or_else(|| path.into());
                     match std::fs::read_to_string(&full) {
-                        Ok(c) => { *expr = Expr::String(c); return; }
-                        Err(e) => { eprintln!("embed: {}: {e}", full.display()); std::process::exit(1); }
+                        Ok(c) => {
+                            *expr = Expr::String(c);
+                            return;
+                        }
+                        Err(e) => {
+                            eprintln!("embed: {}: {e}", full.display());
+                            std::process::exit(1);
+                        }
                     }
                 }
             }
@@ -103,24 +120,29 @@ fn resolve_embed_expr(expr: &mut Expr, base: Option<&std::path::Path>) {
                 if let Expr::String(path) = &args[0] {
                     let full = base.map(|b| b.join(path)).unwrap_or_else(|| path.into());
                     match std::fs::read(&full) {
-                        Ok(b) => { *expr = Expr::Array(b.into_iter().map(|v| Expr::Int(v as i64)).collect()); return; }
-                        Err(e) => { eprintln!("embed_bytes: {}: {e}", full.display()); std::process::exit(1); }
+                        Ok(b) => {
+                            *expr =
+                                Expr::Array(b.into_iter().map(|v| Expr::Int(v as i64)).collect());
+                            return;
+                        }
+                        Err(e) => {
+                            eprintln!("embed_bytes: {}: {e}", full.display());
+                            std::process::exit(1);
+                        }
                     }
                 }
             }
         }
         resolve_embed_expr(callee, base);
-        for a in args { resolve_embed_expr(a, base); }
+        for a in args {
+            resolve_embed_expr(a, base);
+        }
     }
 }
 
-
 fn desugar_if_let_block(block: &mut Block) {
     let stmts = std::mem::take(&mut block.stmts);
-    block.stmts = stmts
-        .into_iter()
-        .map(|s| desugar_if_let_stmt(s))
-        .collect();
+    block.stmts = stmts.into_iter().map(|s| desugar_if_let_stmt(s)).collect();
 }
 
 fn desugar_if_let_stmt(stmt: Stmt) -> Stmt {
@@ -248,7 +270,9 @@ fn expand_json_derive(
         .map(|(n, ty, _)| Param {
             name: n.clone(),
             ty: ty.clone(),
-            mutable: false, variadic: false })
+            mutable: false,
+            variadic: false,
+        })
         .collect();
 
     let mut pieces = s
@@ -293,7 +317,9 @@ fn expand_json_derive(
             params: vec![Param {
                 name: "j".into(),
                 ty: TypeExpr::Named("string".into()),
-                mutable: false, variadic: false }],
+                mutable: false,
+                variadic: false,
+            }],
             ret: Some(TypeExpr::Named(ret_ty.into())),
             body: Block {
                 stmts: vec![Stmt::Return(Some(Expr::Call {
@@ -624,6 +650,543 @@ mod actor_self_tests {
         let error = TypeChecker::new().check(&program).unwrap_err();
         assert!(error.to_string().contains("mutable capture"), "{error}");
     }
+
+    fn expand_source(source: &str) -> Program {
+        let parsed = Parser::new(Lexer::new(source).tokenize().unwrap())
+            .parse()
+            .unwrap();
+        let mut program = desugar(parsed, None);
+        desugar_if_let_all(&mut program);
+        program
+    }
+
+    fn fn_named<'a>(program: &'a Program, name: &str) -> &'a FnDef {
+        program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Fn(f) if f.name == name => Some(f),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing fn {name}"))
+    }
+
+    fn struct_named<'a>(program: &'a Program, name: &str) -> &'a StructDef {
+        program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Struct(s) if s.name == name => Some(s),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing struct {name}"))
+    }
+
+    fn expr_calls(expr: &Expr, name: &str) -> bool {
+        match expr {
+            Expr::Call { callee, args } => {
+                matches!(callee.as_ref(), Expr::Ident(n) if n == name)
+                    || expr_calls(callee, name)
+                    || args.iter().any(|a| expr_calls(a, name))
+            }
+            Expr::Method { receiver, args, .. } => {
+                expr_calls(receiver, name) || args.iter().any(|a| expr_calls(a, name))
+            }
+            Expr::Binary { left, right, .. } => expr_calls(left, name) || expr_calls(right, name),
+            Expr::Unary { expr: e, .. }
+            | Expr::Try(e)
+            | Expr::Join(e)
+            | Expr::Kick { expr: e, .. }
+            | Expr::ChanOpen { cap: e, .. }
+            | Expr::Field { base: e, .. } => expr_calls(e, name),
+            Expr::Index { base, index } => expr_calls(base, name) || expr_calls(index, name),
+            Expr::Slice {
+                base,
+                low,
+                high,
+                max,
+            } => {
+                expr_calls(base, name)
+                    || [low, high, max]
+                        .into_iter()
+                        .flatten()
+                        .any(|b| expr_calls(b, name))
+            }
+            Expr::Array(xs)
+            | Expr::Tuple(xs)
+            | Expr::StructLitPos { values: xs, .. }
+            | Expr::Convert { args: xs, .. } => xs.iter().any(|x| expr_calls(x, name)),
+            Expr::StructLit { fields, update, .. } => {
+                fields.iter().any(|(_, e)| expr_calls(e, name))
+                    || update.as_ref().is_some_and(|u| expr_calls(u, name))
+            }
+            Expr::IfExpr {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                expr_calls(cond, name)
+                    || stmts_call(&then_block.stmts, name)
+                    || stmts_call(&else_block.stmts, name)
+            }
+            Expr::Match { scrutinee, arms } => {
+                expr_calls(scrutinee, name)
+                    || arms.iter().any(|a| {
+                        a.guard.as_ref().is_some_and(|g| expr_calls(g, name))
+                            || expr_calls(&a.body, name)
+                    })
+            }
+            Expr::Block(b) => stmts_call(&b.stmts, name),
+            Expr::Lambda { body, .. } => expr_calls(body, name),
+            Expr::Make { len, cap, .. } => [len, cap]
+                .into_iter()
+                .flatten()
+                .any(|v| expr_calls(v, name)),
+            Expr::Fan { collection, mapper } => {
+                expr_calls(collection, name) || expr_calls(mapper, name)
+            }
+            Expr::StringInterp(parts) => parts.iter().any(|p| match p {
+                InterpPart::Expr(e, _) => expr_calls(e, name),
+                InterpPart::Lit(_) => false,
+            }),
+            Expr::Ident(_) | Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => {
+                false
+            }
+        }
+    }
+
+    fn stmt_calls(stmt: &Stmt, name: &str) -> bool {
+        match stmt {
+            Stmt::Let { init, .. }
+            | Stmt::LetMulti { init, .. }
+            | Stmt::Assign { value: init, .. } => expr_calls(init, name),
+            Stmt::Expr(e) | Stmt::Return(Some(e)) => expr_calls(e, name),
+            Stmt::If {
+                init,
+                cond,
+                then_block,
+                else_block,
+            } => {
+                init.as_ref().is_some_and(|s| stmt_calls(s, name))
+                    || expr_calls(cond, name)
+                    || stmts_call(&then_block.stmts, name)
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|b| stmts_call(&b.stmts, name))
+            }
+            Stmt::While { cond, body, .. } => {
+                expr_calls(cond, name) || stmts_call(&body.stmts, name)
+            }
+            Stmt::For { iter, body, .. } => expr_calls(iter, name) || stmts_call(&body.stmts, name),
+            Stmt::CFor {
+                init,
+                cond,
+                post,
+                body,
+                ..
+            } => {
+                stmt_calls(init, name)
+                    || expr_calls(cond, name)
+                    || stmt_calls(post, name)
+                    || stmts_call(&body.stmts, name)
+            }
+            Stmt::IfLet {
+                scrutinee,
+                then_block,
+                else_block,
+                ..
+            } => {
+                expr_calls(scrutinee, name)
+                    || stmts_call(&then_block.stmts, name)
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|b| stmts_call(&b.stmts, name))
+            }
+            Stmt::LetCommaOk { base, index, .. } => {
+                expr_calls(base, name) || expr_calls(index, name)
+            }
+            Stmt::IndexAssign { base, index, value } => {
+                expr_calls(base, name) || expr_calls(index, name) || expr_calls(value, name)
+            }
+            Stmt::FieldAssign { base, value, .. } => {
+                expr_calls(base, name) || expr_calls(value, name)
+            }
+            Stmt::Defer { body }
+            | Stmt::Crew { body, .. }
+            | Stmt::Arena { body, .. }
+            | Stmt::Unsafe { body } => stmts_call(&body.stmts, name),
+            Stmt::Select {
+                timeout_ms,
+                arms,
+                default_arm,
+            } => {
+                expr_calls(timeout_ms, name)
+                    || arms.iter().any(|(_, b)| stmts_call(&b.stmts, name))
+                    || default_arm
+                        .as_ref()
+                        .is_some_and(|b| stmts_call(&b.stmts, name))
+            }
+            Stmt::Return(None) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        }
+    }
+
+    fn stmts_call(stmts: &[Stmt], name: &str) -> bool {
+        stmts.iter().any(|s| stmt_calls(s, name))
+    }
+
+    fn stmts_have_continue_label(stmts: &[Stmt], label: &str) -> bool {
+        stmts.iter().any(|s| match s {
+            Stmt::Continue(Some(l)) if l == label => true,
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                stmts_have_continue_label(&then_block.stmts, label)
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|b| stmts_have_continue_label(&b.stmts, label))
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. } => {
+                stmts_have_continue_label(&body.stmts, label)
+            }
+            _ => false,
+        })
+    }
+
+    const ENVELOPE_ACTOR: &str = r#"
+actor Boxer {
+    receive Dump(tag: string, blob: []int) { let _ = len(tag) + len(blob) }
+    receive Tick(delta: int) { let _ = delta }
+    receive Find(xs: []int) {
+        for x in xs {
+            if x == 1 { return }
+        }
+    }
+    receive Bye { let _ = 0 }
+}
+fn main() { let _ = Boxer_spawn() }
+"#;
+
+    #[test]
+    fn actor_envelope_struct_stores_tag_first() {
+        let program = expand_source(ENVELOPE_ACTOR);
+        let env = struct_named(&program, "Boxer_Dump_Env");
+        assert_eq!(env.fields[0].0, "__actor_tag");
+        assert!(env.fields.iter().any(|(n, _, _)| n == "tag"));
+        assert!(env.fields.iter().any(|(n, _, _)| n == "blob"));
+    }
+
+    #[test]
+    fn actor_envelope_ctor_boxes_pointer_not_pack() {
+        let program = expand_source(ENVELOPE_ACTOR);
+        let dump = fn_named(&program, "Boxer_Dump");
+        assert!(
+            stmts_call(&dump.body.stmts, "actor_box_payload"),
+            "envelope ctor must box the full pointer"
+        );
+        assert!(
+            !stmts_call(&dump.body.stmts, "actor_pack"),
+            "envelope ctor must not 48-bit-pack the pointer"
+        );
+        let tick = fn_named(&program, "Boxer_Tick");
+        assert!(
+            stmts_call(&tick.body.stmts, "actor_pack"),
+            "scalar ctor still packs"
+        );
+        assert!(!stmts_call(&tick.body.stmts, "actor_box_payload"));
+    }
+
+    #[test]
+    fn actor_loop_drain_unboxes_instead_of_shallow_free() {
+        let program = expand_source(ENVELOPE_ACTOR);
+        let loop_fn = fn_named(&program, "Boxer_loop");
+        assert!(
+            stmts_call(&loop_fn.body.stmts, "actor_unbox_payload"),
+            "drain/handle must unbox typed envelopes"
+        );
+        assert!(
+            !stmts_call(&loop_fn.body.stmts, "actor_free_payload"),
+            "drain must not shallow-free envelope shells"
+        );
+    }
+
+    #[test]
+    fn actor_receive_return_continues_actor_loop() {
+        let program = expand_source(ENVELOPE_ACTOR);
+        let loop_fn = fn_named(&program, "Boxer_loop");
+        assert!(
+            stmts_have_continue_label(&loop_fn.body.stmts, "__actor_loop"),
+            "return in Find must become continue __actor_loop"
+        );
+    }
+
+    const PORT_ACTOR: &str = r#"
+actor Gate {
+    n: int = 0
+    receive Work(done: chan[int]) on exec {
+        self.n = self.n + 1
+        let _ = done.send(self.n)
+    }
+    receive Ping(reply: chan[int]) on control {
+        let _ = reply.send(self.n)
+    }
+    receive Bye on control { let _ = 0 }
+}
+fn main() { let _ = Gate_spawn() }
+"#;
+
+    fn stmts_have_select(stmts: &[Stmt]) -> bool {
+        stmts.iter().any(|s| match s {
+            Stmt::Select { .. } => true,
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                stmts_have_select(&then_block.stmts)
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|b| stmts_have_select(&b.stmts))
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. } => {
+                stmts_have_select(&body.stmts)
+            }
+            Stmt::IfLet {
+                then_block,
+                else_block,
+                ..
+            } => {
+                stmts_have_select(&then_block.stmts)
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|b| stmts_have_select(&b.stmts))
+            }
+            _ => false,
+        })
+    }
+
+    fn stmts_have_method(stmts: &[Stmt], method: &str) -> bool {
+        fn expr_has(expr: &Expr, method: &str) -> bool {
+            match expr {
+                Expr::Method {
+                    receiver,
+                    method: m,
+                    args,
+                } => {
+                    m == method
+                        || expr_has(receiver, method)
+                        || args.iter().any(|a| expr_has(a, method))
+                }
+                Expr::Call { callee, args } => {
+                    expr_has(callee, method) || args.iter().any(|a| expr_has(a, method))
+                }
+                Expr::Binary { left, right, .. } => {
+                    expr_has(left, method) || expr_has(right, method)
+                }
+                Expr::Unary { expr: e, .. }
+                | Expr::Try(e)
+                | Expr::Join(e)
+                | Expr::Kick { expr: e, .. }
+                | Expr::ChanOpen { cap: e, .. }
+                | Expr::Field { base: e, .. } => expr_has(e, method),
+                Expr::IfExpr {
+                    cond,
+                    then_block,
+                    else_block,
+                } => {
+                    expr_has(cond, method)
+                        || stmts_have_method(&then_block.stmts, method)
+                        || stmts_have_method(&else_block.stmts, method)
+                }
+                Expr::Match { scrutinee, arms } => {
+                    expr_has(scrutinee, method) || arms.iter().any(|a| expr_has(&a.body, method))
+                }
+                Expr::Block(b) => stmts_have_method(&b.stmts, method),
+                _ => false,
+            }
+        }
+        stmts.iter().any(|s| match s {
+            Stmt::Let { init, .. }
+            | Stmt::LetMulti { init, .. }
+            | Stmt::Assign { value: init, .. } => expr_has(init, method),
+            Stmt::Expr(e) | Stmt::Return(Some(e)) => expr_has(e, method),
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                stmts_have_method(&then_block.stmts, method)
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|b| stmts_have_method(&b.stmts, method))
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::CFor { body, .. } => {
+                stmts_have_method(&body.stmts, method)
+            }
+            Stmt::IfLet {
+                scrutinee,
+                then_block,
+                else_block,
+                ..
+            } => {
+                expr_has(scrutinee, method)
+                    || stmts_have_method(&then_block.stmts, method)
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|b| stmts_have_method(&b.stmts, method))
+            }
+            Stmt::Select {
+                arms, default_arm, ..
+            } => {
+                arms.iter()
+                    .any(|(_, b)| stmts_have_method(&b.stmts, method))
+                    || default_arm
+                        .as_ref()
+                        .is_some_and(|b| stmts_have_method(&b.stmts, method))
+            }
+            _ => false,
+        })
+    }
+
+    #[test]
+    fn actor_receive_on_port_parses() {
+        let parsed = Parser::new(Lexer::new(PORT_ACTOR).tokenize().unwrap())
+            .parse()
+            .unwrap();
+        let actor = parsed.items.iter().find_map(|item| match item {
+            Item::Actor(a) if a.name == "Gate" => Some(a),
+            _ => None,
+        });
+        let actor = actor.expect("Gate actor");
+        assert_eq!(actor.receives[0].port.as_deref(), Some("exec"));
+        assert_eq!(actor.receives[1].port.as_deref(), Some("control"));
+        assert_eq!(actor.receives[2].port.as_deref(), Some("control"));
+    }
+
+    #[test]
+    fn actor_ports_expand_handle_and_priority() {
+        let program = expand_source(PORT_ACTOR);
+        let handle = struct_named(&program, "Gate");
+        assert_eq!(handle.fields[0].0, "control", "control port is field 0");
+        assert_eq!(handle.fields[1].0, "exec");
+        let spawn = fn_named(&program, "Gate_spawn");
+        assert!(matches!(
+            spawn.ret,
+            Some(TypeExpr::Named(ref n)) if n == "Gate"
+        ));
+        let _ = fn_named(&program, "Gate_control_send");
+        let _ = fn_named(&program, "Gate_exec_send");
+        let _ = fn_named(&program, "Gate_Work_send");
+        let _ = fn_named(&program, "Gate_Ping_send");
+        let _ = fn_named(&program, "Gate_Bye_send");
+        let loop_fn = fn_named(&program, "Gate_loop");
+        assert!(
+            stmts_have_method(&loop_fn.body.stmts, "try_recv"),
+            "multi-port loop try_recv's each mailbox"
+        );
+        assert!(
+            stmts_have_select(&loop_fn.body.stmts),
+            "multi-port loop parks on select when every port is empty"
+        );
+        TypeChecker::new().check(&program).unwrap();
+    }
+}
+
+fn rewrite_return_in_expr(expr: &mut Expr) {
+    match expr {
+        Expr::Block(b) => rewrite_return_to_continue(&mut b.stmts),
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            rewrite_return_in_expr(cond);
+            rewrite_return_to_continue(&mut then_block.stmts);
+            rewrite_return_to_continue(&mut else_block.stmts);
+        }
+        Expr::Match { scrutinee, arms } => {
+            rewrite_return_in_expr(scrutinee);
+            for a in arms {
+                if let Some(guard) = &mut a.guard {
+                    rewrite_return_in_expr(guard);
+                }
+                rewrite_return_in_expr(&mut a.body);
+            }
+        }
+        // A closure has its own return target, outside the receive handler.
+        Expr::Lambda { .. } => {},
+        Expr::Call { callee, args } => {
+            rewrite_return_in_expr(callee);
+            for a in args {
+                rewrite_return_in_expr(a);
+            }
+        }
+        Expr::Method { receiver, args, .. } => {
+            rewrite_return_in_expr(receiver);
+            for a in args {
+                rewrite_return_in_expr(a);
+            }
+        }
+        Expr::Binary { left, right, .. } => {
+            rewrite_return_in_expr(left);
+            rewrite_return_in_expr(right);
+        }
+        Expr::Unary { expr: e, .. }
+        | Expr::Try(e)
+        | Expr::Join(e)
+        | Expr::Kick { expr: e, .. }
+        | Expr::ChanOpen { cap: e, .. } => rewrite_return_in_expr(e),
+        Expr::Field { base, .. } => rewrite_return_in_expr(base),
+        Expr::Index { base, index } => {
+            rewrite_return_in_expr(base);
+            rewrite_return_in_expr(index);
+        }
+        Expr::Slice {
+            base,
+            low,
+            high,
+            max,
+        } => {
+            rewrite_return_in_expr(base);
+            for bound in [low, high, max].into_iter().flatten() {
+                rewrite_return_in_expr(bound);
+            }
+        }
+        Expr::Array(xs)
+        | Expr::Tuple(xs)
+        | Expr::StructLitPos { values: xs, .. }
+        | Expr::Convert { args: xs, .. } => {
+            for x in xs {
+                rewrite_return_in_expr(x);
+            }
+        }
+        Expr::StructLit { fields, update, .. } => {
+            for (_, e) in fields {
+                rewrite_return_in_expr(e);
+            }
+            if let Some(u) = update {
+                rewrite_return_in_expr(u);
+            }
+        }
+        Expr::StringInterp(parts) => {
+            for part in parts {
+                if let InterpPart::Expr(expr, _) = part {
+                    rewrite_return_in_expr(expr);
+                }
+            }
+        }
+        Expr::Make { len, cap, .. } => {
+            for value in [len, cap].into_iter().flatten() {
+                rewrite_return_in_expr(value);
+            }
+        }
+        Expr::Fan { collection, mapper } => {
+            rewrite_return_in_expr(collection);
+            rewrite_return_in_expr(mapper);
+        }
+        Expr::Ident(_) | Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) => {}
+    }
 }
 
 /// Rewrite `return` in actor receive arms to `continue __actor_loop` (next message).
@@ -638,52 +1201,127 @@ fn rewrite_return_to_continue(stmts: &mut Vec<Stmt>) {
                 new_stmts.push(Stmt::Expr(e));
                 new_stmts.push(Stmt::Continue(Some("__actor_loop".into())));
             }
-            Stmt::If { cond, mut then_block, else_block, init } => {
+            Stmt::If {
+                cond,
+                mut then_block,
+                else_block,
+                init,
+            } => {
                 rewrite_return_to_continue(&mut then_block.stmts);
                 let else_block = else_block.map(|mut eb| {
                     rewrite_return_to_continue(&mut eb.stmts);
                     eb
                 });
-                new_stmts.push(Stmt::If { cond, then_block, else_block, init });
+                new_stmts.push(Stmt::If {
+                    cond,
+                    then_block,
+                    else_block,
+                    init,
+                });
             }
-            Stmt::While { cond, mut body, label } => {
+            Stmt::While {
+                cond,
+                mut body,
+                label,
+            } => {
                 rewrite_return_to_continue(&mut body.stmts);
                 new_stmts.push(Stmt::While { cond, body, label });
             }
-            Stmt::For { label, binders, is_range, iter, mut body } => {
+            Stmt::For {
+                label,
+                binders,
+                is_range,
+                iter,
+                mut body,
+            } => {
                 rewrite_return_to_continue(&mut body.stmts);
-                new_stmts.push(Stmt::For { label, binders, is_range, iter, body });
+                new_stmts.push(Stmt::For {
+                    label,
+                    binders,
+                    is_range,
+                    iter,
+                    body,
+                });
             }
-            Stmt::CFor { label, init, cond, post, mut body } => {
+            Stmt::CFor {
+                label,
+                init,
+                cond,
+                post,
+                mut body,
+            } => {
                 rewrite_return_to_continue(&mut body.stmts);
-                new_stmts.push(Stmt::CFor { label, init, cond, post, body });
+                new_stmts.push(Stmt::CFor {
+                    label,
+                    init,
+                    cond,
+                    post,
+                    body,
+                });
             }
-            Stmt::IfLet { pattern, scrutinee, mut then_block, else_block } => {
+            Stmt::IfLet {
+                pattern,
+                scrutinee,
+                mut then_block,
+                else_block,
+            } => {
                 rewrite_return_to_continue(&mut then_block.stmts);
                 let else_block = else_block.map(|mut eb| {
                     rewrite_return_to_continue(&mut eb.stmts);
                     eb
                 });
-                new_stmts.push(Stmt::IfLet { pattern, scrutinee, then_block, else_block });
+                new_stmts.push(Stmt::IfLet {
+                    pattern,
+                    scrutinee,
+                    then_block,
+                    else_block,
+                });
             }
             Stmt::Defer { mut body } => {
                 rewrite_return_to_continue(&mut body.stmts);
                 new_stmts.push(Stmt::Defer { body });
             }
-            Stmt::Select { timeout_ms, arms, default_arm } => {
-                let arms = arms.into_iter().map(|(n, mut b)| {
-                    rewrite_return_to_continue(&mut b.stmts);
-                    (n, b)
-                }).collect();
+            Stmt::Select {
+                timeout_ms,
+                arms,
+                default_arm,
+            } => {
+                let arms = arms
+                    .into_iter()
+                    .map(|(n, mut b)| {
+                        rewrite_return_to_continue(&mut b.stmts);
+                        (n, b)
+                    })
+                    .collect();
                 let default_arm = default_arm.map(|mut b| {
                     rewrite_return_to_continue(&mut b.stmts);
                     b
                 });
-                new_stmts.push(Stmt::Select { timeout_ms, arms, default_arm });
+                new_stmts.push(Stmt::Select {
+                    timeout_ms,
+                    arms,
+                    default_arm,
+                });
             }
             Stmt::Unsafe { mut body } => {
                 rewrite_return_to_continue(&mut body.stmts);
                 new_stmts.push(Stmt::Unsafe { body });
+            }
+            Stmt::Crew {
+                name,
+                policy,
+                mut body,
+            } => {
+                rewrite_return_to_continue(&mut body.stmts);
+                new_stmts.push(Stmt::Crew { name, policy, body });
+            }
+            Stmt::Arena { name, mut body } => {
+                rewrite_return_to_continue(&mut body.stmts);
+                new_stmts.push(Stmt::Arena { name, body });
+            }
+            Stmt::Expr(mut e) => {
+                rewrite_return_in_expr(&mut e);
+                new_stmts.push(Stmt::Expr(e));
             }
             other => new_stmts.push(other),
         }
@@ -698,6 +1336,769 @@ fn arm_needs_envelope(arm: &ReceiveArm) -> bool {
                 arm.params[0].1,
                 TypeExpr::Named(ref n) if n == "int" || n == "int64"
             ))
+}
+
+const ACTOR_TAG_FIELD: &str = "__actor_tag";
+const CTOR_TAG: i64 = 0x7FFF;
+
+fn envelope_struct_fields(params: &[(String, TypeExpr)]) -> Vec<(String, TypeExpr, Option<Expr>)> {
+    let mut fields = vec![(ACTOR_TAG_FIELD.into(), TypeExpr::Named("int".into()), None)];
+    fields.extend(params.iter().map(|(n, ty)| (n.clone(), ty.clone(), None)));
+    fields
+}
+
+fn envelope_lit(env_name: String, tag: i64, params: &[(String, TypeExpr)]) -> Expr {
+    let mut lit_fields: Vec<(String, Expr)> = vec![(ACTOR_TAG_FIELD.into(), Expr::Int(tag))];
+    lit_fields.extend(
+        params
+            .iter()
+            .map(|(n, _)| (n.clone(), Expr::Ident(n.clone()))),
+    );
+    Expr::StructLit {
+        name: env_name,
+        fields: lit_fields,
+        update: None,
+    }
+}
+
+fn box_payload(expr: Expr) -> Expr {
+    Expr::Call {
+        callee: Box::new(Expr::Ident("actor_box_payload".into())),
+        args: vec![expr],
+    }
+}
+
+fn arm_port(arm: &ReceiveArm) -> String {
+    arm.port.clone().unwrap_or_else(|| "__mbox".into())
+}
+
+fn mailbox_drain_stmts(envelopes: &[(i64, String)]) -> Vec<Stmt> {
+    let mut stmts = vec![close_mailbox("__mbox")];
+    stmts.extend(mailbox_drain_named("__mbox", envelopes));
+    stmts
+}
+
+fn close_mailbox(name: &str) -> Stmt {
+    Stmt::Expr(Expr::Call {
+        callee: Box::new(Expr::Ident("actor_stop".into())),
+        args: vec![Expr::Ident(name.into())],
+    })
+}
+
+fn actor_send_body(name: &str, mailbox: Expr, message: Expr, nonblocking: bool) -> Vec<Stmt> {
+    vec![
+        Stmt::Let {
+            name: "__sent".into(), mutable: false, ownership: Ownership::None, ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident(if nonblocking { "actor_try_send" } else { "actor_send" }.into())),
+                args: vec![mailbox, message.clone()],
+            },
+        },
+        Stmt::If {
+            init: None,
+            cond: Expr::Binary { op: BinOp::Eq, left: Box::new(Expr::Ident("__sent".into())),
+                right: Box::new(if nonblocking { Expr::Int(0) } else { Expr::Bool(false) }) },
+            then_block: Block { stmts: vec![Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Ident(format!("{name}_drop_message"))), args: vec![message],
+            })], source_lines: Box::default() },
+            else_block: None,
+        },
+        Stmt::Return(Some(Expr::Ident("__sent".into()))),
+    ]
+}
+
+fn actor_drop_message(name: &str, envelopes: &[(i64, String)]) -> Item {
+    let mut body = Vec::new();
+    if !envelopes.is_empty() {
+        let mut drops = vec![Stmt::Let {
+            name: "__drop_tag".into(), mutable: false, ownership: Ownership::None, ty: None,
+            init: Expr::Call { callee: Box::new(Expr::Ident("actor_msg_tag".into())),
+                args: vec![Expr::Ident("__msg".into())] },
+        }];
+        for (tag, env) in envelopes {
+            drops.push(Stmt::If {
+                init: None,
+                cond: Expr::Binary { op: BinOp::Eq, left: Box::new(Expr::Ident("__drop_tag".into())), right: Box::new(Expr::Int(*tag)) },
+                then_block: Block { stmts: vec![Stmt::Let {
+                    name: "__dropped_env".into(), mutable: false, ownership: Ownership::None,
+                    ty: Some(TypeExpr::Named(env.clone())),
+                    init: Expr::Call { callee: Box::new(Expr::Ident("actor_unbox_payload".into())), args: vec![Expr::Ident("__msg".into())] },
+                }], source_lines: Box::default() }, else_block: None,
+            });
+        }
+        body.push(Stmt::If {
+            init: None,
+            cond: Expr::Binary { op: BinOp::Gt, left: Box::new(Expr::Ident("__msg".into())), right: Box::new(Expr::Int(0)) },
+            then_block: Block { stmts: drops, source_lines: Box::default() }, else_block: None,
+        });
+    }
+    body.push(Stmt::Return(None));
+    actor_fn(format!("{name}_drop_message"), vec![Param { name: "__msg".into(), ty: TypeExpr::Named("int".into()), mutable: false, variadic: false }], None, body)
+}
+
+fn mailbox_drain_named(mbox: &str, envelopes: &[(i64, String)]) -> Vec<Stmt> {
+    if envelopes.is_empty() {
+        return Vec::new();
+    }
+    // Unique temps per mailbox so sequential multi-port drains do not rebind.
+    let dm = format!("__dm_{mbox}");
+    let dtag = format!("__dtag_{mbox}");
+    let dpl = format!("__dpl_{mbox}");
+    let denv = format!("__denv_{mbox}");
+    let mut drain_stmts = vec![
+        Stmt::Let {
+            name: dm.clone(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_recv".into())),
+                args: vec![Expr::Ident(mbox.into())],
+            },
+        },
+        Stmt::If {
+            init: None,
+            cond: Expr::Binary {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Ident(dm.clone())),
+                right: Box::new(Expr::Int(0)),
+            },
+            then_block: Block {
+                stmts: vec![Stmt::Break(None)],
+                source_lines: Box::default(),
+            },
+            else_block: None,
+        },
+        Stmt::Let {
+            name: dtag.clone(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_msg_tag".into())),
+                args: vec![Expr::Ident(dm.clone())],
+            },
+        },
+        Stmt::Let {
+            name: dpl.clone(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_msg_payload".into())),
+                args: vec![Expr::Ident(dm)],
+            },
+        },
+    ];
+    for (tag, env_name) in envelopes {
+        drain_stmts.push(Stmt::If {
+            init: None,
+            cond: Expr::Binary {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Ident(dtag.clone())),
+                right: Box::new(Expr::Int(*tag)),
+            },
+            then_block: Block {
+                stmts: vec![Stmt::Let {
+                    name: denv.clone(),
+                    mutable: false,
+                    ownership: Ownership::None,
+                    ty: Some(TypeExpr::Named(env_name.clone())),
+                    init: Expr::Call {
+                        callee: Box::new(Expr::Ident("actor_unbox_payload".into())),
+                        args: vec![Expr::Ident(dpl.clone())],
+                    },
+                }],
+                source_lines: Box::default(),
+            },
+            else_block: None,
+        });
+    }
+    vec![Stmt::While {
+        label: None,
+        cond: Expr::Binary {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Call {
+                callee: Box::new(Expr::Ident("actor_len".into())),
+                args: vec![Expr::Ident(mbox.into())],
+            }),
+            right: Box::new(Expr::Int(0)),
+        },
+        body: Block {
+            stmts: drain_stmts,
+            source_lines: Box::default(),
+        },
+    }]
+}
+
+fn port_envelopes(
+    actor: &ActorDef,
+    name: &str,
+    port: &str,
+    first_port: &str,
+    has_ctor: bool,
+    ctor_env_name: &str,
+) -> Vec<(i64, String)> {
+    let mut envs = Vec::new();
+    if has_ctor && port == first_port {
+        envs.push((CTOR_TAG, ctor_env_name.to_string()));
+    }
+    for (i, arm) in actor.receives.iter().enumerate() {
+        if arm_port(arm) == port && arm_needs_envelope(arm) {
+            envs.push(((i + 1) as i64, format!("{name}_{}_Env", arm.message)));
+        }
+    }
+    envs
+}
+
+fn drain_and_stop_ports(
+    actor: &ActorDef,
+    name: &str,
+    port_order: &[String],
+    has_ctor: bool,
+    ctor_env_name: &str,
+) -> Vec<Stmt> {
+    let first = port_order.first().map(|s| s.as_str()).unwrap_or("__mbox");
+    // Close every port before taking the final queue snapshot. A racing send
+    // either commits before close and is drained, or fails and keeps ownership.
+    let mut stmts: Vec<Stmt> = port_order.iter().map(|p| close_mailbox(p)).collect();
+    for p in port_order {
+        let envs = port_envelopes(actor, name, p, first, has_ctor, ctor_env_name);
+        stmts.extend(mailbox_drain_named(p, &envs));
+        stmts.push(Stmt::Expr(Expr::Call {
+            callee: Box::new(Expr::Ident("actor_stop".into())),
+            args: vec![Expr::Ident(p.clone())],
+        }));
+    }
+    stmts
+}
+
+fn actor_fn(name: String, params: Vec<Param>, ret: Option<TypeExpr>, stmts: Vec<Stmt>) -> Item {
+    Item::Fn(FnDef {
+        type_bounds: std::collections::HashMap::new(),
+        name,
+        type_params: Vec::new(),
+        params,
+        ret,
+        body: Block {
+            stmts,
+            source_lines: Box::default(),
+        },
+        exported: false,
+        is_const: false,
+        is_live: false,
+        stability: crate::ast::ApiStability::Unspecified,
+        contracts: vec![],
+        source_file: None,
+    })
+}
+
+fn expand_actor_ports(
+    actor: &ActorDef,
+    name: &str,
+    state_ty: &str,
+    has_ctor: bool,
+    has_state: bool,
+    ctor_env_name: &str,
+    port_order: &[String],
+    actor_fields: &[(String, TypeExpr, Option<Expr>)],
+) -> Vec<Item> {
+    let mut items = Vec::new();
+    let handle = name.to_string();
+    let chan_int = TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]);
+    items.push(Item::Struct(StructDef {
+        name: handle.clone(),
+        type_params: Vec::new(),
+        fields: port_order
+            .iter()
+            .map(|p| (p.clone(), chan_int.clone(), None))
+            .collect(),
+        derives: Vec::new(),
+        exported: false,
+        source_file: None,
+    }));
+
+    let ctor_fn_params: Vec<Param> = actor
+        .ctor_params
+        .iter()
+        .map(|(n, ty)| Param {
+            name: n.clone(),
+            ty: ty.clone(),
+            mutable: false,
+            variadic: false,
+        })
+        .collect();
+
+    let spawn_body = |cap: Expr| -> Vec<Stmt> {
+        let mut stmts = Vec::new();
+        for p in port_order {
+            stmts.push(Stmt::Let {
+                name: p.clone(),
+                mutable: false,
+                ownership: Ownership::None,
+                ty: None,
+                init: Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_spawn".into())),
+                    args: vec![cap.clone()],
+                },
+            });
+        }
+        if has_ctor {
+            let first = &port_order[0];
+            stmts.push(Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Ident("actor_send".into())),
+                args: vec![
+                    Expr::Ident(first.clone()),
+                    box_payload(envelope_lit(
+                        ctor_env_name.to_string(),
+                        CTOR_TAG,
+                        &actor.ctor_params,
+                    )),
+                ],
+            }));
+        }
+        let fields = port_order
+            .iter()
+            .map(|p| (p.clone(), Expr::Ident(p.clone())))
+            .collect();
+        stmts.push(Stmt::Return(Some(Expr::StructLit {
+            name: handle.clone(),
+            fields,
+            update: None,
+        })));
+        stmts
+    };
+
+    items.push(actor_fn(
+        format!("{name}_spawn"),
+        ctor_fn_params.clone(),
+        Some(TypeExpr::Named(handle.clone())),
+        spawn_body(Expr::Int(16)),
+    ));
+    let mut cap_params = vec![Param {
+        name: "__cap".into(),
+        ty: TypeExpr::Named("int".into()),
+        mutable: false,
+        variadic: false,
+    }];
+    cap_params.extend(ctor_fn_params);
+    items.push(actor_fn(
+        format!("{name}_spawn_cap"),
+        cap_params,
+        Some(TypeExpr::Named(handle.clone())),
+        spawn_body(Expr::Ident("__cap".into())),
+    ));
+
+    for p in port_order {
+        items.push(actor_fn(
+            format!("{name}_{p}_send"),
+            vec![
+                Param {
+                    name: "__h".into(),
+                    ty: TypeExpr::Named(handle.clone()),
+                    mutable: false,
+                    variadic: false,
+                },
+                Param {
+                    name: "__msg".into(),
+                    ty: TypeExpr::Named("int".into()),
+                    mutable: false,
+                    variadic: false,
+                },
+            ],
+            Some(TypeExpr::Named("bool".into())),
+            actor_send_body(name, Expr::Field {
+                base: Box::new(Expr::Ident("__h".into())), field: p.clone(),
+            }, Expr::Ident("__msg".into()), false),
+        ));
+    }
+    for arm in &actor.receives {
+        let p = arm_port(arm);
+        let params: Vec<Param> = arm
+            .params
+            .iter()
+            .map(|(n, ty)| Param {
+                name: n.clone(),
+                ty: ty.clone(),
+                mutable: false,
+                variadic: false,
+            })
+            .collect();
+        let args: Vec<Expr> = arm
+            .params
+            .iter()
+            .map(|(n, _)| Expr::Ident(n.clone()))
+            .collect();
+        items.push(actor_fn(
+            format!("{name}_{}_send", arm.message),
+            {
+                let mut ps = vec![Param {
+                    name: "__h".into(),
+                    ty: TypeExpr::Named(handle.clone()),
+                    mutable: false,
+                    variadic: false,
+                }];
+                ps.extend(params);
+                ps
+            },
+            Some(TypeExpr::Named("bool".into())),
+            vec![Stmt::Return(Some(Expr::Call {
+                callee: Box::new(Expr::Ident(format!("{name}_{p}_send"))),
+                args: vec![
+                    Expr::Ident("__h".into()),
+                    Expr::Call {
+                        callee: Box::new(Expr::Ident(format!("{name}_{}", arm.message))),
+                        args,
+                    },
+                ],
+            }))],
+        ));
+    }
+
+    let process = actor_process_from_m(actor, name, has_state);
+    let mut loop_stmts: Vec<Stmt> = Vec::new();
+    for p in port_order {
+        loop_stmts.push(Stmt::Let {
+            name: p.clone(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: Some(chan_int.clone()),
+            init: Expr::Field {
+                base: Box::new(Expr::Ident("__h".into())),
+                field: p.clone(),
+            },
+        });
+    }
+    loop_stmts.push(Stmt::Let {
+        name: "__run".into(),
+        mutable: true,
+        ownership: Ownership::None,
+        ty: None,
+        init: Expr::Int(1),
+    });
+    if has_ctor {
+        let first = port_order[0].clone();
+        loop_stmts.push(Stmt::Let {
+            name: "__ctor_m".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_recv".into())),
+                args: vec![Expr::Ident(first.clone())],
+            },
+        });
+        loop_stmts.push(Stmt::If {
+            init: None,
+            cond: Expr::Binary {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_msg_tag".into())),
+                    args: vec![Expr::Ident("__ctor_m".into())],
+                }),
+                right: Box::new(Expr::Int(0)),
+            },
+            then_block: Block {
+                stmts: {
+                    let mut early =
+                        drain_and_stop_ports(actor, name, port_order, has_ctor, ctor_env_name);
+                    early.push(Stmt::Return(Some(Expr::Int(0))));
+                    early
+                },
+                source_lines: Box::default(),
+            },
+            else_block: None,
+        });
+        loop_stmts.push(Stmt::Let {
+            name: "__ctor_pl".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_msg_payload".into())),
+                args: vec![Expr::Ident("__ctor_m".into())],
+            },
+        });
+        loop_stmts.push(Stmt::Let {
+            name: "__ctor_env".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: Some(TypeExpr::Named(ctor_env_name.into())),
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_unbox_payload".into())),
+                args: vec![Expr::Ident("__ctor_pl".into())],
+            },
+        });
+        for (pname, pty) in &actor.ctor_params {
+            loop_stmts.push(Stmt::Let {
+                name: pname.clone(),
+                mutable: false,
+                ownership: Ownership::None,
+                ty: Some(pty.clone()),
+                init: Expr::Field {
+                    base: Box::new(Expr::Ident("__ctor_env".into())),
+                    field: pname.clone(),
+                },
+            });
+        }
+    }
+    if has_state {
+        let mut lit_fields = Vec::new();
+        for (fname, _, def) in actor_fields {
+            if let Some(d) = def {
+                lit_fields.push((fname.clone(), d.clone()));
+            }
+        }
+        let init = if lit_fields.is_empty() {
+            Expr::StructLitPos {
+                name: state_ty.into(),
+                values: vec![],
+            }
+        } else {
+            Expr::StructLit {
+                name: state_ty.into(),
+                fields: lit_fields,
+                update: None,
+            }
+        };
+        loop_stmts.push(Stmt::Let {
+            name: "__st".into(),
+            mutable: true,
+            ownership: Ownership::None,
+            ty: Some(TypeExpr::Named(state_ty.into())),
+            init,
+        });
+    }
+    let mut while_body: Vec<Stmt> = Vec::new();
+    for p in port_order {
+        let mut then_stmts = vec![Stmt::Let {
+            name: "__m".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Ident("__got".into()),
+        }];
+        then_stmts.extend(process.clone());
+        then_stmts.push(Stmt::Continue(Some("__actor_loop".into())));
+        while_body.push(Stmt::IfLet {
+            pattern: Pattern::Variant {
+                name: "Ok".into(),
+                bindings: vec![Pattern::Ident("__got".into())],
+            },
+            scrutinee: Expr::Method {
+                receiver: Box::new(Expr::Ident(p.clone())),
+                method: "try_recv".into(),
+                args: vec![],
+            },
+            then_block: Block {
+                stmts: then_stmts,
+                source_lines: Box::default(),
+            },
+            else_block: None,
+        });
+    }
+    let sel_arms = port_order
+        .iter()
+        .map(|p| {
+            let mut body = vec![Stmt::Let {
+                name: "__m".into(),
+                mutable: false,
+                ownership: Ownership::None,
+                ty: None,
+                init: Expr::Call {
+                    callee: Box::new(Expr::Ident("chan_select_value".into())),
+                    args: vec![],
+                },
+            }];
+            body.extend(process.clone());
+            (
+                p.clone(),
+                Block {
+                    stmts: body,
+                    source_lines: Box::default(),
+                },
+            )
+        })
+        .collect();
+    while_body.push(Stmt::Select {
+        timeout_ms: Expr::Int(-1),
+        arms: sel_arms,
+        default_arm: None,
+    });
+    loop_stmts.push(Stmt::While {
+        label: Some("__actor_loop".into()),
+        cond: Expr::Binary {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Ident("__run".into())),
+            right: Box::new(Expr::Int(1)),
+        },
+        body: Block {
+            stmts: while_body,
+            source_lines: Box::default(),
+        },
+    });
+    loop_stmts.extend(drain_and_stop_ports(
+        actor,
+        name,
+        port_order,
+        has_ctor,
+        ctor_env_name,
+    ));
+    let ret_expr = if has_state {
+        if let Some((fname, _, _)) = actor_fields.iter().find(|(n, ty, _)| {
+            (n == "n"
+                || n == "count"
+                || n == "value"
+                || n == "result"
+                || n == "total"
+                || n == "state")
+                && matches!(ty, TypeExpr::Named(t) if t == "int" || t == "int64")
+        }) {
+            Expr::Field {
+                base: Box::new(Expr::Ident("__st".into())),
+                field: fname.clone(),
+            }
+        } else {
+            Expr::Int(0)
+        }
+    } else {
+        Expr::Int(0)
+    };
+    loop_stmts.push(Stmt::Return(Some(ret_expr)));
+    items.push(actor_fn(
+        format!("{name}_loop"),
+        vec![Param {
+            name: "__h".into(),
+            ty: TypeExpr::Named(handle),
+            mutable: false,
+            variadic: false,
+        }],
+        Some(TypeExpr::Named("int".into())),
+        loop_stmts,
+    ));
+    items
+}
+
+fn actor_process_from_m(actor: &ActorDef, name: &str, has_state: bool) -> Vec<Stmt> {
+    let mut stmts = vec![
+        Stmt::Let {
+            name: "__tag".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_msg_tag".into())),
+                args: vec![Expr::Ident("__m".into())],
+            },
+        },
+        Stmt::If {
+            init: None,
+            cond: Expr::Binary {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Ident("__tag".into())),
+                right: Box::new(Expr::Int(0)),
+            },
+            then_block: Block {
+                stmts: vec![
+                    Stmt::Assign {
+                        name: "__run".into(),
+                        value: Expr::Int(0),
+                    },
+                    Stmt::Break(None),
+                ],
+                source_lines: Box::default(),
+            },
+            else_block: None,
+        },
+        Stmt::Let {
+            name: "__pl".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_msg_payload".into())),
+                args: vec![Expr::Ident("__m".into())],
+            },
+        },
+    ];
+    let mut dispatch_arms: Vec<(i64, Vec<Stmt>)> = Vec::new();
+    for (i, arm) in actor.receives.iter().enumerate() {
+        let tag = (i + 1) as i64;
+        let needs_env = arm_needs_envelope(arm);
+        let mut arm_block = arm.body.clone();
+        if has_state {
+            rewrite_self_block(&mut arm_block, "__st");
+        }
+        let mut arm_stmts = Vec::new();
+        if !arm.params.is_empty() {
+            if !needs_env {
+                let (ref pname, ref pty) = arm.params[0];
+                arm_stmts.push(Stmt::Let {
+                    name: pname.clone(),
+                    mutable: false,
+                    ownership: Ownership::None,
+                    ty: Some(pty.clone()),
+                    init: Expr::Ident("__pl".into()),
+                });
+            } else {
+                let env_name = format!("{name}_{}_Env", arm.message);
+                arm_stmts.push(Stmt::Let {
+                    name: "__env".into(),
+                    mutable: false,
+                    ownership: Ownership::None,
+                    ty: Some(TypeExpr::Named(env_name)),
+                    init: Expr::Call {
+                        callee: Box::new(Expr::Ident("actor_unbox_payload".into())),
+                        args: vec![Expr::Ident("__pl".into())],
+                    },
+                });
+                for (pname, pty) in &arm.params {
+                    arm_stmts.push(Stmt::Let {
+                        name: pname.clone(),
+                        mutable: false,
+                        ownership: Ownership::None,
+                        ty: Some(pty.clone()),
+                        init: Expr::Field {
+                            base: Box::new(Expr::Ident("__env".into())),
+                            field: pname.clone(),
+                        },
+                    });
+                }
+            }
+        }
+        rewrite_return_to_continue(&mut arm_block.stmts);
+        arm_stmts.extend(arm_block.stmts);
+        if arm.message == "Bye" || arm.message == "Stop" {
+            arm_stmts.push(Stmt::Assign {
+                name: "__run".into(),
+                value: Expr::Int(0),
+            });
+        }
+        dispatch_arms.push((tag, arm_stmts));
+    }
+    let mut dispatch_else: Option<Block> = None;
+    for (tag, arm_stmts) in dispatch_arms.into_iter().rev() {
+        dispatch_else = Some(Block {
+            stmts: vec![Stmt::If {
+                init: None,
+                cond: Expr::Binary {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Ident("__tag".into())),
+                    right: Box::new(Expr::Int(tag)),
+                },
+                then_block: Block {
+                    stmts: arm_stmts,
+                    source_lines: Box::default(),
+                },
+                else_block: dispatch_else,
+            }],
+            source_lines: Box::default(),
+        });
+    }
+    if let Some(block) = dispatch_else {
+        stmts.extend(block.stmts);
+    }
+    stmts
 }
 
 fn expand_actor(actor: ActorDef) -> Vec<Item> {
@@ -738,11 +2139,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         items.push(Item::Struct(StructDef {
             name: ctor_env_name.clone(),
             type_params: Vec::new(),
-            fields: actor
-                .ctor_params
-                .iter()
-                .map(|(n, ty)| (n.clone(), ty.clone(), None))
-                .collect(),
+            fields: envelope_struct_fields(&actor.ctor_params),
             derives: Vec::new(),
             exported: false,
             source_file: None,
@@ -756,11 +2153,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             items.push(Item::Struct(StructDef {
                 name: env_name,
                 type_params: Vec::new(),
-                fields: arm
-                    .params
-                    .iter()
-                    .map(|(n, ty)| (n.clone(), ty.clone(), None))
-                    .collect(),
+                fields: envelope_struct_fields(&arm.params),
                 derives: Vec::new(),
                 exported: false,
                 source_file: None,
@@ -773,8 +2166,14 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     // or Session_Msg(args...) -> pack(tag, box_payload(env)) for envelope arms.
     for (i, arm) in actor.receives.iter().enumerate() {
         let tag = (i + 1) as i64;
-        let (params, pack_args) = if arm.params.is_empty() {
-            (vec![], vec![Expr::Int(tag), Expr::Int(0)])
+        let (params, packed) = if arm.params.is_empty() {
+            (
+                vec![],
+                Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_pack".into())),
+                    args: vec![Expr::Int(tag), Expr::Int(0)],
+                },
+            )
         } else if !arm_needs_envelope(arm) {
             // Fast zero-alloc path: single scalar
             let (ref pname, ref pty) = arm.params[0];
@@ -785,10 +2184,13 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                     mutable: false,
                     variadic: false,
                 }],
-                vec![Expr::Int(tag), Expr::Ident(pname.clone())],
+                Expr::Call {
+                    callee: Box::new(Expr::Ident("actor_pack".into())),
+                    args: vec![Expr::Int(tag), Expr::Ident(pname.clone())],
+                },
             )
         } else {
-            // Envelope path: construct struct, box pointer
+            // Envelope path: tag lives in the boxed struct; send the full pointer.
             let env_name = format!("{name}_{}_Env", arm.message);
             let fn_params: Vec<Param> = arm
                 .params
@@ -800,25 +2202,9 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                     variadic: false,
                 })
                 .collect();
-            let lit_fields: Vec<(String, Expr)> = arm
-                .params
-                .iter()
-                .map(|(n, _)| (n.clone(), Expr::Ident(n.clone())))
-                .collect();
-            let construct = Expr::StructLit {
-                name: env_name,
-                fields: lit_fields,
-                update: None,
-            };
             (
                 fn_params,
-                vec![
-                    Expr::Int(tag),
-                    Expr::Call {
-                        callee: Box::new(Expr::Ident("actor_box_payload".into())),
-                        args: vec![construct],
-                    },
-                ],
+                box_payload(envelope_lit(env_name, tag, &arm.params)),
             )
         };
         items.push(Item::Fn(FnDef {
@@ -828,10 +2214,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             params,
             ret: Some(TypeExpr::Named("int".into())),
             body: Block {
-                stmts: vec![Stmt::Return(Some(Expr::Call {
-                    callee: Box::new(Expr::Ident("actor_pack".into())),
-                    args: pack_args,
-                }))],
+                stmts: vec![Stmt::Return(Some(packed))],
                 source_lines: Box::default(),
             },
             exported: false,
@@ -843,7 +2226,40 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         }));
     }
 
-    const CTOR_TAG: i64 = 0x7FFF;
+    let mut all_envelopes: Vec<(i64, String)> = actor.receives.iter().enumerate()
+        .filter(|(_, arm)| arm_needs_envelope(arm))
+        .map(|(i, arm)| ((i + 1) as i64, format!("{name}_{}_Env", arm.message))).collect();
+    if has_ctor { all_envelopes.push((CTOR_TAG, ctor_env_name.clone())); }
+    items.push(actor_drop_message(name, &all_envelopes));
+
+    let mut port_order: Vec<String> = Vec::new();
+    for arm in &actor.receives {
+        let p = arm_port(arm);
+        if !port_order.contains(&p) {
+            port_order.push(p);
+        }
+    }
+    // A port named `control` is always polled first so Open/Bye/Init are not
+    // stuck behind a full exec queue (FayDB's head-of-line case).
+    if let Some(i) = port_order.iter().position(|p| p == "control") {
+        if i != 0 {
+            let c = port_order.remove(i);
+            port_order.insert(0, c);
+        }
+    }
+    if port_order.len() > 1 {
+        items.extend(expand_actor_ports(
+            &actor,
+            name,
+            &state_ty,
+            has_ctor,
+            has_state,
+            &ctor_env_name,
+            &port_order,
+            &actor_fields,
+        ));
+        return items;
+    }
 
     // Session_spawn(...ctor_args) -> chan[int] (default mailbox 16)
     let ctor_fn_params: Vec<Param> = actor
@@ -869,30 +2285,15 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     }];
 
     if has_ctor {
-        let lit_fields: Vec<(String, Expr)> = actor
-            .ctor_params
-            .iter()
-            .map(|(n, _)| (n.clone(), Expr::Ident(n.clone())))
-            .collect();
-        let construct = Expr::StructLit {
-            name: ctor_env_name.clone(),
-            fields: lit_fields,
-            update: None,
-        };
         spawn_stmts.push(Stmt::Expr(Expr::Call {
             callee: Box::new(Expr::Ident("actor_send".into())),
             args: vec![
                 Expr::Ident("__mbox".into()),
-                Expr::Call {
-                    callee: Box::new(Expr::Ident("actor_pack".into())),
-                    args: vec![
-                        Expr::Int(CTOR_TAG),
-                        Expr::Call {
-                            callee: Box::new(Expr::Ident("actor_box_payload".into())),
-                            args: vec![construct],
-                        },
-                    ],
-                },
+                box_payload(envelope_lit(
+                    ctor_env_name.clone(),
+                    CTOR_TAG,
+                    &actor.ctor_params,
+                )),
             ],
         }));
     }
@@ -940,30 +2341,15 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     }];
 
     if has_ctor {
-        let lit_fields: Vec<(String, Expr)> = actor
-            .ctor_params
-            .iter()
-            .map(|(n, _)| (n.clone(), Expr::Ident(n.clone())))
-            .collect();
-        let construct = Expr::StructLit {
-            name: ctor_env_name.clone(),
-            fields: lit_fields,
-            update: None,
-        };
         spawn_cap_stmts.push(Stmt::Expr(Expr::Call {
             callee: Box::new(Expr::Ident("actor_send".into())),
             args: vec![
                 Expr::Ident("__mbox".into()),
-                Expr::Call {
-                    callee: Box::new(Expr::Ident("actor_pack".into())),
-                    args: vec![
-                        Expr::Int(CTOR_TAG),
-                        Expr::Call {
-                            callee: Box::new(Expr::Ident("actor_box_payload".into())),
-                            args: vec![construct],
-                        },
-                    ],
-                },
+                box_payload(envelope_lit(
+                    ctor_env_name.clone(),
+                    CTOR_TAG,
+                    &actor.ctor_params,
+                )),
             ],
         }));
     }
@@ -1011,10 +2397,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         ],
         ret: Some(TypeExpr::Named("bool".into())),
         body: Block {
-            stmts: vec![Stmt::Return(Some(Expr::Call {
-                callee: Box::new(Expr::Ident("actor_send".into())),
-                args: vec![Expr::Ident("__mbox".into()), Expr::Ident("__tag".into())],
-            }))],
+            stmts: actor_send_body(name, Expr::Ident("__mbox".into()), Expr::Ident("__tag".into()), false),
             source_lines: Box::default(),
         },
         exported: false,
@@ -1024,6 +2407,21 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         contracts: vec![],
         source_file: None,
     }));
+
+    let mut envelopes: Vec<(i64, String)> = Vec::new();
+    if has_ctor {
+        envelopes.push((CTOR_TAG, ctor_env_name.clone()));
+    }
+    for (i, arm) in actor.receives.iter().enumerate() {
+        if arm_needs_envelope(arm) {
+            envelopes.push(((i + 1) as i64, format!("{name}_{}_Env", arm.message)));
+        }
+    }
+
+    items.push(actor_fn(format!("{name}_try_send"), vec![
+        Param { name: "__mbox".into(), ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]), mutable: false, variadic: false },
+        Param { name: "__msg".into(), ty: TypeExpr::Named("int".into()), mutable: false, variadic: false },
+    ], Some(TypeExpr::Named("int".into())), actor_send_body(name, Expr::Ident("__mbox".into()), Expr::Ident("__msg".into()), true)));
 
     // Session_loop(mbox) — message dispatch (+ optional state)
     let mut loop_stmts: Vec<Stmt> = vec![Stmt::Let {
@@ -1056,7 +2454,15 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 right: Box::new(Expr::Int(0)),
             },
             then_block: Block {
-                stmts: vec![Stmt::Return(Some(Expr::Int(0)))],
+                stmts: {
+                    let mut early = mailbox_drain_stmts(&envelopes);
+                    early.push(Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("actor_stop".into())),
+                        args: vec![Expr::Ident("__mbox".into())],
+                    }));
+                    early.push(Stmt::Return(Some(Expr::Int(0))));
+                    early
+                },
                 source_lines: Box::default(),
             },
             else_block: None,
@@ -1176,17 +2582,10 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
     ];
 
-    let mut envelope_tags = Vec::new();
-    if has_ctor {
-        envelope_tags.push(CTOR_TAG);
-    }
-
+    let mut dispatch_arms: Vec<(i64, Vec<Stmt>)> = Vec::new();
     for (i, arm) in actor.receives.iter().enumerate() {
         let tag = (i + 1) as i64;
         let needs_env = arm_needs_envelope(arm);
-        if needs_env {
-            envelope_tags.push(tag);
-        }
         let mut arm_block = arm.body.clone();
         if has_state {
             rewrite_self_block(&mut arm_block, "__st");
@@ -1239,30 +2638,44 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 value: Expr::Int(0),
             });
         }
-        while_body.push(Stmt::If {
-            init: None,
-            cond: Expr::Binary {
-                op: BinOp::Eq,
-                left: Box::new(Expr::Ident("__tag".into())),
-                right: Box::new(Expr::Int(tag)),
-            },
-            then_block: Block {
-                stmts: arm_stmts,
-                source_lines: Box::default(),
-            },
-            else_block: None,
+        dispatch_arms.push((tag, arm_stmts));
+    }
+
+    // else-if chain so a hit does not keep testing later tags.
+    let mut dispatch_else: Option<Block> = None;
+    for (tag, arm_stmts) in dispatch_arms.into_iter().rev() {
+        dispatch_else = Some(Block {
+            stmts: vec![Stmt::If {
+                init: None,
+                cond: Expr::Binary {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Ident("__tag".into())),
+                    right: Box::new(Expr::Int(tag)),
+                },
+                then_block: Block {
+                    stmts: arm_stmts,
+                    source_lines: Box::default(),
+                },
+                else_block: dispatch_else,
+            }],
+            source_lines: Box::default(),
         });
+    }
+    if let Some(block) = dispatch_else {
+        while_body.extend(block.stmts);
     }
 
     // If state has an int field `n`, `count`, etc., return it on exit; else 0.
     let ret_expr = if has_state {
-        if let Some((fname, _, _)) = actor_fields
-            .iter()
-            .find(|(n, ty, _)| {
-                (n == "n" || n == "count" || n == "value" || n == "result" || n == "total" || n == "state")
-                    && matches!(ty, TypeExpr::Named(t) if t == "int" || t == "int64")
-            })
-        {
+        if let Some((fname, _, _)) = actor_fields.iter().find(|(n, ty, _)| {
+            (n == "n"
+                || n == "count"
+                || n == "value"
+                || n == "result"
+                || n == "total"
+                || n == "state")
+                && matches!(ty, TypeExpr::Named(t) if t == "int" || t == "int64")
+        }) {
             Expr::Field {
                 base: Box::new(Expr::Ident("__st".into())),
                 field: fname.clone(),
@@ -1287,86 +2700,8 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
     });
 
-    // Drain any remaining unhandled envelope payloads on exit to prevent leaks
-    if !envelope_tags.is_empty() {
-        let mut drain_stmts = vec![
-            Stmt::Let {
-                name: "__dm".into(),
-                mutable: false,
-                ownership: Ownership::None,
-                ty: None,
-                init: Expr::Call {
-                    callee: Box::new(Expr::Ident("actor_recv".into())),
-                    args: vec![Expr::Ident("__mbox".into())],
-                },
-            },
-            Stmt::Let {
-                name: "__dtag".into(),
-                mutable: false,
-                ownership: Ownership::None,
-                ty: None,
-                init: Expr::Call {
-                    callee: Box::new(Expr::Ident("actor_msg_tag".into())),
-                    args: vec![Expr::Ident("__dm".into())],
-                },
-            },
-            Stmt::Let {
-                name: "__dpl".into(),
-                mutable: false,
-                ownership: Ownership::None,
-                ty: None,
-                init: Expr::Call {
-                    callee: Box::new(Expr::Ident("actor_msg_payload".into())),
-                    args: vec![Expr::Ident("__dm".into())],
-                },
-            },
-        ];
-
-        let tag_match_cond = envelope_tags.iter().fold(None, |acc, &t| {
-            let cmp = Expr::Binary {
-                op: BinOp::Eq,
-                left: Box::new(Expr::Ident("__dtag".into())),
-                right: Box::new(Expr::Int(t)),
-            };
-            match acc {
-                None => Some(cmp),
-                Some(prev) => Some(Expr::Binary {
-                    op: BinOp::Or,
-                    left: Box::new(prev),
-                    right: Box::new(cmp),
-                }),
-            }
-        }).unwrap();
-
-        drain_stmts.push(Stmt::If {
-            init: None,
-            cond: tag_match_cond,
-            then_block: Block {
-                stmts: vec![Stmt::Expr(Expr::Call {
-                    callee: Box::new(Expr::Ident("actor_free_payload".into())),
-                    args: vec![Expr::Ident("__dpl".into())],
-                })],
-                source_lines: Box::default(),
-            },
-            else_block: None,
-        });
-
-        loop_stmts.push(Stmt::While {
-            label: None,
-            cond: Expr::Binary {
-                op: BinOp::Gt,
-                left: Box::new(Expr::Call {
-                    callee: Box::new(Expr::Ident("actor_len".into())),
-                    args: vec![Expr::Ident("__mbox".into())],
-                }),
-                right: Box::new(Expr::Int(0)),
-            },
-            body: Block {
-                stmts: drain_stmts,
-                source_lines: Box::default(),
-            },
-        });
-    }
+    // Drain remaining envelopes by typed unbox so nested strings/chans/slices free.
+    loop_stmts.extend(mailbox_drain_stmts(&envelopes));
 
     loop_stmts.push(Stmt::Expr(Expr::Call {
         callee: Box::new(Expr::Ident("actor_stop".into())),

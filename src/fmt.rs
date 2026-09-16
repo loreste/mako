@@ -278,6 +278,22 @@ fn fmt_item(item: &Item) -> String {
                 o.push_str(INDENT);
                 o.push_str("receive ");
                 o.push_str(&arm.message);
+                if !arm.params.is_empty() {
+                    o.push('(');
+                    for (i, (n, t)) in arm.params.iter().enumerate() {
+                        if i > 0 {
+                            o.push_str(", ");
+                        }
+                        o.push_str(n);
+                        o.push_str(": ");
+                        o.push_str(&fmt_type(t));
+                    }
+                    o.push(')');
+                }
+                if let Some(port) = &arm.port {
+                    o.push_str(" on ");
+                    o.push_str(port);
+                }
                 o.push(' ');
                 o.push_str(&fmt_block(&arm.body, 1));
                 o.push('\n');
@@ -528,9 +544,23 @@ fn fmt_stmt(s: &Stmt, indent: usize) -> String {
                 fmt_block(body, indent)
             )
         }
-        Stmt::IfLet { pattern, scrutinee, then_block, else_block } => {
-            let s = format!("if let {} = {} {}", fmt_pattern(pattern), fmt_expr(scrutinee, 0), fmt_block(then_block, indent));
-            if let Some(eb) = else_block { format!("{s} else {}", fmt_block(eb, indent)) } else { s }
+        Stmt::IfLet {
+            pattern,
+            scrutinee,
+            then_block,
+            else_block,
+        } => {
+            let s = format!(
+                "if let {} = {} {}",
+                fmt_pattern(pattern),
+                fmt_expr(scrutinee, 0),
+                fmt_block(then_block, indent)
+            );
+            if let Some(eb) = else_block {
+                format!("{s} else {}", fmt_block(eb, indent))
+            } else {
+                s
+            }
         }
         Stmt::Break(None) => "break".into(),
         Stmt::Break(Some(l)) => format!("break {l}"),

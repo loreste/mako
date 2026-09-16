@@ -15,9 +15,31 @@ locks workload-specific budgets in
 [`benchmarks/performance-contract.json`](../benchmarks/performance-contract.json)
 and CI enforces the reproducible subset with
 `./scripts/performance-contract.sh`. A faster-than-Rust statement applies only
-to rows marked `strict_rust_claim: true`; bounded channel send/recv is measured
-against Rust but remains a regression-only budget until the runtime closes that
-gap.
+to rows marked `strict_rust_claim: true`. Bounded channel send/recv (`chan50k`)
+and single-producer actor delivery (`actor200k`) are measured against Rust `sync_channel` and gated
+as 1.5× regression budgets; on a quiet Apple arm64 host the uncontended channel
+path is typically under 1.0× Rust.
+
+### Actor contention and scaling
+
+Run `./scripts/bench-actor-scaling.sh` on a quiet host after `cargo build --release`.
+It compares equal 200,000-message workloads with Rust `sync_channel`, checks the
+final totals, and reports median time and throughput over five alternating runs.
+Set `MAKO_BENCH_SAMPLES` to change the sample count. Cases cover 1, 2, 4, and 8
+producers at capacities 64 and 1024, then 2, 4, and 8 independent actor shards.
+
+One actor serializes state mutation. Adding producers increases contention;
+separate actors can process independent state concurrently. Named ports isolate
+backlogs and prioritize control traffic, but do not run handlers in parallel.
+Use bounded capacities for backpressure, keep handlers short, and measure before
+choosing a shard count. These scheduling-sensitive measurements are diagnostic;
+the existing performance gates remain enforced.
+
+On the local Apple arm64 validation host, seven alternating before/after runs
+of the wakeup change improved the 1,024-slot cases by 1.17–1.38× with 2–8
+producers. The 64-slot/eight-producer case was unchanged within noise. These are
+observations from that host, not portable throughput guarantees; rerun the
+script on the deployment hardware.
 
 Bias toward the fast design. Convenience that costs belongs off the hot path
 or behind an opt-in. Measure vs hand-C and Rust per workload
