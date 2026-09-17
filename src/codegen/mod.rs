@@ -16098,6 +16098,22 @@ impl Codegen {
                         .unwrap_or_else(|| vty.clone())
                 });
                 let val = self.prepare_own_store_rhs(value, &cty_for_rhs, val);
+                // A POD self-reslice must not discard the sole owning header.
+                // Prefix truncation keeps its allocation in O(1); offset views
+                // materialize owned storage before the old owner is released.
+                let val = if matches!(value, Expr::Slice { .. })
+                    && matches!(
+                        cty_for_rhs.as_str(),
+                        "MakoIntArray" | "MakoByteArray" | "MakoFloatArray" | "MakoBoolArray"
+                    )
+                {
+                    let view = self.fresh("reassign_view");
+                    self.emit_line(format_args!("{cty_for_rhs} {view} = {val};"));
+                    self.emit_line(format_args!("if ({view}.data == {mn}.data && {mn}.cap > 0) {view}.cap = {mn}.cap;"));
+                    self.ensure_slice_owned(&cty_for_rhs, view)
+                } else {
+                    val
+                };
                 if let Some(cty) = borrowed_struct_ty {
                     // Pointer-backed owning struct parameters borrow the caller's
                     // storage. Replace that storage, then free previous fields
@@ -21558,7 +21574,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "temp_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tf");
                             self.line(&format!("MakoString {tmp} = mako_temp_file({p});"));
                             return ("MakoString".into(), tmp);

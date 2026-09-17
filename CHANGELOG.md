@@ -2,6 +2,11 @@
 
 ## 0.6.35
 
+- Preserve owned POD backing on prefix self-reslices and materialize offset
+  views before replacement, fixing connection free-slot recycling leaks (#64).
+- Reclaim temporary filename prefixes and keep page-write ownership regressions
+  portable across platforms with unsupported page managers (#64).
+
 - Release fresh owning struct arguments after borrowed calls, including nested
   database result processing (#64).
 
