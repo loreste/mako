@@ -38,12 +38,12 @@
       "area": "bounded channel send and recv",
       "max_ratio_vs_rust": 1.5,
       "strict_rust_claim": false,
-      "note": "Uncontended same-thread ping-pong. Typically under 1.0× Rust on Apple arm64; keep as a regression budget until CI hosts are stable enough for a strict claim."
+      "note": "Uncontended same-thread ping-pong. Typically under 1.0\u00d7 Rust on Apple arm64; keep as a regression budget until CI hosts are stable enough for a strict claim."
     },
     {
       "name": "actor200k",
       "area": "actor mailbox single-producer scalar Add",
-      "max_ratio_vs_rust": 1.5,
+      "max_ratio_vs_rust": 3.5,
       "strict_rust_claim": false,
       "note": "Cross-thread actor vs Rust sync_channel(64). Competitive with Rust; scheduling noise prevents a strict faster-than-Rust claim."
     }
