@@ -128,21 +128,23 @@ static inline void mako_rc_retain(void *data) {
         }
     }
 }
-/* Claim the final release before destroying elements; a separate shared()
- * check followed by release can miss element cleanup under concurrent drops. */
+/* Check if this is the final release (prev count == 1) without freeing.
+ * Caller handles element cleanup before freeing the block. */
 static inline int mako_rc_release_last(void *data) {
+    if (!data) return 0;
+    uint32_t prev = atomic_fetch_sub_explicit(mako_rc_of(data), 1, memory_order_acq_rel);
+    if (prev == 0) { fprintf(stderr, "mako: slice refcount underflow\n"); abort(); }
+    return prev == 1;
+}
+static inline int mako_rc_release(void *data) {
     if (!data) return 0;
     uint32_t prev = atomic_fetch_sub_explicit(mako_rc_of(data), 1, memory_order_acq_rel);
     if (prev == 0) {
         fprintf(stderr, "mako: slice refcount underflow\n");
         abort();
     }
-    return prev == 1;
-}
-static inline int mako_rc_release(void *data) {
-    if (!mako_rc_release_last(data)) return 0;
-    free((char *)data - MAKO_RC_HEADER);
-    return 1;
+    if (prev == 1) { free((char *)data - MAKO_RC_HEADER); return 1; }
+    return 0;
 }
 static inline int mako_rc_shared(void *data) {
     if (!data) return 0;
@@ -6830,7 +6832,6 @@ static inline int64_t mako_chan_str_select2(
 typedef struct {
     _Atomic uint32_t refs;
     void **buf;
-    void (*drop_payload)(void *); /* immutable after construction */
     size_t cap; /* 0 = unbuffered rendezvous */
     size_t head;
     size_t tail;
@@ -6853,15 +6854,6 @@ static inline MakoChanPtr *mako_chan_ptr_new(int64_t capacity) {
     pthread_mutex_init(&c->mu, NULL);
     pthread_cond_init(&c->can_send, NULL);
     pthread_cond_init(&c->can_recv, NULL);
-    return c;
-}
-
-/* Install the payload destructor before publishing the channel to workers. */
-static inline MakoChanPtr *mako_chan_ptr_new_owned(
-    int64_t capacity, void (*drop_payload)(void *)
-) {
-    MakoChanPtr *c = mako_chan_ptr_new(capacity);
-    c->drop_payload = drop_payload;
     return c;
 }
 
@@ -7035,10 +7027,7 @@ static inline void mako_chan_ptr_free(MakoChanPtr *c) {
     size_t slots = mako_chan_alloc_slots(c->cap);
     while (c->count > 0) {
         void *p = c->buf[c->head];
-        if (p) {
-            if (c->drop_payload) c->drop_payload(p);
-            free(p);
-        }
+        if (p) free(p);
         c->head = (c->head + 1) % slots;
         c->count--;
     }
@@ -11357,34 +11346,26 @@ static inline int64_t mako_actor_try_recv(MakoActor *a) {
     return message;
 }
 
-/* Transfer a bounded prefix of the mailbox to one receiver. Never wait to
- * fill a batch: low-load delivery incurs no batch-fill delay.
- * The caller owns every returned message, including unprocessed envelopes. */
 static inline int64_t mako_actor_recv_batch(MakoActor *a, MakoIntArray dst) {
     if (!a || dst.len == 0) return 0;
-    size_t limit = dst.len < 64 ? dst.len : 64;
+    size_t limit = dst.len < 16 ? dst.len : 16;
     pthread_mutex_lock(&a->mu);
     while (a->count == 0 && !a->closed) {
-        int64_t start = mako_now_ns();
         a->waiters_recv++;
         pthread_cond_wait(&a->can_recv, &a->mu);
         a->waiters_recv--;
-        mako_rt_note_lock_wait(mako_now_ns() - start);
     }
     size_t n = a->count < limit ? a->count : limit;
     for (size_t i = 0; i < n; ++i) {
         dst.data[i] = a->buf[a->head];
-        mako_chan_trace_recv(a, dst.data[i]);
         if (a->cap > 0 && ++a->head == a->cap) a->head = 0;
     }
     a->count -= n;
-    /* One signal cannot release multiple blocked producers after a batch. */
     if (n && a->waiters_send) {
         if (a->cap == 0 || n > 1) pthread_cond_broadcast(&a->can_send);
         else pthread_cond_signal(&a->can_send);
     }
     pthread_mutex_unlock(&a->mu);
-    for (size_t i = 0; i < n; ++i) mako_rt_counter_inc(&mako_rt_channel_recvs);
     return (int64_t)n;
 }
 
