@@ -2,6 +2,24 @@
 
 ## 0.6.35
 
+- Reclaim temporary strings consumed by `len`, including channel receive and
+  user-function results (#64).
+
+- Release superseded retained channel fields when replacing a struct with a
+  returned alias, preventing per-connection handle leaks (#64).
+
+- Reclaim `str_cut` results and temporary strings borrowed by user functions,
+  file operations, and case-insensitive slice searches (#64).
+
+- Run element destructors when replacing owned struct-array fields so table and
+  column replacement releases nested payloads on the final reference (#64).
+
+- Free the previous string after self-reassignment through allocating string
+  builtins such as trim; these functions borrow their input (#64).
+
+- Release superseded owned payloads in nested struct-field assignments, including
+  log-array trimming and append growth (#64).
+
 - Fix retained slice-field replacement leaking a reference when the old and new
   headers share backing storage; preserve append ownership and retained aliases.
 

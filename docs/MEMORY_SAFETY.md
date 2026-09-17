@@ -277,6 +277,16 @@ See [CONSOLIDATION.md](CONSOLIDATION.md).
 
 ---
 
+`len` also reclaims freshly owned string results after reading their length.
+User-function string arguments, file operations, and slice searches reclaim
+owned temporaries after use. `str_cut` returns an owned string array.
+Allocating string builtins borrow their input; assigning their result back to
+the input binding releases its previous allocation.
+Replacing a struct array runs its element destructors when the final backing
+reference is released, including nested string and slice payloads.
+Nested struct-field assignment also releases the previous owned payload.
+Retained channel fields also release the superseded reference on struct
+replacement, preserving independently retained senders and receivers.
 Retained slice-field replacement releases the superseded reference even when
 both headers point at the same allocation. Append retains its separate transfer
 semantics; other retained aliases remain valid after replacement or growth.

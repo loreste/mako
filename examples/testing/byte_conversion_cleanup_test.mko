@@ -32,6 +32,8 @@ fn choose_token(text: string) -> TokenChoice {
     return TokenChoice { value: chosen }
 }
 
+fn borrowed_text_length(text: string) -> int { return len(text) }
+
 fn response_text(text: string) -> string {
     let output = str_builder()
     builder_write(output, str_to_upper(text))
@@ -133,6 +135,17 @@ export fn TestQueryTemporaryCleanup() {
     let parts = ["hello", "hé"]
     let mut i = 0
     while i < 1000 {
+        let mut trimmed = str_repeat(" value ", 3)
+        trimmed = str_trim_space(trimmed)
+        trimmed = str_trim(trimmed, "e")
+        assert_eq(len(trimmed), 18)
+        assert_eq(borrowed_text_length(str_repeat("temporary", 3)), 27)
+        assert_eq(str_slice_ci_index("select VALUES", 0, 13, str_repeat("values", 1)), 7)
+        let cut = str_cut(str_repeat("left:right", 1), ":")
+        assert_eq(len(cut), 2)
+        assert_eq(file_open(str_repeat("/issue64-missing-directory/file", 1), 0, 0), -1)
+        assert_eq(write_file("/issue64-missing-directory/file", str_repeat("data", 3)), -1)
+        assert_eq(append_file("/issue64-missing-directory/file", str_repeat("data", 3)), -1)
         let choice = choose_token("select value from table")
         assert(str_eq(choice.value, "value"))
         let response = response_text("hello")
@@ -176,9 +189,60 @@ export fn TestByteConversionCleanup() {
     }
 }
 
+struct NestedQueryState { state: QueryState }
+
+export fn TestNestedFieldCleanup() {
+    let mut outer = NestedQueryState { state: QueryState { values: [1], labels: ["seed"] } }
+    let mut i = 0
+    while i < 1000 {
+        outer.state.labels = append(outer.state.labels, str_repeat("entry", 3))
+        let retained = retain_values(outer.state.values)
+        outer.state.values = retained
+        outer.state.labels = [str_repeat("replacement", 2)]
+        assert_eq(len(outer.state.labels[0]), 22)
+        i = i + 1
+    }
+}
+
+struct QueryBatch { states: []QueryState }
+
+export fn TestStructArrayReplacementCleanup() {
+    let mut batch = QueryBatch { states: make([]QueryState, 0, 1) }
+    let mut i = 0
+    while i < 1000 {
+        let mut fresh = make([]QueryState, 0, 1)
+        fresh = append(fresh, QueryState { values: [i], labels: [str_repeat("payload", 3)] })
+        batch.states = fresh
+        assert_eq(batch.states[0].values[0], i)
+        i = i + 1
+    }
+}
+
+struct SessionHandles { numbers: chan[int], texts: chan[string], objects: chan[TokenChoice] }
+fn retain_session_handles(handles: SessionHandles) -> SessionHandles { return handles }
+
+export fn TestChannelFieldReplacementCleanup() {
+    let mut i = 0
+    while i < 1000 {
+        let mut handles = SessionHandles { numbers: chan_open[int](1), texts: chan_open[string](1), objects: chan_open[TokenChoice](1) }
+        let retained = retain_session_handles(handles)
+        handles = retain_session_handles(handles)
+        let _ = handles.numbers.send(i)
+        assert_eq(retained.numbers.recv(), i)
+        let _ = handles.texts.send("text")
+        assert_eq(len(retained.texts.recv()), 4)
+        let _ = handles.objects.send(TokenChoice { value: "object" })
+        assert_eq(len(receive_token(retained.objects)), 6)
+        i = i + 1
+    }
+}
+
 fn main() {
     TestByteConversionCleanup()
     TestQueryTemporaryCleanup()
     TestContainerReplacementCleanup()
     TestRetainedFieldCleanup()
+    TestNestedFieldCleanup()
+    TestStructArrayReplacementCleanup()
+    TestChannelFieldReplacementCleanup()
 }

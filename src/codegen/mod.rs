@@ -2659,7 +2659,7 @@ impl Codegen {
         // a builtin handing back a freshly allocated handle that `own_free_fn`
         // knows how to release. Without it the scope-exit drop is never
         // emitted and every builder leaks its struct and buffer.
-        matches!(name, "env_keys" | "read_dir" | "str_builder" | "str_split" | "str_fields")
+        matches!(name, "env_keys" | "read_dir" | "str_builder" | "str_split" | "str_fields" | "str_cut")
     }
 
     fn builtin_returns_borrowed_string(name: &str) -> bool {
@@ -4178,8 +4178,10 @@ impl Codegen {
                 ));
             }
             other if other.starts_with("MakoArr_") => {
+                // The array destructor releases element payloads on the final
+                // reference. Releasing only backing leaks owned struct fields.
                 self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
+                    "if ({old}.data != {new}.data) {free_fn}({old});"
                 ));
             }
             _ => {
@@ -4592,7 +4594,7 @@ impl Codegen {
                     self.out,
                     "{indent}if ({cond}) {{ {free_fn}({old}.{path}); }}"
                 );
-                self.write_shared_slice_replacement_release(
+                self.write_retained_replacement_release(
                     &format!("{old}.{path}"),
                     &format!("{new}.{path}"),
                     &fty,
@@ -4604,20 +4606,25 @@ impl Codegen {
         if let Some(ff) = Self::own_free_fn(cty) {
             let cond = Self::owning_field_replaced_cond(cty, old, new);
             let _ = writeln!(self.out, "{indent}if ({cond}) {{ {ff}({old}); }}");
-            self.write_shared_slice_replacement_release(old, new, cty, indent);
+            self.write_retained_replacement_release(old, new, cty, indent);
         }
     }
 
     /// A cloned replacement may retain the same slice backing. Pointer equality
     /// skips dest-destroy, but the superseded owner still owes one release.
     /// Views have no owner reference and must never inspect an RC header.
-    fn write_shared_slice_replacement_release(
+    fn write_retained_replacement_release(
         &mut self,
         old: &str,
         new: &str,
         cty: &str,
         indent: &str,
     ) {
+        if matches!(cty, "MakoChan*" | "MakoChanStr*" | "MakoChanPtr*") {
+            let free_fn = Self::own_free_fn(cty).expect("channel destructor");
+            let _ = writeln!(self.out, "{indent}if ({old} == {new} && {old}) {free_fn}({old});");
+            return;
+        }
         if Self::slice_backing_release(cty) != "mako_rc_release" {
             return;
         }
@@ -4665,24 +4672,12 @@ impl Codegen {
                 &format!("{dest}.{path}"),
             );
             self.emit_line(format_args!("if ({cond}) {{ {free_fn}({old}.{path}); }}"));
-            // A returned struct may carry an RC-retained alias of the old
-            // array field. The backing pointer is unchanged, so the normal
-            // replacement predicate skips cleanup; release the superseded
-            // owner reference while retaining the returned alias.
-            if fty.starts_with("MakoArr_")
-                || matches!(
-                    fty.as_str(),
-                    "MakoIntArray"
-                        | "MakoByteArray"
-                        | "MakoStrArray"
-                        | "MakoFloatArray"
-                        | "MakoBoolArray"
-                )
-            {
-                self.emit_line(format_args!(
-                    "if (!({cond}) && {old}.{path}.data == {dest}.{path}.data && {old}.{path}.data && mako_rc_shared({old}.{path}.data)) mako_rc_release({old}.{path}.data);"
-                ));
-            }
+            self.write_retained_replacement_release(
+                &format!("{old}.{path}"),
+                &format!("{dest}.{path}"),
+                &fty,
+                "",
+            );
         }
     }
 
@@ -4731,7 +4726,7 @@ impl Codegen {
             if retained_replacement {
                 // prepare_own_store_rhs supplied an independent reference.
                 // Replacing a field with the same backing still drops its old reference.
-                self.write_shared_slice_replacement_release(&old, dest, cty, "");
+                self.write_retained_replacement_release(&old, dest, cty, "");
             }
         }
     }
@@ -16119,10 +16114,12 @@ impl Codegen {
                 // that value. It may return the same allocation (append/realloc is
                 // the common case), so snapshotting/freeing the pre-call pointer is
                 // a use-after-move and potentially a double-free.
+                // Allocating string builtins borrow inputs; reclaim the old
+                // string after evaluating a self-reassignment such as trim.
                 let self_consuming_call = matches!(
-                    value,
-                    Expr::Call { args, .. }
-                        if args.iter().any(|arg| matches!(arg, Expr::Ident(base) if base == name))
+                    value, Expr::Call { callee, args }
+                        if !matches!(callee.as_ref(), Expr::Ident(function) if Self::builtin_returns_owned_string(function))
+                            && args.iter().any(|arg| matches!(arg, Expr::Ident(base) if base == name))
                 );
                 if self_consuming_call {
                     // SAFE-042: append/grow functions take the slice by value and
@@ -16615,7 +16612,15 @@ impl Codegen {
                         self.scope_drop_safe.insert(mn);
                     }
                 }
-                self.emit_line(format_args!("{b}{arrow}{field} = {v};"));
+                // Nested struct fields own their payload just like local fields.
+                let dest = format!("{b}{arrow}{field}");
+                if let Some(field_free) = Self::own_free_fn(&vty) {
+                    self.emit_assign_owned_value(&dest, &vty, &v, &field_free, is_append, retained_replacement);
+                } else if !self.struct_own_field_frees(&vty).is_empty() {
+                    self.emit_assign_owning_struct(&dest, &vty, &v);
+                } else {
+                    self.emit_line(format_args!("{dest} = {v};"));
+                }
             }
             Stmt::Expr(e) => {
                 let (ty, val) = self.emit_expr(e);
@@ -18239,29 +18244,29 @@ impl Codegen {
                             );
                         }
                         "str_slice_ci_eq" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, l) = self.emit_expr(&args[2]);
-                            let (_, t) = self.emit_expr(&args[3]);
+                            let t = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_str_slice_ci_eq({s}, {o}, {l}, {t})"),
                             );
                         }
                         "str_slice_ci_index" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, l) = self.emit_expr(&args[2]);
-                            let (_, t) = self.emit_expr(&args[3]);
+                            let t = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_str_slice_ci_index({s}, {o}, {l}, {t})"),
                             );
                         }
                         "str_slice_ci_starts" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_str_slice_ci_starts({s}, {o}, {p})"),
@@ -19518,7 +19523,7 @@ impl Codegen {
                         }
                         // Direct I/O
                         "file_open" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
                             let (_, f) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("fo");
@@ -21422,15 +21427,15 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "write_file" => {
-                            let p = self.emit_str_arg(&args[0]);
-                            let c = self.emit_str_arg(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let c = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("wf");
                             self.line(&format!("int64_t {tmp} = mako_write_file({p}, {c});"));
                             return ("int64_t".into(), tmp);
                         }
                         "append_file" => {
-                            let p = self.emit_str_arg(&args[0]);
-                            let c = self.emit_str_arg(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let c = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("af");
                             self.line(&format!("int64_t {tmp} = mako_append_file({p}, {c});"));
                             return ("int64_t".into(), tmp);
@@ -31533,8 +31538,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "str_cut" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, sep) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let sep = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("scut");
                             self.line(&format!("MakoStrArray {tmp} = mako_str_cut({s}, {sep});"));
                             return ("MakoStrArray".into(), tmp);
@@ -35649,6 +35654,16 @@ impl Codegen {
                                 return ("int64_t".into(), format!("(int64_t){v}.len"));
                             }
                             if ty == "MakoString" {
+                                let v = if self.expr_is_scope_drop_safe(&args[0], &ty)
+                                    && !self.own_drop_live.contains(&v)
+                                {
+                                    let owned = self.fresh("len_string");
+                                    self.emit_line(format_args!("MakoString {owned} = {v};"));
+                                    self.note_own_bind_scope(&owned);
+                                    self.register_own_drop(&owned, &ty);
+                                    self.scope_drop_safe.insert(owned.clone());
+                                    owned
+                                } else { v };
                                 return ("int64_t".into(), format!("mako_str_len({v})"));
                             }
                             if ty == "MakoByteArray" {
@@ -36237,13 +36252,12 @@ impl Codegen {
                                     } else {
                                         self.emit_expr(a)
                                     }
-                                } else if matches!(a, Expr::String(_))
-                                    && expected_c_params
+                                } else if expected_c_params
                                         .as_ref()
                                         .and_then(|params| params.get(i))
                                         .is_some_and(|ty| ty == "MakoString")
                                 {
-                                    ("MakoString".into(), self.emit_str_arg(a))
+                                    ("MakoString".into(), self.emit_str_arg_borrow(a))
                                 } else if self.param_passed_by_ptr(name, i)
                                     && matches!(a, Expr::Index { .. })
                                 {
