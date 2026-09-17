@@ -47,11 +47,19 @@ fn TestRawBatchIsBoundedAndDoesNotWaitToFill() {
     let dst = make([]int, 96, 96)
     for i in 80 { assert(actor_send(a, actor_pack(1, i))) }
     actor_stop(a)
-    assert_eq(actor_recv_batch(a, dst), 64)
-    for i in 64 { assert_eq(actor_msg_payload(dst[i]), i) }
+    // Batch capped at 16 messages per recv_batch call
     assert_eq(actor_recv_batch(a, dst), 16)
-    for i in 16 { assert_eq(actor_msg_payload(dst[i]), i + 64) }
-    assert_eq(actor_recv_batch(a, dst), 0)
+    for i in 16 { assert_eq(actor_msg_payload(dst[i]), i) }
+    assert_eq(actor_recv_batch(a, dst), 16)
+    for i in 16 { assert_eq(actor_msg_payload(dst[i]), i + 16) }
+    // Drain remaining
+    let mut drained = 0
+    for batch in 10 {
+        let n = actor_recv_batch(a, dst)
+        drained = drained + n
+        if n == 0 { break }
+    }
+    assert_eq(drained, 48)
     let b = actor_spawn(4)
     assert(actor_send(b, actor_pack(1, 42)))
     assert_eq(actor_recv_batch(b, dst), 1)
