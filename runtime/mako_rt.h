@@ -6838,6 +6838,7 @@ typedef struct {
     size_t count;
     bool closed;
     int waiters_recv;
+    void (*dtor)(void *);  /* optional element destructor for owned payloads */
     pthread_mutex_t mu;
     pthread_cond_t can_send;
     pthread_cond_t can_recv;
@@ -6854,6 +6855,13 @@ static inline MakoChanPtr *mako_chan_ptr_new(int64_t capacity) {
     pthread_mutex_init(&c->mu, NULL);
     pthread_cond_init(&c->can_send, NULL);
     pthread_cond_init(&c->can_recv, NULL);
+    return c;
+}
+
+/* chan_ptr with owned-element destructor for struct payloads. */
+static inline MakoChanPtr *mako_chan_ptr_new_owned(int64_t capacity, void (*dtor)(void *)) {
+    MakoChanPtr *c = mako_chan_ptr_new(capacity);
+    c->dtor = dtor;
     return c;
 }
 
