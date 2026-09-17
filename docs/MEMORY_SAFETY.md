@@ -279,7 +279,8 @@ See [CONSOLIDATION.md](CONSOLIDATION.md).
 
 In the C backend, POD prefix self-reslices retain their owning header and capacity in O(1).
 Offset self-reslices become owned copies before releasing the previous buffer.
-Temporary filename prefixes are borrowed and reclaimed after use.
+Temporary filename prefixes and signal names are borrowed and reclaimed after use.
+The `args()` result owns its array and strings and is reclaimed at scope exit.
 `len` also reclaims freshly owned string results after reading their length.
 Fresh owning structs passed to pointer-based borrowed parameters remain owned
 by the caller and are destroyed when the calling scope exits.

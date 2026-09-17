@@ -2,6 +2,8 @@
 
 ## 0.6.35
 
+- Reclaim command-line argument arrays and temporary signal names (#64).
+
 - Preserve owned POD backing on prefix self-reslices and materialize offset
   views before replacement, fixing connection free-slot recycling leaks (#64).
 - Reclaim temporary filename prefixes and keep page-write ownership regressions

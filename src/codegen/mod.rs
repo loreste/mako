@@ -2659,7 +2659,7 @@ impl Codegen {
         // a builtin handing back a freshly allocated handle that `own_free_fn`
         // knows how to release. Without it the scope-exit drop is never
         // emitted and every builder leaks its struct and buffer.
-        matches!(name, "env_keys" | "read_dir" | "str_builder" | "str_split" | "str_fields" | "str_cut")
+        matches!(name, "env_keys" | "read_dir" | "str_builder" | "str_split" | "str_fields" | "str_cut" | "args")
     }
 
     fn builtin_returns_borrowed_string(name: &str) -> bool {
@@ -28803,7 +28803,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_signal_fired({n})"));
                         }
                         "signal_ignore" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_signal_ignore({n})"));
                         }
                         "watch_available" => {
