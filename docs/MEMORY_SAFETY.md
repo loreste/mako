@@ -12,6 +12,16 @@ released at scope exit; escaping tokens retain independent ownership.
 Struct channels clone payloads for independent ownership. Temporary source
 structs are reclaimed after sends, including full, timed-out, and closed sends;
 named payloads remain available to their caller.
+Inline byte indexing keeps its copied buffer alive through the bounds-checked
+access and releases it afterward. Owned temporary sources for byte conversions
+and string searches are also reclaimed; string-array elements use the same
+allocation-free byte-length path as named strings.
+Replacing a struct in an array or map releases the superseded slice reference
+even when the replacement retains the same backing buffer. Independently owned
+snapshots keep their references; borrowed views do not release an RC header.
+Scalar-key maps of structs release owned value fields on deletion, clear, and
+destruction. Map clones, copies, and value arrays own independent field copies
+or retained slice references, so clearing one map does not invalidate another.
 
 String-slice COW detachment deep-clones owned string elements because the caller
 retains responsibility for releasing the old header. This prevents detached
@@ -266,6 +276,10 @@ modules, and arranges an external review of ownership, channels, and native ABI.
 See [CONSOLIDATION.md](CONSOLIDATION.md).
 
 ---
+
+Retained slice-field replacement releases the superseded reference even when
+both headers point at the same allocation. Append retains its separate transfer
+semantics; other retained aliases remain valid after replacement or growth.
 
 ## What we’ll stand behind
 

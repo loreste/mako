@@ -39,8 +39,98 @@ fn response_text(text: string) -> string {
     return builder_string(output)
 }
 
+struct QueryState { values: []int labels: []string }
+
+fn retain_query_state(state: QueryState) -> QueryState { return state }
+
+fn query_state_values(records: map[string]QueryState) -> []QueryState {
+    return maps_values(records)
+}
+
+fn retain_values(values: []int) -> []int { return values }
+
+fn replace_retained_field(state: QueryState) -> QueryState {
+    let mut result = state
+    let retained = retain_values(state.values)
+    result.values = retained
+    return result
+}
+
+export fn TestRetainedFieldCleanup() {
+    let mut items = make([]QueryState, 1, 1)
+    items[0] = QueryState { values: make([]int, 0, 0), labels: make([]string, 0, 0) }
+    let mut i = 0
+    while i < 1000 {
+        let packed = make([]int, 1000, 1000)
+        items[0].values = packed
+        items[0] = replace_retained_field(items[0])
+        let retained = retain_values(items[0].values)
+        items[0].values = retained
+        assert_eq(len(retained), 1000)
+        items[0].values = append(items[0].values, 7)
+        assert_eq(len(retained), 1000)
+        assert_eq(items[0].values[1000], 7)
+        i = i + 1
+    }
+}
+
+fn clone_query_states(states: map[string]QueryState) -> map[string]QueryState { return maps_clone(states) }
+fn clone_integer_states(states: map[int]QueryState) -> map[int]QueryState { return maps_clone(states) }
+fn clone_float_states(states: map[float]QueryState) -> map[float]QueryState { return maps_clone(states) }
+fn clone_boolean_states(states: map[bool]QueryState) -> map[bool]QueryState { return maps_clone(states) }
+
+export fn TestContainerReplacementCleanup() {
+    let mut items = make([]QueryState, 1, 1)
+    items[0] = QueryState { values: [7, 8], labels: [str_repeat("label", 4)] }
+    let snapshot = retain_query_state(items[0])
+    let mut records = make(map[string]QueryState)
+    records["state"] = retain_query_state(snapshot)
+    let mut i = 0
+    while i < 1000 {
+        items[0] = retain_query_state(items[0])
+        records["state"] = retain_query_state(records["state"])
+        i = i + 1
+    }
+    items[0] = QueryState { values: [9], labels: ["replacement"] }
+    assert_eq(snapshot.values[0], 7)
+    assert_eq(records["state"].values[1], 8)
+    assert_eq(len(snapshot.labels[0]), 20)
+    assert_eq(len(records["state"].labels[0]), 20)
+    let cloned = clone_query_states(records)
+    let listed = query_state_values(records)
+    maps_clear(records)
+    assert_eq(cloned["state"].values[0], 7)
+    assert_eq(len(listed[0].labels[0]), 20)
+    maps_copy(records, cloned)
+    delete(cloned, "state")
+    assert_eq(records["state"].values[1], 8)
+    assert_eq(len(snapshot.labels[0]), 20)
+    let mut integers = make(map[int]QueryState)
+    let mut floats = make(map[float]QueryState)
+    let mut flags = make(map[bool]QueryState)
+    integers[1] = retain_query_state(snapshot)
+    floats[1.5] = retain_query_state(snapshot)
+    flags[true] = retain_query_state(snapshot)
+    let saved_integers = clone_integer_states(integers)
+    let saved_floats = clone_float_states(floats)
+    let saved_flags = clone_boolean_states(flags)
+    maps_clear(integers)
+    maps_clear(floats)
+    maps_clear(flags)
+    maps_copy(integers, saved_integers)
+    maps_copy(floats, saved_floats)
+    maps_copy(flags, saved_flags)
+    delete(saved_integers, 1)
+    delete(saved_floats, 1.5)
+    delete(saved_flags, true)
+    assert_eq(integers[1].values[0], 7)
+    assert_eq(floats[1.5].values[0], 7)
+    assert_eq(flags[true].values[0], 7)
+}
+
 export fn TestQueryTemporaryCleanup() {
     let messages = chan_open[TokenChoice](1)
+    let parts = ["hello", "hé"]
     let mut i = 0
     while i < 1000 {
         let choice = choose_token("select value from table")
@@ -48,6 +138,11 @@ export fn TestQueryTemporaryCleanup() {
         let response = response_text("hello")
         assert(str_eq(response, "HELLO!"))
         assert_eq(len(bytes(str_repeat("hé", 3))), 9)
+        assert_eq(len(bytes(parts[1])), 3)
+        assert_eq(int(bytes(str_repeat("hé", 3))[1]), 195)
+        assert_eq(int(bytes(parts[0])[4]), 111)
+        assert_eq(str_index(str_to_upper("hello"), str_repeat("L", 1)), 2)
+        assert_eq(str_last_index(str_to_upper("hello"), "L"), 3)
         assert_eq(tcp_write(-1, response_text("hello")), -1)
         assert_eq(tcp_write_all(-1, response_text("hello")), -1)
         let _ = messages.send(TokenChoice { value: str_repeat("reply", 4) })
@@ -84,4 +179,6 @@ export fn TestByteConversionCleanup() {
 fn main() {
     TestByteConversionCleanup()
     TestQueryTemporaryCleanup()
+    TestContainerReplacementCleanup()
+    TestRetainedFieldCleanup()
 }

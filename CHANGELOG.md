@@ -2,6 +2,9 @@
 
 ## 0.6.35
 
+- Fix retained slice-field replacement leaking a reference when the old and new
+  headers share backing storage; preserve append ownership and retained aliases.
+
 - C backend: reclaim copied `bytes(string)` buffers on normal and early scope
   exits, preserving returned ownership and borrowed views. Add a dedicated
   LeakSanitizer regression for repeated disk-page-style scans (#64).
@@ -10,6 +13,13 @@
   `len(bytes(text))`, including when the source string is temporary (#64).
 - Release temporary struct payloads after channel sends have made their owned
   copy, including rejected and timed-out sends (#64).
+- Reclaim inline byte-index buffers and temporary conversion/search arguments;
+  extend allocation-free byte-length checks to string-array elements (#64).
+- Release superseded retained slice references when replacing array/map
+  elements, preserving independent snapshots and borrowed views (#64).
+- Scalar-key struct maps now release owned value fields on delete, clear, and
+  destruction; clones, copies, and value arrays preserve independent ownership.
+  String map assignment keys also avoid leaking temporary strings (#64).
 
 - Document release-artifact verification, sanitizer/build-profile differences, and correct pgbench database arguments when investigating application throughput regressions (#64).
 
