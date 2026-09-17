@@ -542,3 +542,18 @@ regular file→socket, then fall back to a 64 KiB userspace pump.
 ## Incremental builds
 
 Hot rebuilds: changed units + link only — [BUILD.md](BUILD.md).
+
+### Actor receive batch bound
+
+Single-port actor loops transfer up to 64 ready messages per mailbox lock.
+They never wait to fill a batch, preserve FIFO order, and check Stop while
+processing each message. Shutdown destroys both the unread prefetched suffix
+and messages still queued. Named ports retain per-message priority checks.
+The staging array uses 512 bytes of payload storage per running actor (previously
+128 bytes); the extra 384 bytes reduces mutex acquisitions under sustained load.
+`actor_len` reports only queued messages, excluding the in-flight batch.
+
+In an isolated Linux ABBA microbenchmark, two sets of 11 alternating samples
+per implementation measured actor medians of 305/214 ms with the 16-message
+bound and 176/199 ms with 64. The mean of those medians improved about 28%.
+This is a workload-specific result, not a guarantee for every actor workload.

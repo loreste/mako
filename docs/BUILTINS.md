@@ -2636,7 +2636,7 @@ HTTP seed path `/debug/hot_sites` via `profile_http_route`.
 | `actor_try_send` | `actor_try_send(mailbox: chan[int], msg: int) -> int` | Non-blocking send to actor mailbox (returns 1 on success, 0 if full) |
 | `actor_recv` | `actor_recv(mailbox: chan[int]) -> int` | Receive a message from a mailbox |
 | `actor_try_recv` | `actor_try_recv(mailbox: chan[int]) -> int` | Nonblocking actor poll: transfers one message, or returns zero when empty. Zero is reserved for empty/closed actor mailboxes; discard owned messages with the matching generated drop helper. |
-| `actor_recv_batch` | `actor_recv_batch(mailbox: chan[int], dst: []int) -> int` | Wait for one message or close, then transfer up to `min(len(dst), 16)` ready messages into caller-owned writable storage. Returns the count, zero on closed-empty or empty destination. Never waits to fill a batch. Caller must process or destroy every returned typed message before reusing the slots. | 
+| `actor_recv_batch` | `actor_recv_batch(mailbox: chan[int], dst: []int) -> int` | Wait for one message or close, then transfer up to `min(len(dst), 64)` ready messages into caller-owned writable storage. Returns the count, zero on closed-empty or empty destination. Never waits to fill a batch. Caller must process or destroy every returned typed message before reusing the slots. |
 | `actor_len` | `actor_len(mailbox: chan[int]) -> int` | Current queued message count in mailbox |
 | `actor_cap` | `actor_cap(mailbox: chan[int]) -> int` | Capacity of actor mailbox |
 | `actor_stop` | `actor_stop(mailbox: chan[int]) -> void` | Stop an actor (one mailbox). Multi-port actors call this per port on shutdown. |
@@ -2644,7 +2644,7 @@ HTTP seed path `/debug/hot_sites` via `profile_http_route`.
 
 ---
 
-Generated single-port actor loops prefetch at most 16 messages. `actor_len` reports
+Generated single-port actor loops prefetch at most 64 messages. `actor_len` reports
 only the mailbox queue, excluding that in-flight batch. Named-port loops do not
 prefetch, preserving per-message priority checks. Single booleans and pairs of
 integers in the signed 24-bit range pack without envelopes; larger pairs use

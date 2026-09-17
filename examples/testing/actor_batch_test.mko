@@ -12,13 +12,13 @@ actor BatchOrder {
 }
 
 fn TestBatchPreservesOrderAndEarlyReturns() {
-    let a = BatchOrder_spawn_cap(64)
+    let a = BatchOrder_spawn_cap(128)
     for i in 47 { assert(BatchOrder_send(a, BatchOrder_Add(i))) }
     let reply = make(chan[int], 1)
     assert(BatchOrder_send(a, BatchOrder_Check(reply)))
     assert(BatchOrder_send(a, BatchOrder_Stop()))
     // These span both the prefetched suffix and the remaining mailbox.
-    for i in 15 {
+    for i in 79 {
         assert(BatchOrder_send(a, BatchOrder_Unreachable("tail-" + int_to_string(i), [i, i + 1])))
     }
     crew workers {
@@ -43,14 +43,14 @@ fn TestBatchSingleSlotAndClosedPrefix() {
 }
 
 fn TestRawBatchIsBoundedAndDoesNotWaitToFill() {
-    let a = actor_spawn(32)
-    let dst = make([]int, 32, 32)
-    for i in 20 { assert(actor_send(a, actor_pack(1, i))) }
+    let a = actor_spawn(96)
+    let dst = make([]int, 96, 96)
+    for i in 80 { assert(actor_send(a, actor_pack(1, i))) }
     actor_stop(a)
+    assert_eq(actor_recv_batch(a, dst), 64)
+    for i in 64 { assert_eq(actor_msg_payload(dst[i]), i) }
     assert_eq(actor_recv_batch(a, dst), 16)
-    for i in 16 { assert_eq(actor_msg_payload(dst[i]), i) }
-    assert_eq(actor_recv_batch(a, dst), 4)
-    for i in 4 { assert_eq(actor_msg_payload(dst[i]), i + 16) }
+    for i in 16 { assert_eq(actor_msg_payload(dst[i]), i + 64) }
     assert_eq(actor_recv_batch(a, dst), 0)
     let b = actor_spawn(4)
     assert(actor_send(b, actor_pack(1, 42)))

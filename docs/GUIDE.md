@@ -1519,7 +1519,7 @@ payloads. Keep them in actor state and send commands plus reply channels instead
 Single-port loops receive up to 16 available messages per lock acquisition. They
 never wait to fill a batch. FIFO order and early returns are preserved; shutdown
 drops the unprocessed batch suffix before draining the closed mailbox.
-`actor_len` counts queued messages, excluding up to 16 messages already owned by
+`actor_len` counts queued messages, excluding up to 64 messages already owned by
 the loop. Allow for this bounded in-flight batch when choosing a memory budget.
 Named-port loops check port priority before each message and do not prefetch.
 Their nonblocking poll uses `actor_try_recv`, avoiding temporary Result objects.

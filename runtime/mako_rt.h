@@ -11362,7 +11362,7 @@ static inline int64_t mako_actor_try_recv(MakoActor *a) {
  * The caller owns every returned message, including unprocessed envelopes. */
 static inline int64_t mako_actor_recv_batch(MakoActor *a, MakoIntArray dst) {
     if (!a || dst.len == 0) return 0;
-    size_t limit = dst.len < 16 ? dst.len : 16;
+    size_t limit = dst.len < 64 ? dst.len : 64;
     pthread_mutex_lock(&a->mu);
     while (a->count == 0 && !a->closed) {
         int64_t start = mako_now_ns();

@@ -2,6 +2,10 @@
 
 ## 0.6.35
 
+- Increase bounded single-port actor prefetch to 64 ready messages to reduce
+  mailbox locking under sustained load; FIFO, prompt partial batches, and
+  typed shutdown cleanup remain intact (#64).
+
 - Destroy owned fields in unread struct channel messages on final release,
   without adding send/receive overhead (#64).
 
@@ -57,7 +61,7 @@
 
 - Document release-artifact verification, sanitizer/build-profile differences, and correct pgbench database arguments when investigating application throughput regressions (#64).
 
-- Single-port actor loops batch up to 16 ready messages per receive lock, preserving FIFO, early returns, and typed cleanup of prefetched messages on shutdown. Named ports retain per-message priority checks. `actor_len` excludes the bounded in-flight batch.
+- Single-port actor loops batch up to 64 ready messages per receive lock, preserving FIFO, early returns, and typed cleanup of prefetched messages on shutdown. Named ports retain per-message priority checks. `actor_len` excludes the bounded in-flight batch.
 - Boolean messages and pairs of integers in the signed 24-bit range avoid envelope allocation; larger pairs fall back to full-width envelopes. Actor payload isolation can transfer exclusive slice backing while continuing to snapshot shared and borrowed storage recursively.
 - Add a keyed sharding example, batch/packing boundary tests, and sanitizer/race coverage for batched shutdown. Document mailbox contention measurements and per-shard transaction constraints.
 - Reclaim raw `actor_spawn` handles at scope exit and temporary concatenated/interpolated strings passed into generated message constructors.

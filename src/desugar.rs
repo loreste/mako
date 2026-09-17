@@ -2705,7 +2705,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
     }
 
     loop_stmts.extend([
-        actor_batch_let("__batch", Expr::Make { ty: TypeExpr::Array(Box::new(TypeExpr::Named("int".into()))), len: Some(Box::new(Expr::Int(16))), cap: None }),
+        actor_batch_let("__batch", Expr::Make { ty: TypeExpr::Array(Box::new(TypeExpr::Named("int".into()))), len: Some(Box::new(Expr::Int(64))), cap: None }),
         actor_batch_let("__batch_i", Expr::Int(0)),
         actor_batch_let("__batch_n", Expr::Int(0)),
     ]);
