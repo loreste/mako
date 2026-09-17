@@ -2,6 +2,9 @@
 
 ## 0.6.35
 
+- Reclaim replaced owning structs inside indexed fields and temporary page-manager
+  write buffers, closing session-slot and checkpoint leaks (#64).
+
 - Reclaim temporary strings consumed by `len`, including channel receive and
   user-function results (#64).
 

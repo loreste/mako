@@ -284,6 +284,8 @@ Allocating string builtins borrow their input; assigning their result back to
 the input binding releases its previous allocation.
 Replacing a struct array runs its element destructors when the final backing
 reference is released, including nested string and slice payloads.
+Indexed struct fields release their old nested owning payloads on replacement.
+Page writes borrow their string data.
 Nested struct-field assignment also releases the previous owned payload.
 Retained channel fields also release the superseded reference on struct
 replacement, preserving independently retained senders and receivers.

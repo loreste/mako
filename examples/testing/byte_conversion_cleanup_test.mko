@@ -192,9 +192,13 @@ export fn TestByteConversionCleanup() {
 struct NestedQueryState { state: QueryState }
 
 export fn TestNestedFieldCleanup() {
+    let mut indexed = make([]NestedQueryState, 1, 1)
+    indexed[0] = NestedQueryState { state: QueryState { values: [0], labels: ["initial"] } }
     let mut outer = NestedQueryState { state: QueryState { values: [1], labels: ["seed"] } }
     let mut i = 0
     while i < 1000 {
+        indexed[0].state = QueryState { values: [i], labels: [str_repeat("indexed", 3)] }
+        assert_eq(len(indexed[0].state.labels[0]), 21)
         outer.state.labels = append(outer.state.labels, str_repeat("entry", 3))
         let retained = retain_values(outer.state.values)
         outer.state.values = retained
@@ -237,6 +241,19 @@ export fn TestChannelFieldReplacementCleanup() {
     }
 }
 
+export fn TestPageWriteTemporaryCleanup() {
+    let path = temp_file("mako_issue64_pages")
+    let pages = pman_open(path)
+    let page = pman_alloc(pages)
+    let mut i = 0
+    while i < 1000 {
+        assert_eq(pman_write_page(pages, page, str_repeat("page", 8)), 32)
+        i = i + 1
+    }
+    assert_eq(pman_close(pages), 0)
+    assert_eq(remove_file(path), 0)
+}
+
 fn main() {
     TestByteConversionCleanup()
     TestQueryTemporaryCleanup()
@@ -245,4 +262,5 @@ fn main() {
     TestNestedFieldCleanup()
     TestStructArrayReplacementCleanup()
     TestChannelFieldReplacementCleanup()
+    TestPageWriteTemporaryCleanup()
 }

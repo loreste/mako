@@ -16540,6 +16540,10 @@ impl Codegen {
                             );
                             return;
                         }
+                        if !self.struct_own_field_frees(&vty).is_empty() {
+                            self.emit_assign_owning_struct(&format!("{ptr}->{field}"), &vty, &v);
+                            return;
+                        }
                         self.emit_line(format_args!("{ptr}->{field} = {v};"));
                         return;
                     }
@@ -20402,7 +20406,7 @@ impl Codegen {
                         "pman_write_page" => {
                             let (_, pm) = self.emit_expr(&args[0]);
                             let (_, id) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_pman_write_page({pm}, {id}, {d})"),
