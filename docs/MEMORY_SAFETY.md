@@ -278,6 +278,8 @@ See [CONSOLIDATION.md](CONSOLIDATION.md).
 ---
 
 `len` also reclaims freshly owned string results after reading their length.
+Fresh owning structs passed to pointer-based borrowed parameters remain owned
+by the caller and are destroyed when the calling scope exits.
 User-function string arguments, file operations, and slice searches reclaim
 owned temporaries after use. `str_cut` returns an owned string array.
 Allocating string builtins borrow their input; assigning their result back to

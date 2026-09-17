@@ -254,6 +254,20 @@ export fn TestPageWriteTemporaryCleanup() {
     assert_eq(remove_file(path), 0)
 }
 
+fn fresh_query_state(n: int) -> QueryState {
+    return QueryState { values: [n], labels: [str_repeat("temporary", 3)] }
+}
+fn inspect_query_state(state: QueryState) -> int { return len(state.labels[0]) }
+
+export fn TestBorrowedStructArgumentCleanup() {
+    let mut i = 0
+    while i < 1000 {
+        assert_eq(inspect_query_state(fresh_query_state(i)), 27)
+        assert_eq(inspect_query_state(QueryState { values: [i], labels: [str_repeat("literal", 3)] }), 21)
+        i = i + 1
+    }
+}
+
 fn main() {
     TestByteConversionCleanup()
     TestQueryTemporaryCleanup()
@@ -263,4 +277,5 @@ fn main() {
     TestStructArrayReplacementCleanup()
     TestChannelFieldReplacementCleanup()
     TestPageWriteTemporaryCleanup()
+    TestBorrowedStructArgumentCleanup()
 }

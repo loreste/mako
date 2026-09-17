@@ -36318,6 +36318,17 @@ impl Codegen {
                                 let v = if self.param_passed_by_ptr(&resolved, i)
                                     || self.param_passed_by_ptr(name, i)
                                 {
+                                    // A pointer parameter borrows its argument. Fresh
+                                    // owning structs still need a caller-side destructor.
+                                    if matches!(&args[i], Expr::Call { .. } | Expr::StructLit { .. } | Expr::StructLitPos { .. })
+                                        && !Self::is_user_struct_ptr(aty)
+                                        && !self.struct_own_field_frees(aty).is_empty()
+                                        && !self.own_drop_live.contains(&v)
+                                    {
+                                        self.note_own_bind_scope(&v);
+                                        self.register_own_drop(&v, aty);
+                                        self.scope_drop_safe.insert(v.clone());
+                                    }
                                     self.take_owning_struct_arg_addr(aty, v)
                                 } else if Self::is_user_struct_ptr(aty) {
                                     Self::coerce_user_struct_value(aty, v).1
