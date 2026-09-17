@@ -6830,6 +6830,7 @@ static inline int64_t mako_chan_str_select2(
 typedef struct {
     _Atomic uint32_t refs;
     void **buf;
+    void (*drop_payload)(void *); /* immutable after construction */
     size_t cap; /* 0 = unbuffered rendezvous */
     size_t head;
     size_t tail;
@@ -6852,6 +6853,15 @@ static inline MakoChanPtr *mako_chan_ptr_new(int64_t capacity) {
     pthread_mutex_init(&c->mu, NULL);
     pthread_cond_init(&c->can_send, NULL);
     pthread_cond_init(&c->can_recv, NULL);
+    return c;
+}
+
+/* Install the payload destructor before publishing the channel to workers. */
+static inline MakoChanPtr *mako_chan_ptr_new_owned(
+    int64_t capacity, void (*drop_payload)(void *)
+) {
+    MakoChanPtr *c = mako_chan_ptr_new(capacity);
+    c->drop_payload = drop_payload;
     return c;
 }
 
@@ -7025,7 +7035,10 @@ static inline void mako_chan_ptr_free(MakoChanPtr *c) {
     size_t slots = mako_chan_alloc_slots(c->cap);
     while (c->count > 0) {
         void *p = c->buf[c->head];
-        if (p) free(p);
+        if (p) {
+            if (c->drop_payload) c->drop_payload(p);
+            free(p);
+        }
         c->head = (c->head + 1) % slots;
         c->count--;
     }

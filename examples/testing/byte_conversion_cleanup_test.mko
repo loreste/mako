@@ -303,7 +303,19 @@ export fn TestProcessTemporaryCleanup() {
     }
 }
 
+export fn TestQueuedStructChannelCleanup() {
+    let mut i = 0
+    while i < 1000 {
+        let pending = chan_open[QueryState](2)
+        pending.send(fresh_query_state(i))
+        pending.send(fresh_query_state(i + 1))
+        pending.close()
+        i = i + 1
+    }
+}
+
 fn main() {
+    TestQueuedStructChannelCleanup()
     TestProcessTemporaryCleanup()
     TestByteConversionCleanup()
     TestQueryTemporaryCleanup()

@@ -307,3 +307,11 @@ safe path.
 We won’t claim “memory-safe for all FFI” or “proven like seL4.” And we won’t
 add a collector later under the same product name without a major version and
 an identity break.
+
+### Queued struct channel cleanup
+
+The C backend gives channels of owning structs a payload destructor at creation,
+before the channel can be shared with workers. Final channel release destroys
+owned fields in unread queued messages before freeing their boxes. The callback
+is immutable and runs only during final destruction; send and receive keep their
+existing hot paths. Closing a channel alone does not discard queued messages.

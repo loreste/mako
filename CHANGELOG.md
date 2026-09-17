@@ -2,6 +2,9 @@
 
 ## 0.6.35
 
+- Destroy owned fields in unread struct channel messages on final release,
+  without adding send/receive overhead (#64).
+
 - Reclaim command-line argument arrays and temporary signal names (#64).
 
 - Preserve owned POD backing on prefix self-reslices and materialize offset

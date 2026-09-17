@@ -36712,6 +36712,28 @@ impl Codegen {
         }
     }
 
+    fn emit_named_ptr_channel(&mut self, tmp: &str, capacity: &str, name: &str) {
+        let ty = TypeExpr::Named(name.to_string());
+        let c_ty = self.type_expr_c(&ty);
+        let helper = self.fresh("channel_payload_drop");
+        let saved_out = std::mem::take(&mut self.out);
+        let saved_indent = self.indent;
+        self.indent = 1;
+        self.emit_inline_value_drop("(*payload)", &ty);
+        let drops = std::mem::replace(&mut self.out, saved_out);
+        self.indent = saved_indent;
+        if drops.is_empty() {
+            self.line(&format!("MakoChanPtr *{tmp} = mako_chan_ptr_new({capacity});"));
+        } else {
+            self.insert_helper(&format!(
+                "static void {helper}(void *box) {{\n    {c_ty} *payload = ({c_ty}*)box;\n{drops}}}\n"
+            ));
+            self.line(&format!(
+                "MakoChanPtr *{tmp} = mako_chan_ptr_new_owned({capacity}, {helper});"
+            ));
+        }
+    }
+
     fn emit_chan_open_expr(&mut self, expr: &Expr) -> (String, String) {
         match expr {
             Expr::ChanOpen { elem, cap } => {
@@ -36739,7 +36761,7 @@ impl Codegen {
                             && n != "string"
                             && (self.structs.contains_key(n) || self.enums.contains_key(n)) =>
                     {
-                        self.line(&format!("MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"));
+                        self.emit_named_ptr_channel(&tmp, &c, n);
                         // Remember element type for this temporary / binding
                         self.chan_ptr_elems.insert(tmp.clone(), n.clone());
                         ("MakoChanPtr*".into(), tmp)
@@ -37029,7 +37051,7 @@ impl Codegen {
                                     && (self.structs.contains_key(en)
                                         || self.enums.contains_key(en)) =>
                             {
-                                self.line(&format!("MakoChanPtr *{tmp} = mako_chan_ptr_new({c});"));
+                                self.emit_named_ptr_channel(&tmp, &c, en);
                                 self.chan_ptr_elems.insert(tmp.clone(), en.clone());
                                 return ("MakoChanPtr*".into(), tmp);
                             }
