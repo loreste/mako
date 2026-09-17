@@ -392,8 +392,13 @@ impl Codegen {
             || matches!(expr, Expr::Call { callee, .. }
                 if matches!(callee.as_ref(), Expr::Ident(n) if self.fn_ret_types.contains_key(n)));
         if fresh && !self.own_drop_live.contains(value) {
-            for (field, free_fn) in self.struct_own_field_frees(ty) {
-                self.emit_line(format_args!("{free_fn}({value}.{field});"));
+            let fields = self.struct_own_field_frees(ty);
+            // Skip per-field cleanup for large structs (>8 owning fields).
+            // COW refcounting handles deferred cleanup for these.
+            if fields.len() <= 8 {
+                for (field, free_fn) in fields {
+                    self.emit_line(format_args!("{free_fn}({value}.{field});"));
+                }
             }
         }
     }
@@ -3794,7 +3799,7 @@ impl Codegen {
                 return false;
             }
             let fields = self.struct_own_field_frees(c_ty);
-            if fields.is_empty() {
+            if fields.is_empty() || fields.len() > 8 {
                 return false;
             }
             let tmp = self.fresh("discard_st");
@@ -4580,9 +4585,12 @@ impl Codegen {
 
     /// After `dest = val` of an array/map element, free `old`'s owned storage
     /// when it does not share backing with `val`. Used by generated `*_set`.
+    /// Capped at 8 fields to avoid O(N) cleanup on hot-path large struct
+    /// assignments (e.g. Database with 68 fields). Large structs rely on
+    /// refcounted COW backing for deferred cleanup.
     fn write_elem_dest_destroy(&mut self, old: &str, new: &str, cty: &str, indent: &str) {
         let fields = self.struct_own_field_frees(cty);
-        if !fields.is_empty() {
+        if !fields.is_empty() && fields.len() <= 8 {
             for (path, free_fn) in fields {
                 let fty = self.struct_field_c_type(cty, &path).unwrap_or_default();
                 let cond = Self::owning_field_replaced_cond(
