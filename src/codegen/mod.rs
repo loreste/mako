@@ -4585,12 +4585,15 @@ impl Codegen {
 
     /// After `dest = val` of an array/map element, free `old`'s owned storage
     /// when it does not share backing with `val`. Used by generated `*_set`.
-    /// Capped at 8 fields to avoid O(N) cleanup on hot-path large struct
-    /// assignments (e.g. Database with 68 fields). Large structs rely on
-    /// refcounted COW backing for deferred cleanup.
+    ///
+    /// SAFETY: per-field frees on struct elements in COW arrays cause use-after-free
+    /// when the array backing is shared (issue #65). The array-level destructor
+    /// (mako_arr_T_free) handles cleanup via refcounting. Skip all field-level frees
+    /// for struct types — only free scalar owning types (string, array, map).
     fn write_elem_dest_destroy(&mut self, old: &str, new: &str, cty: &str, indent: &str) {
         let fields = self.struct_own_field_frees(cty);
-        if !fields.is_empty() && fields.len() <= 8 {
+        if !fields.is_empty() && false {
+            // Disabled: per-field frees in COW struct arrays cause use-after-free.
             for (path, free_fn) in fields {
                 let fty = self.struct_field_c_type(cty, &path).unwrap_or_default();
                 let cond = Self::owning_field_replaced_cond(
@@ -5162,12 +5165,22 @@ impl Codegen {
             Expr::Ident(n) => {
                 self.note_own_drop_moved(&mangle(n));
             }
-            // Struct literals handle move/clone in `prepare_own_store_rhs`
-            // during emission. Moved fields already called
-            // `note_own_drop_moved`; cloned fields still need their
-            // scope-exit free. Recursing here would disarm the cloned
-            // locals and leak them (issue #53 ASan regression).
-            Expr::StructLit { .. } | Expr::StructLitPos { .. } => {}
+            // Struct literals: mark ident fields as moved to prevent
+            // double-free on scope exit (#65 use-after-free in matview).
+            Expr::StructLit { fields, .. } => {
+                for (_, val) in fields {
+                    if let Expr::Ident(n) = val {
+                        self.note_own_drop_moved(&mangle(n));
+                    }
+                }
+            }
+            Expr::StructLitPos { values, .. } => {
+                for val in values {
+                    if let Expr::Ident(n) = val {
+                        self.note_own_drop_moved(&mangle(n));
+                    }
+                }
+            }
             Expr::Tuple(values) | Expr::Array(values) => {
                 for v in values {
                     self.transfer_own_on_return(v);
