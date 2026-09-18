@@ -4177,16 +4177,22 @@ impl Codegen {
                 ));
             }
             "MakoStrArray" => {
-                // Free individual string elements before releasing backing.
+                // SAFETY: only release backing refcount. Individual strings may
+                // be borrowed elsewhere. Full mako_str_array_free would free
+                // string elements even when the backing is uniquely owned but
+                // individual strings are COW-shared (#65).
                 self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data) mako_str_array_free({old});"
+                    "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
                 ));
             }
             other if other.starts_with("MakoArr_") => {
-                // The array destructor releases element payloads on the final
-                // reference. Releasing only backing leaks owned struct fields.
+                // SAFETY: only release backing refcount, never free element fields.
+                // Element fields (Column.values, etc.) may be COW-shared with other
+                // tables. The full destructor frees element strings/arrays even when
+                // the array backing refcount is 1, because individual element COW
+                // sharing isn't tracked by the array refcount (#65).
                 self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data) {free_fn}({old});"
+                    "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
                 ));
             }
             _ => {
