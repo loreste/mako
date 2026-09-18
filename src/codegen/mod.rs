@@ -4598,8 +4598,9 @@ impl Codegen {
     /// for struct types — only free scalar owning types (string, array, map).
     fn write_elem_dest_destroy(&mut self, old: &str, new: &str, cty: &str, indent: &str) {
         let fields = self.struct_own_field_frees(cty);
-        if !fields.is_empty() && false {
-            // Disabled: per-field frees in COW struct arrays cause use-after-free.
+        if !fields.is_empty() {
+            // Only free owned fields when sole owner (not COW-shared).
+            let _ = writeln!(self.out, "{indent}if (!mako_rc_shared(a.data)) {{");
             for (path, free_fn) in fields {
                 let fty = self.struct_field_c_type(cty, &path).unwrap_or_default();
                 let cond = Self::owning_field_replaced_cond(
@@ -4618,6 +4619,7 @@ impl Codegen {
                     indent,
                 );
             }
+            let _ = writeln!(self.out, "{indent}}}");
             return;
         }
         if let Some(ff) = Self::own_free_fn(cty) {

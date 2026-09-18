@@ -6018,7 +6018,6 @@ typedef struct {
     bool closed;
     int waiters_send; /* threads blocked in send */
     int waiters_recv; /* threads blocked in recv (for unbuffered try_send) */
-    MakoSPSC *spsc;   /* lock-free SPSC ring for actor mailboxes (NULL = disabled) */
     pthread_mutex_t mu;
     pthread_cond_t can_send;
     pthread_cond_t can_recv;
@@ -11481,19 +11480,14 @@ static inline void mako_actor_free_payload(int64_t packed) {
 }
 
 static inline MakoActor *mako_actor_spawn(int64_t mailbox_cap) {
-    size_t cap = mailbox_cap < 1 ? 8 : (size_t)mailbox_cap;
-    MakoChan *a = mako_chan_new((int64_t)cap);
-    a->spsc = mako_spsc_new(cap);
-    return a;
+    return mako_chan_new(mailbox_cap < 1 ? 8 : mailbox_cap);
 }
 
 static inline int64_t mako_actor_send(MakoActor *a, int64_t msg) {
-    if (MAKO_LIKELY(a->spsc)) return mako_spsc_send(a->spsc, msg);
     return mako_chan_send(a, msg);
 }
 
 static inline int64_t mako_actor_recv(MakoActor *a) {
-    if (MAKO_LIKELY(a->spsc)) return mako_spsc_recv(a->spsc);
     return mako_chan_recv(a);
 }
 
@@ -11527,22 +11521,18 @@ static inline int64_t mako_actor_recv_batch(MakoActor *a, MakoIntArray dst) {
 }
 
 static inline int64_t mako_actor_try_send(MakoActor *a, int64_t msg) {
-    if (a && a->spsc) return mako_spsc_try_send(a->spsc, msg);
     return a ? mako_chan_try_send(a, msg) : 0;
 }
 
 static inline int64_t mako_actor_len(MakoActor *a) {
-    if (a && a->spsc) return mako_spsc_len(a->spsc);
     return a ? mako_chan_len(a) : 0;
 }
 
 static inline int64_t mako_actor_cap(MakoActor *a) {
-    if (a && a->spsc) return mako_spsc_cap(a->spsc);
     return a ? mako_chan_cap(a) : 0;
 }
 
 static inline void mako_actor_stop(MakoActor *a) {
-    if (a && a->spsc) mako_spsc_close(a->spsc);
     mako_chan_close(a);
 }
 
