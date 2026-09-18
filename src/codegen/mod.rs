@@ -12942,7 +12942,10 @@ impl Codegen {
         if !self.c_ty_owns_fields(c_ty) {
             return val;
         }
-        if Self::is_field_borrow_return(expr) {
+        // Skip clone for field/index borrows — the source (column array, struct field)
+        // outlives the return. Cloning every returned string caused OOM (#65).
+        // Only clone when storing into a new owning variable (prepare_own_store_rhs).
+        if false && Self::is_field_borrow_return(expr) {
             return self.clone_own_val(c_ty, &val);
         }
         if let Expr::Ident(n) = expr {

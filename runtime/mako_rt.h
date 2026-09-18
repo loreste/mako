@@ -3412,7 +3412,7 @@ static inline MakoString mako_str_clone(MakoString s) {
     if (!s.data || s.data == &mako_str_empty_byte) return mako_str_empty;
     char *d = (char *)malloc(s.len + 1);
     if (MAKO_UNLIKELY(!d)) {
-        fprintf(stderr, "mako: OOM in str_clone\n");
+        fprintf(stderr, "mako: OOM in str_clone (len=%zu)\n", s.len);
         abort();
     }
     memcpy(d, s.data, s.len);
@@ -5866,6 +5866,144 @@ static inline int64_t mako_slice_copy(MakoIntArray dst, MakoIntArray src) {
  * After close, recv() returns 0 once drained. send() after close fails (0).
  * select() polls multiple channels with optional timeout.
  */
+/* ==== Lock-free SPSC ring buffer for actor mailboxes ====
+ * Single Producer, Single Consumer — no mutex needed.
+ * Producer owns tail, consumer owns head. Shared count via atomics.
+ * Falls back to condvar wait when empty (consumer) or full (producer).
+ */
+typedef struct {
+    int64_t *buf;
+    size_t cap;                /* power-of-two capacity */
+    _Atomic size_t head;       /* consumer reads from here */
+    _Atomic size_t tail;       /* producer writes here */
+    _Atomic int closed;
+    /* Slow path: condvar for blocking when empty/full */
+    pthread_mutex_t mu;
+    pthread_cond_t not_empty;
+    pthread_cond_t not_full;
+} MakoSPSC;
+
+static inline MakoSPSC *mako_spsc_new(size_t cap) {
+    /* Round up to power of two for fast modulo */
+    size_t n = 1;
+    while (n < (cap < 2 ? 2 : cap)) n *= 2;
+    MakoSPSC *q = (MakoSPSC *)calloc(1, sizeof(MakoSPSC));
+    if (!q) abort();
+    q->buf = (int64_t *)calloc(n, sizeof(int64_t));
+    if (!q->buf) abort();
+    q->cap = n;
+    atomic_init(&q->head, 0);
+    atomic_init(&q->tail, 0);
+    atomic_init(&q->closed, 0);
+    pthread_mutex_init(&q->mu, NULL);
+    pthread_cond_init(&q->not_empty, NULL);
+    pthread_cond_init(&q->not_full, NULL);
+    return q;
+}
+
+static inline int mako_spsc_send(MakoSPSC *q, int64_t v) {
+    for (;;) {
+        size_t t = atomic_load_explicit(&q->tail, memory_order_relaxed);
+        size_t h = atomic_load_explicit(&q->head, memory_order_acquire);
+        if (MAKO_LIKELY(t - h < q->cap)) {
+            q->buf[t & (q->cap - 1)] = v;
+            atomic_store_explicit(&q->tail, t + 1, memory_order_release);
+            /* Always signal — consumer may have entered wait between our load and store */
+            pthread_mutex_lock(&q->mu);
+            pthread_cond_signal(&q->not_empty);
+            pthread_mutex_unlock(&q->mu);
+            return 1;
+        }
+        /* Slow path: full — wait for space */
+        if (atomic_load_explicit(&q->closed, memory_order_acquire)) return 0;
+        pthread_mutex_lock(&q->mu);
+        while (atomic_load_explicit(&q->tail, memory_order_relaxed) -
+               atomic_load_explicit(&q->head, memory_order_acquire) >= q->cap) {
+            if (atomic_load_explicit(&q->closed, memory_order_acquire)) {
+                pthread_mutex_unlock(&q->mu);
+                return 0;
+            }
+            pthread_cond_wait(&q->not_full, &q->mu);
+        }
+        pthread_mutex_unlock(&q->mu);
+    }
+}
+
+static inline int64_t mako_spsc_recv(MakoSPSC *q) {
+    size_t h = atomic_load_explicit(&q->head, memory_order_relaxed);
+    size_t t = atomic_load_explicit(&q->tail, memory_order_acquire);
+    if (MAKO_LIKELY(h < t)) {
+        /* Fast path: data available, no lock */
+        int64_t v = q->buf[h & (q->cap - 1)];
+        atomic_store_explicit(&q->head, h + 1, memory_order_release);
+        /* Wake blocked producer */
+        if (MAKO_UNLIKELY(t - h == q->cap)) {
+            pthread_mutex_lock(&q->mu);
+            pthread_cond_signal(&q->not_full);
+            pthread_mutex_unlock(&q->mu);
+        }
+        return v;
+    }
+    /* Slow path: empty — wait */
+    pthread_mutex_lock(&q->mu);
+    for (;;) {
+        h = atomic_load_explicit(&q->head, memory_order_relaxed);
+        t = atomic_load_explicit(&q->tail, memory_order_acquire);
+        if (h < t) break;
+        if (atomic_load_explicit(&q->closed, memory_order_acquire)) {
+            pthread_mutex_unlock(&q->mu);
+            return 0;
+        }
+        pthread_cond_wait(&q->not_empty, &q->mu);
+    }
+    int64_t v = q->buf[h & (q->cap - 1)];
+    atomic_store_explicit(&q->head, h + 1, memory_order_release);
+    pthread_cond_signal(&q->not_full);
+    pthread_mutex_unlock(&q->mu);
+    return v;
+}
+
+static inline void mako_spsc_close(MakoSPSC *q) {
+    atomic_store_explicit(&q->closed, 1, memory_order_release);
+    pthread_mutex_lock(&q->mu);
+    pthread_cond_broadcast(&q->not_empty);
+    pthread_cond_broadcast(&q->not_full);
+    pthread_mutex_unlock(&q->mu);
+}
+
+static inline void mako_spsc_free(MakoSPSC *q) {
+    if (!q) return;
+    free(q->buf);
+    pthread_mutex_destroy(&q->mu);
+    pthread_cond_destroy(&q->not_empty);
+    pthread_cond_destroy(&q->not_full);
+    free(q);
+}
+
+static inline int64_t mako_spsc_len(MakoSPSC *q) {
+    size_t t = atomic_load_explicit(&q->tail, memory_order_acquire);
+    size_t h = atomic_load_explicit(&q->head, memory_order_acquire);
+    return (int64_t)(t - h);
+}
+
+static inline int64_t mako_spsc_cap(MakoSPSC *q) {
+    return (int64_t)q->cap;
+}
+
+static inline int64_t mako_spsc_try_send(MakoSPSC *q, int64_t v) {
+    size_t t = atomic_load_explicit(&q->tail, memory_order_relaxed);
+    size_t h = atomic_load_explicit(&q->head, memory_order_acquire);
+    if (t - h >= q->cap) return 0;
+    q->buf[t & (q->cap - 1)] = v;
+    atomic_store_explicit(&q->tail, t + 1, memory_order_release);
+    if (t == h) {
+        pthread_mutex_lock(&q->mu);
+        pthread_cond_signal(&q->not_empty);
+        pthread_mutex_unlock(&q->mu);
+    }
+    return 1;
+}
+
 static inline void mako_select_notify(void); /* forward decl — wakes select waiters */
 
 typedef struct {
@@ -5880,6 +6018,7 @@ typedef struct {
     bool closed;
     int waiters_send; /* threads blocked in send */
     int waiters_recv; /* threads blocked in recv (for unbuffered try_send) */
+    MakoSPSC *spsc;   /* lock-free SPSC ring for actor mailboxes (NULL = disabled) */
     pthread_mutex_t mu;
     pthread_cond_t can_send;
     pthread_cond_t can_recv;
@@ -5997,18 +6136,21 @@ static inline MakoChan *mako_chan_clone(MakoChan *c) {
 }
 
 static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
-    /* trylock fast path: buffered and not full. Wake a waiting receiver without
-     * dropping the mutex — actor mailboxes spend most sends in that case. */
+    /* Fast path: buffered, not full, no waiters — trylock avoids syscall. */
     if (MAKO_LIKELY(c->cap > 0) && pthread_mutex_trylock(&c->mu) == 0) {
+        if (MAKO_LIKELY(c->count < c->cap && !c->closed && c->waiters_recv == 0)) {
+            c->buf[c->tail] = v;
+            if (++c->tail == c->cap) c->tail = 0;
+            c->count++;
+            pthread_mutex_unlock(&c->mu);
+            mako_rt_counter_inc(&mako_rt_channel_sends);
+            mako_chan_trace_send(c, v);
+            return 1;
+        }
         if (MAKO_LIKELY(c->count < c->cap && !c->closed)) {
-            if (MAKO_LIKELY(c->cap == 1)) {
-                c->inline_buf[0] = v;
-                c->count = 1;
-            } else {
-                c->buf[c->tail] = v;
-                if (++c->tail == c->cap) c->tail = 0;
-                c->count++;
-            }
+            c->buf[c->tail] = v;
+            if (++c->tail == c->cap) c->tail = 0;
+            c->count++;
             mako_chan_observe_depth(c, c->count);
             mako_chan_wake_receiver(c);
             pthread_mutex_unlock(&c->mu);
@@ -6147,19 +6289,21 @@ static inline int64_t mako_chan_cap(MakoChan *c) {
 }
 
 static inline int64_t mako_chan_recv(MakoChan *c) {
-    /* trylock fast path: buffered with data. Wake a waiting sender if the
-     * mailbox was full — same lock, no unlock/relock. */
+    /* Fast path: buffered with data, no waiters — skip signal overhead. */
     if (MAKO_LIKELY(c->cap > 0) && pthread_mutex_trylock(&c->mu) == 0) {
+        if (MAKO_LIKELY(c->count > 0 && c->waiters_send == 0)) {
+            int64_t v = c->buf[c->head];
+            if (++c->head == c->cap) c->head = 0;
+            c->count--;
+            pthread_mutex_unlock(&c->mu);
+            mako_rt_counter_inc(&mako_rt_channel_recvs);
+            mako_chan_trace_recv(c, v);
+            return v;
+        }
         if (MAKO_LIKELY(c->count > 0)) {
-            int64_t v;
-            if (MAKO_LIKELY(c->cap == 1)) {
-                v = c->inline_buf[0];
-                c->count = 0;
-            } else {
-                v = c->buf[c->head];
-                if (++c->head == c->cap) c->head = 0;
-                c->count--;
-            }
+            int64_t v = c->buf[c->head];
+            if (++c->head == c->cap) c->head = 0;
+            c->count--;
             mako_chan_wake_sender(c);
             pthread_mutex_unlock(&c->mu);
             mako_rt_counter_inc(&mako_rt_channel_recvs);
@@ -11337,14 +11481,19 @@ static inline void mako_actor_free_payload(int64_t packed) {
 }
 
 static inline MakoActor *mako_actor_spawn(int64_t mailbox_cap) {
-    return mako_chan_new(mailbox_cap < 1 ? 8 : mailbox_cap);
+    size_t cap = mailbox_cap < 1 ? 8 : (size_t)mailbox_cap;
+    MakoChan *a = mako_chan_new((int64_t)cap);
+    a->spsc = mako_spsc_new(cap);
+    return a;
 }
 
 static inline int64_t mako_actor_send(MakoActor *a, int64_t msg) {
+    if (MAKO_LIKELY(a->spsc)) return mako_spsc_send(a->spsc, msg);
     return mako_chan_send(a, msg);
 }
 
 static inline int64_t mako_actor_recv(MakoActor *a) {
+    if (MAKO_LIKELY(a->spsc)) return mako_spsc_recv(a->spsc);
     return mako_chan_recv(a);
 }
 
@@ -11378,18 +11527,22 @@ static inline int64_t mako_actor_recv_batch(MakoActor *a, MakoIntArray dst) {
 }
 
 static inline int64_t mako_actor_try_send(MakoActor *a, int64_t msg) {
+    if (a && a->spsc) return mako_spsc_try_send(a->spsc, msg);
     return a ? mako_chan_try_send(a, msg) : 0;
 }
 
 static inline int64_t mako_actor_len(MakoActor *a) {
+    if (a && a->spsc) return mako_spsc_len(a->spsc);
     return a ? mako_chan_len(a) : 0;
 }
 
 static inline int64_t mako_actor_cap(MakoActor *a) {
+    if (a && a->spsc) return mako_spsc_cap(a->spsc);
     return a ? mako_chan_cap(a) : 0;
 }
 
 static inline void mako_actor_stop(MakoActor *a) {
+    if (a && a->spsc) mako_spsc_close(a->spsc);
     mako_chan_close(a);
 }
 
