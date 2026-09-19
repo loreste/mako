@@ -36514,7 +36514,19 @@ impl Codegen {
                         }
                     }
                 } else {
-                    self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
+                    // Only memset when not all fields are explicitly set;
+                    // skipping it in tight loops avoids ~1 cache-line write per iter.
+                    let all_fields_set = info
+                        .as_ref()
+                        .map(|inf| {
+                            inf.fields
+                                .iter()
+                                .all(|(fname, _)| fields.iter().any(|(n, _)| n == fname))
+                        })
+                        .unwrap_or(false);
+                    if !all_fields_set {
+                        self.line(&format!("memset(&{tmp}, 0, sizeof({tmp}));"));
+                    }
                     // Apply field defaults for omitted fields.
                     if let Some(ref inf) = info {
                         for (fname, def) in &inf.defaults {
