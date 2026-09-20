@@ -6038,22 +6038,25 @@ void __tsan_acquire(void *addr);
 void __tsan_release(void *addr);
 #endif
 
+/* Channel fast-path lock.
+ * macOS: os_unfair_lock (separate from mu) — ~5x faster uncontended.
+ * Others: delegate to mu (no separate lock, no double-lock overhead). */
 #if defined(__APPLE__) && !MAKO_TSAN
 #include <os/lock.h>
 typedef os_unfair_lock MakoFastLock;
 #define MAKO_FAST_LOCK_INIT OS_UNFAIR_LOCK_INIT
+#define MAKO_HAS_FAST_LOCK 1
 static inline void mako_fast_lock(MakoFastLock *l) { os_unfair_lock_lock(l); }
 static inline int  mako_fast_trylock(MakoFastLock *l) { return os_unfair_lock_trylock(l); }
 static inline void mako_fast_unlock(MakoFastLock *l) { os_unfair_lock_unlock(l); }
 #else
-/* Linux / Windows / TSan: use pthread_mutex. On glibc with ADAPTIVE_NP
- * this is futex-based with a brief user-space spin — already fast.
- * Under TSan, pthread_mutex is fully understood (no false positives). */
-typedef pthread_mutex_t MakoFastLock;
-#define MAKO_FAST_LOCK_INIT PTHREAD_MUTEX_INITIALIZER
-static inline void mako_fast_lock(MakoFastLock *l) { pthread_mutex_lock(l); }
-static inline int  mako_fast_trylock(MakoFastLock *l) { return pthread_mutex_trylock(l) == 0; }
-static inline void mako_fast_unlock(MakoFastLock *l) { pthread_mutex_unlock(l); }
+/* fl.mu points to the channel's mu — all locking goes through one mutex. */
+typedef struct { pthread_mutex_t *mu; } MakoFastLock;
+#define MAKO_FAST_LOCK_INIT {NULL}
+#define MAKO_HAS_FAST_LOCK 0
+static inline void mako_fast_lock(MakoFastLock *l) { pthread_mutex_lock(l->mu); }
+static inline int  mako_fast_trylock(MakoFastLock *l) { return pthread_mutex_trylock(l->mu) == 0; }
+static inline void mako_fast_unlock(MakoFastLock *l) { pthread_mutex_unlock(l->mu); }
 #endif
 
 typedef struct {
@@ -6168,7 +6171,11 @@ static inline MakoChan *mako_chan_new(int64_t capacity) {
     pthread_mutex_init(&c->mu, NULL);
 #endif
 #if defined(__APPLE__) && !MAKO_TSAN
+#if MAKO_HAS_FAST_LOCK
     c->fl = (MakoFastLock)MAKO_FAST_LOCK_INIT;
+#else
+    c->fl.mu = &c->mu;  /* delegate to the channel's pthread_mutex */
+#endif
 #else
     pthread_mutex_init(&c->fl, NULL);
 #endif
@@ -6207,10 +6214,15 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
             if (++c->tail == c->cap) c->tail = 0;
             c->count++;
             mako_chan_observe_depth(c, c->count);
+#if MAKO_HAS_FAST_LOCK
             mako_fast_unlock(&c->fl);
             pthread_mutex_lock(&c->mu);
             pthread_cond_signal(&c->can_recv);
             pthread_mutex_unlock(&c->mu);
+#else
+            pthread_cond_signal(&c->can_recv);
+            mako_fast_unlock(&c->fl);
+#endif
             mako_select_notify();
             mako_rt_counter_inc(&mako_rt_channel_sends);
             mako_chan_trace_send(c, v);
@@ -6306,12 +6318,13 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
             }
             int wake = (c->waiters_recv > 0);
             mako_chan_observe_depth(c, c->count);
+#if MAKO_HAS_FAST_LOCK
             mako_fast_unlock(&c->fl);
-            if (wake) {
-                pthread_mutex_lock(&c->mu);
-                pthread_cond_signal(&c->can_recv);
-                pthread_mutex_unlock(&c->mu);
-            }
+            if (wake) { pthread_mutex_lock(&c->mu); pthread_cond_signal(&c->can_recv); pthread_mutex_unlock(&c->mu); }
+#else
+            if (wake) pthread_cond_signal(&c->can_recv);
+            mako_fast_unlock(&c->fl);
+#endif
             mako_select_notify();
             mako_rt_counter_inc(&mako_rt_channel_sends);
             return 1;
@@ -6387,10 +6400,15 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
             int64_t v = c->buf[c->head];
             if (++c->head == c->cap) c->head = 0;
             c->count--;
+#if MAKO_HAS_FAST_LOCK
             mako_fast_unlock(&c->fl);
             pthread_mutex_lock(&c->mu);
             pthread_cond_signal(&c->can_send);
             pthread_mutex_unlock(&c->mu);
+#else
+            pthread_cond_signal(&c->can_send);
+            mako_fast_unlock(&c->fl);
+#endif
             mako_rt_counter_inc(&mako_rt_channel_recvs);
             mako_chan_trace_recv(c, v);
             return v;
@@ -6523,13 +6541,14 @@ static inline int64_t mako_chan_try_recv(MakoChan *c, int64_t *out) {
         c->count--;
     }
     int wake = (c->waiters_send > 0);
+#if MAKO_HAS_FAST_LOCK
     mako_fast_unlock(&c->fl);
+    if (wake) { pthread_mutex_lock(&c->mu); pthread_cond_broadcast(&c->can_send); pthread_mutex_unlock(&c->mu); }
+#else
+    if (wake) pthread_cond_broadcast(&c->can_send);
+    mako_fast_unlock(&c->fl);
+#endif
     mako_rt_counter_inc(&mako_rt_channel_recvs);
-    if (wake) {
-        pthread_mutex_lock(&c->mu);
-        pthread_cond_broadcast(&c->can_send);
-        pthread_mutex_unlock(&c->mu);
-    }
     if (out) *out = v;
     return 1;
 }
@@ -11626,12 +11645,13 @@ static inline int64_t mako_actor_try_recv(MakoActor *a) {
         a->count--;
     }
     int wake = (n > 0 && a->waiters_send > 0);
+#if MAKO_HAS_FAST_LOCK
     mako_fast_unlock(&a->fl);
-    if (wake) {
-        pthread_mutex_lock(&a->mu);
-        pthread_cond_broadcast(&a->can_send);
-        pthread_mutex_unlock(&a->mu);
-    }
+    if (wake) { pthread_mutex_lock(&a->mu); pthread_cond_broadcast(&a->can_send); pthread_mutex_unlock(&a->mu); }
+#else
+    if (wake) pthread_cond_broadcast(&a->can_send);
+    mako_fast_unlock(&a->fl);
+#endif
     mako_actor_pf_len = n;
     if (n > 0) return mako_actor_pf_buf[mako_actor_pf_pos++];
     return 0;
