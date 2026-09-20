@@ -206,7 +206,7 @@ if [[ "$(uname -s)" == "Linux" ]]; then
     --backend c --sanitize leak
 fi
 set +e
-"$mako_bin" run --backend c "$repo_dir/examples/testing/actor_pack_overflow_abort.mko" \
+"$mako_bin" run --backend c "$repo_dir/examples/testing/actor_pack_overflow/actor_pack_overflow_abort.mko" \
   >/tmp/mako-actor-pack-ovf.out 2>&1
 ovf_status=$?
 set -e

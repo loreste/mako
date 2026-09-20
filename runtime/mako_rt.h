@@ -6533,9 +6533,9 @@ static inline int64_t mako_chan_send_timeout(MakoChan *c, int64_t v, int64_t tim
     mako_gettimeofday(&start, NULL);
     for (;;) {
         if (mako_chan_try_send(c, v)) return 1;
-        pthread_mutex_lock(&c->mu);
+        mako_fast_lock(&c->fl);
         int closed = c->closed ? 1 : 0;
-        pthread_mutex_unlock(&c->mu);
+        mako_fast_unlock(&c->fl);
         if (closed) return -1;
         if (timeout_ms >= 0) {
             mako_gettimeofday(&now, NULL);
@@ -6558,9 +6558,9 @@ static inline int64_t mako_chan_recv_timeout(MakoChan *c, int64_t *out, int64_t 
     mako_gettimeofday(&start, NULL);
     for (;;) {
         if (mako_chan_try_recv(c, out)) return 1;
-        pthread_mutex_lock(&c->mu);
+        mako_fast_lock(&c->fl);
         int closed_empty = (c->count == 0 && c->closed) ? 1 : 0;
-        pthread_mutex_unlock(&c->mu);
+        mako_fast_unlock(&c->fl);
         if (closed_empty) return -1;
         if (timeout_ms >= 0) {
             mako_gettimeofday(&now, NULL);
