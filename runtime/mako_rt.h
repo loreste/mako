@@ -6188,9 +6188,9 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
             c->count++;
             mako_chan_observe_depth(c, c->count);
             mako_fast_unlock(&c->fl);
-            /* Signal without mu: safe because waiters recheck predicate
-             * in a loop. Avoids the mu acquire/release on the hot path. */
+            pthread_mutex_lock(&c->mu);
             pthread_cond_signal(&c->can_recv);
+            pthread_mutex_unlock(&c->mu);
             mako_select_notify();
             mako_rt_counter_inc(&mako_rt_channel_sends);
             mako_chan_trace_send(c, v);
@@ -6285,6 +6285,7 @@ static inline int64_t mako_chan_try_send(MakoChan *c, int64_t v) {
                 c->count++;
             }
             int wake = (c->waiters_recv > 0);
+            mako_chan_observe_depth(c, c->count);
             mako_fast_unlock(&c->fl);
             if (wake) {
                 pthread_mutex_lock(&c->mu);
@@ -6367,7 +6368,9 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
             if (++c->head == c->cap) c->head = 0;
             c->count--;
             mako_fast_unlock(&c->fl);
+            pthread_mutex_lock(&c->mu);
             pthread_cond_signal(&c->can_send);
+            pthread_mutex_unlock(&c->mu);
             mako_rt_counter_inc(&mako_rt_channel_recvs);
             mako_chan_trace_recv(c, v);
             return v;
@@ -6476,7 +6479,7 @@ static inline void mako_chan_free(MakoChan *c) {
 
 /* Non-blocking try-recv: 1 + value via out, or 0 if empty (not closed wait). */
 static inline int64_t mako_chan_try_recv(MakoChan *c, int64_t *out) {
-    mako_fast_lock(&c->fl);
+    if (!mako_fast_trylock(&c->fl)) return 0; /* contended — treat as empty */
     if (c->count == 0) {
         mako_fast_unlock(&c->fl);
         return 0;
@@ -6493,7 +6496,11 @@ static inline int64_t mako_chan_try_recv(MakoChan *c, int64_t *out) {
     int wake = (c->waiters_send > 0);
     mako_fast_unlock(&c->fl);
     mako_rt_counter_inc(&mako_rt_channel_recvs);
-    if (wake) pthread_cond_broadcast(&c->can_send);
+    if (wake) {
+        pthread_mutex_lock(&c->mu);
+        pthread_cond_broadcast(&c->can_send);
+        pthread_mutex_unlock(&c->mu);
+    }
     if (out) *out = v;
     return 1;
 }
@@ -11587,7 +11594,11 @@ static inline int64_t mako_actor_try_recv(MakoActor *a) {
     }
     int wake = (n > 0 && a->waiters_send > 0);
     mako_fast_unlock(&a->fl);
-    if (wake) pthread_cond_broadcast(&a->can_send);
+    if (wake) {
+        pthread_mutex_lock(&a->mu);
+        pthread_cond_broadcast(&a->can_send);
+        pthread_mutex_unlock(&a->mu);
+    }
     mako_actor_pf_len = n;
     if (n > 0) return mako_actor_pf_buf[mako_actor_pf_pos++];
     return 0;
