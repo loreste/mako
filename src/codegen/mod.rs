@@ -5000,7 +5000,7 @@ impl Codegen {
                     // Strings are excluded: the .data pointer may be held
                     // by a C function argument after the struct is zeroed
                     // (use-after-free in read_file / fs_path_cstr paths).
-                    if c_ty == "MakoString" || self.ident_used_after_current(n) {
+                    if self.ident_used_after_current(n) {
                         self.clone_own_val(c_ty, &val)
                     } else {
                         self.note_own_drop_moved(&mn);
@@ -15751,6 +15751,8 @@ impl Codegen {
                     self.owned_result_errors.insert(name.clone());
                 }
                 self.note_own_bind_scope(&mangle(name));
+                // Track owned locals for scope-exit cleanup (string, slice, struct).
+                self.register_own_drop(&mangle(name), &ty);
                 // Annotated lets: Result/Option nest metadata from the type.
                 if let Some(ann_ty) = ann {
                     self.register_local_type_metadata(name, ann_ty);
