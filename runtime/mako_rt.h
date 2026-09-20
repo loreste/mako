@@ -6038,57 +6038,22 @@ void __tsan_acquire(void *addr);
 void __tsan_release(void *addr);
 #endif
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !MAKO_TSAN
 #include <os/lock.h>
 typedef os_unfair_lock MakoFastLock;
 #define MAKO_FAST_LOCK_INIT OS_UNFAIR_LOCK_INIT
-static inline void mako_fast_lock(MakoFastLock *l) {
-    os_unfair_lock_lock(l);
-#if MAKO_TSAN
-    __tsan_acquire(l);
-#endif
-}
-static inline int mako_fast_trylock(MakoFastLock *l) {
-    int ok = os_unfair_lock_trylock(l);
-#if MAKO_TSAN
-    if (ok) __tsan_acquire(l);
-#endif
-    return ok;
-}
-static inline void mako_fast_unlock(MakoFastLock *l) {
-#if MAKO_TSAN
-    __tsan_release(l);
-#endif
-    os_unfair_lock_unlock(l);
-}
+static inline void mako_fast_lock(MakoFastLock *l) { os_unfair_lock_lock(l); }
+static inline int  mako_fast_trylock(MakoFastLock *l) { return os_unfair_lock_trylock(l); }
+static inline void mako_fast_unlock(MakoFastLock *l) { os_unfair_lock_unlock(l); }
 #else
-typedef struct { _Atomic int v; } MakoFastLock;
-#define MAKO_FAST_LOCK_INIT {0}
-static inline void mako_fast_lock(MakoFastLock *l) {
-    while (atomic_exchange_explicit(&l->v, 1, memory_order_acquire)) {
-#if defined(__aarch64__)
-        __asm__ __volatile__("yield");
-#elif defined(__x86_64__)
-        __asm__ __volatile__("pause");
-#endif
-    }
-#if MAKO_TSAN
-    __tsan_acquire(l);
-#endif
-}
-static inline int mako_fast_trylock(MakoFastLock *l) {
-    int ok = !atomic_exchange_explicit(&l->v, 1, memory_order_acquire);
-#if MAKO_TSAN
-    if (ok) __tsan_acquire(l);
-#endif
-    return ok;
-}
-static inline void mako_fast_unlock(MakoFastLock *l) {
-#if MAKO_TSAN
-    __tsan_release(l);
-#endif
-    atomic_store_explicit(&l->v, 0, memory_order_release);
-}
+/* Linux / Windows / TSan: use pthread_mutex. On glibc with ADAPTIVE_NP
+ * this is futex-based with a brief user-space spin — already fast.
+ * Under TSan, pthread_mutex is fully understood (no false positives). */
+typedef pthread_mutex_t MakoFastLock;
+#define MAKO_FAST_LOCK_INIT PTHREAD_MUTEX_INITIALIZER
+static inline void mako_fast_lock(MakoFastLock *l) { pthread_mutex_lock(l); }
+static inline int  mako_fast_trylock(MakoFastLock *l) { return pthread_mutex_trylock(l) == 0; }
+static inline void mako_fast_unlock(MakoFastLock *l) { pthread_mutex_unlock(l); }
 #endif
 
 typedef struct {
@@ -6202,7 +6167,11 @@ static inline MakoChan *mako_chan_new(int64_t capacity) {
 #else
     pthread_mutex_init(&c->mu, NULL);
 #endif
+#if defined(__APPLE__) && !MAKO_TSAN
     c->fl = (MakoFastLock)MAKO_FAST_LOCK_INIT;
+#else
+    pthread_mutex_init(&c->fl, NULL);
+#endif
     pthread_cond_init(&c->can_send, NULL);
     pthread_cond_init(&c->can_recv, NULL);
     mako_rt_counter_inc(&mako_rt_channels_created);
