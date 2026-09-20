@@ -160,6 +160,15 @@ static inline int mako_rc_shared(void *data) {
 #define MAKO_UNLIKELY(x) (x)
 #endif
 
+/* Anti-ICF: prevent function merging. Clang has optnone; GCC uses optimize("O0"). */
+#if defined(__clang__)
+#define MAKO_NOINLINE_NOOPT __attribute__((noinline,optnone))
+#elif defined(__GNUC__)
+#define MAKO_NOINLINE_NOOPT __attribute__((noinline,__optimize__("O0")))
+#else
+#define MAKO_NOINLINE_NOOPT
+#endif
+
 /* Defined two's-complement wrapping for Mako integer arithmetic. C signed
  * overflow and out-of-range shift counts are UB, so use unsigned math for the
  * default wrap contract and convert the resulting bit pattern back to int64. */

@@ -30,6 +30,12 @@ struct StructInfo {
 /// `w = f(w)` still clones a cheap header rather than aliasing the dest.
 const OWNING_STRUCT_MUT_PTR_FIELDS: usize = 4;
 
+/// Structs with more owning fields than this emit a shared drop/assign helper
+/// instead of inlining one conditional free per field at every scope exit.
+/// FayDB's Database has ~68 owning fields; inlining those on the query path
+/// blew instruction cache (issue #66).
+const STRUCT_INLINE_FIELD_DROP_MAX: usize = 8;
+
 pub struct Codegen {
     out: String,
     tmp: usize,
@@ -230,6 +236,9 @@ pub struct Codegen {
     current_fn_body: Option<Block>,
     /// Index of the top-level statement currently being emitted.
     current_stmt_idx: usize,
+    /// Reuse `*_get_ptr` results while the array header and index stay live.
+    /// Keyed by `(array C expr, index C expr)`.
+    struct_elem_ptr_cache: HashMap<(String, String), String>,
 }
 
 pub use crate::overflow::OverflowMode;
@@ -326,6 +335,7 @@ impl Codegen {
             used_arr_elems: std::collections::HashSet::new(),
             current_fn_body: None,
             current_stmt_idx: 0,
+            struct_elem_ptr_cache: HashMap::new(),
         }
     }
 
@@ -392,14 +402,7 @@ impl Codegen {
             || matches!(expr, Expr::Call { callee, .. }
                 if matches!(callee.as_ref(), Expr::Ident(n) if self.fn_ret_types.contains_key(n)));
         if fresh && !self.own_drop_live.contains(value) {
-            let fields = self.struct_own_field_frees(ty);
-            // Skip per-field cleanup for large structs (>8 owning fields).
-            // COW refcounting handles deferred cleanup for these.
-            if fields.len() <= 8 {
-                for (field, free_fn) in fields {
-                    self.emit_line(format_args!("{free_fn}({value}.{field});"));
-                }
-            }
+            self.emit_struct_field_drop(ty, value, false);
         }
     }
 
@@ -1432,8 +1435,26 @@ impl Codegen {
                 .cloned()
                 .unwrap_or_else(|| "int64_t".into()),
             Expr::Unary { expr, .. } => self.peek_expr_c_ty(expr),
-            Expr::Index { base, .. } if self.peek_expr_c_ty(base) == "MakoStrArray" => {
-                "MakoString".into()
+            Expr::Field { base, field } => {
+                let bty = self.peek_expr_c_ty(base);
+                let deref = bty.strip_suffix('*').unwrap_or(bty.as_str());
+                self.lookup_struct_field_ty(deref, field)
+            }
+            Expr::Index { base, .. } => {
+                let bty = self.peek_expr_c_ty(base);
+                if bty == "MakoStrArray" {
+                    "MakoString".into()
+                } else if bty == "MakoIntArray" || bty == "MakoByteArray" {
+                    "int64_t".into()
+                } else if bty == "MakoFloatArray" {
+                    "double".into()
+                } else if bty == "MakoBoolArray" {
+                    "bool".into()
+                } else if let Some(sn) = bty.strip_prefix("MakoArr_") {
+                    self.arr_elem_c_ty(sn)
+                } else {
+                    "int64_t".into()
+                }
             }
             Expr::Binary { left, .. } => self.peek_expr_c_ty(left),
             Expr::Array(xs) => {
@@ -1473,7 +1494,9 @@ impl Codegen {
                     if let Some(rt) = self.fn_rets.get(&mono).or_else(|| self.fn_rets.get(fname)) {
                         return rt.clone();
                     }
-                    if Self::OWNED_STRING_BUILTINS.binary_search(&fname.as_str()).is_ok()
+                    if Self::OWNED_STRING_BUILTINS
+                        .binary_search(&fname.as_str())
+                        .is_ok()
                         || fname == "str_repeat"
                         || Self::builtin_returns_borrowed_string(fname)
                     {
@@ -2664,7 +2687,16 @@ impl Codegen {
         // a builtin handing back a freshly allocated handle that `own_free_fn`
         // knows how to release. Without it the scope-exit drop is never
         // emitted and every builder leaks its struct and buffer.
-        matches!(name, "env_keys" | "read_dir" | "str_builder" | "str_split" | "str_fields" | "str_cut" | "args")
+        matches!(
+            name,
+            "env_keys"
+                | "read_dir"
+                | "str_builder"
+                | "str_split"
+                | "str_fields"
+                | "str_cut"
+                | "args"
+        )
     }
 
     fn builtin_returns_borrowed_string(name: &str) -> bool {
@@ -4177,12 +4209,11 @@ impl Codegen {
                 ));
             }
             "MakoStrArray" => {
-                // SAFETY: only release backing refcount. Individual strings may
-                // be borrowed elsewhere. Full mako_str_array_free would free
-                // string elements even when the backing is uniquely owned but
-                // individual strings are COW-shared (#65).
+                // Free the old array properly: mako_str_array_free checks the
+                // refcount — if shared (COW), just decrements; if last owner,
+                // frees contained strings then releases the backing.
                 self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
+                    "if ({old}.data != {new}.data) mako_str_array_free({old});"
                 ));
             }
             other if other.starts_with("MakoArr_") => {
@@ -4641,14 +4672,24 @@ impl Codegen {
     ) {
         if matches!(cty, "MakoChan*" | "MakoChanStr*" | "MakoChanPtr*") {
             let free_fn = Self::own_free_fn(cty).expect("channel destructor");
-            let _ = writeln!(self.out, "{indent}if ({old} == {new} && {old}) {free_fn}({old});");
+            let _ = writeln!(
+                self.out,
+                "{indent}if ({old} == {new} && {old}) {free_fn}({old});"
+            );
             return;
         }
         if Self::slice_backing_release(cty) != "mako_rc_release" {
             return;
         }
         if cty.starts_with("MakoArr_")
-            || matches!(cty, "MakoIntArray" | "MakoByteArray" | "MakoStrArray" | "MakoFloatArray" | "MakoBoolArray")
+            || matches!(
+                cty,
+                "MakoIntArray"
+                    | "MakoByteArray"
+                    | "MakoStrArray"
+                    | "MakoFloatArray"
+                    | "MakoBoolArray"
+            )
         {
             let _ = writeln!(self.out,
                 "{indent}if ({old}.data == {new}.data && {old}.cap > 0 && {new}.cap > 0 && {old}.data && mako_rc_shared({old}.data)) mako_rc_release({old}.data);"
@@ -4678,6 +4719,18 @@ impl Codegen {
         let fields = self.struct_own_field_frees(cty);
         if fields.is_empty() {
             self.emit_line(format_args!("{dest} = {val};"));
+            return;
+        }
+        if fields.len() > STRUCT_INLINE_FIELD_DROP_MAX {
+            if Self::is_c_lvalue(val) {
+                self.emit_line(format_args!(
+                    "mako_struct_{cty}_assign(&({dest}), &({val}));"
+                ));
+            } else {
+                let tmp = self.fresh("asg");
+                self.emit_line(format_args!("{cty} {tmp} = {val};"));
+                self.emit_line(format_args!("mako_struct_{cty}_assign(&({dest}), &{tmp});"));
+            }
             return;
         }
         let old = self.fresh("old_st");
@@ -4760,9 +4813,7 @@ impl Codegen {
             if let Some(cty) = free_fn.strip_prefix("/*struct*/") {
                 self.emit_line(format_args!("if ({name}__own) {{"));
                 self.indent += 1;
-                for (fname, ff) in self.struct_own_field_frees(cty) {
-                    self.emit_line(format_args!("{ff}({name}.{fname});"));
-                }
+                self.emit_struct_field_drop(cty, name, false);
                 self.emit_line(format_args!("{name}__own = 0;"));
                 self.indent -= 1;
                 self.line("}");
@@ -4772,9 +4823,7 @@ impl Codegen {
                 ));
             }
         } else if let Some(cty) = free_fn.strip_prefix("/*struct*/") {
-            for (fname, ff) in self.struct_own_field_frees(cty) {
-                self.emit_line(format_args!("{ff}({name}.{fname});"));
-            }
+            self.emit_struct_field_drop(cty, name, false);
         } else {
             self.emit_line(format_args!("{free_fn}({name});"));
         }
@@ -4915,7 +4964,23 @@ impl Codegen {
             {
                 self.clone_own_val(c_ty, &val)
             }
+            // Field/index of an array or struct is a borrow of the container.
+            // Map index already cloned in emit — do not clone a second time.
+            Expr::Field { .. } | Expr::Index { .. } if self.expr_is_owning_borrow(value) => {
+                self.clone_own_val(c_ty, &val)
+            }
             _ => val,
+        }
+    }
+
+    /// True when `value` is a header-only view into storage owned elsewhere.
+    /// `arr[i].name` / `xs[i]` (string/struct arrays) must clone on escape.
+    /// `m[k]` for a string map already returns an owned clone.
+    fn expr_is_owning_borrow(&self, value: &Expr) -> bool {
+        match value {
+            Expr::Field { .. } => true,
+            Expr::Index { base, .. } => !self.peek_expr_c_ty(base).starts_with("MakoMap"),
+            _ => false,
         }
     }
 
@@ -5102,14 +5167,19 @@ impl Codegen {
             "MakoByteArray" => Some(("uint8_t".into(), "mako_byte_array_make".into())),
             "MakoBoolArray" => Some(("bool".into(), "mako_bool_array_make".into())),
             "MakoStrArray" => Some(("MakoString".into(), "mako_str_array_make".into())),
-            _ => c_ty.strip_prefix("MakoArr_").map(|tag|
-                (self.arr_elem_c_ty(tag), format!("mako_arr_{tag}_make"))),
+            _ => c_ty
+                .strip_prefix("MakoArr_")
+                .map(|tag| (self.arr_elem_c_ty(tag), format!("mako_arr_{tag}_make"))),
         };
         if let Some((elem, make)) = array {
             let out = self.fresh("actor_copy");
             let index = self.fresh("actor_i");
-            self.line(&format!("{c_ty} {out} = {make}((int64_t)({val}).len, (int64_t)({val}).len);"));
-            self.line(&format!("for (size_t {index} = 0; {index} < ({val}).len; ++{index}) {{"));
+            self.line(&format!(
+                "{c_ty} {out} = {make}((int64_t)({val}).len, (int64_t)({val}).len);"
+            ));
+            self.line(&format!(
+                "for (size_t {index} = 0; {index} < ({val}).len; ++{index}) {{"
+            ));
             self.indent += 1;
             let item = self.clone_actor_value(&elem, &format!("({val}).data[{index}]"));
             self.line(&format!("{out}.data[{index}] = {item};"));
@@ -5126,20 +5196,31 @@ impl Codegen {
             }
             return out;
         }
-        if Self::own_free_fn(c_ty).is_some() { self.clone_own_val(c_ty, val) }
-        else { val.to_string() }
+        if Self::own_free_fn(c_ty).is_some() {
+            self.clone_own_val(c_ty, val)
+        } else {
+            val.to_string()
+        }
     }
 
     fn detach_actor_slices(&mut self, c_ty: &str, val: &str) {
-        if matches!(c_ty, "MakoIntArray" | "MakoFloatArray" | "MakoByteArray" | "MakoBoolArray" | "MakoStrArray")
-            || c_ty.starts_with("MakoArr_")
+        if matches!(
+            c_ty,
+            "MakoIntArray" | "MakoFloatArray" | "MakoByteArray" | "MakoBoolArray" | "MakoStrArray"
+        ) || c_ty.starts_with("MakoArr_")
         {
             // The literal already owns this reference. A uniquely owned heap
             // backing can move into the envelope without copying. Views and
             // pooled byte buffers must still detach; nested slices need their
             // own uniqueness checks even when the outer backing is exclusive.
-            let pool_check = if c_ty == "MakoByteArray" { format!(" || (({val}).cap & MAKO_POOL_CAP_FLAG)") } else { String::new() };
-            self.line(&format!("if (({val}).cap == 0{pool_check} || mako_rc_shared(({val}).data)) {{"));
+            let pool_check = if c_ty == "MakoByteArray" {
+                format!(" || (({val}).cap & MAKO_POOL_CAP_FLAG)")
+            } else {
+                String::new()
+            };
+            self.line(&format!(
+                "if (({val}).cap == 0{pool_check} || mako_rc_shared(({val}).data)) {{"
+            ));
             self.indent += 1;
             let snapshot = self.clone_actor_value(c_ty, val);
             if let Some(free) = Self::own_free_fn(c_ty) {
@@ -5152,7 +5233,9 @@ impl Codegen {
                 self.indent += 1;
                 let index = self.fresh("actor_move_i");
                 let elem = self.arr_elem_c_ty(tag);
-                self.line(&format!("for (size_t {index} = 0; {index} < ({val}).len; ++{index}) {{"));
+                self.line(&format!(
+                    "for (size_t {index} = 0; {index} < ({val}).len; ++{index}) {{"
+                ));
                 self.indent += 1;
                 self.detach_actor_slices(&elem, &format!("({val}).data[{index}]"));
                 self.indent -= 1;
@@ -5231,7 +5314,11 @@ impl Codegen {
     }
 
     fn emit_map_heap_free_with_values(
-        &mut self, fnp: &str, mt: &str, free_str_keys: bool, value_struct: Option<&str>,
+        &mut self,
+        fnp: &str,
+        mt: &str,
+        free_str_keys: bool,
+        value_struct: Option<&str>,
     ) {
         let _ = writeln!(self.out, "static inline void {fnp}_free({mt} *m) {{");
         let _ = writeln!(self.out, "    if (!m) return;");
@@ -7027,6 +7114,69 @@ impl Codegen {
         }
     }
 
+    /// Shared drop/assign helpers for structs with many owning fields.
+    /// Inlining one free per field at every scope exit is O(fields) code
+    /// growth and i-cache noise on FayDB's Database (issue #66).
+    fn emit_struct_own_helpers(&mut self, c_name: &str) {
+        let fields = self.struct_own_field_frees(c_name);
+        if fields.is_empty() {
+            return;
+        }
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_struct_{c_name}_drop_fields({c_name} *p) {{"
+        );
+        let _ = writeln!(self.out, "    if (!p) return;");
+        for (path, ff) in &fields {
+            let _ = writeln!(self.out, "    {ff}(p->{path});");
+        }
+        let _ = writeln!(self.out, "}}");
+        if fields.len() <= STRUCT_INLINE_FIELD_DROP_MAX {
+            return;
+        }
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_struct_{c_name}_assign({c_name} *dest, {c_name} *src) {{"
+        );
+        let _ = writeln!(self.out, "    {c_name} old = *dest;");
+        let _ = writeln!(self.out, "    *dest = *src;");
+        for (path, ff) in &fields {
+            let fty = self.struct_field_c_type(c_name, path).unwrap_or_default();
+            let cond = Self::owning_field_replaced_cond(
+                &fty,
+                &format!("old.{path}"),
+                &format!("dest->{path}"),
+            );
+            let _ = writeln!(self.out, "    if ({cond}) {{ {ff}(old.{path}); }}");
+            self.write_retained_replacement_release(
+                &format!("old.{path}"),
+                &format!("dest->{path}"),
+                &fty,
+                "    ",
+            );
+        }
+        let _ = writeln!(self.out, "}}");
+    }
+
+    fn emit_struct_field_drop(&mut self, c_ty: &str, base: &str, through_ptr: bool) {
+        let fields = self.struct_own_field_frees(c_ty);
+        if fields.is_empty() {
+            return;
+        }
+        if fields.len() > STRUCT_INLINE_FIELD_DROP_MAX {
+            if through_ptr {
+                self.emit_line(format_args!("mako_struct_{c_ty}_drop_fields({base});"));
+            } else {
+                self.emit_line(format_args!("mako_struct_{c_ty}_drop_fields(&{base});"));
+            }
+            return;
+        }
+        let acc = if through_ptr { "->" } else { "." };
+        for (fname, ff) in fields {
+            self.emit_line(format_args!("{ff}({base}{acc}{fname});"));
+        }
+    }
+
     fn emit_struct_typedef(&mut self, s: &StructDef) {
         let info = self.structs.get(&s.name).unwrap().clone();
         let c_name = info.c_name.clone();
@@ -7070,6 +7220,7 @@ impl Codegen {
         }
         let _ = writeln!(self.out, "    return h;");
         let _ = writeln!(self.out, "}}");
+        self.emit_struct_own_helpers(&c_name);
         let arr = format!("MakoArr_{c_name}");
         let _ = writeln!(self.out, "typedef struct {arr} {{");
         let _ = writeln!(self.out, "    {c_name} *data;");
@@ -7149,13 +7300,13 @@ impl Codegen {
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
-            "static inline {c_name}* mako_arr_{c_name}_get_ptr({arr} a, int64_t i) {{"
+            "static inline {c_name}* mako_arr_{c_name}_get_ptr(const {arr} *a, int64_t i) {{"
         );
         let _ = writeln!(
             self.out,
-            "    if (i < 0 || (size_t)i >= a.len) mako_abort(\"struct slice index out of bounds\");"
+            "    if (MAKO_UNLIKELY(i < 0 || (size_t)i >= a->len)) mako_abort(\"struct slice index out of bounds\");"
         );
-        let _ = writeln!(self.out, "    return &a.data[i];");
+        let _ = writeln!(self.out, "    return &a->data[i];");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -7413,7 +7564,10 @@ impl Codegen {
         if matches!(elem_c, "MakoChan*" | "MakoChanStr*" | "MakoChanPtr*") {
             let clone = Self::own_clone_fn(elem_c).expect("channel clone");
             let _ = writeln!(self.out, "        if (mako_rc_shared(s.data)) {{");
-            let _ = writeln!(self.out, "            for (size_t i = 0; i < s.len; ++i) nd[i] = {clone}(nd[i]);");
+            let _ = writeln!(
+                self.out,
+                "            for (size_t i = 0; i < s.len; ++i) nd[i] = {clone}(nd[i]);"
+            );
             let _ = writeln!(self.out, "        }}");
         }
         let _ = writeln!(self.out, "        s.data = nd; s.cap = ncap;");
@@ -10946,13 +11100,24 @@ impl Codegen {
         }
         // Scalar-key maps own each stored struct. Copies need independent
         // owned fields; deletion, clear, and destruction release those fields.
-        let _ = writeln!(self.out, "static inline {c_name} mako_map_value_{c_name}_clone({c_name} value) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline {c_name} mako_map_value_{c_name}_clone({c_name} value) {{"
+        );
         let cloned = self.clone_own_val(c_name, "value");
         let _ = writeln!(self.out, "    return {cloned};\n}}");
-        let _ = writeln!(self.out, "static inline void mako_map_value_{c_name}_drop({c_name} value) {{");
+        let _ = writeln!(
+            self.out,
+            "static inline void mako_map_value_{c_name}_drop({c_name} value) {{"
+        );
         let _ = writeln!(self.out, "    (void)value;");
-        for (field, free_fn) in self.struct_own_field_frees(c_name) {
-            let _ = writeln!(self.out, "    {free_fn}(value.{field});");
+        let drop_fields = self.struct_own_field_frees(c_name);
+        if drop_fields.len() > STRUCT_INLINE_FIELD_DROP_MAX {
+            let _ = writeln!(self.out, "    mako_struct_{c_name}_drop_fields(&value);");
+        } else {
+            for (field, free_fn) in drop_fields {
+                let _ = writeln!(self.out, "    {free_fn}(value.{field});");
+            }
         }
         let _ = writeln!(self.out, "}}");
         let mi = format!("MakoMapI_{c_name}");
@@ -11132,7 +11297,12 @@ impl Codegen {
             "    *m = mako_map_i_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
         );
         let _ = writeln!(self.out, "}}");
-        self.emit_map_heap_free_with_values(&format!("mako_map_i_{c_name}"), &mi, false, Some(c_name));
+        self.emit_map_heap_free_with_values(
+            &format!("mako_map_i_{c_name}"),
+            &mi,
+            false,
+            Some(c_name),
+        );
 
         // --- map[string]T ---
         let ms = format!("MakoMapS_{c_name}");
@@ -11346,7 +11516,12 @@ impl Codegen {
             "    *m = mako_map_s_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
         );
         let _ = writeln!(self.out, "}}");
-        self.emit_map_heap_free_with_values(&format!("mako_map_s_{c_name}"), &ms, true, Some(c_name));
+        self.emit_map_heap_free_with_values(
+            &format!("mako_map_s_{c_name}"),
+            &ms,
+            true,
+            Some(c_name),
+        );
 
         // maps_* helpers for monomorphized struct maps
         let arr = format!("MakoArr_{c_name}");
@@ -11744,7 +11919,12 @@ impl Codegen {
             "    *m = mako_map_f_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
         );
         let _ = writeln!(self.out, "}}");
-        self.emit_map_heap_free_with_values(&format!("mako_map_f_{c_name}"), &mf, false, Some(c_name));
+        self.emit_map_heap_free_with_values(
+            &format!("mako_map_f_{c_name}"),
+            &mf,
+            false,
+            Some(c_name),
+        );
         let _ = writeln!(
             self.out,
             "static inline MakoFloatArray mako_maps_keys_f_{c_name}({mf} *m) {{"
@@ -12020,7 +12200,12 @@ impl Codegen {
             "    *m = mako_map_b_{c_name}_new(hint > 0 ? (size_t)hint : 0); return m;"
         );
         let _ = writeln!(self.out, "}}");
-        self.emit_map_heap_free_with_values(&format!("mako_map_b_{c_name}"), &mb, false, Some(c_name));
+        self.emit_map_heap_free_with_values(
+            &format!("mako_map_b_{c_name}"),
+            &mb,
+            false,
+            Some(c_name),
+        );
         let _ = writeln!(
             self.out,
             "static inline MakoBoolArray mako_maps_keys_b_{c_name}({mb} *m) {{"
@@ -12887,6 +13072,69 @@ impl Codegen {
         !val.contains('(')
     }
 
+    /// Ident or integer literal — safe to pass to get_ptr without a temp.
+    fn is_simple_c_index(idx: &str) -> bool {
+        let s = idx.strip_prefix('-').unwrap_or(idx);
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
+
+    fn materialize_index(&mut self, idx: &str) -> String {
+        if Self::is_simple_c_index(idx) {
+            idx.to_string()
+        } else {
+            let tmp = self.fresh("idx");
+            self.emit_line(format_args!("int64_t {tmp} = {idx};"));
+            tmp
+        }
+    }
+
+    fn array_addr_arg(&mut self, arr_ty: &str, arr: &str) -> String {
+        if Self::is_c_lvalue(arr) {
+            format!("&({arr})")
+        } else {
+            let tmp = self.fresh("arr");
+            self.emit_line(format_args!("{arr_ty} {tmp} = {arr};"));
+            format!("&{tmp}")
+        }
+    }
+
+    fn c_ident_in(expr: &str, name: &str) -> bool {
+        expr.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .any(|w| w == name)
+    }
+
+    fn invalidate_struct_elem_ptr_cache(&mut self, assigned: &str) {
+        let assigned = mangle(assigned);
+        self.struct_elem_ptr_cache.retain(|(arr, idx), _| {
+            !Self::c_ident_in(arr, &assigned) && !Self::c_ident_in(idx, &assigned)
+        });
+    }
+
+    /// Bounds-checked pointer to `arr[i]` without copying the array header.
+    fn emit_struct_elem_ptr(&mut self, sn: &str, arr_ty: &str, arr: &str, idx: &str) -> String {
+        let idx = self.materialize_index(idx);
+        let key = (arr.to_string(), idx.clone());
+        if let Some(p) = self.struct_elem_ptr_cache.get(&key) {
+            return p.clone();
+        }
+        let p = self.fresh("sp");
+        let elem = self.arr_elem_c_ty(sn);
+        if Self::is_c_lvalue(arr) {
+            self.emit_bounds_check(
+                &format!("{idx} < 0 || (size_t){idx} >= ({arr}).len"),
+                "struct slice index out of bounds",
+            );
+            self.emit_line(format_args!("{elem} *{p} = &({arr}).data[{idx}];"));
+        } else {
+            let addr = self.array_addr_arg(arr_ty, arr);
+            self.emit_line(format_args!(
+                "{elem} *{p} = mako_arr_{sn}_get_ptr({addr}, {idx});"
+            ));
+        }
+        self.struct_elem_ptr_cache.insert(key, p.clone());
+        p
+    }
+
     /// Take the address of a struct value for a borrowed (pointer) parameter.
     fn take_owning_struct_arg_addr(&mut self, aty: &str, val: String) -> String {
         if Self::is_user_struct_ptr(aty) {
@@ -12901,6 +13149,57 @@ impl Codegen {
         }
     }
 
+    fn lookup_struct_field_ty(&self, struct_c_ty: &str, field: &str) -> String {
+        let deref = struct_c_ty.strip_suffix('*').unwrap_or(struct_c_ty);
+        self.structs
+            .get(deref)
+            .or_else(|| self.structs.get(struct_c_ty))
+            .or_else(|| {
+                self.structs
+                    .values()
+                    .find(|s| s.c_name == deref || s.c_name == struct_c_ty)
+            })
+            .and_then(|info| {
+                info.fields
+                    .iter()
+                    .find(|(n, _)| n == field)
+                    .map(|(_, t)| t.clone())
+            })
+            .unwrap_or_else(|| "int64_t".into())
+    }
+
+    /// Field of `arr[i]`: use `*_get_ptr` so a borrowed read does not memcpy
+    /// the whole element (FayDB `db.tables[t].columns[c].values[r]`, issue #66).
+    /// Binding `let t = arr[i]` still goes through by-value `*_get` + clone.
+    fn emit_indexed_struct_field(&mut self, base: &Expr, field: &str) -> Option<(String, String)> {
+        let Expr::Index {
+            base: arr_base,
+            index,
+        } = base
+        else {
+            return None;
+        };
+        let aty = self.peek_expr_c_ty(arr_base);
+        let sn_peek = aty.strip_prefix("MakoArr_")?;
+        let elem_peek = self.arr_elem_c_ty(sn_peek);
+        let is_struct = self.structs.contains_key(sn_peek)
+            || self.structs.contains_key(&elem_peek)
+            || self
+                .structs
+                .values()
+                .any(|s| s.c_name == elem_peek || s.c_name == sn_peek);
+        if !is_struct {
+            return None;
+        }
+        let (bty, b) = self.emit_expr(arr_base);
+        let sn = bty.strip_prefix("MakoArr_")?;
+        let (_, idx) = self.emit_expr(index);
+        let p = self.emit_struct_elem_ptr(sn, &bty, &b, &idx);
+        let elem = self.arr_elem_c_ty(sn);
+        let fty = self.lookup_struct_field_ty(&elem, field);
+        Some((fty, format!("{p}->{field}")))
+    }
+
     /// Indexed struct elements are rvalues from `*_get`. Mut pointer params
     /// must receive `*_get_ptr` so writes land in the array, not a copy.
     fn emit_index_struct_ptr_arg(&mut self, expr: &Expr) -> Option<(String, String)> {
@@ -12910,13 +13209,9 @@ impl Codegen {
         let (bty, b) = self.emit_expr(base);
         let sn = bty.strip_prefix("MakoArr_")?.to_string();
         let (_, idx) = self.emit_expr(index);
-        let tmp = self.fresh("iarg");
-        self.emit_line(format_args!("int64_t {tmp} = {idx};"));
+        let p = self.emit_struct_elem_ptr(&sn, &bty, &b, &idx);
         let elem = self.arr_elem_c_ty(&sn);
-        Some((
-            format!("{elem}*"),
-            format!("mako_arr_{sn}_get_ptr({b}, {tmp})"),
-        ))
+        Some((format!("{elem}*"), p))
     }
 
     fn emit_struct_ptr_arg(&mut self, expr: &Expr) -> (String, String) {
@@ -12957,7 +13252,12 @@ impl Codegen {
     /// A user-struct pointer is a borrow. Returning or storing `(*p)` without
     /// cloning would alias the caller's fields with a new destructor.
     fn clone_escaped_struct_borrow(&mut self, expr: &Expr, c_ty: &str, val: String) -> String {
-        if c_ty == "MakoFn" && matches!(expr, Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }) {
+        if c_ty == "MakoFn"
+            && matches!(
+                expr,
+                Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+            )
+        {
             return format!("mako_fn_clone({val})");
         }
         if !self.c_ty_owns_fields(c_ty) {
@@ -14268,6 +14568,7 @@ impl Codegen {
         self.own_cond_flags.clear();
         self.loop_drop_bases.clear();
         self.loop_label_drop_bases.clear();
+        self.struct_elem_ptr_cache.clear();
         // Mut capture cells are per-function (heap cells for sequential outer mut).
         self.mut_capture_cells.clear();
         self.result_err_enums.clear();
@@ -14326,10 +14627,7 @@ impl Codegen {
         }
         let name = mangle(&f.name);
         if Self::c_hot_inline_fn(f) {
-            let _ = writeln!(
-                self.out,
-                "static inline {ret} {name}({params}) {{"
-            );
+            let _ = writeln!(self.out, "static inline {ret} {name}({params}) {{");
         } else {
             let _ = writeln!(self.out, "{ret} {name}({params}) {{");
         }
@@ -15620,7 +15918,11 @@ impl Codegen {
                     && self.current_arena.is_none()
                     && !self.struct_own_field_frees(&ty).is_empty()
                     && matches!(init, Expr::Call { .. } | Expr::Method { .. });
-                let (val, field_value_owned) = if ty == "MakoFn" && matches!(init, Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }) {
+                let (val, field_value_owned) = if ty == "MakoFn"
+                    && matches!(
+                        init,
+                        Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                    ) {
                     (format!("mako_fn_clone({val})"), false)
                 } else if clone_ident_own {
                     (self.clone_own_val(&ty, &val), false)
@@ -16130,6 +16432,7 @@ impl Codegen {
                         .unwrap_or_else(|| vty.clone())
                 });
                 let val = self.prepare_own_store_rhs(value, &cty_for_rhs, val);
+                self.invalidate_struct_elem_ptr_cache(name);
                 // A POD self-reslice must not discard the sole owning header.
                 // Prefix truncation keeps its allocation in O(1); offset views
                 // materialize owned storage before the old owner is released.
@@ -16137,11 +16440,12 @@ impl Codegen {
                     && matches!(
                         cty_for_rhs.as_str(),
                         "MakoIntArray" | "MakoByteArray" | "MakoFloatArray" | "MakoBoolArray"
-                    )
-                {
+                    ) {
                     let view = self.fresh("reassign_view");
                     self.emit_line(format_args!("{cty_for_rhs} {view} = {val};"));
-                    self.emit_line(format_args!("if ({view}.data == {mn}.data && {mn}.cap > 0) {view}.cap = {mn}.cap;"));
+                    self.emit_line(format_args!(
+                        "if ({view}.data == {mn}.data && {mn}.cap > 0) {view}.cap = {mn}.cap;"
+                    ));
                     self.ensure_slice_owned(&cty_for_rhs, view)
                 } else {
                     val
@@ -16391,12 +16695,14 @@ impl Codegen {
                 let (bty, b) = self.emit_expr(base);
                 // Generated string-key maps clone keys. Primitive SI/SS maps
                 // may use set_take below and therefore still need owned keys.
-                let i = if bty.starts_with("MakoMapS_") && self.peek_expr_c_ty(index) == "MakoString" {
-                    self.emit_str_arg_borrow(index)
-                } else {
-                    self.emit_expr(index).1
-                };
+                let i =
+                    if bty.starts_with("MakoMapS_") && self.peek_expr_c_ty(index) == "MakoString" {
+                        self.emit_str_arg_borrow(index)
+                    } else {
+                        self.emit_expr(index).1
+                    };
                 let (vty, v) = self.emit_expr(value);
+                self.struct_elem_ptr_cache.clear();
                 let expected_vty = bty
                     .strip_prefix("MakoArr_")
                     .map(|sn| self.product_c_ty(sn))
@@ -16546,7 +16852,10 @@ impl Codegen {
                 }
             }
             Stmt::FieldAssign { base, field, value } => {
-                let retained_replacement = matches!(value, Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. });
+                let retained_replacement = matches!(
+                    value,
+                    Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                );
                 // Chained index+field: w.routes[0].path = "x"
                 let destination = Expr::Field {
                     base: Box::new(base.clone()),
@@ -16569,10 +16878,9 @@ impl Codegen {
                         let (vty, v) = Self::coerce_user_struct_value(&vty, v);
                         let v = self.prepare_own_store_rhs(value, &vty, v);
                         let v = self.ensure_slice_owned(&vty, v);
-                        let tmp = self.fresh("ifield");
-                        self.emit_line(format_args!("int64_t {tmp} = {idx};"));
                         let sn = sn.to_string();
-                        let ptr = format!("mako_arr_{sn}_get_ptr({a}, {tmp})");
+                        let ptr = self.emit_struct_elem_ptr(&sn, &aty, &a, &idx);
+                        self.struct_elem_ptr_cache.clear();
                         // Issue #53: `arr[i].values = append(arr[i].values, x)` COWs
                         // without freeing the old header (str/int append leave that
                         // to the caller). Skipping dest-destroy leaked ~one full
@@ -16616,7 +16924,14 @@ impl Codegen {
                         if self.own_cond_flags.contains(&mn) {
                             self.emit_line(format_args!("if ({mn}__own) {{"));
                             self.indent += 1;
-                            self.emit_assign_owned_value(&dest, &vty, &v, &field_free, is_append, retained_replacement);
+                            self.emit_assign_owned_value(
+                                &dest,
+                                &vty,
+                                &v,
+                                &field_free,
+                                is_append,
+                                retained_replacement,
+                            );
                             self.indent -= 1;
                             self.emit_line(format_args!("}} else {{"));
                             self.indent += 1;
@@ -16625,7 +16940,14 @@ impl Codegen {
                             self.emit_line(format_args!("}}"));
                             self.emit_line(format_args!("{mn}__own = 1;"));
                         } else {
-                            self.emit_assign_owned_value(&dest, &vty, &v, &field_free, is_append, retained_replacement);
+                            self.emit_assign_owned_value(
+                                &dest,
+                                &vty,
+                                &v,
+                                &field_free,
+                                is_append,
+                                retained_replacement,
+                            );
                         }
                         if Self::own_free_fn(&bty).is_some()
                             || !self.struct_own_field_frees(&bty).is_empty()
@@ -16667,7 +16989,14 @@ impl Codegen {
                 // Nested struct fields own their payload just like local fields.
                 let dest = format!("{b}{arrow}{field}");
                 if let Some(field_free) = Self::own_free_fn(&vty) {
-                    self.emit_assign_owned_value(&dest, &vty, &v, &field_free, is_append, retained_replacement);
+                    self.emit_assign_owned_value(
+                        &dest,
+                        &vty,
+                        &v,
+                        &field_free,
+                        is_append,
+                        retained_replacement,
+                    );
                 } else if !self.struct_own_field_frees(&vty).is_empty() {
                     self.emit_assign_owning_struct(&dest, &vty, &v);
                 } else {
@@ -17073,7 +17402,12 @@ impl Codegen {
                     }
                 }
                 // Local binding first (may be a function pointer).
-                if let Some(ty) = self.locals.get(n).or_else(|| self.locals.get(&mangle(n))).cloned() {
+                if let Some(ty) = self
+                    .locals
+                    .get(n)
+                    .or_else(|| self.locals.get(&mangle(n)))
+                    .cloned()
+                {
                     return (ty, mangle(n));
                 }
                 // Named function as a first-class value → MakoFn bare fat pointer.
@@ -17261,8 +17595,13 @@ impl Codegen {
                     // (call result, another concat, f-string — not a named variable).
                     // Literal operands are emitted as static views above and cannot
                     // be passed to the reallocating concat_own path.
-                    let left_is_fresh =
-                        Self::expr_is_fresh_own(left) && !matches!(left.as_ref(), Expr::String(_));
+                    // concat_own reallocs the left buffer. Field/index of an
+                    // array or struct is a borrow of the container — realloc
+                    // would alias the element's string with the concat result
+                    // and double-free when the container drops (issue #66).
+                    let left_is_fresh = Self::expr_is_fresh_own(left)
+                        && !matches!(left.as_ref(), Expr::String(_))
+                        && !self.expr_is_owning_borrow(left);
                     let fn_name = if left_is_fresh {
                         "mako_str_concat_own"
                     } else {
@@ -25189,7 +25528,9 @@ impl Codegen {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, dst) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("arb");
-                            self.line(&format!("int64_t {tmp} = mako_actor_recv_batch({a}, {dst});"));
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_actor_recv_batch({a}, {dst});"
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "actor_stop" => {
@@ -25233,7 +25574,10 @@ impl Codegen {
                         "actor_box_payload" => {
                             // Heap-allocate the struct/value and return the full pointer.
                             let (ety, ev) = self.emit_expr(&args[0]);
-                            let snapshot = if matches!(&args[0], Expr::StructLit { .. } | Expr::StructLitPos { .. }) {
+                            let snapshot = if matches!(
+                                &args[0],
+                                Expr::StructLit { .. } | Expr::StructLitPos { .. }
+                            ) {
                                 // The literal already owns strings and channel clones.
                                 // Only mutable slice backing needs a separate snapshot.
                                 self.detach_actor_slices(&ety, &ev);
@@ -35691,7 +36035,11 @@ impl Codegen {
                             // Byte conversion preserves a string's byte length.
                             // Avoid allocating a copy solely to inspect its size;
                             // retain normal cleanup for an owned string argument.
-                            if let Expr::Call { callee, args: converted } = &args[0] {
+                            if let Expr::Call {
+                                callee,
+                                args: converted,
+                            } = &args[0]
+                            {
                                 if matches!(callee.as_ref(), Expr::Ident(n) if n == "bytes")
                                     && converted.len() == 1
                                     && self.peek_expr_c_ty(&converted[0]) == "MakoString"
@@ -35715,7 +36063,9 @@ impl Codegen {
                                     self.register_own_drop(&owned, &ty);
                                     self.scope_drop_safe.insert(owned.clone());
                                     owned
-                                } else { v };
+                                } else {
+                                    v
+                                };
                                 return ("int64_t".into(), format!("mako_str_len({v})"));
                             }
                             if ty == "MakoByteArray" {
@@ -36305,9 +36655,9 @@ impl Codegen {
                                         self.emit_expr(a)
                                     }
                                 } else if expected_c_params
-                                        .as_ref()
-                                        .and_then(|params| params.get(i))
-                                        .is_some_and(|ty| ty == "MakoString")
+                                    .as_ref()
+                                    .and_then(|params| params.get(i))
+                                    .is_some_and(|ty| ty == "MakoString")
                                 {
                                     ("MakoString".into(), self.emit_str_arg_borrow(a))
                                 } else if self.param_passed_by_ptr(name, i)
@@ -36368,8 +36718,12 @@ impl Codegen {
                                 {
                                     // A pointer parameter borrows its argument. Fresh
                                     // owning structs still need a caller-side destructor.
-                                    if matches!(&args[i], Expr::Call { .. } | Expr::StructLit { .. } | Expr::StructLitPos { .. })
-                                        && !Self::is_user_struct_ptr(aty)
+                                    if matches!(
+                                        &args[i],
+                                        Expr::Call { .. }
+                                            | Expr::StructLit { .. }
+                                            | Expr::StructLitPos { .. }
+                                    ) && !Self::is_user_struct_ptr(aty)
                                         && !self.struct_own_field_frees(aty).is_empty()
                                         && !self.own_drop_live.contains(&v)
                                     {
@@ -36406,7 +36760,9 @@ impl Codegen {
                                         Self::collect_assigned_idents_in_expr(body, &mut assigned);
                                         // Mutable capture cells can still be used by the outer
                                         // binding after this inner scope exits.
-                                        !assigned.iter().any(|n| self.locals.contains_key(n) && !params.contains(n))
+                                        !assigned.iter().any(|n| {
+                                            self.locals.contains_key(n) && !params.contains(n)
+                                        })
                                     }
                                     Some(Expr::Call { .. }) => true,
                                     _ => false,
@@ -36420,8 +36776,14 @@ impl Codegen {
                                 if Self::own_free_fn(aty).is_some()
                                     && !self.own_drop_live.contains(&arg_vals[i])
                                     && (matches!(args.get(i), Some(Expr::Call { .. }))
-                                        || (aty == "MakoString" && matches!(args.get(i),
-                                            Some(Expr::Binary { op: BinOp::Add, .. } | Expr::StringInterp(_)))))
+                                        || (aty == "MakoString"
+                                            && matches!(
+                                                args.get(i),
+                                                Some(
+                                                    Expr::Binary { op: BinOp::Add, .. }
+                                                        | Expr::StringInterp(_)
+                                                )
+                                            )))
                                 {
                                     let cap = self.fresh("trs");
                                     let cty = aty.clone();
@@ -36767,7 +37129,9 @@ impl Codegen {
         let drops = std::mem::replace(&mut self.out, saved_out);
         self.indent = saved_indent;
         if drops.is_empty() {
-            self.line(&format!("MakoChanPtr *{tmp} = mako_chan_ptr_new({capacity});"));
+            self.line(&format!(
+                "MakoChanPtr *{tmp} = mako_chan_ptr_new({capacity});"
+            ));
         } else {
             self.insert_helper(&format!(
                 "static void {helper}(void *box) {{\n    {c_ty} *payload = ({c_ty}*)box;\n{drops}}}\n"
@@ -37844,8 +38208,7 @@ impl Codegen {
                     }
                     return (vty, format!("mako_map_k_{kn}_{vs}_get({b}, {i})"));
                 }
-                let tmp = self.fresh("idx");
-                self.emit_line(format_args!("int64_t {tmp} = {i};"));
+                let tmp = self.materialize_index(&i);
                 // Raw arrays: direct element access (same struct layout, bounds check inline).
                 if bty == "MakoRawIntArray" {
                     self.line(&format!(
@@ -37884,9 +38247,17 @@ impl Codegen {
                 }
                 if bty == "MakoStrArray" {
                     let out = self.fresh("sg");
-                    self.line(&format!(
-                        "MakoString {out} = mako_str_array_get({b}, {tmp});"
-                    ));
+                    if Self::is_c_lvalue(&b) {
+                        self.emit_bounds_check(
+                            &format!("{tmp} < 0 || (size_t){tmp} >= {b}.len"),
+                            "string slice index out of bounds",
+                        );
+                        self.line(&format!("MakoString {out} = {b}.data[{tmp}];"));
+                    } else {
+                        self.line(&format!(
+                            "MakoString {out} = mako_str_array_get({b}, {tmp});"
+                        ));
+                    }
                     return ("MakoString".into(), out);
                 }
                 if bty == "MakoFloatArray" {
@@ -38710,9 +39081,7 @@ impl Codegen {
                             self.drop_channel_struct_temp(&args[0], &cname, &v);
                             self.emit_line(format_args!("if (!{tmp}) {{"));
                             self.indent += 1;
-                            for (field, free_fn) in self.struct_own_field_frees(&cname) {
-                                self.emit_line(format_args!("{free_fn}({boxn}->{field});"));
-                            }
+                            self.emit_struct_field_drop(&cname, &boxn, true);
                             self.emit_line(format_args!("mako_box_free({boxn}, sizeof({cname}));"));
                             self.indent -= 1;
                             self.line("}");
@@ -38792,9 +39161,7 @@ impl Codegen {
                             self.drop_channel_struct_temp(&args[0], &cname, &v);
                             self.emit_line(format_args!("if ({tmp} != 1) {{"));
                             self.indent += 1;
-                            for (field, free_fn) in self.struct_own_field_frees(&cname) {
-                                self.emit_line(format_args!("{free_fn}({boxn}->{field});"));
-                            }
+                            self.emit_struct_field_drop(&cname, &boxn, true);
                             self.emit_line(format_args!("mako_box_free({boxn}, sizeof({cname}));"));
                             self.indent -= 1;
                             self.line("}");
@@ -39554,6 +39921,9 @@ impl Codegen {
                     }
                 }
                 // (handled below — pure-c helper also supports fields)
+                if let Some(got) = self.emit_indexed_struct_field(base, field) {
+                    return got;
+                }
                 let (bty, b) = self.emit_expr(base);
                 // Pointer types (mut self) use -> for field access
                 let deref_bty = bty.strip_suffix('*').unwrap_or(&bty);
@@ -40217,9 +40587,14 @@ impl Codegen {
             let own_error = self.expr_owns_result_error(scrutinee)
                 && arms.iter().all(|arm| arm.guard.is_none())
                 && match scrutinee {
-                    Expr::Ident(n) => !self.ident_used_after_current(n)
-                        && self.loop_drop_bases.last().is_none_or(|base|
-                            self.own_bind_scope.get(&mangle(n)).is_some_and(|scope| scope >= base)),
+                    Expr::Ident(n) => {
+                        !self.ident_used_after_current(n)
+                            && self.loop_drop_bases.last().is_none_or(|base| {
+                                self.own_bind_scope
+                                    .get(&mangle(n))
+                                    .is_some_and(|scope| scope >= base)
+                            })
+                    }
                     _ => true,
                 };
             self.bind_pattern_locals(&scrut, &sty, &arm.pattern, own_error);
@@ -40773,8 +41148,11 @@ impl Codegen {
                             self.register_own_drop(&b, &cty);
                         } else {
                             self.locals.insert(bindings[0].clone(), "MakoString".into());
-                            let payload = if own_error { format!("{scrut}.err") }
-                                else { format!("mako_str_clone({scrut}.err)") };
+                            let payload = if own_error {
+                                format!("{scrut}.err")
+                            } else {
+                                format!("mako_str_clone({scrut}.err)")
+                            };
                             self.line(&format!("MakoString {b} = {payload};"));
                             self.register_own_drop(&b, "MakoString");
                         }
@@ -40897,7 +41275,7 @@ impl Codegen {
             let stub_id = self.tmp;
             let helper_src = format!(
                 "static _Atomic int64_t __mako_kick_id_{stub_id} = 0;\n\
-                 __attribute__((noinline,optnone)) void *{helper}(void *arg) {{ (void)arg;\n\
+                 MAKO_NOINLINE_NOOPT void *{helper}(void *arg) {{ (void)arg;\n\
                  atomic_store_explicit(&__mako_kick_id_{stub_id}, {stub_id}, memory_order_relaxed);\n{body}}}\n"
             );
             self.insert_helper(&helper_src);
@@ -40960,8 +41338,13 @@ impl Codegen {
                 }
                 // The boxed value is the task's owned clone. Drop it after the
                 // callee returns (the callee borrows and must not free it).
-                for (path, ff) in self.struct_own_field_frees(ty) {
-                    cleanup.push_str(&format!("{ff}({local}.{path});\n"));
+                let kick_fields = self.struct_own_field_frees(ty);
+                if kick_fields.len() > STRUCT_INLINE_FIELD_DROP_MAX {
+                    cleanup.push_str(&format!("mako_struct_{ty}_drop_fields(&{local});\n"));
+                } else {
+                    for (path, ff) in kick_fields {
+                        cleanup.push_str(&format!("{ff}({local}.{path});\n"));
+                    }
                 }
             } else if ty.contains('*') {
                 unpack.push_str(&format!("{ty} {local} = ({ty})a[{i}];\n"));
@@ -41026,7 +41409,7 @@ impl Codegen {
         let stub_id = self.tmp;
         let helper_src = format!(
             "static _Atomic int64_t __mako_kick_id_{stub_id} = 0;\n\
-             __attribute__((noinline,optnone)) void *{helper}(void *arg) {{\n\
+             MAKO_NOINLINE_NOOPT void *{helper}(void *arg) {{\n\
              atomic_store_explicit(&__mako_kick_id_{stub_id}, {stub_id}, memory_order_relaxed);\n{body}}}\n"
         );
         self.insert_helper(&helper_src);
@@ -43756,7 +44139,7 @@ fn main() {
         let program = Parser::new(tokens).parse().expect("parse");
         let generated = Codegen::new().emit(&program);
         assert!(
-            generated.contains("get_ptr"),
+            generated.contains("get_ptr") || generated.contains(".data["),
             "mut owning-struct index args must pass element pointers:\n{generated}"
         );
     }
@@ -43826,6 +44209,387 @@ fn main() {
         assert!(
             generated.contains("mako_chan_ptr_clone("),
             "kick of chan[struct] must RC-clone the handle:\n{generated}"
+        );
+    }
+
+    fn emit_src(source: &str) -> String {
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        Codegen::new().emit(&program)
+    }
+
+    /// Body of the last `sig(` that is a definition (`{`), not a prototype (`;`).
+    fn fn_body<'a>(generated: &'a str, sig: &str) -> &'a str {
+        let mut search = 0;
+        let mut found = None;
+        while let Some(rel) = generated[search..].find(sig) {
+            let start = search + rel;
+            let after_sig = start + sig.len();
+            if let Some(brace_rel) = generated[after_sig..].find('{') {
+                let semi_rel = generated[after_sig..].find(';');
+                let proto = semi_rel.is_some_and(|s| s < brace_rel);
+                if !proto {
+                    found = Some(start);
+                }
+            }
+            search = after_sig;
+        }
+        let start = found.unwrap_or_else(|| panic!("definition {sig}"));
+        let brace = generated[start..].find('{').expect("body") + start;
+        let mut depth = 0i32;
+        for (i, c) in generated[brace..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &generated[start..brace + i + 1];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unclosed {sig}");
+    }
+
+    fn src_faydb_hot_path() -> &'static str {
+        r#"
+struct Column { name: string values: []string }
+struct Table { name: string columns: []Column rows: int }
+struct Database {
+    tables: []Table
+    label: string
+    a: string
+    b: string
+    c: string
+    d: string
+    e: string
+    f: string
+    g: string
+}
+
+fn exec_select_point(mut db: Database, tidx: int, ci: int, ri: int, out: StrBuilder) {
+    builder_write(out, db.tables[tidx].columns[ci].values[ri])
+}
+
+fn column_get(col: Column, i: int) -> string {
+    return col.values[i]
+}
+
+fn bind_table(mut db: Database) -> string {
+    let mut table = db.tables[0]
+    table.name = "n"
+    return table.name
+}
+
+fn main() {
+    let mut db = Database {
+        tables: make([]Table, 0, 1),
+        label: "orig",
+        a: "a", b: "b", c: "c", d: "d", e: "e", f: "f", g: "g",
+    }
+    db.tables = append(db.tables, Table { name: "t", columns: make([]Column, 0, 1), rows: 1 })
+    db.tables[0].columns = append(db.tables[0].columns, Column { name: "c", values: ["v0"] })
+    let out = str_builder()
+    exec_select_point(db, 0, 0, 0, out)
+    print(builder_string(out))
+    print(column_get(db.tables[0].columns[0], 0))
+    print(bind_table(db))
+}
+"#
+    }
+
+    #[test]
+    fn nested_indexed_field_read_uses_get_ptr_not_struct_copy() {
+        // Issue #66: `db.tables[t].columns[c].values[r]` must not memcpy Table/Column.
+        let generated = emit_src(src_faydb_hot_path());
+        let body = fn_body(&generated, "exec_select_point(");
+        assert!(
+            (body.contains("mako_arr_Table_get_ptr") || body.contains("tables).data["))
+                && (body.contains("mako_arr_Column_get_ptr") || body.contains("columns).data[")),
+            "nested field reads must use element pointers, not struct copies:\n{body}"
+        );
+        assert!(
+            !body.contains("mako_arr_Table_get(") && !body.contains("mako_arr_Column_get("),
+            "nested field reads must not copy the whole element:\n{body}"
+        );
+        assert!(
+            !body.contains("mako_str_clone"),
+            "builder_write of a borrowed nested string must not clone:\n{body}"
+        );
+        assert!(
+            body.contains(".data[") && body.contains("mako_str_builder_write"),
+            "hot path must bounds-check the string slot via .data[i] and write it:\n{body}"
+        );
+    }
+
+    #[test]
+    fn returning_indexed_string_still_clones_for_caller_ownership() {
+        // Adversarial: skipping this clone UAFs when the caller frees the result
+        // (`emit_str_arg` treats user-function string returns as owned).
+        let generated = emit_src(src_faydb_hot_path());
+        let body = fn_body(&generated, "column_get(");
+        assert!(
+            (body.contains("mako_str_array_get") || body.contains(".data["))
+                && body.contains("mako_str_clone"),
+            "return col.values[i] must clone so the caller owns the result:\n{body}"
+        );
+    }
+
+    #[test]
+    fn let_of_indexed_struct_still_copies_and_clones() {
+        // Adversarial: get_ptr on `let t = arr[i]` would alias the array element
+        // and free/mutate through both owners.
+        let generated = emit_src(src_faydb_hot_path());
+        let bind = fn_body(&generated, "bind_table(");
+        let name_at = bind.find("table.name").expect("table.name assign");
+        let before = &bind[..name_at];
+        assert!(
+            before.contains("mako_arr_Table_get(") && before.contains("mako_str_clone"),
+            "let of indexed owning struct must still copy + clone:\n{before}"
+        );
+        assert!(
+            !before.contains("mako_arr_Table_get_ptr"),
+            "let of indexed struct must not borrow via get_ptr:\n{before}"
+        );
+    }
+
+    #[test]
+    fn large_struct_scope_exit_uses_drop_helper() {
+        let generated = emit_src(src_faydb_hot_path());
+        assert!(
+            generated.contains("mako_struct_Database_drop_fields"),
+            "Database has >8 owning fields and must emit a shared drop helper:\n{}",
+            generated
+                .split("typedef struct Database")
+                .nth(1)
+                .unwrap_or(&generated)
+                .chars()
+                .take(1200)
+                .collect::<String>()
+        );
+        let main = generated.split("void mako_main(").last().expect("main");
+        assert!(
+            main.contains("mako_struct_Database_drop_fields(&db)")
+                || main.contains("mako_struct_Database_drop_fields(&db);"),
+            "scope exit of a large owning struct must call the helper, not 9+ inline frees:\n{main}"
+        );
+        let inline_label_free = main.matches("mako_str_free(db.label)").count();
+        assert_eq!(
+            inline_label_free, 0,
+            "large-struct drop must not inline per-field frees in main:\n{main}"
+        );
+    }
+
+    #[test]
+    fn nested_index_with_call_index_still_uses_get_ptr() {
+        // Adversarial: index is not a bare ident; get_ptr must still win, and
+        // the call must be evaluated once into a temp (not re-read as a copy).
+        let source = r#"
+struct Cell { label: string }
+struct Row { cells: []Cell }
+fn pick() -> int { return 0 }
+fn read_label(mut rows: []Row) -> string {
+    return rows[pick()].cells[pick()].label
+}
+fn main() {
+    let mut rows = make([]Row, 0, 1)
+    rows = append(rows, Row { cells: make([]Cell, 0, 1) })
+    rows[0].cells = append(rows[0].cells, Cell { label: "x" })
+    print(read_label(rows))
+}
+"#;
+        let generated = emit_src(source);
+        let read = fn_body(&generated, "read_label(");
+        assert!(
+            read.contains(".data[")
+                && (read.contains("mako_arr_Row_get_ptr")
+                    || read.contains("mako_arr_Cell_get_ptr")
+                    || read.contains(" *")),
+            "call-indexed nested fields must use element pointers:\n{read}"
+        );
+        assert!(
+            !read.contains("mako_arr_Row_get(") && !read.contains("mako_arr_Cell_get("),
+            "call-indexed nested fields must not copy the element:\n{read}"
+        );
+        assert!(
+            read.contains("mako_str_clone"),
+            "returning the borrowed label must still clone:\n{read}"
+        );
+    }
+
+    fn src_general_nested_index() -> &'static str {
+        r#"
+struct Edge { to: int cost: int kind: string }
+struct Node { name: string edges: []Edge }
+struct Handler { name: string weight: int }
+struct Route { path: string handlers: []Handler }
+struct Cell { score: int label: string }
+struct Row { cells: []Cell weight: int }
+struct Grid { rows: []Row title: string }
+
+fn scan_graph(nodes: []Node) -> int {
+    return nodes[0].edges[1].cost + nodes[0].edges[1].to
+}
+
+fn scan_routes(routes: []Route, out: StrBuilder) {
+    builder_write(out, routes[0].path)
+    builder_write(out, routes[0].handlers[1].name)
+}
+
+fn scan_grid(g: Grid) -> int {
+    return g.rows[0].cells[1].score + g.rows[0].weight
+}
+
+fn scan_labels(g: Grid, out: StrBuilder) {
+    builder_write(out, g.rows[0].cells[1].label)
+}
+
+fn main() {
+    let mut nodes = make([]Node, 0, 1)
+    nodes = append(nodes, Node { name: "a", edges: make([]Edge, 0, 1) })
+    nodes[0].edges = append(nodes[0].edges, Edge { to: 1, cost: 4, kind: "fwd" })
+    let mut routes = make([]Route, 0, 1)
+    routes = append(routes, Route { path: "/", handlers: make([]Handler, 0, 1) })
+    routes[0].handlers = append(routes[0].handlers, Handler { name: "h", weight: 1 })
+    let mut g = Grid { rows: make([]Row, 0, 1), title: "g" }
+    g.rows = append(g.rows, Row { cells: make([]Cell, 0, 1), weight: 10 })
+    g.rows[0].cells = append(g.rows[0].cells, Cell { score: 1, label: "x" })
+    let out = str_builder()
+    print_int(scan_graph(nodes))
+    scan_routes(routes, out)
+    print_int(scan_grid(g))
+    scan_labels(g, out)
+}
+"#
+    }
+
+    #[test]
+    fn graph_nested_edge_read_uses_get_ptr() {
+        let generated = emit_src(src_general_nested_index());
+        let body = fn_body(&generated, "scan_graph(");
+        assert!(
+            body.contains(".data[")
+                && !body.contains("mako_arr_Node_get(")
+                && !body.contains("mako_arr_Edge_get("),
+            "graph nodes[i].edges[j].cost must use element pointers:\n{body}"
+        );
+        assert!(
+            !body.contains("mako_arr_Node_get(") && !body.contains("mako_arr_Edge_get("),
+            "graph nested reads must not memcpy Node/Edge:\n{body}"
+        );
+        assert!(
+            !body.contains("mako_str_clone"),
+            "int field reads must not clone strings:\n{body}"
+        );
+    }
+
+    #[test]
+    fn route_nested_handler_read_uses_get_ptr_without_string_clone() {
+        let generated = emit_src(src_general_nested_index());
+        let body = fn_body(&generated, "scan_routes(");
+        assert!(
+            body.contains(".data[")
+                && !body.contains("mako_arr_Route_get(")
+                && !body.contains("mako_arr_Handler_get("),
+            "routes[i].handlers[j].name must use element pointers:\n{body}"
+        );
+        assert!(
+            !body.contains("mako_arr_Route_get(") && !body.contains("mako_arr_Handler_get("),
+            "route nested reads must not memcpy Route/Handler:\n{body}"
+        );
+        assert!(
+            !body.contains("mako_str_clone") && body.contains("mako_str_builder_write"),
+            "builder_write of nested route strings must not clone:\n{body}"
+        );
+    }
+
+    #[test]
+    fn grid_nested_cell_read_uses_get_ptr() {
+        let generated = emit_src(src_general_nested_index());
+        let scores = fn_body(&generated, "scan_grid(");
+        assert!(
+            scores.contains(".data[")
+                && !scores.contains("mako_arr_Row_get(")
+                && !scores.contains("mako_arr_Cell_get("),
+            "g.rows[r].cells[c].score must use element pointers:\n{scores}"
+        );
+        assert_eq!(
+            scores.matches(".data[").count(),
+            2,
+            "g.rows[0] used twice must reuse one element pointer:\n{scores}"
+        );
+        assert!(
+            !scores.contains("mako_arr_Row_get(") && !scores.contains("mako_arr_Cell_get("),
+            "grid nested reads must not memcpy Row/Cell:\n{scores}"
+        );
+        let labels = fn_body(&generated, "scan_labels(");
+        assert!(
+            labels.contains(".data[") && !labels.contains("mako_str_clone"),
+            "builder_write of g.rows[r].cells[c].label must borrow:\n{labels}"
+        );
+    }
+
+    fn src_nested_escape() -> &'static str {
+        r#"
+struct Cell { score: int label: string }
+struct Row { cells: []Cell tags: []string }
+fn bag_field(rows: []Row) -> Option[string] {
+    return Some(rows[0].cells[0].label)
+}
+fn bag_index(rows: []Row) -> Option[string] {
+    return Some(rows[0].tags[0])
+}
+fn concat_field(rows: []Row) -> string {
+    return rows[0].cells[0].label + "!"
+}
+fn concat_index(rows: []Row) -> string {
+    return rows[0].tags[0] + "!"
+}
+fn main() {
+    let mut rows = make([]Row, 0, 1)
+    rows = append(rows, Row { cells: make([]Cell, 0, 1), tags: ["t"] })
+    rows[0].cells = append(rows[0].cells, Cell { score: 1, label: "x" })
+    print(unwrap(bag_field(rows)))
+    print(unwrap(bag_index(rows)))
+    print(concat_field(rows))
+    print(concat_index(rows))
+}
+"#
+    }
+
+    #[test]
+    fn some_of_nested_field_clones_so_container_and_option_do_not_alias() {
+        let generated = emit_src(src_nested_escape());
+        let body = fn_body(&generated, "bag_field(");
+        assert!(
+            body.contains("mako_str_clone") && body.contains("mako_some_str"),
+            "Some(rows[i].cells[j].label) must clone the borrow:\n{body}"
+        );
+    }
+
+    #[test]
+    fn some_of_string_index_clones_so_array_and_option_do_not_alias() {
+        let generated = emit_src(src_nested_escape());
+        let body = fn_body(&generated, "bag_index(");
+        assert!(
+            body.contains("mako_str_clone") && body.contains("mako_some_str"),
+            "Some(rows[i].tags[j]) must clone the borrow:\n{body}"
+        );
+    }
+
+    #[test]
+    fn concat_of_nested_field_does_not_realloc_container_string() {
+        let generated = emit_src(src_nested_escape());
+        let field = fn_body(&generated, "concat_field(");
+        assert!(
+            field.contains("mako_str_concat(") && !field.contains("mako_str_concat_own("),
+            "label + \"!\" must copy, not realloc the cell's string:\n{field}"
+        );
+        let index = fn_body(&generated, "concat_index(");
+        assert!(
+            index.contains("mako_str_concat(") && !index.contains("mako_str_concat_own("),
+            "tags[i] + \"!\" must copy, not realloc the array element:\n{index}"
         );
     }
 }
