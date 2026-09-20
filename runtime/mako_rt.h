@@ -6012,8 +6012,17 @@ static inline void mako_select_notify(void); /* forward decl — wakes select wa
 
 /* Lightweight fast-path lock: os_unfair_lock on macOS, atomic spinlock elsewhere.
  * Protects buffer state (head/tail/count) without pthread overhead.
- * The pthread mutex is kept only for condvar waits (slow path). */
-#if defined(__APPLE__)
+ * The pthread mutex is kept only for condvar waits (slow path).
+ * Under TSan: fall back to pthread_mutex since TSan does not understand
+ * custom atomic spinlocks and would report false-positive data races. */
+#if defined(__SANITIZE_THREAD__) || (defined(__has_feature) && __has_feature(thread_sanitizer))
+/* TSan mode: use pthread_mutex so TSan can track happens-before. */
+typedef pthread_mutex_t MakoFastLock;
+#define MAKO_FAST_LOCK_INIT PTHREAD_MUTEX_INITIALIZER
+static inline void mako_fast_lock(MakoFastLock *l) { pthread_mutex_lock(l); }
+static inline int  mako_fast_trylock(MakoFastLock *l) { return pthread_mutex_trylock(l) == 0; }
+static inline void mako_fast_unlock(MakoFastLock *l) { pthread_mutex_unlock(l); }
+#elif defined(__APPLE__)
 #include <os/lock.h>
 typedef os_unfair_lock MakoFastLock;
 #define MAKO_FAST_LOCK_INIT OS_UNFAIR_LOCK_INIT
@@ -6151,7 +6160,11 @@ static inline MakoChan *mako_chan_new(int64_t capacity) {
 #else
     pthread_mutex_init(&c->mu, NULL);
 #endif
+#if defined(__SANITIZE_THREAD__) || (defined(__has_feature) && __has_feature(thread_sanitizer))
+    pthread_mutex_init(&c->fl, NULL);
+#else
     c->fl = (MakoFastLock)MAKO_FAST_LOCK_INIT;
+#endif
     pthread_cond_init(&c->can_send, NULL);
     pthread_cond_init(&c->can_recv, NULL);
     mako_rt_counter_inc(&mako_rt_channels_created);
