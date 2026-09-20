@@ -6023,12 +6023,19 @@ static inline void mako_select_notify(void); /* forward decl — wakes select wa
  * Protects buffer state (head/tail/count) without pthread overhead.
  * The pthread mutex is kept only for condvar waits (slow path).
  * TSan annotations tell the sanitizer about our custom synchronization. */
-#if defined(__SANITIZE_THREAD__) || (defined(__has_feature) && __has_feature(thread_sanitizer))
+#ifdef __SANITIZE_THREAD__
 #define MAKO_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define MAKO_TSAN 1
+#endif
+#endif
+#ifndef MAKO_TSAN
+#define MAKO_TSAN 0
+#endif
+#if MAKO_TSAN
 void __tsan_acquire(void *addr);
 void __tsan_release(void *addr);
-#else
-#define MAKO_TSAN 0
 #endif
 
 #if defined(__APPLE__)
