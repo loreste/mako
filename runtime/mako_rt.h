@@ -7272,11 +7272,15 @@ static inline void mako_chan_ptr_free(MakoChanPtr *c) {
     if (atomic_fetch_sub_explicit(&c->refs, 1, memory_order_acq_rel) != 1) return;
     atomic_thread_fence(memory_order_acquire);
     if (!c->closed) mako_chan_ptr_close(c);
-    /* Free remaining buffered boxes (heap-allocated struct copies). */
+    /* Free remaining buffered boxes (heap-allocated struct copies).
+     * Call the element destructor first to release owned fields. */
     size_t slots = mako_chan_alloc_slots(c->cap);
     while (c->count > 0) {
         void *p = c->buf[c->head];
-        if (p) free(p);
+        if (p) {
+            if (c->dtor) c->dtor(p);
+            free(p);
+        }
         c->head = (c->head + 1) % slots;
         c->count--;
     }

@@ -4217,14 +4217,18 @@ impl Codegen {
                 ));
             }
             other if other.starts_with("MakoArr_") => {
-                // SAFETY: only release backing refcount, never free element fields.
-                // Element fields (Column.values, etc.) may be COW-shared with other
-                // tables. The full destructor frees element strings/arrays even when
-                // the array backing refcount is 1, because individual element COW
-                // sharing isn't tracked by the array refcount (#65).
-                self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
-                ));
+                // Use the struct array's free function which checks refcount:
+                // if shared (COW), just decrements; if last owner, frees
+                // contained owned fields then releases the backing.
+                if let Some(ff) = Self::own_free_fn(other) {
+                    self.emit_line(format_args!(
+                        "if ({old}.data != {new}.data) {ff}({old});"
+                    ));
+                } else {
+                    self.emit_line(format_args!(
+                        "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
+                    ));
+                }
             }
             _ => {
                 let cond = Self::owning_field_replaced_cond(c_ty, old, new);
@@ -4629,9 +4633,7 @@ impl Codegen {
     /// for struct types — only free scalar owning types (string, array, map).
     fn write_elem_dest_destroy(&mut self, old: &str, new: &str, cty: &str, indent: &str) {
         let fields = self.struct_own_field_frees(cty);
-        if !fields.is_empty() && false {
-            // Disabled: references `a.data` which only exists inside generated
-            // array helpers, not at all call sites. Needs caller-side guard.
+        if !fields.is_empty() {
             for (path, free_fn) in fields {
                 let fty = self.struct_field_c_type(cty, &path).unwrap_or_default();
                 let cond = Self::owning_field_replaced_cond(
@@ -4650,7 +4652,6 @@ impl Codegen {
                     indent,
                 );
             }
-            let _ = writeln!(self.out, "{indent}}}");
             return;
         }
         if let Some(ff) = Self::own_free_fn(cty) {
