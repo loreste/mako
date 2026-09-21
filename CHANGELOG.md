@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.36
+
+- C backend: borrowed `arr[i].field` reads (graphs, routes, records, nested
+  `rows[r].cells[c].score`, FayDB columns) emit `&arr.data[i]` after a bounds
+  check instead of copying the whole element or the array header. The element
+  pointer is reused while the index is live. `builder_write` / `len` of that
+  string does not `mako_str_clone`. `let t = arr[i]`, stores, and
+  `return col.values[i]` still clone so owners stay distinct. `Some`/`Ok` of a
+  nested field or string-index clones the borrow; `s + "x"` uses
+  `mako_str_concat` rather than reallocating the container's buffer (issue #66).
+- C backend: structs with more than eight owning fields drop and reassign
+  through a shared helper instead of inlining one free per field at every
+  scope exit. Channel send failures and kick workers use the same helper.
+
 ## 0.6.35
 
 - Increase bounded single-port actor prefetch to 64 ready messages to reduce

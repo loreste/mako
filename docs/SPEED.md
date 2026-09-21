@@ -71,6 +71,8 @@ contract.
 | Channel send/recv (buffered, not full/empty) | **One mutex** — enqueue/dequeue and wake a waiter without unlock/relock |
 | Actor scalar messages | **Zero-alloc pack** (tag+payload in one `int64`) + always-inlined constructors; envelope pointers stay off this path |
 | Fully-initialized struct literals | **`memset` elision** — codegen skips zeroing when all fields are explicitly assigned, eliminating redundant cache writes |
+| `arr[i].field` / nested `rows[r].cells[c].score` | **`&arr.data[i]`** after a bounds check — no array-header copy, named element pointer reused while the index is live, no extra index temp for idents. String slots on an lvalue use `.data[i]`. `let t = arr[i]`, stores, and `return arr[i].s` still copy/clone |
+| Large owning structs (>8 owned fields) | **Shared drop/assign helper** — one call at scope exit instead of O(fields) inlined frees (FayDB `Database`) |
 | Raw arrays (`raw []T`) | **Plain malloc, zero refcount** — bypasses atomic retain/release overhead for single-owner hot loops |
 | Iterator combinators (`map`/`filter`/`reduce`) | **Inline loops** — lowers directly to tight iteration with zero closure indirection overhead |
 | Structured nursery policies | `crew:race` / `crew:fail_fast` — cooperative token cancellation without runaway background tasks |

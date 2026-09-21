@@ -28,6 +28,15 @@ retains responsibility for releasing the old header. This prevents detached
 arrays from becoming duplicate owners of the same string allocation on macOS and
 Linux. Nested `arr[i].field = append(arr[i].field, v)` dest-destroys that old
 header (issue #53); skipping it leaked one full column copy per FayDB DML.
+A borrowed read of `arr[i].field` (including FayDB
+`db.tables[t].columns[c].values[r]` fed to `builder_write`) uses `*_get_ptr`
+and does not clone the string or memcpy the whole element (issue #66). Binding
+`let t = arr[i]`, storing into a new owner, `Some`/`Ok`/tuple payloads,
+`return col.values[i]`, and `s + "x"` still clone (concat copies; it must not
+`concat_own` a container string) so the new owner and the container never
+share a destructor. Structs with
+more than eight owning fields drop through a shared helper rather than inlining
+one free per field at every scope exit.
 Loop-exit cleanup (`emit_loop_exit_cleanup`) for `break` and `continue` emits
 frees for live variables along the exit branch without clearing compiler tracking
 scopes, ensuring loop body fallthrough preserves scope drop tracking for

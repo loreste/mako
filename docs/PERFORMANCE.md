@@ -42,7 +42,11 @@ compiler version alone does not establish how an application binary was built.
 Debug or sanitizer-instrumented artifacts can dominate a throughput result.
 Run sanitizer correctness checks separately and retain their flags in the report.
 Optimized safe Mako indexing still retains bounds checks; release builds do not
-opt out of ownership or mailbox synchronization.
+opt out of ownership or mailbox synchronization. Nested `arr[i].field` reads (`rows[r].cells[c].score`, graph edges, HTTP
+routes, FayDB columns) borrow through `*_get_ptr` instead of copying the
+element; `let t = arr[i]` and `return col.values[i]` still clone. Large owning
+structs drop through a shared helper (issue #66). Measure the kernel with
+`examples/bench/nested_index_read.mko` against the C and Rust twins.
 
 Host C release builds use `-O3 -flto`; the Zig cross-compilation path currently
 uses `-O2` without LTO. Record that distinction when comparing deployment builds.
