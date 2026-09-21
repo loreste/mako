@@ -1,0 +1,67 @@
+// DCE must keep struct types that are only referenced as field types of other
+// structs (issue #66 follow-up: []ChildStruct collapsed to MakoIntArray when
+// the child was only reachable via a parent struct field, not function sigs).
+
+struct Col { cname: string ref_tab: string }
+struct Tab { tname: string cols: []Col }
+
+fn read_while(tabs: []Tab) -> string {
+    let mut ti = 0
+    let mut result = ""
+    while ti < len(tabs) {
+        let mut ci = 0
+        while ci < len(tabs[ti].cols) {
+            result = tabs[ti].cols[ci].cname
+            ci = ci + 1
+        }
+        ti = ti + 1
+    }
+    return result
+}
+
+fn mutate_while(mut tabs: []Tab) {
+    let mut ti = 0
+    while ti < len(tabs) {
+        let mut ci = 0
+        while ci < len(tabs[ti].cols) {
+            tabs[ti].cols[ci].ref_tab = ""
+            ci = ci + 1
+        }
+        ti = ti + 1
+    }
+}
+
+struct Deep { val: string }
+struct Mid { items: []Deep }
+struct Top { tables: []Mid }
+
+fn three_level(db: Top) -> string {
+    let mut ti = 0
+    let mut result = ""
+    while ti < len(db.tables) {
+        let mut ii = 0
+        while ii < len(db.tables[ti].items) {
+            result = db.tables[ti].items[ii].val
+            ii = ii + 1
+        }
+        ti = ti + 1
+    }
+    return result
+}
+
+fn test_read_while() {
+    let c1 = Col { cname: "id", ref_tab: "users" }
+    let c2 = Col { cname: "name", ref_tab: "users" }
+    let t = Tab { tname: "users", cols: [c1, c2] }
+    let r = read_while([t])
+    assert(r == "name")
+}
+
+fn test_three_level() {
+    let d1 = Deep { val: "a" }
+    let d2 = Deep { val: "b" }
+    let m = Mid { items: [d1, d2] }
+    let db = Top { tables: [m] }
+    let r = three_level(db)
+    assert(r == "b")
+}

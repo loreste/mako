@@ -15691,6 +15691,15 @@ impl Codegen {
                         } else {
                             self.emit_expr(init)
                         }
+                    } else if !elems.is_empty() {
+                        // Check if the first element resolves to a struct type
+                        // (ident, field, call result — not just StructLit).
+                        let ety = self.peek_expr_c_ty(&elems[0]);
+                        if self.structs.contains_key(ety.as_str()) {
+                            self.emit_struct_array_lit(&ety, elems)
+                        } else {
+                            self.emit_expr(init)
+                        }
                     } else {
                         self.emit_expr(init)
                     }
@@ -37371,6 +37380,41 @@ impl Codegen {
                             }
                         }
                         return (outer.to_string(), tmp);
+                    }
+                    // Element is a user struct: [s1, s2] where s1/s2 are struct
+                    // values (idents, field accesses, call results — not just
+                    // Expr::StructLit).  Clone each element so the array owns
+                    // its data independently (struct literals are fresh, but
+                    // idents alias existing owned fields → double-free without
+                    // a deep copy).
+                    if self.structs.contains_key(ty0.as_str())
+                        || self.structs.values().any(|s| s.c_name == ty0)
+                    {
+                        let sn = ty0.clone();
+                        let v0 = if matches!(&elems[0], Expr::StructLit { .. }) {
+                            v0
+                        } else {
+                            self.clone_own_val(&sn, &v0)
+                        };
+                        let mut vals = vec![v0];
+                        for e in elems.iter().skip(1) {
+                            let (_, v) = self.emit_expr(e);
+                            let v = if matches!(e, Expr::StructLit { .. }) {
+                                v
+                            } else {
+                                self.clone_own_val(&sn, &v)
+                            };
+                            vals.push(v);
+                        }
+                        let arr_ty = format!("MakoArr_{sn}");
+                        let tmp = self.fresh("sarr");
+                        let lit = self.fresh("slit");
+                        self.line(&format!("{sn} {lit}[] = {{ {} }};", vals.join(", ")));
+                        self.line(&format!(
+                            "{arr_ty} {tmp} = mako_arr_{sn}_of({lit}, {});",
+                            elems.len()
+                        ));
+                        return (arr_ty, tmp);
                     }
                     // Element is itself a slice (`[a]` where a is []int): build
                     // the nested array the same way the `[[…]]` literal does.

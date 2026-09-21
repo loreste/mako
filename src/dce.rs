@@ -61,6 +61,35 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
         }
     }
 
+    // Transitively close reachable_types: if struct A is reachable and has a
+    // field of type []B, B must also be kept (otherwise codegen lowers []B to
+    // MakoIntArray).  Fixed-point loop handles arbitrary nesting depth.
+    {
+        let struct_fields: std::collections::HashMap<&str, &[(String, TypeExpr, Option<Expr>)]> =
+            program.items.iter().filter_map(|item| match item {
+                Item::Struct(s) => Some((s.name.as_str(), s.fields.as_slice())),
+                _ => None,
+            }).collect();
+        loop {
+            let mut added = false;
+            let snapshot: Vec<String> = reachable_types.iter().cloned().collect();
+            for name in &snapshot {
+                if let Some(fields) = struct_fields.get(name.as_str()) {
+                    for (_, ty, _) in *fields {
+                        let before = reachable_types.len();
+                        collect_type_refs(ty, &mut reachable_types);
+                        if reachable_types.len() > before {
+                            added = true;
+                        }
+                    }
+                }
+            }
+            if !added {
+                break;
+            }
+        }
+    }
+
     // Check for unused imports (if source file is provided).
     // This runs after BFS so reachable_fns is complete.
 

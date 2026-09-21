@@ -24,6 +24,7 @@
 /bench_*
 /owning_struct_param_borrow_test
 /pg_server
+/nested_index_read
 
 # Debug symbol bundles
 *.dSYM/
