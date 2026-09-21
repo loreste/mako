@@ -44684,7 +44684,14 @@ fn main() {
 
     fn is_sp_decl(body: &str, ident_at: usize) -> bool {
         let before = body[..ident_at].trim_end();
-        before.ends_with('*')
+        if !before.ends_with('*') {
+            return false;
+        }
+        let rest = &body[ident_at..];
+        let name_len = rest
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .unwrap_or(rest.len());
+        rest[name_len..].trim_start().starts_with('=')
     }
 
     fn src_nested_index_across_if() -> &'static str {
@@ -44719,6 +44726,29 @@ fn scan_both_arms(mut db: Database, tidx: int, other: int) -> string {
     return db.tables[tidx].columns[0].name
 }
 
+fn scan_sequential_ifs(mut db: Database, a: int, b: int) -> string {
+    if a >= 0 {
+        let _ = db.tables[a].name
+    }
+    if b >= 0 {
+        let _ = db.tables[b].name
+    }
+    return db.tables[0].columns[0].name
+}
+
+fn scan_loop_inner_if(mut db: Database, n: int) -> string {
+    let mut i = 0
+    let mut last = ""
+    while i < n {
+        if i > 0 {
+            let _ = db.tables[i].name
+        }
+        last = db.tables[i].columns[0].name
+        i = i + 1
+    }
+    return last
+}
+
 fn main() {
     let mut db = Database { tables: make([]Table, 0, 1), label: "d" }
     db.tables = append(db.tables, Table { name: "t", columns: make([]Column, 0, 1), rows: 1 })
@@ -44739,6 +44769,8 @@ fn main() {
             "exec_diff_schema(",
             "exec_drop_table_cascade(",
             "scan_both_arms(",
+            "scan_sequential_ifs(",
+            "scan_loop_inner_if(",
         ] {
             let body = fn_body(&generated, sig);
             assert_sp_temps_declared_in_scope(body);
@@ -44749,6 +44781,12 @@ fn main() {
                 "{sig} must keep element-pointer reads:\n{body}"
             );
         }
+        let seq = fn_body(&generated, "scan_sequential_ifs(");
+        let decls = seq.matches("*__mako_sp_").count();
+        assert!(
+            decls >= 2,
+            "sibling ifs must each declare their own element pointer, got {decls}:\n{seq}"
+        );
     }
 
     #[test]

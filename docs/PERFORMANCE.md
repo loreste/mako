@@ -20,9 +20,8 @@ locks workload-specific budgets in
 and CI enforces the reproducible subset with
 `./scripts/performance-contract.sh`. A faster-than-Rust statement applies only
 to rows marked `strict_rust_claim: true`. Bounded channel send/recv (`chan50k`)
-is a 2.0× regression budget (Linux CI has measured 1.12–1.71× on the same
-commit). Single-producer actor delivery (`actor200k`) is gated at 3.5× against
-Rust `sync_channel`. Neither is a strict faster-than-Rust claim.
+is a 1.5× regression budget, not a faster-than-Rust claim. Single-producer
+actor delivery (`actor200k`) is gated at 3.5× against Rust `sync_channel`.
 
 ### Verify the artifact before comparing throughput
 
@@ -213,7 +212,7 @@ The CI performance contract verifies six runtime kernels against matching Rust
 programs and parser hot-path smoke budgets. The strict faster-than-Rust claim
 set is `fib30x5`, `struct1m`, `slice100k`, `map50k`, and `string20k`, all capped
 at 1.5× Rust in the hard gate. `chan50k` is intentionally separate: it has a
-2.0× regression budget and is not a faster-than-Rust claim. Broader HTTP
+1.5× regression budget and is not a faster-than-Rust claim. Broader HTTP
 throughput is tracked in `scripts/bench-http.sh` with the method and minimum
 budget recorded in the contract JSON; CI keeps HTTP correctness/RSS as hard
 soak gates because load-generator availability and loopback scheduling are

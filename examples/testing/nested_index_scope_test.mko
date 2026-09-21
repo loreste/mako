@@ -31,10 +31,35 @@ fn scan_both_arms(mut db: Database, tidx: int, other: int) -> string {
     return db.tables[tidx].columns[0].name
 }
 
+fn scan_sequential_ifs(mut db: Database, a: int, b: int) -> string {
+    if a >= 0 {
+        let _ = db.tables[a].name
+    }
+    if b >= 0 {
+        let _ = db.tables[b].name
+    }
+    return db.tables[0].columns[0].name
+}
+
+fn scan_loop_inner_if(mut db: Database, n: int) -> string {
+    let mut i = 0
+    let mut last = ""
+    while i < n {
+        if i > 0 {
+            let _ = db.tables[i].name
+        }
+        last = db.tables[i].columns[0].name
+        i = i + 1
+    }
+    return last
+}
+
 fn TestNestedIndexAcrossIf() {
     let mut db = Database { tables: make([]Table, 0, 1), label: "d" }
     db.tables = append(db.tables, Table { name: "t", columns: make([]Column, 0, 1), rows: 1 })
     db.tables[0].columns = append(db.tables[0].columns, Column { name: "c", values: ["v0"] })
+    db.tables = append(db.tables, Table { name: "u", columns: make([]Column, 0, 1), rows: 1 })
+    db.tables[1].columns = append(db.tables[1].columns, Column { name: "d", values: ["v1"] })
     let mut branch = Database { tables: make([]Table, 0, 1), label: "b" }
     branch.tables = append(branch.tables, Table { name: "t", columns: make([]Column, 0, 1), rows: 1 })
     branch.tables[0].columns = append(branch.tables[0].columns, Column { name: "c", values: ["v0"] })
@@ -42,6 +67,9 @@ fn TestNestedIndexAcrossIf() {
     assert(exec_drop_table_cascade(db, 0, 0) == "c")
     assert(scan_both_arms(db, 0, -1) == "c")
     assert(scan_both_arms(db, 0, 0) == "c")
+    assert(scan_sequential_ifs(db, 0, 1) == "c")
+    assert(scan_sequential_ifs(db, -1, 0) == "c")
+    assert(scan_loop_inner_if(db, 2) == "d")
 }
 
 fn main() {

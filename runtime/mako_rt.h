@@ -6151,9 +6151,14 @@ static inline int64_t mako_chan_send(MakoChan *c, int64_t v) {
     /* Fast path: buffered, not full, no waiters — trylock avoids syscall. */
     if (MAKO_LIKELY(c->cap > 0) && pthread_mutex_trylock(&c->mu) == 0) {
         if (MAKO_LIKELY(c->count < c->cap && !c->closed && c->waiters_recv == 0)) {
-            c->buf[c->tail] = v;
-            if (++c->tail == c->cap) c->tail = 0;
-            c->count++;
+            if (MAKO_LIKELY(c->cap == 1)) {
+                c->buf[0] = v;
+                c->count = 1;
+            } else {
+                c->buf[c->tail] = v;
+                if (++c->tail == c->cap) c->tail = 0;
+                c->count++;
+            }
             pthread_mutex_unlock(&c->mu);
             mako_rt_counter_inc(&mako_rt_channel_sends);
             mako_chan_trace_send(c, v);
@@ -6304,9 +6309,17 @@ static inline int64_t mako_chan_recv(MakoChan *c) {
     /* Fast path: buffered with data, no waiters — skip signal overhead. */
     if (MAKO_LIKELY(c->cap > 0) && pthread_mutex_trylock(&c->mu) == 0) {
         if (MAKO_LIKELY(c->count > 0 && c->waiters_send == 0)) {
-            int64_t v = c->buf[c->head];
-            if (++c->head == c->cap) c->head = 0;
-            c->count--;
+            int64_t v;
+            if (MAKO_LIKELY(c->cap == 1)) {
+                v = c->buf[0];
+                c->count = 0;
+                c->head = 0;
+                c->tail = 0;
+            } else {
+                v = c->buf[c->head];
+                if (++c->head == c->cap) c->head = 0;
+                c->count--;
+            }
             pthread_mutex_unlock(&c->mu);
             mako_rt_counter_inc(&mako_rt_channel_recvs);
             mako_chan_trace_recv(c, v);
@@ -6417,8 +6430,33 @@ static inline void mako_chan_free(MakoChan *c) {
     free(c);
 }
 
-/* Non-blocking try-recv: 1 + value via out, or 0 if empty (not closed wait). */
+/* Non-blocking try-recv: 1 + value via out, or 0 if empty (not closed wait).
+ * Same trylock / wake-only-if-waiters contract as mako_chan_recv. Broadcasting
+ * on every success made named-port polls and select slower than a blocking recv. */
 static inline int64_t mako_chan_try_recv(MakoChan *c, int64_t *out) {
+    if (!c) return 0;
+    if (MAKO_LIKELY(c->cap > 0) && pthread_mutex_trylock(&c->mu) == 0) {
+        if (MAKO_LIKELY(c->count > 0)) {
+            int64_t v;
+            if (MAKO_LIKELY(c->cap == 1)) {
+                v = c->buf[0];
+                c->count = 0;
+                c->head = 0;
+                c->tail = 0;
+            } else {
+                v = c->buf[c->head];
+                if (++c->head == c->cap) c->head = 0;
+                c->count--;
+            }
+            if (c->waiters_send > 0) mako_chan_wake_sender(c);
+            pthread_mutex_unlock(&c->mu);
+            mako_rt_counter_inc(&mako_rt_channel_recvs);
+            if (out) *out = v;
+            return 1;
+        }
+        pthread_mutex_unlock(&c->mu);
+        return 0;
+    }
     pthread_mutex_lock(&c->mu);
     if (c->count == 0) {
         pthread_mutex_unlock(&c->mu);
@@ -6428,14 +6466,22 @@ static inline int64_t mako_chan_try_recv(MakoChan *c, int64_t *out) {
     if (c->cap == 0) {
         v = c->buf[0];
         c->count = 0;
+    } else if (c->cap == 1) {
+        v = c->buf[0];
+        c->count = 0;
+        c->head = 0;
+        c->tail = 0;
     } else {
         v = c->buf[c->head];
-        c->head = (c->head + 1) % c->cap;
+        if (++c->head == c->cap) c->head = 0;
         c->count--;
     }
-    mako_rt_counter_inc(&mako_rt_channel_recvs);
-    pthread_cond_broadcast(&c->can_send);
+    if (c->waiters_send > 0) {
+        if (c->cap == 0) pthread_cond_broadcast(&c->can_send);
+        else mako_chan_wake_sender(c);
+    }
     pthread_mutex_unlock(&c->mu);
+    mako_rt_counter_inc(&mako_rt_channel_recvs);
     if (out) *out = v;
     return 1;
 }
