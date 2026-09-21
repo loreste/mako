@@ -17199,6 +17199,7 @@ impl Codegen {
                 let (_, c) = self.emit_expr(cond);
                 self.emit_line(format_args!("if (!({c})) break;"));
                 self.push_share_scope();
+                self.struct_elem_ptr_cache.clear();
                 self.push_loop_drop_base(label.as_deref());
                 self.emit_body(body);
                 self.pop_loop_drop_base(label.as_deref());
