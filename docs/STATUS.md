@@ -403,7 +403,7 @@ Capability equivalents of the Go application stdlib. Mako names (`concat`,
 | `error_join` combine Results | Done |
 | performance-contract strict Rust claims ≤1.5× (fib/struct/slice/map/string) | Done |
 | ShareInt + string kick auto-clone heap pack | Done |
-| `chan50k` regression-only budget ≤3.5× Rust | Done (not a speed claim) |
+| `chan50k` regression-only budget ≤2.0× Rust | Done (not a speed claim) |
 | `chan_open[Struct]` via MakoChanPtr heap-box | Done |
 | `error_tag(tag, msg)` enum-like string errors | Done |
 

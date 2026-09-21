@@ -10,6 +10,8 @@
   `actor_try_recv` is a single-message poll (no thread-local prefetch, so named
   ports cannot mix mail). `actor_recv_batch` remains the opt-in drain of up to
   16 ready messages under one lock (issue #64).
+- `chan50k` regression budget is 2.0× Rust. Linux CI has measured 1.12–1.71×
+  on the same commit; it is not a strict faster-than-Rust claim.
 
 ## 0.6.36
 

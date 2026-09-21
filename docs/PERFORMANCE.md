@@ -20,9 +20,9 @@ locks workload-specific budgets in
 and CI enforces the reproducible subset with
 `./scripts/performance-contract.sh`. A faster-than-Rust statement applies only
 to rows marked `strict_rust_claim: true`. Bounded channel send/recv (`chan50k`)
-and single-producer actor delivery (`actor200k`) are measured against Rust `sync_channel` and gated
-as 1.5× regression budgets; on a quiet Apple arm64 host the uncontended channel
-path is typically under 1.0× Rust.
+is a 2.0× regression budget (Linux CI has measured 1.12–1.71× on the same
+commit). Single-producer actor delivery (`actor200k`) is gated at 3.5× against
+Rust `sync_channel`. Neither is a strict faster-than-Rust claim.
 
 ### Verify the artifact before comparing throughput
 
@@ -80,23 +80,18 @@ Use bounded capacities for backpressure, keep handlers short, and measure before
 choosing a shard count. These scheduling-sensitive measurements are diagnostic;
 the existing performance gates remain enforced.
 
-Single-port actors receive up to 16 ready messages under one lock. Named ports
-retain per-message priority checks. Small boolean messages and pairs of signed
-24-bit integers avoid envelope allocations; larger pairs retain heap fallback.
-Shared slice payloads still copy for isolation; exclusive heap backing can move.
-See `examples/actor_sharded.mko` for explicit routing of independent state.
+Single-port actors take one message per `actor_recv`. Named ports poll with
+`actor_try_recv` so a control port stays first. `actor_recv_batch` is opt-in
+and drains up to 16 already-queued messages under one lock. Small boolean
+messages and pairs of signed 24-bit integers avoid envelope allocations;
+larger pairs retain heap fallback. Shared slice payloads still copy for
+isolation; exclusive heap backing can move. See
+`examples/actor_sharded.mko` for explicit routing of independent state.
 
-During local Apple arm64 validation, five-sample medians for eight producers at
-capacity 1024 improved from 30.69 ms to 9.99 ms for 200,000 messages (about 3.07×).
-At capacity 64 the same case improved from 130.26 ms to 54.92 ms (2.37×).
-These are sequential before/after measurements, not portable guarantees. A
-direct-lock actor send candidate did not improve contended throughput (10.36 ms
-and 56.24 ms respectively), so the existing send implementation was retained.
-The mailbox continues to use a mutex: batching reduces acquisitions without
-introducing lock-free reclamation or weakening close and ownership guarantees.
-Named-port polling uses a raw actor word instead of allocating a Result. Channel
-handles in shard arrays and native structs retain their references; final array
-release claims cleanup atomically so concurrent releases cannot skip destructors.
+The mailbox uses a mutex. Named-port polling uses a raw actor word instead of
+allocating a Result. Channel handles in shard arrays and native structs retain
+their references; final array release claims cleanup atomically so concurrent
+releases cannot skip destructors.
 
 Run `./scripts/bench-actor-payloads.sh` to measure small integer pairs, booleans,
 fresh slice messages, and low-load send-to-handler latency (p50/p95/p99 after
@@ -218,7 +213,7 @@ The CI performance contract verifies six runtime kernels against matching Rust
 programs and parser hot-path smoke budgets. The strict faster-than-Rust claim
 set is `fib30x5`, `struct1m`, `slice100k`, `map50k`, and `string20k`, all capped
 at 1.5× Rust in the hard gate. `chan50k` is intentionally separate: it has a
-3.5× regression budget and is not a faster-than-Rust claim. Broader HTTP
+2.0× regression budget and is not a faster-than-Rust claim. Broader HTTP
 throughput is tracked in `scripts/bench-http.sh` with the method and minimum
 budget recorded in the contract JSON; CI keeps HTTP correctness/RSS as hard
 soak gates because load-generator availability and loopback scheduling are
