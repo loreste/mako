@@ -15751,8 +15751,6 @@ impl Codegen {
                     self.owned_result_errors.insert(name.clone());
                 }
                 self.note_own_bind_scope(&mangle(name));
-                // Track owned locals for scope-exit cleanup (string, slice, struct).
-                self.register_own_drop(&mangle(name), &ty);
                 // Annotated lets: Result/Option nest metadata from the type.
                 if let Some(ann_ty) = ann {
                     self.register_local_type_metadata(name, ann_ty);
