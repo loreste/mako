@@ -11508,34 +11508,13 @@ static inline int64_t mako_actor_recv(MakoActor *a) {
     return mako_chan_recv(a);
 }
 
-/* Actor prefetch: drain up to 16 messages per lock, serve subsequent
- * try_recv calls from thread-local buffer. Reduces mutex ops ~16x. */
-#define MAKO_ACTOR_PREFETCH_CAP 16
-static __thread int64_t mako_actor_pf_buf[MAKO_ACTOR_PREFETCH_CAP];
-static __thread int mako_actor_pf_pos = 0;
-static __thread int mako_actor_pf_len = 0;
-
+/* One message, no thread-local prefetch. Prefetching across try_recv calls
+ * mixed messages from different actors/ports on the same thread (issue #64).
+ * Drain several ready messages under one lock via mako_actor_recv_batch. */
 static inline int64_t mako_actor_try_recv(MakoActor *a) {
-    /* Serve from prefetch buffer first. */
-    if (MAKO_LIKELY(mako_actor_pf_pos < mako_actor_pf_len)) {
-        return mako_actor_pf_buf[mako_actor_pf_pos++];
-    }
-    /* Refill: drain up to 16 messages in one lock. */
-    mako_actor_pf_pos = 0;
-    mako_actor_pf_len = 0;
     if (!a) return 0;
-    if (pthread_mutex_trylock(&a->mu) != 0) return 0;
-    int n = 0;
-    while (n < MAKO_ACTOR_PREFETCH_CAP && a->count > 0) {
-        mako_actor_pf_buf[n++] = a->buf[a->head];
-        if (++a->head == a->cap) a->head = 0;
-        a->count--;
-    }
-    int wake = (n > 0 && a->waiters_send > 0);
-    if (wake) pthread_cond_broadcast(&a->can_send);
-    pthread_mutex_unlock(&a->mu);
-    mako_actor_pf_len = n;
-    if (n > 0) return mako_actor_pf_buf[mako_actor_pf_pos++];
+    int64_t v = 0;
+    if (mako_chan_try_recv(a, &v)) return v;
     return 0;
 }
 

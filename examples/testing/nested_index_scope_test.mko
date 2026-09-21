@@ -1,0 +1,49 @@
+// Nested struct-array field access across if/else must compile and run.
+// The C backend must not reuse `__mako_sp_*` temps from a closed block (issue #66).
+
+struct Column { name: string values: []string }
+struct Table { name: string columns: []Column rows: int }
+struct Database { tables: []Table label: string }
+
+fn exec_diff_schema(mut db: Database, mut branch_db: Database, tidx: int, bidx: int, ci: int) -> string {
+    if bidx >= 0 {
+        let _ = branch_db.tables[bidx].columns[ci].name
+    }
+    return db.tables[tidx].columns[ci].name
+}
+
+fn exec_drop_table_cascade(mut db: Database, ti: int, ci: int) -> string {
+    if ti >= 0 {
+        let n = db.tables[ti].columns[ci].name
+        if n == "id" {
+            return n
+        }
+    }
+    return db.tables[ti].columns[ci].name
+}
+
+fn scan_both_arms(mut db: Database, tidx: int, other: int) -> string {
+    if other >= 0 {
+        let _ = db.tables[other].name
+    } else {
+        let _ = db.tables[tidx].name
+    }
+    return db.tables[tidx].columns[0].name
+}
+
+fn TestNestedIndexAcrossIf() {
+    let mut db = Database { tables: make([]Table, 0, 1), label: "d" }
+    db.tables = append(db.tables, Table { name: "t", columns: make([]Column, 0, 1), rows: 1 })
+    db.tables[0].columns = append(db.tables[0].columns, Column { name: "c", values: ["v0"] })
+    let mut branch = Database { tables: make([]Table, 0, 1), label: "b" }
+    branch.tables = append(branch.tables, Table { name: "t", columns: make([]Column, 0, 1), rows: 1 })
+    branch.tables[0].columns = append(branch.tables[0].columns, Column { name: "c", values: ["v0"] })
+    assert(exec_diff_schema(db, branch, 0, 0, 0) == "c")
+    assert(exec_drop_table_cascade(db, 0, 0) == "c")
+    assert(scan_both_arms(db, 0, -1) == "c")
+    assert(scan_both_arms(db, 0, 0) == "c")
+}
+
+fn main() {
+    TestNestedIndexAcrossIf()
+}

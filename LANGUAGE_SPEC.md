@@ -1131,13 +1131,13 @@ self.db = load_session(self.db, s_tx, s_u)
 Actors desugar to a mailbox and a `crew` loop. The `Bye` or `Stop` variant
 ends the loop by convention.
 
-Single-port loops prefetch at most 16 available messages without waiting to fill
-a batch. They preserve FIFO order and destroy unprocessed prefetched messages
-on shutdown. Mailbox depth excludes this bounded in-flight batch. Named ports
-retain per-message priority checks. Single booleans and pairs of `int`/`int64`
-values in the signed 24-bit range use inline message words; larger pairs fall
-back to full-width typed envelopes. This representation does not change handler
-parameter types or permit truncation.
+Single-port loops block on one mailbox receive per message. `actor_recv_batch`
+is opt-in: it waits for one message or close, then copies up to 16 already-queued
+messages without waiting to fill. Named ports poll each port with
+`actor_try_recv` so a control port stays first. Single booleans and pairs of
+`int`/`int64` values in the signed 24-bit range use inline message words; larger
+pairs fall back to full-width typed envelopes. This representation does not
+change handler parameter types or permit truncation.
 
 Actor operations:
 
