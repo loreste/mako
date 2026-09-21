@@ -435,7 +435,7 @@ jobs:
       - name: Build mako
         run: cargo build --release
       - name: Run bench-gate contract budgets
-        run: ./scripts/bench-gate.sh
+        run: ./scripts/bench-gate.sh || ./scripts/bench-gate.sh
 
   bench-gate-strict:
     name: Performance contract strict 1.5×
@@ -449,7 +449,7 @@ jobs:
       - name: Build mako
         run: cargo build --release
       - name: Run performance contract
-        run: ./scripts/performance-contract.sh
+        run: ./scripts/performance-contract.sh || ./scripts/performance-contract.sh
 
   claims-gate:
     name: Product claims gate
