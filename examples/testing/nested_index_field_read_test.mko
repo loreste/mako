@@ -1,0 +1,167 @@
+// Issue #66: nested `arr[i].field` reads are a language-wide codegen path
+// (graphs, routes, grids, records) — not a FayDB special case. Borrow via
+// get_ptr; do not memcpy the element or clone a string just to read it.
+
+struct Edge {
+    to: int
+    cost: int
+    kind: string
+}
+
+struct Node {
+    name: string
+    edges: []Edge
+}
+
+struct Handler {
+    name: string
+    weight: int
+}
+
+struct Route {
+    path: string
+    handlers: []Handler
+}
+
+struct Cell {
+    score: int
+    label: string
+}
+
+struct Row {
+    cells: []Cell
+    weight: int
+}
+
+struct Grid {
+    rows: []Row
+    title: string
+}
+
+fn seed_graph() -> []Node {
+    let mut nodes = make([]Node, 0, 3)
+    nodes = append(nodes, Node { name: "a", edges: make([]Edge, 0, 2) })
+    nodes = append(nodes, Node { name: "b", edges: make([]Edge, 0, 1) })
+    nodes = append(nodes, Node { name: "c", edges: make([]Edge, 0, 1) })
+    nodes[0].edges = append(nodes[0].edges, Edge { to: 1, cost: 4, kind: "fwd" })
+    nodes[0].edges = append(nodes[0].edges, Edge { to: 2, cost: 9, kind: "alt" })
+    nodes[1].edges = append(nodes[1].edges, Edge { to: 2, cost: 1, kind: "fwd" })
+    nodes[2].edges = append(nodes[2].edges, Edge { to: 0, cost: 7, kind: "back" })
+    return nodes
+}
+
+fn seed_routes() -> []Route {
+    let mut routes = make([]Route, 0, 2)
+    routes = append(routes, Route { path: "/health", handlers: make([]Handler, 0, 2) })
+    routes = append(routes, Route { path: "/", handlers: make([]Handler, 0, 1) })
+    routes[0].handlers = append(routes[0].handlers, Handler { name: "ok", weight: 1 })
+    routes[0].handlers = append(routes[0].handlers, Handler { name: "log", weight: 2 })
+    routes[1].handlers = append(routes[1].handlers, Handler { name: "home", weight: 3 })
+    return routes
+}
+
+fn seed_grid() -> Grid {
+    let mut g = Grid { rows: make([]Row, 0, 2), title: "g" }
+    g.rows = append(g.rows, Row { cells: make([]Cell, 0, 2), weight: 10 })
+    g.rows = append(g.rows, Row { cells: make([]Cell, 0, 1), weight: 20 })
+    g.rows[0].cells = append(g.rows[0].cells, Cell { score: 1, label: "a" })
+    g.rows[0].cells = append(g.rows[0].cells, Cell { score: 2, label: "b" })
+    g.rows[1].cells = append(g.rows[1].cells, Cell { score: 3, label: "c" })
+    return g
+}
+
+fn scan_graph(nodes: []Node) -> int {
+    let mut sum = 0
+    let mut i = 0
+    while i < len(nodes) {
+        let mut j = 0
+        while j < len(nodes[i].edges) {
+            sum = sum + nodes[i].edges[j].cost + nodes[i].edges[j].to
+            j = j + 1
+        }
+        i = i + 1
+    }
+    return sum
+}
+
+fn scan_grid(g: Grid) -> int {
+    let mut sum = 0
+    let mut r = 0
+    while r < len(g.rows) {
+        let mut c = 0
+        while c < len(g.rows[r].cells) {
+            sum = sum + g.rows[r].cells[c].score + g.rows[r].weight
+            c = c + 1
+        }
+        r = r + 1
+    }
+    return sum
+}
+
+fn edge_kind(e: Edge) -> string {
+    return e.kind
+}
+
+fn TestGraphNestedIndexReads() {
+    let mut nodes = seed_graph()
+    assert_eq_str(nodes[0].name, "a")
+    assert_eq(nodes[0].edges[1].to, 2)
+    assert_eq(nodes[0].edges[1].cost, 9)
+    assert_eq_str(nodes[0].edges[1].kind, "alt")
+    assert_eq_str(nodes[2].edges[0].kind, "back")
+    assert_eq(scan_graph(nodes), 4 + 1 + 9 + 2 + 1 + 2 + 7 + 0)
+}
+
+fn TestRouteNestedIndexReads() {
+    let mut routes = seed_routes()
+    assert_eq_str(routes[0].path, "/health")
+    assert_eq_str(routes[0].handlers[1].name, "log")
+    assert_eq(routes[1].handlers[0].weight, 3)
+    assert_eq(len(routes[0].handlers), 2)
+}
+
+fn TestGridNestedIndexReadsAndBuilder() {
+    let mut g = seed_grid()
+    assert_eq(scan_grid(g), 1 + 10 + 2 + 10 + 3 + 20)
+    let out = str_builder()
+    builder_write(out, g.rows[0].cells[0].label)
+    builder_write(out, g.rows[0].cells[1].label)
+    builder_write(out, g.rows[1].cells[0].label)
+    builder_write(out, g.title)
+    assert_eq_str(builder_string(out), "abcg")
+    assert_eq_str(g.rows[0].cells[0].label, "a")
+    assert_eq_str(g.rows[1].cells[0].label, "c")
+}
+
+fn TestNestedIntFieldAssignVisible() {
+    let mut g = seed_grid()
+    g.rows[0].cells[1].score = 99
+    g.rows[1].weight = 5
+    assert_eq(g.rows[0].cells[1].score, 99)
+    assert_eq(g.rows[0].cells[0].score, 1)
+    assert_eq(g.rows[1].weight, 5)
+    assert_eq(scan_grid(g), 1 + 10 + 99 + 10 + 3 + 5)
+}
+
+fn TestReturnedNestedStringIsIndependent() {
+    let mut nodes = seed_graph()
+    let got = edge_kind(nodes[0].edges[0])
+    nodes[0].edges[0].kind = "mut"
+    assert_eq_str(got, "fwd")
+    assert_eq_str(nodes[0].edges[0].kind, "mut")
+}
+
+fn TestNestedIndexScanDoesNotLeak() {
+    let _ = alloc_track_reset()
+    let mut g = seed_grid()
+    let mut nodes = seed_graph()
+    let mark = leak_mark()
+    let mut round = 0
+    var acc = 0
+    while round < 400 {
+        acc = acc + scan_grid(g) + scan_graph(nodes)
+        round = round + 1
+    }
+    assert_eq(leak_bytes_since(mark), 0)
+    assert(acc == 400 * (1 + 10 + 2 + 10 + 3 + 20 + 4 + 1 + 9 + 2 + 1 + 2 + 7 + 0))
+}

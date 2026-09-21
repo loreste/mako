@@ -1,0 +1,177 @@
+// Issue #66: nested `arr[i].field` reads must borrow via get_ptr (no whole-struct
+// memcpy, no string clone) while stores/lets/returns keep independent owners.
+
+struct Column {
+    name: string
+    values: []string
+}
+
+struct Table {
+    name: string
+    columns: []Column
+    rows: int
+}
+
+struct Database {
+    tables: []Table
+    label: string
+    a: string
+    b: string
+    c: string
+    d: string
+    e: string
+    f: string
+    g: string
+}
+
+struct Cursor {
+    i: int
+    a: string
+    b: string
+    c: string
+    d: string
+}
+
+fn seed_db() -> Database {
+    let mut db = Database {
+        tables: make([]Table, 0, 2),
+        label: "orig",
+        a: "a",
+        b: "b",
+        c: "c",
+        d: "d",
+        e: "e",
+        f: "f",
+        g: "g",
+    }
+    db.tables = append(db.tables, Table { name: "t0", columns: make([]Column, 0, 2), rows: 2 })
+    db.tables = append(db.tables, Table { name: "t1", columns: make([]Column, 0, 1), rows: 1 })
+    db.tables[0].columns = append(db.tables[0].columns, Column { name: "c0", values: make([]string, 0, 4) })
+    db.tables[0].columns = append(db.tables[0].columns, Column { name: "c1", values: ["x"] })
+    db.tables[0].columns[0].values = append(db.tables[0].columns[0].values, "v0")
+    db.tables[0].columns[0].values = append(db.tables[0].columns[0].values, "v1")
+    db.tables[1].columns = append(db.tables[1].columns, Column { name: "c9", values: ["z"] })
+    return db
+}
+
+fn column_get(col: Column, i: int) -> string {
+    return col.values[i]
+}
+
+fn bump(mut cur: Cursor) -> int {
+    let v = cur.i
+    cur.i = cur.i + 1
+    return v
+}
+
+fn scan_values(mut db: Database, n: int) -> int {
+    let mut i = 0
+    let mut hits = 0
+    while i < n {
+        if db.tables[0].columns[0].values[i] == "v0" {
+            hits = hits + 1
+        }
+        i = i + 1
+    }
+    return hits
+}
+
+fn drop_heavy() -> int {
+    let db = seed_db()
+    return len(db.label) + len(db.tables[0].name)
+}
+
+fn TestNestedIndexedFieldRead() {
+    let mut db = seed_db()
+    assert_eq_str(db.tables[0].name, "t0")
+    assert_eq_str(db.tables[1].name, "t1")
+    assert_eq_str(db.tables[0].columns[0].name, "c0")
+    assert_eq_str(db.tables[0].columns[1].name, "c1")
+    assert_eq_str(db.tables[0].columns[0].values[0], "v0")
+    assert_eq_str(db.tables[0].columns[0].values[1], "v1")
+    assert_eq(db.tables[0].rows, 2)
+}
+
+fn TestBuilderWriteBorrowsNestedString() {
+    let mut db = seed_db()
+    let out = str_builder()
+    builder_write(out, db.tables[0].columns[0].values[0])
+    builder_write(out, db.tables[0].columns[0].values[1])
+    builder_write(out, db.tables[0].name)
+    assert_eq_str(builder_string(out), "v0v1t0")
+    // Source slots must still be alive (not freed as if the write took ownership).
+    assert_eq_str(db.tables[0].columns[0].values[0], "v0")
+    assert_eq_str(db.tables[0].columns[0].values[1], "v1")
+    assert_eq_str(db.tables[0].name, "t0")
+}
+
+fn TestLetIndexedStructIsIndependentOwner() {
+    let mut db = seed_db()
+    let mut table = db.tables[0]
+    table.name = "other"
+    // name is cloned; nested []Column stays RC-shared (existing []struct clone).
+    assert_eq_str(db.tables[0].name, "t0")
+    assert_eq_str(table.name, "other")
+}
+
+fn TestReturnedIndexedStringIsIndependentOwner() {
+    let mut db = seed_db()
+    let got = column_get(db.tables[0].columns[0], 0)
+    db.tables[0].columns[0].values[0] = "mutated"
+    assert_eq_str(got, "v0")
+    assert_eq_str(db.tables[0].columns[0].values[0], "mutated")
+}
+
+fn TestGetPtrReadSeesFieldAssign() {
+    let mut db = seed_db()
+    db.tables[0].name = "renamed"
+    db.tables[0].columns[1].name = "c1b"
+    assert_eq_str(db.tables[0].name, "renamed")
+    assert_eq_str(db.tables[0].columns[1].name, "c1b")
+    assert_eq_str(db.tables[0].columns[0].name, "c0")
+}
+
+fn TestIndexCallEvaluatedOnce() {
+    let mut db = seed_db()
+    let mut cur = Cursor { i: 0, a: "a", b: "b", c: "c", d: "d" }
+    assert_eq_str(db.tables[bump(cur)].name, "t0")
+    assert_eq(cur.i, 1)
+    assert_eq_str(db.tables[bump(cur)].name, "t1")
+    assert_eq(cur.i, 2)
+}
+
+fn TestHotPathReadsDoNotLeak() {
+    let _ = alloc_track_reset()
+    let mut db = seed_db()
+    let n = len(db.tables[0].columns[0].values)
+    let mark = leak_mark()
+    let mut round = 0
+    var acc = 0
+    while round < 200 {
+        acc = acc + scan_values(db, n)
+        round = round + 1
+    }
+    assert_eq(leak_bytes_since(mark), 0)
+    assert(acc == 200)
+}
+
+fn TestLargeStructDropDoesNotLeak() {
+    let _ = alloc_track_reset()
+    let mark = leak_mark()
+    let mut round = 0
+    var acc = 0
+    while round < 64 {
+        acc = acc + drop_heavy()
+        round = round + 1
+    }
+    assert_eq(leak_bytes_since(mark), 0)
+    assert(acc == 64 * 6)
+}
+
+fn TestNestedReadAfterAppend() {
+    let mut db = seed_db()
+    db.tables[0].columns[0].values = append(db.tables[0].columns[0].values, "v2")
+    assert_eq_str(db.tables[0].columns[0].values[2], "v2")
+    assert_eq_str(db.tables[0].columns[0].values[0], "v0")
+    assert_eq(len(db.tables[0].columns[0].values), 3)
+}

@@ -17146,6 +17146,7 @@ impl Codegen {
                 // 3. Free arm-local owns (pop), then merge outer live changes so
                 //    reassigned outer muts free once at their bind scope (not arm exit).
                 self.push_share_scope();
+                self.push_elem_ptr_scope();
                 let arm_idx = self.own_drop_scopes.len().saturating_sub(1);
                 let saved_live = self.own_drop_live.clone();
                 for (si, s) in then_block.stmts.iter().enumerate() {
@@ -17154,11 +17155,13 @@ impl Codegen {
                 }
                 let after_then = self.own_drop_live.clone();
                 self.finish_arm_own_live(&saved_live, arm_idx, after_then);
+                self.pop_elem_ptr_scope();
                 self.indent -= 1;
                 if let Some(eb) = else_block {
                     self.line("} else {");
                     self.indent += 1;
                     self.push_share_scope();
+                    self.push_elem_ptr_scope();
                     let arm_idx_else = self.own_drop_scopes.len().saturating_sub(1);
                     let saved_live_else = self.own_drop_live.clone();
                     for (si, s) in eb.stmts.iter().enumerate() {
@@ -17167,6 +17170,7 @@ impl Codegen {
                     }
                     let after_else = self.own_drop_live.clone();
                     self.finish_arm_own_live(&saved_live_else, arm_idx_else, after_else);
+                    self.pop_elem_ptr_scope();
                     self.indent -= 1;
                 }
                 self.line("}");

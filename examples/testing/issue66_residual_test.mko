@@ -1,0 +1,196 @@
+// Issue #66 comment: 3 residual patterns after PR #67.
+// Pattern 1: mutable field assign on arr[i].field after if
+// Pattern 2: read-only nested access after if
+// Pattern 3: deep nested access crossing multiple scopes
+
+struct Column {
+    name: string
+    ref_table: string
+    ref_column: string
+    values: []string
+}
+
+struct Index {
+    name: string
+    col: int
+}
+
+struct Table {
+    name: string
+    columns: []Column
+    indexes: []Index
+    rows: int
+}
+
+struct Database {
+    tables: []Table
+    label: string
+}
+
+fn seed() -> Database {
+    let mut db = Database { tables: make([]Table, 0, 3), label: "db" }
+    db.tables = append(db.tables, Table { name: "t0", columns: make([]Column, 0, 2), indexes: make([]Index, 0, 1), rows: 10 })
+    db.tables = append(db.tables, Table { name: "t1", columns: make([]Column, 0, 1), indexes: make([]Index, 0, 1), rows: 5 })
+    db.tables = append(db.tables, Table { name: "t2", columns: make([]Column, 0, 1), indexes: make([]Index, 0, 1), rows: 3 })
+    db.tables[0].columns = append(db.tables[0].columns, Column { name: "id", ref_table: "self", ref_column: "id", values: ["v0"] })
+    db.tables[0].columns = append(db.tables[0].columns, Column { name: "fk", ref_table: "t1", ref_column: "id", values: ["v1"] })
+    db.tables[0].indexes = append(db.tables[0].indexes, Index { name: "pk", col: 0 })
+    db.tables[1].columns = append(db.tables[1].columns, Column { name: "id", ref_table: "", ref_column: "", values: ["z"] })
+    db.tables[1].indexes = append(db.tables[1].indexes, Index { name: "pk1", col: 0 })
+    db.tables[2].columns = append(db.tables[2].columns, Column { name: "rid", ref_table: "t0", ref_column: "id", values: ["w"] })
+    db.tables[2].indexes = append(db.tables[2].indexes, Index { name: "pk2", col: 0 })
+    return db
+}
+
+// Pattern 1: mutable field assign after if scope
+fn clear_refs(mut db: Database, ti: int, ci: int) {
+    if ti >= 0 {
+        let _ = db.tables[ti].name
+    }
+    db.tables[ti].columns[ci].ref_table = ""
+    db.tables[ti].columns[ci].ref_column = ""
+}
+
+// Pattern 2: read-only nested access after if
+fn describe(mut db: Database, ti: int, ii: int) -> string {
+    let out = str_builder()
+    if ti > 0 {
+        builder_write(out, db.tables[0].name)
+    }
+    builder_write(out, db.tables[ti].name)
+    builder_write(out, string(db.tables[ti].rows))
+    let idx = db.tables[ti].indexes[ii]
+    builder_write(out, idx.name)
+    return builder_string(out)
+}
+
+// Pattern 3: deep nested crossing multiple if scopes
+fn deep_cross(mut db: Database, xi: int, yi: int) -> string {
+    let out = str_builder()
+    if xi >= 0 {
+        builder_write(out, db.tables[xi].columns[0].name)
+        if yi >= 0 {
+            builder_write(out, db.tables[yi].columns[0].ref_table)
+        }
+    }
+    builder_write(out, db.tables[0].columns[0].name)
+    builder_write(out, db.tables[0].columns[1].ref_table)
+    return builder_string(out)
+}
+
+// Adversarial: same index across if/else/while
+fn cross_scope_storm(mut db: Database, ti: int) -> string {
+    let out = str_builder()
+    if ti == 0 {
+        builder_write(out, db.tables[ti].columns[0].name)
+    } else {
+        builder_write(out, db.tables[ti].columns[0].ref_table)
+    }
+    // After if/else, same nested path must re-declare pointer
+    builder_write(out, db.tables[ti].columns[0].name)
+    let mut wi = 0
+    while wi < 2 {
+        builder_write(out, db.tables[ti].columns[0].ref_column)
+        wi = wi + 1
+    }
+    // After while, pointer must still be valid
+    builder_write(out, db.tables[ti].name)
+    return builder_string(out)
+}
+
+// Adversarial: nested assign inside if, read after
+fn assign_inside_if_read_after(mut db: Database, ti: int, ci: int) {
+    if ci == 0 {
+        db.tables[ti].columns[ci].ref_table = "changed"
+    }
+    // Must not reuse pointer from inside the if
+    let _ = db.tables[ti].columns[ci].ref_table
+}
+
+// Adversarial: two sequential ifs, then assign
+fn sequential_ifs_then_assign(mut db: Database, ti: int) {
+    if ti >= 0 {
+        let _ = db.tables[ti].name
+    }
+    if ti < 3 {
+        let _ = db.tables[ti].columns[0].name
+    }
+    db.tables[ti].columns[0].ref_table = "seq"
+    db.tables[ti].columns[0].ref_column = "seq"
+}
+
+// Adversarial: nested if inside while, then access after while
+fn nested_if_in_while_then_after(mut db: Database, n: int) -> int {
+    let mut wi = 0
+    var acc = 0
+    while wi < n {
+        if wi < len(db.tables) {
+            acc = acc + len(db.tables[wi].columns[0].name)
+        }
+        wi = wi + 1
+    }
+    acc = acc + len(db.tables[0].columns[0].name)
+    return acc
+}
+
+fn TestPattern1ClearRefs() {
+    let mut db = seed()
+    clear_refs(db, 0, 0)
+    assert_eq_str(db.tables[0].columns[0].ref_table, "")
+    assert_eq_str(db.tables[0].columns[0].ref_column, "")
+    assert_eq_str(db.tables[0].columns[1].ref_table, "t1")
+}
+
+fn TestPattern2Describe() {
+    let mut db = seed()
+    let got = describe(db, 0, 0)
+    assert_eq_str(got, "t010pk")
+}
+
+fn TestPattern3DeepCross() {
+    let mut db = seed()
+    let got = deep_cross(db, 0, 0)
+    assert_eq_str(got, "idselfidt1")
+}
+
+fn TestCrossScopeStorm() {
+    let mut db = seed()
+    let got = cross_scope_storm(db, 0)
+    assert_eq_str(got, "ididididt0")
+}
+
+fn TestAssignInsideIfReadAfter() {
+    let mut db = seed()
+    assign_inside_if_read_after(db, 0, 0)
+    assert_eq_str(db.tables[0].columns[0].ref_table, "changed")
+}
+
+fn TestSequentialIfsThenAssign() {
+    let mut db = seed()
+    sequential_ifs_then_assign(db, 0)
+    assert_eq_str(db.tables[0].columns[0].ref_table, "seq")
+    assert_eq_str(db.tables[0].columns[0].ref_column, "seq")
+}
+
+fn TestNestedIfInWhileThenAfter() {
+    let mut db = seed()
+    let got = nested_if_in_while_then_after(db, 3)
+    assert_eq(got, 2 + 2 + 3 + 2)
+}
+
+fn TestNoLeakUnderLoad() {
+    let _ = alloc_track_reset()
+    let mark = leak_mark()
+    let mut round = 0
+    var acc = 0
+    while round < 100 {
+        let mut db = seed()
+        clear_refs(db, 0, 0)
+        let got = describe(db, 0, 0)
+        acc = acc + len(got) + len(deep_cross(db, 0, 0))
+        acc = acc + len(cross_scope_storm(db, 0))
+        round = round + 1
+    }
+    assert_eq(leak_bytes_since(mark), 0)
+    assert(acc > 0)
+}

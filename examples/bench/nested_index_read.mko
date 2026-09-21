@@ -1,0 +1,94 @@
+// Issue #66: nested `arr[i].field` read kernel. General records, not a DB.
+// Compare: examples/bench/nested_index_read.c and nested_index_read.rs
+//   mako build --release --backend c examples/bench/nested_index_read.mko -o out/nested_index_read
+
+struct Cell {
+    score: int
+    label: string
+}
+
+struct Row {
+    cells: []Cell
+    weight: int
+}
+
+struct Grid {
+    rows: []Row
+    title: string
+}
+
+fn make_grid(n_rows: int, n_cells: int) -> Grid {
+    let mut g = Grid { rows: make([]Row, 0, n_rows), title: "grid" }
+    let mut r = 0
+    while r < n_rows {
+        let mut row = Row { cells: make([]Cell, 0, n_cells), weight: r + 1 }
+        let mut c = 0
+        while c < n_cells {
+            row.cells = append(row.cells, Cell { score: r * n_cells + c, label: "x" })
+            c = c + 1
+        }
+        g.rows = append(g.rows, row)
+        r = r + 1
+    }
+    return g
+}
+
+fn scan_scores(g: Grid, n_rows: int, n_cells: int) -> int {
+    let mut sum = 0
+    let mut r = 0
+    while r < n_rows {
+        let mut c = 0
+        while c < n_cells {
+            sum = sum + g.rows[r].cells[c].score + g.rows[r].weight
+            c = c + 1
+        }
+        r = r + 1
+    }
+    return black_box(sum)
+}
+
+fn scan_labels(g: Grid, n_rows: int, n_cells: int) -> int {
+    let mut n = 0
+    let mut r = 0
+    while r < n_rows {
+        let mut c = 0
+        while c < n_cells {
+            n = n + len(g.rows[r].cells[c].label)
+            c = c + 1
+        }
+        r = r + 1
+    }
+    return black_box(n)
+}
+
+fn main() {
+    let n_rows = black_box(80)
+    let n_cells = black_box(80)
+    let scans = black_box(400)
+    let mut g = make_grid(n_rows, n_cells)
+
+    let mut i = 0
+    var acc = 0
+    let t0 = now_ns()
+    while i < scans {
+        acc = acc + scan_scores(g, n_rows, n_cells)
+        i = i + 1
+    }
+    let t1 = now_ns()
+    i = 0
+    var nlab = 0
+    while i < scans {
+        nlab = nlab + scan_labels(g, n_rows, n_cells)
+        i = i + 1
+    }
+    let t2 = now_ns()
+
+    print("lang")
+    print("mako")
+    print("nested_index_scores")
+    print_int(acc)
+    print_int(t1 - t0)
+    print("nested_index_labels")
+    print_int(nlab)
+    print_int(t2 - t1)
+}

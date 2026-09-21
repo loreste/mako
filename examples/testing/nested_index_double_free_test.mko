@@ -1,0 +1,228 @@
+// Issue #66: get_ptr nested reads must not alias a container's owned strings
+// with a second destructor. Run under --sanitize address.
+
+struct Cell {
+    score: int
+    label: string
+}
+
+struct Row {
+    cells: []Cell
+    tags: []string
+    title: string
+}
+
+struct Heavy {
+    a: string
+    b: string
+    c: string
+    d: string
+    e: string
+    f: string
+    g: string
+    h: string
+    i: string
+    rows: []Row
+}
+
+fn seed_row() -> Row {
+    let mut row = Row { cells: make([]Cell, 0, 2), tags: make([]string, 0, 2), title: "t" }
+    row.cells = append(row.cells, Cell { score: 1, label: "alpha" })
+    row.cells = append(row.cells, Cell { score: 2, label: "beta" })
+    row.tags = append(row.tags, "tag0")
+    row.tags = append(row.tags, "tag1")
+    return row
+}
+
+fn seed_rows() -> []Row {
+    let mut rows = make([]Row, 0, 2)
+    rows = append(rows, seed_row())
+    rows = append(rows, seed_row())
+    rows[1].title = "u"
+    rows[1].cells[0].label = "gamma"
+    return rows
+}
+
+fn unwrap_opt(o: Option[string]) -> string {
+    match o {
+        Some(v) => v
+        None => ""
+    }
+}
+
+fn unwrap_res(r: Result[string, string]) -> string {
+    match r {
+        Ok(v) => v
+        Err(_) => ""
+    }
+}
+
+fn bag_field(rows: []Row) -> Option[string] {
+    return Some(rows[0].cells[0].label)
+}
+
+fn bag_index(rows: []Row) -> Option[string] {
+    return Some(rows[0].tags[0])
+}
+
+fn bag_ok(rows: []Row) -> Result[string, string] {
+    return Ok(rows[0].cells[1].label)
+}
+
+fn concat_field(rows: []Row) -> string {
+    return rows[0].cells[0].label + "!"
+}
+
+fn concat_index(rows: []Row) -> string {
+    return rows[0].tags[1] + "?"
+}
+
+fn take_label(s: string) -> int {
+    return len(s)
+}
+
+fn TestSomeNestedFieldIsIndependentOwner() {
+    let mut rows = seed_rows()
+    let got = unwrap_opt(bag_field(rows))
+    rows[0].cells[0].label = "mutated"
+    assert_eq_str(got, "alpha")
+    assert_eq_str(rows[0].cells[0].label, "mutated")
+}
+
+fn TestSomeNestedIndexIsIndependentOwner() {
+    let mut rows = seed_rows()
+    let got = unwrap_opt(bag_index(rows))
+    rows[0].tags[0] = "mutated"
+    assert_eq_str(got, "tag0")
+    assert_eq_str(rows[0].tags[0], "mutated")
+}
+
+fn TestOkNestedFieldIsIndependentOwner() {
+    let mut rows = seed_rows()
+    let got = unwrap_res(bag_ok(rows))
+    rows[0].cells[1].label = "mutated"
+    assert_eq_str(got, "beta")
+}
+
+fn TestConcatNestedFieldDoesNotStealContainer() {
+    let mut rows = seed_rows()
+    let got = concat_field(rows)
+    assert_eq_str(got, "alpha!")
+    assert_eq_str(rows[0].cells[0].label, "alpha")
+    rows[0].cells[0].label = "mutated"
+    assert_eq_str(got, "alpha!")
+}
+
+fn TestConcatNestedIndexDoesNotStealContainer() {
+    let mut rows = seed_rows()
+    let got = concat_index(rows)
+    assert_eq_str(got, "tag1?")
+    assert_eq_str(rows[0].tags[1], "tag1")
+    rows[0].tags[1] = "mutated"
+    assert_eq_str(got, "tag1?")
+}
+
+fn TestLetNestedFieldIsIndependentOwner() {
+    let mut rows = seed_rows()
+    let s = rows[0].cells[0].label
+    rows[0].cells[0].label = "mutated"
+    assert_eq_str(s, "alpha")
+    let t = rows[0].tags[0]
+    rows[0].tags[0] = "x"
+    assert_eq_str(t, "tag0")
+}
+
+fn TestAppendNestedFieldDoesNotFreeSource() {
+    let mut rows = seed_rows()
+    let mut xs: []string = []
+    xs = append(xs, rows[0].cells[0].label)
+    xs = append(xs, rows[0].tags[0])
+    rows[0].cells[0].label = "mutated"
+    rows[0].tags[0] = "mutated"
+    assert_eq_str(xs[0], "alpha")
+    assert_eq_str(xs[1], "tag0")
+}
+
+fn TestBuilderWriteThenMutateSource() {
+    let mut rows = seed_rows()
+    let out = str_builder()
+    builder_write(out, rows[0].cells[0].label)
+    builder_write(out, rows[0].tags[1])
+    rows[0].cells[0].label = "mutated"
+    rows[0].tags[1] = "mutated"
+    assert_eq_str(builder_string(out), "alphatag1")
+}
+
+fn TestPrintAndLenDoNotFreeSource() {
+    let mut rows = seed_rows()
+    assert_eq(len(rows[0].cells[0].label), 5)
+    assert_eq(take_label(rows[0].cells[1].label), 4)
+    assert_eq_str(rows[0].cells[0].label, "alpha")
+    assert_eq_str(rows[0].cells[1].label, "beta")
+}
+
+fn TestNestedFieldAssignThenDrop() {
+    let mut rows = seed_rows()
+    rows[0].cells[0].label = "one"
+    rows[0].cells[0].label = "two"
+    rows[0].tags[0] = "a"
+    rows[0].tags[0] = "b"
+    assert_eq_str(rows[0].cells[0].label, "two")
+    assert_eq_str(rows[0].tags[0], "b")
+}
+
+fn TestLargeStructAssignThenDrop() {
+    let mut h = Heavy {
+        a: "a", b: "b", c: "c", d: "d", e: "e",
+        f: "f", g: "g", h: "h", i: "i",
+        rows: seed_rows(),
+    }
+    let other = Heavy {
+        a: "A", b: "B", c: "C", d: "D", e: "E",
+        f: "F", g: "G", h: "H", i: "I",
+        rows: seed_rows(),
+    }
+    h = other
+    assert_eq_str(h.a, "A")
+    assert_eq_str(h.rows[0].cells[0].label, "alpha")
+}
+
+fn TestMatchArmNestedFieldClones() {
+    let mut rows = seed_rows()
+    let s = if true { rows[0].cells[0].label } else { "no" }
+    rows[0].cells[0].label = "mutated"
+    assert_eq_str(s, "alpha")
+}
+
+fn TestRepeatedEscapeDoesNotLeakOrDoubleFree() {
+    let _ = alloc_track_reset()
+    let mut rows = seed_rows()
+    let mark = leak_mark()
+    let mut round = 0
+    var acc = 0
+    while round < 200 {
+        let a = unwrap_opt(bag_field(rows))
+        let b = unwrap_opt(bag_index(rows))
+        let c = concat_field(rows)
+        let d = concat_index(rows)
+        acc = acc + len(a) + len(b) + len(c) + len(d)
+        round = round + 1
+    }
+    assert_eq(leak_bytes_since(mark), 0)
+    assert(acc == 200 * (5 + 4 + 6 + 5))
+}
+
+fn TestDropRowAfterBorrowingReads() {
+    let _ = alloc_track_reset()
+    let mark = leak_mark()
+    let mut n = 0
+    var acc = 0
+    while n < 64 {
+        let mut rows = seed_rows()
+        acc = acc + len(rows[0].cells[0].label) + len(rows[0].tags[0])
+        acc = acc + len(concat_field(rows))
+        n = n + 1
+    }
+    assert_eq(leak_bytes_since(mark), 0)
+    assert(acc == 64 * (5 + 4 + 6))
+}
