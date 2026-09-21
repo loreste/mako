@@ -236,9 +236,16 @@ pub struct Codegen {
     current_fn_body: Option<Block>,
     /// Index of the top-level statement currently being emitted.
     current_stmt_idx: usize,
-    /// Reuse `*_get_ptr` results while the array header and index stay live.
+    /// Reuse `*_get_ptr` results while the array header and index stay live
+    /// *and* the declaring C block is still open. Value is `(temp name, scope id)`.
     /// Keyed by `(array C expr, index C expr)`.
-    struct_elem_ptr_cache: HashMap<(String, String), String>,
+    struct_elem_ptr_cache: HashMap<(String, String), (String, usize)>,
+    /// Monotonic id for C blocks that can hold `__mako_sp_*` declarations.
+    struct_elem_ptr_scope_id: usize,
+    /// Currently open C blocks (innermost last). A cached pointer is only
+    /// reusable when its scope id is still on this stack — sibling `if`/`else`
+    /// arms must not share a temp declared in the other arm (issue #66).
+    struct_elem_ptr_scope_stack: Vec<usize>,
 }
 
 pub use crate::overflow::OverflowMode;
@@ -336,6 +343,8 @@ impl Codegen {
             current_fn_body: None,
             current_stmt_idx: 0,
             struct_elem_ptr_cache: HashMap::new(),
+            struct_elem_ptr_scope_id: 0,
+            struct_elem_ptr_scope_stack: Vec::new(),
         }
     }
 
@@ -2392,6 +2401,17 @@ impl Codegen {
         self.share_scopes.push(Vec::new());
         self.fn_env_scopes.push(Vec::new());
         self.own_drop_scopes.push(Vec::new());
+        self.push_elem_ptr_scope();
+    }
+
+    fn push_elem_ptr_scope(&mut self) {
+        self.struct_elem_ptr_scope_id += 1;
+        self.struct_elem_ptr_scope_stack
+            .push(self.struct_elem_ptr_scope_id);
+    }
+
+    fn pop_elem_ptr_scope(&mut self) {
+        self.struct_elem_ptr_scope_stack.pop();
     }
 
     /// Emit a bounds check unless inside `unsafe { }`.
@@ -4343,6 +4363,7 @@ impl Codegen {
     }
 
     fn pop_share_scope(&mut self) {
+        self.pop_elem_ptr_scope();
         // Owning slices/maps first (SAFE-003/004), then fn env, then shares.
         // A borrowed/aliased legacy entry may not be safe to free without
         // path-sensitive metadata. Fresh allocating builtin results are known
@@ -13115,8 +13136,10 @@ impl Codegen {
     fn emit_struct_elem_ptr(&mut self, sn: &str, arr_ty: &str, arr: &str, idx: &str) -> String {
         let idx = self.materialize_index(idx);
         let key = (arr.to_string(), idx.clone());
-        if let Some(p) = self.struct_elem_ptr_cache.get(&key) {
-            return p.clone();
+        if let Some((p, sid)) = self.struct_elem_ptr_cache.get(&key) {
+            if self.struct_elem_ptr_scope_stack.iter().any(|s| s == sid) {
+                return p.clone();
+            }
         }
         let p = self.fresh("sp");
         let elem = self.arr_elem_c_ty(sn);
@@ -13132,7 +13155,8 @@ impl Codegen {
                 "{elem} *{p} = mako_arr_{sn}_get_ptr({addr}, {idx});"
             ));
         }
-        self.struct_elem_ptr_cache.insert(key, p.clone());
+        let sid = self.struct_elem_ptr_scope_stack.last().copied().unwrap_or(0);
+        self.struct_elem_ptr_cache.insert(key, (p.clone(), sid));
         p
     }
 
@@ -14570,6 +14594,8 @@ impl Codegen {
         self.loop_drop_bases.clear();
         self.loop_label_drop_bases.clear();
         self.struct_elem_ptr_cache.clear();
+        self.struct_elem_ptr_scope_id = 0;
+        self.struct_elem_ptr_scope_stack.clear();
         // Mut capture cells are per-function (heap cells for sequential outer mut).
         self.mut_capture_cells.clear();
         self.result_err_enums.clear();
@@ -17108,6 +17134,7 @@ impl Codegen {
                 if let Some(init) = init {
                     self.line("{");
                     self.indent += 1;
+                    self.push_elem_ptr_scope();
                     self.emit_stmt(init);
                 }
                 let (_, c) = self.emit_expr(cond);
@@ -17144,6 +17171,7 @@ impl Codegen {
                 }
                 self.line("}");
                 if init.is_some() {
+                    self.pop_elem_ptr_scope();
                     self.indent -= 1;
                     self.line("}");
                 }
@@ -44591,6 +44619,250 @@ fn main() {
         assert!(
             index.contains("mako_str_concat(") && !index.contains("mako_str_concat_own("),
             "tags[i] + \"!\" must copy, not realloc the array element:\n{index}"
+        );
+    }
+
+    /// Every `__mako_sp_N` use in `body` must be declared in an ancestor C block.
+    /// Sibling `if`/`else` arms must not share a pointer temp (issue #66).
+    fn assert_sp_temps_declared_in_scope(body: &str) {
+        let bytes = body.as_bytes();
+        let mut i = 0;
+        let mut stack: Vec<std::collections::HashSet<String>> =
+            vec![std::collections::HashSet::new()];
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' => {
+                    stack.push(std::collections::HashSet::new());
+                    i += 1;
+                }
+                b'}' => {
+                    stack.pop();
+                    i += 1;
+                }
+                _ => {
+                    if let Some(name) = sp_ident_at(body, i) {
+                        let decl = is_sp_decl(body, i);
+                        if decl {
+                            stack
+                                .last_mut()
+                                .expect("C scope")
+                                .insert(name.clone());
+                        } else {
+                            let live = stack.iter().any(|s| s.contains(&name));
+                            assert!(
+                                live,
+                                "undeclared {name} (declared in a closed C block):\n{body}"
+                            );
+                        }
+                        i += name.len();
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    fn sp_ident_at(body: &str, i: usize) -> Option<String> {
+        const PFX: &str = "__mako_sp_";
+        if !body[i..].starts_with(PFX) {
+            return None;
+        }
+        if i > 0 {
+            let prev = body.as_bytes()[i - 1];
+            if prev.is_ascii_alphanumeric() || prev == b'_' {
+                return None;
+            }
+        }
+        let rest = &body[i + PFX.len()..];
+        let n = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+        if n == 0 {
+            return None;
+        }
+        Some(body[i..i + PFX.len() + n].to_string())
+    }
+
+    fn is_sp_decl(body: &str, ident_at: usize) -> bool {
+        let before = body[..ident_at].trim_end();
+        if !before.ends_with('*') {
+            return false;
+        }
+        let rest = &body[ident_at..];
+        let name_len = rest
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .unwrap_or(rest.len());
+        rest[name_len..].trim_start().starts_with('=')
+    }
+
+    fn src_nested_index_across_if() -> &'static str {
+        r#"
+struct Column { name: string values: []string }
+struct Table { name: string columns: []Column rows: int }
+struct Database { tables: []Table label: string }
+
+fn exec_diff_schema(mut db: Database, mut branch_db: Database, tidx: int, bidx: int, ci: int) -> string {
+    if bidx >= 0 {
+        let _ = branch_db.tables[bidx].columns[ci].name
+    }
+    return db.tables[tidx].columns[ci].name
+}
+
+fn exec_drop_table_cascade(mut db: Database, ti: int, ci: int) -> string {
+    if ti >= 0 {
+        let n = db.tables[ti].columns[ci].name
+        if n == "id" {
+            return n
+        }
+    }
+    return db.tables[ti].columns[ci].name
+}
+
+fn scan_both_arms(mut db: Database, tidx: int, other: int) -> string {
+    if other >= 0 {
+        let _ = db.tables[other].name
+    } else {
+        let _ = db.tables[tidx].name
+    }
+    return db.tables[tidx].columns[0].name
+}
+
+fn scan_sequential_ifs(mut db: Database, a: int, b: int) -> string {
+    if a >= 0 {
+        let _ = db.tables[a].name
+    }
+    if b >= 0 {
+        let _ = db.tables[b].name
+    }
+    return db.tables[0].columns[0].name
+}
+
+fn scan_loop_inner_if(mut db: Database, n: int) -> string {
+    let mut i = 0
+    let mut last = ""
+    while i < n {
+        if i > 0 {
+            let _ = db.tables[i].name
+        }
+        last = db.tables[i].columns[0].name
+        i = i + 1
+    }
+    return last
+}
+
+fn main() {
+    let mut db = Database { tables: make([]Table, 0, 1), label: "d" }
+    db.tables = append(db.tables, Table { name: "t", columns: make([]Column, 0, 1), rows: 1 })
+    db.tables[0].columns = append(db.tables[0].columns, Column { name: "c", values: ["v0"] })
+    print(exec_diff_schema(db, db, 0, 0, 0))
+    print(exec_drop_table_cascade(db, 0, 0))
+    print(scan_both_arms(db, 0, -1))
+}
+"#
+    }
+
+    #[test]
+    fn nested_index_after_if_does_not_reuse_closed_block_ptr() {
+        // Issue #66: `__mako_sp_N` declared inside `if` must not be reused after
+        // the brace. FayDB hit undeclared identifiers on this shape.
+        let generated = emit_src(src_nested_index_across_if());
+        for sig in [
+            "exec_diff_schema(",
+            "exec_drop_table_cascade(",
+            "scan_both_arms(",
+            "scan_sequential_ifs(",
+            "scan_loop_inner_if(",
+        ] {
+            let body = fn_body(&generated, sig);
+            assert_sp_temps_declared_in_scope(body);
+            assert!(
+                body.contains(".data[")
+                    && !body.contains("mako_arr_Table_get(")
+                    && !body.contains("mako_arr_Column_get("),
+                "{sig} must keep element-pointer reads:\n{body}"
+            );
+        }
+        let seq = fn_body(&generated, "scan_sequential_ifs(");
+        let decls = seq.matches("*__mako_sp_").count();
+        assert!(
+            decls >= 2,
+            "sibling ifs must each declare their own element pointer, got {decls}:\n{seq}"
+        );
+    }
+
+    #[test]
+    fn faydb_hot_path_sp_temps_are_declared_in_scope() {
+        let generated = emit_src(src_faydb_hot_path());
+        assert_sp_temps_declared_in_scope(fn_body(&generated, "exec_select_point("));
+        assert_sp_temps_declared_in_scope(fn_body(&generated, "column_get("));
+        assert_sp_temps_declared_in_scope(fn_body(&generated, "bind_table("));
+        let nested = emit_src(src_general_nested_index());
+        assert_sp_temps_declared_in_scope(fn_body(&nested, "scan_grid("));
+        assert_sp_temps_declared_in_scope(fn_body(&nested, "scan_labels("));
+        assert_sp_temps_declared_in_scope(fn_body(&nested, "scan_graph("));
+        assert_sp_temps_declared_in_scope(fn_body(&nested, "scan_routes("));
+    }
+
+    #[test]
+    fn single_port_actor_loop_uses_recv_not_heap_batch() {
+        // Issue #64: generated actor loops must not allocate a 64-slot batch
+        // array or call actor_recv_batch. One blocking recv per message is the
+        // cheap path; actor_recv_batch stays an opt-in builtin.
+        let source = r#"
+actor Echo {
+    n: int = 0
+    receive Ping(reply: chan[int]) {
+        self.n = self.n + 1
+        let _ = reply.send(self.n)
+    }
+    receive Stop { let _ = 0 }
+}
+fn main() {
+    let a = Echo_spawn()
+    actor_stop(a)
+}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let mut program = crate::desugar::desugar(program, None);
+        crate::desugar::desugar_if_let_all(&mut program);
+        let item_names: Vec<String> = program
+            .items
+            .iter()
+            .map(|item| match item {
+                crate::ast::Item::Fn(f) => format!("fn {}", f.name),
+                crate::ast::Item::Actor(a) => format!("actor {}", a.name),
+                crate::ast::Item::Struct(s) => format!("struct {}", s.name),
+                _ => "other".into(),
+            })
+            .collect();
+        assert!(
+            item_names.iter().any(|n| n == "fn Echo_loop"),
+            "desugar must emit Echo_loop, got {item_names:?}"
+        );
+        let generated = Codegen::new().emit(&program);
+        assert!(
+            generated.contains("Echo_loop("),
+            "codegen must emit Echo_loop:\n{}",
+            generated
+                .lines()
+                .rev()
+                .take(40)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let body = fn_body(&generated, "Echo_loop(");
+        assert!(
+            body.contains("mako_actor_recv(") || body.contains("mako_chan_recv("),
+            "single-port actor loop must block on one recv:\n{body}"
+        );
+        assert!(
+            !body.contains("mako_actor_recv_batch(")
+                && !body.contains("mako_int_array_make(64")
+                && !body.contains("__batch"),
+            "single-port actor loop must not heap-batch mail:\n{body}"
         );
     }
 }

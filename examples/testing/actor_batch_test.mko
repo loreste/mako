@@ -1,4 +1,4 @@
-// Batch FIFO, partial batches, and cleanup after Stop within a prefetched batch.
+// Actor FIFO, Stop cleanup of queued typed messages, and actor_recv_batch bounds.
 actor BatchOrder {
     n: int = 0
     receive Add(sequence: int) {
@@ -17,7 +17,7 @@ fn TestBatchPreservesOrderAndEarlyReturns() {
     let reply = make(chan[int], 1)
     assert(BatchOrder_send(a, BatchOrder_Check(reply)))
     assert(BatchOrder_send(a, BatchOrder_Stop()))
-    // These span both the prefetched suffix and the remaining mailbox.
+    // Queued after Stop: drain must drop them, not run Unreachable.
     for i in 79 {
         assert(BatchOrder_send(a, BatchOrder_Unreachable("tail-" + int_to_string(i), [i, i + 1])))
     }

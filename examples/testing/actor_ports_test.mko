@@ -86,6 +86,37 @@ actor Named(id: string) {
     }
 }
 
+fn TestTryRecvDoesNotCrossMailboxes() {
+    // Thread-local prefetch used to drain 16 messages from mailbox A on the
+    // first try_recv(A), then serve those leftovers to try_recv(B).
+    let a = actor_spawn(32)
+    let b = actor_spawn(32)
+    let mut i = 0
+    while i < 16 {
+        assert(actor_send(a, actor_pack(1, i)))
+        i = i + 1
+    }
+    assert(actor_send(b, actor_pack(2, 99)))
+    let from_a = actor_try_recv(a)
+    assert_eq(actor_msg_tag(from_a), 1)
+    assert_eq(actor_msg_payload(from_a), 0)
+    assert_eq(actor_len(a), 15)
+    let from_b = actor_try_recv(b)
+    assert_eq(actor_msg_tag(from_b), 2)
+    assert_eq(actor_msg_payload(from_b), 99)
+    let mut n = 1
+    while n < 16 {
+        let m = actor_try_recv(a)
+        assert_eq(actor_msg_tag(m), 1)
+        assert_eq(actor_msg_payload(m), n)
+        n = n + 1
+    }
+    assert_eq(actor_try_recv(a), 0)
+    assert_eq(actor_try_recv(b), 0)
+    actor_stop(a)
+    actor_stop(b)
+}
+
 fn TestActorPortsCtor() {
     let a = Named_spawn("hi")
     crew t {
@@ -103,4 +134,5 @@ fn main() {
     TestActorPortHeadOfLine()
     TestActorPortSend()
     TestActorPortsCtor()
+    TestTryRecvDoesNotCrossMailboxes()
 }

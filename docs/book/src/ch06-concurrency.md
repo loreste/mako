@@ -830,11 +830,11 @@ actor DB {
 
 ### Actor design patterns
 
-Single-port loops prefetch at most 16 ready messages under one lock, without
-waiting to fill the batch. FIFO and early-return behavior are unchanged. On
-shutdown, unused prefetched envelopes are destroyed before the closed mailbox
-is drained. `actor_len` excludes this bounded in-flight batch. Named-port loops
-continue to check priority before each message instead of batching.
+Single-port loops take one message per `actor_recv`. FIFO and early-return
+behavior are unchanged. On shutdown the closed mailbox is drained with typed
+unbox. Named-port loops check priority before each message with `actor_try_recv`.
+Call `actor_recv_batch` only when you want to drain up to 16 ready messages
+under one lock.
 
 **Keyed shards**: Route independent keys to separate actor mailboxes for parallel
 work. [The sharding example](../../../examples/actor_sharded.mko) uses four actors,

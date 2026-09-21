@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- C backend: `__mako_sp_*` element pointers are scoped to the C block that
+  declared them. Nested `arr[i].field` reads inside `if`/`else` no longer
+  reuse a temp after that brace closes, so sibling arms and later statements
+  re-emit a pointer instead of compiling as an undeclared identifier (issue #66).
+- Generated single-port actor loops block on one `actor_recv` per message.
+  `actor_try_recv` is a single-message poll (no thread-local prefetch, so named
+  ports cannot mix mail). `actor_recv_batch` remains the opt-in drain of up to
+  16 ready messages under one lock (issue #64).
+- `mako_chan_try_recv` uses the same trylock / wake-only-if-waiters path as
+  `mako_chan_recv`. Cap-1 send/recv skip ring-index math. `chan50k` stays a
+  1.5× regression budget — a noisy CI host is a rerun, not a quieter bar.
+
 ## 0.6.36
 
 - C backend: borrowed `arr[i].field` reads (graphs, routes, records, nested

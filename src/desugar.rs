@@ -912,6 +912,21 @@ fn main() { let _ = Boxer_spawn() }
     }
 
     #[test]
+    fn single_port_actor_loop_recv_is_not_batched() {
+        // Issue #64: default loops must not heap-allocate a batch array.
+        let program = expand_source(ENVELOPE_ACTOR);
+        let loop_fn = fn_named(&program, "Boxer_loop");
+        assert!(
+            stmts_call(&loop_fn.body.stmts, "actor_recv"),
+            "single-port loop must block on actor_recv"
+        );
+        assert!(
+            !stmts_call(&loop_fn.body.stmts, "actor_recv_batch"),
+            "single-port loop must not call actor_recv_batch"
+        );
+    }
+
+    #[test]
     fn actor_receive_return_continues_actor_loop() {
         let program = expand_source(ENVELOPE_ACTOR);
         let loop_fn = fn_named(&program, "Boxer_loop");
@@ -2235,40 +2250,10 @@ fn actor_process_from_m(actor: &ActorDef, name: &str, has_state: bool) -> Vec<St
     stmts
 }
 
-// A receiver owns its prefetched messages. Keeping the cursor in the loop
-// scope makes early returns safe; shutdown explicitly drops the unused suffix.
-fn actor_batch_let(name: &str, init: Expr) -> Stmt {
-    Stmt::Let {
-        name: name.into(),
-        mutable: true,
-        ownership: Ownership::None,
-        ty: None,
-        init,
-    }
-}
-
 fn actor_batch_call(name: &str, args: Vec<Expr>) -> Expr {
     Expr::Call {
         callee: Box::new(Expr::Ident(name.into())),
         args,
-    }
-}
-
-fn actor_batch_index() -> Expr {
-    Expr::Index {
-        base: Box::new(Expr::Ident("__batch".into())),
-        index: Box::new(Expr::Ident("__batch_i".into())),
-    }
-}
-
-fn actor_batch_advance() -> Stmt {
-    Stmt::Assign {
-        name: "__batch_i".into(),
-        value: Expr::Binary {
-            op: BinOp::Add,
-            left: Box::new(Expr::Ident("__batch_i".into())),
-            right: Box::new(Expr::Int(1)),
-        },
     }
 }
 
@@ -2704,31 +2689,17 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         });
     }
 
-    loop_stmts.extend([
-        actor_batch_let("__batch", Expr::Make { ty: TypeExpr::Array(Box::new(TypeExpr::Named("int".into()))), len: Some(Box::new(Expr::Int(64))), cap: None }),
-        actor_batch_let("__batch_i", Expr::Int(0)),
-        actor_batch_let("__batch_n", Expr::Int(0)),
-    ]);
     let mut while_body: Vec<Stmt> = vec![
-        Stmt::If {
-            init: None,
-            cond: Expr::Binary { op: BinOp::Eq, left: Box::new(Expr::Ident("__batch_i".into())), right: Box::new(Expr::Ident("__batch_n".into())) },
-            then_block: Block { stmts: vec![
-                Stmt::Assign { name: "__batch_n".into(), value: actor_batch_call("actor_recv_batch", vec![Expr::Ident("__mbox".into()), Expr::Ident("__batch".into())]) },
-                Stmt::Assign { name: "__batch_i".into(), value: Expr::Int(0) },
-                Stmt::If { init: None,
-                    cond: Expr::Binary { op: BinOp::Eq, left: Box::new(Expr::Ident("__batch_n".into())), right: Box::new(Expr::Int(0)) },
-                    then_block: Block { stmts: vec![Stmt::Break(None)], source_lines: Box::default() }, else_block: None },
-            ], source_lines: Box::default() }, else_block: None,
-        },
         Stmt::Let {
             name: "__m".into(),
             mutable: false,
             ownership: Ownership::None,
             ty: None,
-            init: actor_batch_index(),
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_recv".into())),
+                args: vec![Expr::Ident("__mbox".into())],
+            },
         },
-        actor_batch_advance(),
         Stmt::Let {
             name: "__tag".into(),
             mutable: false,
@@ -2888,18 +2859,9 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
     });
 
-    // Close first so a blocked producer cannot escape shutdown cleanup while
-    // prefetched messages are destroyed. Preserve typed ownership for the tail.
-    loop_stmts.push(close_mailbox("__mbox"));
-    loop_stmts.push(Stmt::While {
-        label: None,
-        cond: Expr::Binary { op: BinOp::Lt, left: Box::new(Expr::Ident("__batch_i".into())), right: Box::new(Expr::Ident("__batch_n".into())) },
-        body: Block { stmts: vec![
-            Stmt::Expr(actor_batch_call(&format!("{name}_drop_message"), vec![actor_batch_index()])),
-            actor_batch_advance(),
-        ], source_lines: Box::default() },
-    });
+    // Close first so a blocked producer cannot escape shutdown cleanup.
     // Drain remaining envelopes by typed unbox so nested strings/chans/slices free.
+    loop_stmts.push(close_mailbox("__mbox"));
     loop_stmts.extend(mailbox_drain_stmts(&envelopes));
 
     loop_stmts.push(Stmt::Expr(Expr::Call {

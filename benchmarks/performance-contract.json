@@ -38,7 +38,7 @@
       "area": "bounded channel send and recv",
       "max_ratio_vs_rust": 1.5,
       "strict_rust_claim": false,
-      "note": "Uncontended same-thread ping-pong. Typically under 1.0\u00d7 Rust on Apple arm64; keep as a regression budget until CI hosts are stable enough for a strict claim."
+      "note": "Uncontended same-thread ping-pong. Typically ~1.2\u00d7 Rust on a quiet host. A noisy CI fail is a rerun, not a quieter bar."
     },
     {
       "name": "actor200k",
