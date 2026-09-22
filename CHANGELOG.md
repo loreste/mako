@@ -2,10 +2,20 @@
 
 ## Unreleased
 
+- DCE: struct types referenced only via another struct's field type (e.g.
+  `[]Col` in `Tab.cols`) are no longer eliminated. Previously DCE would remove
+  the child struct, causing codegen to lower the field to `MakoIntArray` instead
+  of the correct `MakoArr_Col` — breaking nested struct-array access patterns
+  like `tabs[ti].cols[ci].cname` (issue #66 follow-up).
 - C backend: `__mako_sp_*` element pointers are scoped to the C block that
-  declared them. Nested `arr[i].field` reads inside `if`/`else` no longer
-  reuse a temp after that brace closes, so sibling arms and later statements
-  re-emit a pointer instead of compiling as an undeclared identifier (issue #66).
+  declared them. Nested `arr[i].field` reads inside `if`/`else` and `while`
+  loops no longer reuse a temp after that brace closes, so sibling arms and
+  later statements re-emit a pointer instead of compiling as an undeclared
+  identifier (issue #66).
+- C backend: array literals with struct-typed variable elements (`[s1, s2]`
+  where `s1`/`s2` are idents, not struct literals) now emit `MakoArr_{sn}_of`
+  with proper deep cloning of owned fields, preventing double-free when the
+  original variables are freed at scope exit.
 - Generated single-port actor loops block on one `actor_recv` per message.
   `actor_try_recv` is a single-message poll (no thread-local prefetch, so named
   ports cannot mix mail). `actor_recv_batch` remains the opt-in drain of up to
