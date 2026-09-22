@@ -1830,18 +1830,25 @@ static inline MakoString mako_random_bytes(int64_t n) {
     }
 #else
     {
-        int fd = open("/dev/urandom", O_RDONLY);
-        if (fd < 0) mako_abort("random_bytes: cannot open /dev/urandom");
+        static int cached_urandom_fd = -1;
+        static pthread_mutex_t urandom_mu = MAKO_MUTEX_INIT;
+        pthread_mutex_lock(&urandom_mu);
+        if (cached_urandom_fd < 0) {
+            cached_urandom_fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+        }
+        int fd = cached_urandom_fd;
+        if (fd < 0) { pthread_mutex_unlock(&urandom_mu); mako_abort("random_bytes: cannot open /dev/urandom"); }
+        /* Read under lock — /dev/urandom reads are fast and non-blocking */
         size_t got = 0;
         while (got < (size_t)n) {
             ssize_t r = read(fd, d + got, (size_t)n - got);
             if (r <= 0) {
-                close(fd);
+                pthread_mutex_unlock(&urandom_mu);
                 mako_abort("random_bytes: /dev/urandom read failed");
             }
             got += (size_t)r;
         }
-        close(fd);
+        pthread_mutex_unlock(&urandom_mu);
     }
 #endif
     d[n] = 0;
