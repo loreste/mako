@@ -15692,14 +15692,10 @@ impl Codegen {
                             self.emit_expr(init)
                         }
                     } else if !elems.is_empty() {
-                        // Check if the first element resolves to a struct type
-                        // (ident, field, call result — not just StructLit).
-                        let ety = self.peek_expr_c_ty(&elems[0]);
-                        if self.structs.contains_key(ety.as_str()) {
-                            self.emit_struct_array_lit(&ety, elems)
-                        } else {
-                            self.emit_expr(init)
-                        }
+                        // Non-literal struct elements (idents, calls, field accesses):
+                        // fall through to emit_expr which clones each element to
+                        // prevent double-free when the original variable is freed.
+                        self.emit_expr(init)
                     } else {
                         self.emit_expr(init)
                     }
