@@ -37380,27 +37380,19 @@ impl Codegen {
                     }
                     // Element is a user struct: [s1, s2] where s1/s2 are struct
                     // values (idents, field accesses, call results — not just
-                    // Expr::StructLit).  Clone each element so the array owns
-                    // its data independently (struct literals are fresh, but
-                    // idents alias existing owned fields → double-free without
-                    // a deep copy).
+                    // Expr::StructLit).  Move-or-clone each element so the
+                    // array owns its data independently.  Struct literals are
+                    // fresh temps (use as-is); idents are moved when this is
+                    // their last use, cloned when used later.
                     if self.structs.contains_key(ty0.as_str())
                         || self.structs.values().any(|s| s.c_name == ty0)
                     {
                         let sn = ty0.clone();
-                        let v0 = if matches!(&elems[0], Expr::StructLit { .. }) {
-                            v0
-                        } else {
-                            self.clone_own_val(&sn, &v0)
-                        };
+                        let v0 = self.prepare_own_store_rhs(&elems[0], &sn, v0);
                         let mut vals = vec![v0];
                         for e in elems.iter().skip(1) {
                             let (_, v) = self.emit_expr(e);
-                            let v = if matches!(e, Expr::StructLit { .. }) {
-                                v
-                            } else {
-                                self.clone_own_val(&sn, &v)
-                            };
+                            let v = self.prepare_own_store_rhs(e, &sn, v);
                             vals.push(v);
                         }
                         let arr_ty = format!("MakoArr_{sn}");
