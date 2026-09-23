@@ -63,6 +63,7 @@ static MakoString bridge_borrow_str(const MakoNativeString *s) {
     m.data = (char *)(uintptr_t)s->data;
     /* Strip immortal/static high bit from native string lens. */
     m.len = s->len & ~((size_t)1 << (sizeof(size_t) * 8 - 1));
+    m._rc = 0; /* borrow — not RC-owned */
     return m;
 }
 
@@ -91,6 +92,12 @@ static MakoNativeString *bridge_clone_str(MakoString s) {
 static MakoNativeString *bridge_take_str(MakoString s) {
     if (mako_str_is_empty_singleton(s) || !s.data) {
         return mako_native_string_literal_ptr("", 0);
+    }
+    if (s._rc) {
+        /* RC string: native side will plain-free, so copy into a plain buffer. */
+        MakoNativeString *out = mako_native_string_literal_ptr(s.data, s.len);
+        mako_str_free(s); /* release RC ref */
+        return out;
     }
     // Transfer ownership of s.data into a native header.
     MakoNativeString *out = (MakoNativeString *)malloc(sizeof(*out));
