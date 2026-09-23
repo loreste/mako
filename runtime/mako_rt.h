@@ -8094,11 +8094,15 @@ static inline void mako_sched_ensure_pool(void) {
     mako_sched.workers = (pthread_t *)calloc((size_t)want, sizeof(pthread_t));
     if (!mako_sched.workers) mako_abort("sched: OOM");
     mako_sched.running = 1;
+    pthread_attr_t wattr;
+    pthread_attr_init(&wattr);
+    pthread_attr_setstacksize(&wattr, mako_task_stack_size);
     for (int i = 0; i < want; i++) {
-        if (pthread_create(&mako_sched.workers[i], NULL, mako_sched_worker_main, NULL) != 0) {
+        if (pthread_create(&mako_sched.workers[i], &wattr, mako_sched_worker_main, NULL) != 0) {
             mako_abort("sched: worker create failed");
         }
     }
+    pthread_attr_destroy(&wattr);
 }
 
 static inline int mako_sched_enqueue(MakoTaskFn fn, void *arg, MakoTask *task) {
