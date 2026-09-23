@@ -4626,8 +4626,11 @@ impl Codegen {
 
     /// True when two owned field values do not share backing storage.
     fn owning_field_replaced_cond(fty: &str, old: &str, new: &str) -> String {
-        if fty == "MakoString"
-            || fty.starts_with("MakoArr_")
+        if fty == "MakoString" {
+            // RC strings share the same data pointer after clone — must always
+            // release the old reference so the refcount decrements correctly.
+            "1".into()
+        } else if fty.starts_with("MakoArr_")
             || matches!(
                 fty,
                 "MakoIntArray"
