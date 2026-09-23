@@ -17,7 +17,7 @@ fn write_plugin_src(path: string) -> int {
         + "    MakoString o = {d, payload.len}; return o;\n"
         + "  }\n"
         + "  return mako_str_from_cstr(\"demo: ok\");\n}\n"
-        + "static void plugin_free_string(MakoString v) { free(v.data); }\n"
+        + "static void plugin_free_string(MakoString v) { mako_str_free(v); }\n"
         + "static const MakoPluginVTable VTABLE = {\n"
         + "  MAKO_PLUGIN_ABI_VERSION,\n"
         + "  { MAKO_PLUGIN_ABI_VERSION, MAKO_PLUGIN_API_VERSION, \"demo\", \"1.0.0\", \"native\" },\n"

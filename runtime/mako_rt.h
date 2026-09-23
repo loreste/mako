@@ -428,14 +428,17 @@ static inline int64_t mako_fn_has_env(MakoFn f) {
     return f.env != NULL ? 1 : 0;
 }
 
-/* ---- Strings (owned, null-terminated) ----
- * MakoString is the primary string type. Strings own their buffer (heap-allocated,
- * NUL-terminated). `data` is never NULL for owned strings. `len` does not count
- * the trailing NUL. Free with free(s.data) when done, or let scope/arena handle it.
+/* ---- Strings (owned, refcounted, null-terminated) ----
+ * MakoString is the primary string type. Owned strings may use a refcounted
+ * backing buffer (_rc=1) or plain malloc (_rc=0). Clone of an RC string is
+ * O(1) — atomic refcount bump, no malloc/memcpy. Existing (MakoString){d,n}
+ * compound literals zero-init _rc to 0 (plain malloc), so only core allocators
+ * need updating.
  */
 typedef struct {
     char *data;
     size_t len;
+    uint8_t _rc; /* 1 = refcounted (mako_rc_alloc), 0 = plain malloc */
 } MakoString;
 
 static inline MakoString mako_str_from_cstr(const char *s);
@@ -454,7 +457,11 @@ static inline int mako_str_is_empty_singleton(MakoString s) {
  * boundary; probing before an arbitrary view pointer would itself be UB. */
 static inline void mako_str_free(MakoString s) {
     if (!s.data || s.data == &mako_str_empty_byte) return;
-    free(s.data);
+    if (s._rc) {
+        mako_rc_release(s.data);
+    } else {
+        free(s.data);
+    }
 }
 
 /* Create an owned MakoString by copying a C string. NULL/empty → shared empty. */
@@ -463,13 +470,9 @@ static inline MakoString mako_str_from_cstr(const char *s) {
         return mako_str_empty;
     }
     size_t n = strlen(s);
-    char *d = (char *)malloc(n + 1);
-    if (!d) {
-        fprintf(stderr, "mako: OOM in str_from_cstr\n");
-        abort();
-    }
+    char *d = (char *)mako_rc_alloc(n + 1);
     memcpy(d, s, n + 1);
-    MakoString out = {d, n};
+    MakoString out = {d, n, 1};
     return out;
 }
 
@@ -510,31 +513,24 @@ static inline MakoString mako_str_view(const char *p, size_t n) {
 }
 
 static inline MakoString mako_str_concat(MakoString a, MakoString b) {
-    /* Empty fast paths without calling mako_str_clone (defined later). */
     if (MAKO_UNLIKELY(a.len == 0 && b.len == 0)) return mako_str_empty;
     if (MAKO_UNLIKELY(a.len == 0)) {
-        char *d = (char *)malloc(b.len + 1);
-        if (MAKO_UNLIKELY(!d)) abort();
+        char *d = (char *)mako_rc_alloc(b.len + 1);
         memcpy(d, b.data, b.len);
         d[b.len] = 0;
-        return (MakoString){d, b.len};
+        return (MakoString){d, b.len, 1};
     }
     if (MAKO_UNLIKELY(b.len == 0)) {
-        char *d = (char *)malloc(a.len + 1);
-        if (MAKO_UNLIKELY(!d)) abort();
+        char *d = (char *)mako_rc_alloc(a.len + 1);
         memcpy(d, a.data, a.len);
         d[a.len] = 0;
-        return (MakoString){d, a.len};
+        return (MakoString){d, a.len, 1};
     }
-    char *d = (char *)malloc(a.len + b.len + 1);
-    if (MAKO_UNLIKELY(!d)) {
-        fprintf(stderr, "mako: OOM in str_concat\n");
-        abort();
-    }
+    char *d = (char *)mako_rc_alloc(a.len + b.len + 1);
     memcpy(d, a.data, a.len);
     memcpy(d + a.len, b.data, b.len);
     d[a.len + b.len] = 0;
-    MakoString out = {d, a.len + b.len};
+    MakoString out = {d, a.len + b.len, 1};
     return out;
 }
 
@@ -544,14 +540,22 @@ static inline MakoString mako_str_concat(MakoString a, MakoString b) {
 static inline MakoString mako_str_concat_own(MakoString a, MakoString b) {
     if (MAKO_UNLIKELY(b.len == 0)) return a;
     if (MAKO_UNLIKELY(a.len == 0)) {
-        /* a is empty — just clone b; no realloc benefit. */
-        char *d = (char *)malloc(b.len + 1);
-        if (MAKO_UNLIKELY(!d)) abort();
+        char *d = (char *)mako_rc_alloc(b.len + 1);
         memcpy(d, b.data, b.len);
         d[b.len] = 0;
-        return (MakoString){d, b.len};
+        mako_str_free(a);
+        return (MakoString){d, b.len, 1};
     }
-    /* Realloc a's owned buffer to fit a + b. */
+    if (a._rc) {
+        /* RC buffer: can't realloc (offset pointer). Alloc new RC + copy. */
+        char *d = (char *)mako_rc_alloc(a.len + b.len + 1);
+        memcpy(d, a.data, a.len);
+        memcpy(d + a.len, b.data, b.len);
+        d[a.len + b.len] = 0;
+        mako_str_free(a);
+        return (MakoString){d, a.len + b.len, 1};
+    }
+    /* Plain-malloc buffer: realloc in place. */
     char *d = (char *)realloc(a.data, a.len + b.len + 1);
     if (MAKO_UNLIKELY(!d)) {
         fprintf(stderr, "mako: OOM in str_concat_own\n");
@@ -3419,14 +3423,16 @@ static inline uint64_t mako_hash_result_float(MakoResultFloat k) {
 static inline MakoString mako_str_clone(MakoString s) {
     if (MAKO_UNLIKELY(s.len == 0)) return mako_str_empty;
     if (!s.data || s.data == &mako_str_empty_byte) return mako_str_empty;
-    char *d = (char *)malloc(s.len + 1);
-    if (MAKO_UNLIKELY(!d)) {
-        fprintf(stderr, "mako: OOM in str_clone (len=%zu)\n", s.len);
-        abort();
+    if (s._rc) {
+        /* O(1) refcount bump — no malloc, no memcpy. */
+        mako_rc_retain(s.data);
+        return s;
     }
+    /* Non-RC source: deep copy into RC buffer so future clones are O(1). */
+    char *d = (char *)mako_rc_alloc(s.len + 1);
     memcpy(d, s.data, s.len);
     d[s.len] = 0;
-    return (MakoString){d, s.len};
+    return (MakoString){d, s.len, 1};
 }
 
 static inline MakoMapSI mako_map_si_new(size_t hint) {

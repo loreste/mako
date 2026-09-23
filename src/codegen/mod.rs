@@ -1302,7 +1302,7 @@ impl Codegen {
                 let s = self.fresh("rfs");
                 self.line(&format!("MakoString {s} = mako_str_clone({access});"));
                 self.line(&format!(
-                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); free({s}.data);"
+                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); mako_str_free({s});"
                 ));
                 *idx += 1;
             } else if ft == "int64_t" || ft == "double" || ft == "bool" {
@@ -1311,7 +1311,7 @@ impl Codegen {
                     "MakoString {s} = mako_int_to_string((int64_t)({access}));"
                 ));
                 self.line(&format!(
-                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); free({s}.data);"
+                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); mako_str_free({s});"
                 ));
                 *idx += 1;
             } else if ft == "MakoOptionInt" {
@@ -1323,13 +1323,13 @@ impl Codegen {
                        MakoString _iv = mako_int_to_string(({access}).value); \
                        MakoString _p = mako_str_from_cstr(\"Some(\"); \
                        MakoString _m = mako_str_concat(_p, _iv); \
-                       free(_iv.data); \
+                       mako_str_free(_iv); \
                        {s} = mako_str_concat(_m, mako_str_from_cstr(\")\")); \
-                       free(_m.data); \
+                       mako_str_free(_m); \
                      }} else {{ {s} = mako_str_from_cstr(\"None\"); }}"
                 ));
                 self.line(&format!(
-                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); free({s}.data);"
+                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); mako_str_free({s});"
                 ));
                 *idx += 1;
             } else if ft == "MakoResultInt" {
@@ -1340,18 +1340,18 @@ impl Codegen {
                        MakoString _iv = mako_int_to_string(({access}).value); \
                        MakoString _p = mako_str_from_cstr(\"Ok(\"); \
                        MakoString _m = mako_str_concat(_p, _iv); \
-                       free(_iv.data); \
+                       mako_str_free(_iv); \
                        {s} = mako_str_concat(_m, mako_str_from_cstr(\")\")); \
-                       free(_m.data); \
+                       mako_str_free(_m); \
                      }} else {{ \
                        MakoString _p = mako_str_from_cstr(\"Err(\"); \
                        MakoString _m = mako_str_concat(_p, ({access}).err); \
                        {s} = mako_str_concat(_m, mako_str_from_cstr(\")\")); \
-                       free(_m.data); \
+                       mako_str_free(_m); \
                      }}"
                 ));
                 self.line(&format!(
-                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); free({s}.data);"
+                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); mako_str_free({s});"
                 ));
                 *idx += 1;
             } else if ft == "MakoIntArray" || ft == "MakoStrArray" || ft == "MakoFloatArray" {
@@ -1360,14 +1360,14 @@ impl Codegen {
                     "MakoString {s} = mako_int_to_string((int64_t)({access}).len);"
                 ));
                 self.line(&format!(
-                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); free({s}.data);"
+                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); mako_str_free({s});"
                 ));
                 *idx += 1;
             } else if ft.starts_with("MakoMap") {
                 let s = self.fresh("rfs");
                 self.line(&format!("MakoString {s} = mako_str_from_cstr(\"map\");"));
                 self.line(&format!(
-                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); free({s}.data);"
+                    "mako_reflect_value_set_at({tmp}, {idx}, {s}); mako_str_free({s});"
                 ));
                 *idx += 1;
             } else if let Some(info) = self

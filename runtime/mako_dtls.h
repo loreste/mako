@@ -492,7 +492,7 @@ static inline MakoString mako_dtls_recv(void *conn_ptr, int64_t max) {
         return mako_str_from_cstr("");
     }
     buf[n] = 0;
-    MakoString s;
+    MakoString s = {0};
     s.data = buf;
     s.len = (size_t)n;
     return s;
@@ -534,7 +534,7 @@ static inline MakoString mako_dtls_fingerprint_of(X509 *cert) {
         *p++ = hexd[(md[i] >> 4) & 0xf];
         *p++ = hexd[md[i] & 0xf];
     }
-    MakoString s;
+    MakoString s = {0};
     s.data = buf;
     s.len = (size_t)(p - buf);
     return s;
@@ -592,7 +592,7 @@ static inline MakoString mako_dtls_export_srtp_keys(void *conn_ptr) {
         ERR_print_errors_fp(stderr);
         return mako_str_from_cstr("");
     }
-    MakoString s;
+    MakoString s = {0};
     s.data = buf;
     s.len = n;
     return s;

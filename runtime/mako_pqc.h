@@ -34,7 +34,7 @@ static inline MakoString mako_pqc_bio_to_str(BIO *bio) {
     if (!bio) return mako_str_from_cstr("");
     char *data = NULL;
     long len = BIO_get_mem_data(bio, &data);
-    MakoString s;
+    MakoString s = {0};
     if (len > 0 && data) {
         s.data = (char *)malloc((size_t)len);
         if (s.data) {
