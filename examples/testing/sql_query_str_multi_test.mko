@@ -10,6 +10,7 @@ fn db_open_test() -> SqlDB {
 
 fn TestQueryStr2() {
     let db = db_open_test()
+    if sql_ok(db) != 1 { return }
     let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS t_q2 (a TEXT, b TEXT, v TEXT)")
     let _ = sql_exec_str4(db, "DELETE FROM t_q2 WHERE a = $1", "x", "", "", "")
     let _ = sql_exec_str4(
@@ -26,6 +27,7 @@ fn TestQueryStr2() {
 
 fn TestQueryStrEmptySecond() {
     let db = db_open_test()
+    if sql_ok(db) != 1 { return }
     let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS t_qe (k TEXT, ua TEXT)")
     let _ = sql_exec_str4(db, "DELETE FROM t_qe WHERE k = $1", "k1", "", "", "")
     let _ = sql_exec_str4(

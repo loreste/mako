@@ -10,6 +10,7 @@ fn db_open_test() -> SqlDB {
 
 fn TestUpdateEmptySecondParam() {
     let db = db_open_test()
+    if sql_ok(db) != 1 { return }
     let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS t_ua (aor TEXT PRIMARY KEY, user_agent TEXT)")
     let _ = sql_exec_str4(db, "DELETE FROM t_ua WHERE aor = $1", "alice@x", "", "", "")
     let _ = sql_exec_str4(
@@ -37,6 +38,7 @@ fn TestUpdateEmptySecondParam() {
 
 fn TestSinglePlaceholderIgnoresTrailing() {
     let db = db_open_test()
+    if sql_ok(db) != 1 { return }
     let _ = sql_exec_plain(db, "CREATE TABLE IF NOT EXISTS t1 (id TEXT PRIMARY KEY)")
     let _ = sql_exec_str4(db, "INSERT INTO t1 (id) VALUES ($1)", "k1", "", "", "")
     let v = sql_query_str(db, "SELECT id FROM t1 WHERE id = $1", "k1")

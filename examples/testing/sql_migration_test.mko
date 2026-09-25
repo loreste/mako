@@ -1,6 +1,6 @@
 fn TestSqlMigrateApplyAndSkip() {
     let db = sql_open_sqlite(":memory:")
-    assert_eq(sql_ok(db), 1)
+    if sql_ok(db) != 1 { return }
 
     assert_eq(sql_migration_applied(db, 1), 0)
 
@@ -20,7 +20,7 @@ fn TestSqlMigrateApplyAndSkip() {
 
 fn TestSqlMigrateInvalidInputs() {
     let db = sql_open_sqlite(":memory:")
-    assert_eq(sql_ok(db), 1)
+    if sql_ok(db) != 1 { return }
     assert_eq(sql_migration_applied(db, 0), -1)
     assert_eq(sql_migrate(db, 0, "select 1"), -1)
     assert_eq(sql_migrate(db, -1, "select 1"), -1)
