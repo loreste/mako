@@ -1,7 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.6.38
 
+- **Refcounted strings**: `mako_str_clone` is O(1) — atomic refcount bump
+  instead of `malloc + memcpy`. MakoString gains a `_rc` flag (1 = RC, 0 =
+  plain malloc). `mako_str_free` routes by flag. `mako_str_concat` and
+  `mako_str_from_cstr` produce RC strings. Non-RC sources (runtime helpers,
+  FFI) are promoted to RC on first clone (issue #69).
 - DCE: struct types referenced only via another struct's field type (e.g.
   `[]Col` in `Tab.cols`) are no longer eliminated. Previously DCE would remove
   the child struct, causing codegen to lower the field to `MakoIntArray` instead
@@ -16,6 +21,15 @@
   where `s1`/`s2` are idents, not struct literals) now emit `MakoArr_{sn}_of`
   with proper deep cloning of owned fields, preventing double-free when the
   original variables are freed at scope exit.
+- C backend: RC string reassignment always releases old reference — fixes
+  leak when cloned strings share the same data pointer.
+- Native bridge: `bridge_borrow_str` sets `_rc=0`, `bridge_take_str` copies
+  RC strings into plain buffers for native ownership.
+- Worker pool threads use configurable stack size (8 MB default), matching
+  direct-spawned tasks. Fixes stack overflow on recursive SQL evaluation
+  in UNION queries (issue #71).
+- Windows: SQL/crypto/network tests skip gracefully when platform libraries
+  are unavailable. Quarantine reduced from 18 to 14 tests.
 - Generated single-port actor loops block on one `actor_recv` per message.
   `actor_try_recv` is a single-message poll (no thread-local prefetch, so named
   ports cannot mix mail). `actor_recv_batch` remains the opt-in drain of up to
