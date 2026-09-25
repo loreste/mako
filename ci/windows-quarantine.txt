@@ -17,4 +17,5 @@ examples/testing/residual_seeds_test.mko
 examples/testing/signal_test.mko
 examples/testing/storage_depth_test.mko
 examples/testing/syscall_full_test.mko
+examples/testing/time_latency_test.mko
 examples/testing/tls_aead_test.mko
