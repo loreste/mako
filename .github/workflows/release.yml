@@ -174,7 +174,7 @@ jobs:
             dist/${{ matrix.artifact }}.sha256
             dist/${{ matrix.artifact }}
 
-      # Only Linux uploads installers so Windows CRLF checkout never overwrites them.
+      # Only Linux uploads shell installers so Windows CRLF checkout never overwrites them.
       - name: Publish install scripts (Linux only, LF)
         if: runner.os == 'Linux'
         uses: softprops/action-gh-release@v2
@@ -184,3 +184,12 @@ jobs:
           files: |
             dist/install-release.sh
             dist/install-linux.sh
+
+      # Windows uploads the PowerShell installer.
+      - name: Publish Windows installer
+        if: runner.os == 'Windows'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          fail_on_unmatched_files: false
+          files: scripts/install-windows.ps1
