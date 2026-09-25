@@ -1,14 +1,14 @@
 # Makori release & cross-platform guide
 
-**Product version:** **0.6.34** (`Cargo.toml` / `makori version`);
-release tag **v0.6.34**.
-**Tree status:** `examples/testing` inventory **452** `*_test.mko` files
-(2026-09-14): CI/claims gates pass across the release matrix.
+**Product version:** **0.6.38** (`Cargo.toml` / `makori version`);
+release tag **v0.6.38**.
+**Tree status:** `examples/testing` inventory **477** `*_test.mko` files
+(2026-09-25): CI/claims gates pass across the release matrix.
 **Versioning:** small patches preferred — [VERSIONING.md](VERSIONING.md).
 **Backends:** default **native** for debug/test; use explicit `--backend c` as
 the oracle for C-only modes and `--backend llvm --release` for optimizing builds
 (see [BUILD.md § Backend policy](BUILD.md)).
-**Train:** **0.6.34** iterator invalidation prevention, channel trylock fast path (TSan clean), 8MB stack safety, raw array use-after-move tracking, struct DCE retention;
+**Train:** **0.6.38** refcounted strings (O(1) clone), DCE transitive field types, while-loop scoping, struct array double-free/leak fixes, native bridge RC handling, worker pool stack size, Windows skip guards;
 
 ### Compiler/runtime compatibility
 
@@ -377,6 +377,18 @@ mako version
 curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-release.sh | bash
 source "$HOME/.local/share/mako/env.sh"
 ```
+
+**Windows** (PowerShell — run as Administrator or in a user shell)
+
+```powershell
+irm https://github.com/loreste/mako/releases/latest/download/install-windows.ps1 | iex
+```
+
+The Windows installer downloads the pre-built binary, installs to
+`%LOCALAPPDATA%\mako`, adds `bin` to your user PATH, and sets
+`MAKO_RUNTIME` / `MAKO_STD` environment variables. Requires
+[LLVM clang](https://llvm.org/) on PATH to compile `.mko` programs
+(`winget install LLVM.LLVM` or `choco install llvm`).
 
 What the installer does:
 

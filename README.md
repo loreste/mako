@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.35).** It works, it compiles real programs, people have
+**Status: alpha (v0.6.38).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -36,8 +36,11 @@ curl -fsSL https://github.com/loreste/mako/releases/latest/download/install-rele
 source "$HOME/.local/share/mako/env.sh"
 ```
 
-**Windows** — grab the `.zip` from [Releases](https://github.com/loreste/mako/releases),
-or build from source with LLVM clang on PATH.
+**Windows** (PowerShell)
+
+```powershell
+irm https://github.com/loreste/mako/releases/latest/download/install-windows.ps1 | iex
+```
 
 **From source** (needs Rust):
 
@@ -188,6 +191,14 @@ message inspection, site history, reports, alerts, and traffic metrics.
 - Package security model is not independently audited
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
+
+## New in 0.6.38
+
+- **Refcounted strings:** `mako_str_clone` is O(1) — atomic refcount bump instead of `malloc + memcpy`. FayDB-class workloads see major read throughput improvements.
+- **Memory safety fixes:** DCE preserves struct types referenced only via field types; `__mako_sp_*` element pointers properly scoped in while loops; struct array literals with variable elements use move-or-clone to prevent double-free and leaks.
+- **Worker pool stack size:** Pool threads now use the same 8 MB stack as direct-spawned tasks, fixing stack overflow on recursive SQL evaluation (UNION queries).
+- **Windows first-class:** One-liner PowerShell installer; SQL/crypto/network tests skip gracefully when platform libraries are unavailable; quarantine reduced from 18 to 14 tests.
+- **Native bridge RC handling:** Borrowed strings set `_rc=0`; taken strings copy RC data into plain buffers for native ownership.
 
 ## New in 0.6.35
 
