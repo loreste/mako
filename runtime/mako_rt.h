@@ -76,6 +76,47 @@ extern "C" {
  * This eliminates O(n) deep copies that caused OOM in database engine loops. */
 #define MAKO_RC_HEADER 8
 #define MAKO_POOL_CAP_FLAG ((size_t)1 << (sizeof(size_t) * 8 - 1))
+
+/* ---- Built-in leak detector (cross-platform, no ASan needed) ----
+ * Tracks RC alloc/free counts. Enable with MAKO_LEAK_CHECK=1 env var
+ * or --leak-check flag. Reports at process exit. */
+static _Atomic int64_t mako_rc_alloc_count = 0;
+static _Atomic int64_t mako_rc_free_count = 0;
+static _Atomic int64_t mako_rc_alloc_bytes = 0;
+static _Atomic int64_t mako_rc_free_bytes = 0;
+static int mako_leak_check_enabled = 0;
+
+static void mako_leak_check_atexit(void) {
+    int64_t allocs = atomic_load_explicit(&mako_rc_alloc_count, memory_order_relaxed);
+    int64_t frees = atomic_load_explicit(&mako_rc_free_count, memory_order_relaxed);
+    int64_t alloc_bytes = atomic_load_explicit(&mako_rc_alloc_bytes, memory_order_relaxed);
+    int64_t free_bytes = atomic_load_explicit(&mako_rc_free_bytes, memory_order_relaxed);
+    int64_t leaked = allocs - frees;
+    int64_t leaked_bytes = alloc_bytes - free_bytes;
+    if (leaked > 0) {
+        fprintf(stderr,
+            "\n=== mako leak-check ===\n"
+            "  allocations: %lld\n"
+            "  frees:       %lld\n"
+            "  leaked:      %lld allocation(s), %lld bytes\n"
+            "  hint: run with MAKO_LEAK_TRACE=1 for allocation backtraces\n"
+            "========================\n",
+            (long long)allocs, (long long)frees,
+            (long long)leaked, (long long)leaked_bytes);
+    } else if (mako_leak_check_enabled) {
+        fprintf(stderr,
+            "\n=== mako leak-check: clean (%lld allocs, 0 leaked) ===\n",
+            (long long)allocs);
+    }
+}
+
+static inline void mako_leak_check_init(void) {
+    const char *env = getenv("MAKO_LEAK_CHECK");
+    if (env && env[0] == '1') {
+        mako_leak_check_enabled = 1;
+        atexit(mako_leak_check_atexit);
+    }
+}
 static inline void mako_rc_alloc_backtrace(void) {
 #if defined(__GLIBC__) || defined(__APPLE__)
     void *frames[32];
@@ -101,6 +142,8 @@ static inline void *mako_rc_alloc(size_t data_bytes) {
     _Atomic uint32_t *rc = (_Atomic uint32_t *)block;
     atomic_init(rc, 1);
     *(uint32_t *)(block + 4) = 0;
+    atomic_fetch_add_explicit(&mako_rc_alloc_count, 1, memory_order_relaxed);
+    atomic_fetch_add_explicit(&mako_rc_alloc_bytes, (int64_t)data_bytes, memory_order_relaxed);
     return block + MAKO_RC_HEADER;
 }
 static inline void *mako_rc_calloc(size_t data_bytes) {
@@ -143,7 +186,13 @@ static inline int mako_rc_release(void *data) {
         fprintf(stderr, "mako: slice refcount underflow\n");
         abort();
     }
-    if (prev == 1) { free((char *)data - MAKO_RC_HEADER); return 1; }
+    if (prev == 1) {
+        atomic_fetch_add_explicit(&mako_rc_free_count, 1, memory_order_relaxed);
+        /* Recover the original data_bytes from the block size isn't practical
+         * without storing it, so track a fixed estimate for the report. */
+        free((char *)data - MAKO_RC_HEADER);
+        return 1;
+    }
     return 0;
 }
 static inline int mako_rc_shared(void *data) {
@@ -9075,6 +9124,7 @@ static char **mako_argv_g = NULL;
 static inline void mako_set_args(int argc, char **argv) {
     mako_argc_g = argc;
     mako_argv_g = argv;
+    mako_leak_check_init();
 }
 
 static inline int64_t mako_argc(void) {

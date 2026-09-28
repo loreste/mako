@@ -340,6 +340,9 @@ enum Commands {
         /// Bounds checks: `default` (debug-only) or `always`
         #[arg(long, value_enum, default_value_t = BoundsCli::Default)]
         bounds: BoundsCli,
+        /// Enable built-in leak detector (reports leaked RC allocations at exit)
+        #[arg(long = "leak-check", default_value_t = false)]
+        leak_check: bool,
         /// Arguments forwarded to the compiled program (`argc` / `args` / `arg_get`)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -388,6 +391,9 @@ enum Commands {
         /// Pass `-fsanitize=` (overrides `--race` if both set)
         #[arg(long = "sanitize")]
         sanitize: Option<String>,
+        /// Enable built-in leak detector (reports leaked RC allocations at exit)
+        #[arg(long = "leak-check", default_value_t = false)]
+        leak_check: bool,
         /// Print package-level source/test coverage and test category counts
         #[arg(long = "coverage", default_value_t = false)]
         coverage: bool,
@@ -1385,9 +1391,13 @@ fn run(cli: Cli) -> Result<(), ()> {
             jobs,
             overflow,
             bounds,
+            leak_check,
             args,
         } => {
             let backend = resolve_backend(backend, &["MAKO_BACKEND"]);
+            if leak_check {
+                std::env::set_var("MAKO_LEAK_CHECK", "1");
+            }
             cmd_run(
                 &file,
                 package.as_deref(),
@@ -1459,6 +1469,7 @@ fn run(cli: Cli) -> Result<(), ()> {
             count,
             race,
             sanitize,
+            leak_check,
             coverage,
             json,
             backend,
@@ -1466,6 +1477,9 @@ fn run(cli: Cli) -> Result<(), ()> {
         } => {
             let count = count.max(1);
             let sanitize = sanitize.or_else(|| race.then(|| "thread".into()));
+            if leak_check {
+                std::env::set_var("MAKO_LEAK_CHECK", "1");
+            }
             // CLI --backend wins; else MAKO_TEST_BACKEND, then MAKO_BACKEND.
             let backend = resolve_backend(backend, &["MAKO_TEST_BACKEND", "MAKO_BACKEND"]);
             if json {
