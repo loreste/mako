@@ -85,6 +85,7 @@ static _Atomic int64_t mako_rc_free_count = 0;
 static _Atomic int64_t mako_rc_alloc_bytes = 0;
 static _Atomic int64_t mako_rc_free_bytes = 0;
 static int mako_leak_check_enabled = 0;
+static int mako_leak_trace_enabled = 0;
 
 static void mako_leak_check_atexit(void) {
     int64_t allocs = atomic_load_explicit(&mako_rc_alloc_count, memory_order_relaxed);
@@ -116,6 +117,12 @@ static inline void mako_leak_check_init(void) {
         mako_leak_check_enabled = 1;
         atexit(mako_leak_check_atexit);
     }
+    const char *trace = getenv("MAKO_LEAK_TRACE");
+    if (trace && trace[0] == '1') {
+        mako_leak_check_enabled = 1;
+        mako_leak_trace_enabled = 1;
+        atexit(mako_leak_check_atexit);
+    }
 }
 static inline void mako_rc_alloc_backtrace(void) {
 #if defined(__GLIBC__) || defined(__APPLE__)
@@ -144,6 +151,10 @@ static inline void *mako_rc_alloc(size_t data_bytes) {
     *(uint32_t *)(block + 4) = 0;
     atomic_fetch_add_explicit(&mako_rc_alloc_count, 1, memory_order_relaxed);
     atomic_fetch_add_explicit(&mako_rc_alloc_bytes, (int64_t)data_bytes, memory_order_relaxed);
+    if (mako_leak_trace_enabled) {
+        fprintf(stderr, "[leak-trace] alloc %zu bytes at %p\n", data_bytes, (void*)(block + MAKO_RC_HEADER));
+        mako_rc_alloc_backtrace();
+    }
     return block + MAKO_RC_HEADER;
 }
 static inline void *mako_rc_calloc(size_t data_bytes) {
@@ -188,8 +199,10 @@ static inline int mako_rc_release(void *data) {
     }
     if (prev == 1) {
         atomic_fetch_add_explicit(&mako_rc_free_count, 1, memory_order_relaxed);
-        /* Recover the original data_bytes from the block size isn't practical
-         * without storing it, so track a fixed estimate for the report. */
+        if (mako_leak_trace_enabled) {
+            fprintf(stderr, "[leak-trace] free at %p\n", data);
+            mako_rc_alloc_backtrace();
+        }
         free((char *)data - MAKO_RC_HEADER);
         return 1;
     }

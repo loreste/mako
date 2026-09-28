@@ -2663,6 +2663,8 @@ impl Codegen {
                 false
             }
             Expr::Call { .. } | Expr::Method { .. } => true,
+            // crew.kick().join() returns an owned value unboxed from the heap.
+            Expr::Join(_) => true,
             // Match / if-expr results take ownership of arm values (pattern binds
             // move or outer owns are cloned into the result temp).
             Expr::Match { .. } | Expr::IfExpr { .. } => true,
@@ -3571,6 +3573,8 @@ impl Codegen {
                             && Self::own_free_fn(c_ty).is_some()
                             && !c_ty.starts_with("MakoEnum_"))
             ),
+            // crew.kick().join() returns an owned value unboxed from the heap.
+            Expr::Join(_) => Self::own_free_fn(c_ty).is_some(),
             // Method calls (e.g. ch.recv()) that return a leaf owned value
             // are freshly allocated — safe to reclaim at scope exit.
             Expr::Method { .. } => Self::own_free_fn(c_ty).is_some(),
@@ -41519,7 +41523,7 @@ impl Codegen {
     /// Unbox `mako_await` result according to the kicked function's C return type.
     fn emit_job_join(&mut self, task: &str, ret_ty: &str) -> (String, String) {
         let tmp = self.fresh("jn");
-        if ret_ty == "MakoString" {
+        let c_ty: String = if ret_ty == "MakoString" {
             let p = self.fresh("jsp");
             self.line(&format!(
                 "MakoString *{p} = (MakoString*)mako_await({task});"
@@ -41528,7 +41532,7 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {tmp} = *{p}; free({p}); }} else {{ {tmp} = mako_str_from_cstr(\"\"); }}"
             ));
-            ("MakoString".into(), tmp)
+            "MakoString".into()
         } else if ret_ty == "MakoResultInt" {
             let p = self.fresh("jrp");
             self.line(&format!(
@@ -41547,7 +41551,7 @@ impl Codegen {
             if let Some(ok) = self.job_ok_kinds.get(task).cloned() {
                 self.result_ok_kinds.insert(tmp.clone(), ok);
             }
-            ("MakoResultInt".into(), tmp)
+            "MakoResultInt".into()
         } else if ret_ty == "MakoOptionInt" {
             let p = self.fresh("jop");
             self.line(&format!(
@@ -41557,7 +41561,7 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {tmp} = *{p}; free({p}); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
             ));
-            ("MakoOptionInt".into(), tmp)
+            "MakoOptionInt".into()
         } else if ret_ty == "MakoUuid" {
             let p = self.fresh("jup");
             self.line(&format!("MakoUuid *{p} = (MakoUuid*)mako_await({task});"));
@@ -41565,18 +41569,24 @@ impl Codegen {
             self.line(&format!(
                 "if ({p}) {{ {tmp} = *{p}; free({p}); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
             ));
-            ("MakoUuid".into(), tmp)
+            "MakoUuid".into()
         } else if ret_ty == "double" {
             self.line(&format!(
                 "double {tmp} = mako_bits_to_f64((int64_t)(intptr_t)mako_await({task}));"
             ));
-            ("double".into(), tmp)
+            "double".into()
         } else {
             self.line(&format!(
                 "int64_t {tmp} = (int64_t)(intptr_t)mako_await({task});"
             ));
-            ("int64_t".into(), tmp)
-        }
+            "int64_t".into()
+        };
+        // Register the join result for scope-exit cleanup so owned values
+        // (strings, arrays, structs) are freed when the crew scope ends.
+        self.note_own_bind_scope(&tmp);
+        self.register_own_drop(&tmp, &c_ty);
+        self.scope_drop_safe.insert(tmp.clone());
+        (c_ty, tmp)
     }
 
     fn expr_as_pure_c(&self, expr: &Expr, param: &str) -> String {
