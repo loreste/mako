@@ -5535,10 +5535,10 @@ static inline int mako_color_enabled(void) {
 }
 
 /* ---- Function tracing and Chrome Trace (Perfetto) JSON export ---- */
-static int mako_trace_flag = -1;
-static int mako_trace_mode_tree = 0;
-static int mako_trace_mode_json = 0;
-static int mako_trace_mode_chan = 0;
+static _Atomic int mako_trace_flag = -1;
+static _Atomic int mako_trace_mode_tree = 0;
+static _Atomic int mako_trace_mode_json = 0;
+static _Atomic int mako_trace_mode_chan = 0;
 static FILE *mako_trace_json_file = NULL;
 #if !defined(MAKO_WASI) && !defined(__wasi__)
 static pthread_mutex_t mako_trace_json_mu = MAKO_MUTEX_INIT;
@@ -5560,23 +5560,23 @@ static void mako_trace_json_finish(void) {
 }
 
 static inline void mako_trace_init_modes(void) {
-    if (MAKO_LIKELY(mako_trace_flag >= 0)) return;
+    if (MAKO_LIKELY(atomic_load_explicit(&mako_trace_flag, memory_order_relaxed) >= 0)) return;
     const char *t = getenv("MAKO_TRACE");
     const char *s = getenv("MAKO_STACK");
     const char *j = getenv("MAKO_TRACE_JSON");
     const char *c = getenv("MAKO_TRACE_CHAN");
     const char *cc = getenv("MAKO_TRACE_CONCURRENCY");
-    mako_trace_flag = ((t && t[0]) || (s && s[0] == '1') || (j && j[0]) ||
+    int flag = ((t && t[0]) || (s && s[0] == '1') || (j && j[0]) ||
                        (c && c[0] == '1') || (cc && cc[0] == '1')) ? 1 : 0;
     if (t && (strcmp(t, "tree") == 0 || strcmp(t, "1") == 0 || strcmp(t, "all") == 0)) {
-        mako_trace_mode_tree = 1;
+        atomic_store_explicit(&mako_trace_mode_tree, 1, memory_order_relaxed);
     }
     if ((c && c[0] == '1') || (cc && cc[0] == '1')) {
-        mako_trace_mode_chan = 1;
+        atomic_store_explicit(&mako_trace_mode_chan, 1, memory_order_relaxed);
     }
 #if !defined(MAKO_WASI) && !defined(__wasi__)
     if (j && j[0]) {
-        mako_trace_mode_json = 1;
+        atomic_store_explicit(&mako_trace_mode_json, 1, memory_order_relaxed);
         pthread_mutex_lock(&mako_trace_json_mu);
         if (!mako_trace_json_file) {
             mako_trace_json_file = fopen(j, "w");
@@ -5591,13 +5591,16 @@ static inline void mako_trace_init_modes(void) {
 #else
     (void)j;
 #endif
+    atomic_store_explicit(&mako_trace_flag, flag, memory_order_release);
 }
 
 static inline int mako_trace_active(void) {
-    if (MAKO_UNLIKELY(mako_trace_flag < 0)) {
+    int f = atomic_load_explicit(&mako_trace_flag, memory_order_acquire);
+    if (MAKO_UNLIKELY(f < 0)) {
         mako_trace_init_modes();
+        f = atomic_load_explicit(&mako_trace_flag, memory_order_acquire);
     }
-    return mako_trace_flag;
+    return f;
 }
 
 static inline unsigned long mako_trace_tid(void) {
@@ -5614,7 +5617,7 @@ static inline void mako_trace_json_emit(const char *name, const char *cat, int64
 #if defined(MAKO_WASI) || defined(__wasi__)
     (void)name; (void)cat; (void)start_ns; (void)dur_ns;
 #else
-    if (MAKO_LIKELY(!mako_trace_mode_json || !mako_trace_json_file)) return;
+    if (MAKO_LIKELY(!atomic_load_explicit(&mako_trace_mode_json, memory_order_relaxed) || !mako_trace_json_file)) return;
     pthread_mutex_lock(&mako_trace_json_mu);
     if (mako_trace_json_file) {
         double ts_us = (double)(start_ns - mako_trace_json_base_ns) / 1000.0;
@@ -5670,7 +5673,7 @@ static inline void mako_fn_exit(void) {
 static inline void mako_trace_enter(const char *fn_name, const char *file, int line) {
     mako_fn_enter(fn_name, file, line);
     if (MAKO_UNLIKELY(mako_trace_active())) {
-        if (mako_trace_mode_tree) {
+        if (atomic_load_explicit(&mako_trace_mode_tree, memory_order_relaxed)) {
             int depth = mako_callstack_depth > 1 ? mako_callstack_depth - 1 : 0;
             if (depth > 24) depth = 24;
             if (mako_color_enabled()) {
@@ -5690,10 +5693,10 @@ static inline void mako_trace_exit(const char *fn_name) {
         int d = mako_callstack_depth > 0 ? mako_callstack_depth - 1 : 0;
         int64_t start = (d < MAKO_CALLSTACK_MAX) ? mako_callstack[d].start_ns : 0;
         int64_t dur_ns = start > 0 ? (mako_mono_ns() - start) : 0;
-        if (mako_trace_mode_json) {
+        if (atomic_load_explicit(&mako_trace_mode_json, memory_order_relaxed)) {
             mako_trace_json_emit(fn_name, "fn", start, dur_ns);
         }
-        if (mako_trace_mode_tree) {
+        if (atomic_load_explicit(&mako_trace_mode_tree, memory_order_relaxed)) {
             int depth = d > 24 ? 24 : d;
             if (mako_color_enabled()) {
                 const char *color = dur_ns >= 50000000LL ? "\033[31m" : (dur_ns >= 1000000LL ? "\033[33m" : "\033[32m");
@@ -6128,7 +6131,7 @@ static inline void mako_chan_wake_sender(MakoChan *c) {
 
 #if !defined(NDEBUG) || defined(MAKO_ENABLE_TRACE)
 static inline void mako_chan_trace_send(MakoChan *c, int64_t val) {
-    if (MAKO_UNLIKELY(mako_trace_active() && mako_trace_mode_chan)) {
+    if (MAKO_UNLIKELY(mako_trace_active() && atomic_load_explicit(&mako_trace_mode_chan, memory_order_relaxed))) {
         if (mako_color_enabled()) {
             fprintf(stderr, "[chan] \033[35msend\033[0m chan=%p val=%lld (len=%zu/%zu)\n",
                     (void *)c, (long long)val, c ? c->count : 0, c ? c->cap : 0);
@@ -6141,7 +6144,7 @@ static inline void mako_chan_trace_send(MakoChan *c, int64_t val) {
 }
 
 static inline void mako_chan_trace_recv(MakoChan *c, int64_t val) {
-    if (MAKO_UNLIKELY(mako_trace_active() && mako_trace_mode_chan)) {
+    if (MAKO_UNLIKELY(mako_trace_active() && atomic_load_explicit(&mako_trace_mode_chan, memory_order_relaxed))) {
         if (mako_color_enabled()) {
             fprintf(stderr, "[chan] \033[35mrecv\033[0m chan=%p val=%lld (len=%zu/%zu)\n",
                     (void *)c, (long long)val, c ? c->count : 0, c ? c->cap : 0);

@@ -21853,6 +21853,11 @@ impl TypeChecker {
             | Type::Bool
             | Type::Float
             | Type::String => true,
+            // Slices/maps with sendable elements are POD leaves (atomic RC + COW).
+            Type::Array(inner) | Type::RawArray(inner) => self.is_pod_leaf_ty(inner, depth + 1),
+            Type::Map(k, v) => {
+                self.is_pod_leaf_ty(k, depth + 1) && self.is_pod_leaf_ty(v, depth + 1)
+            }
             Type::Named(n) => {
                 self.is_pod_struct_depth(n, depth + 1) || self.is_pod_enum_depth(n, depth + 1)
             }
@@ -22029,6 +22034,10 @@ impl TypeChecker {
             {
                 true
             }
+            // Slices and maps: atomic RC + COW makes them safe to share across
+            // crew boundaries. Clone is O(1) (refcount bump); mutation COW-detaches.
+            Type::Array(inner) | Type::RawArray(inner) => self.is_kick_sendable_ty(inner),
+            Type::Map(k, v) => self.is_kick_sendable_ty(k) && self.is_kick_sendable_ty(v),
             // Fuller Send: sum types and products of sendable payloads.
             Type::Option(inner) => self.is_kick_sendable_ty(inner),
             Type::Result(ok, err) => self.is_kick_sendable_ty(ok) && self.is_kick_sendable_ty(err),
@@ -22226,7 +22235,7 @@ fn is_kick_sendable(t: &Type) -> bool {
         Type::Named(n) if n == "DtlsCtx" || n == "DtlsConn" => true,
         Type::Named(n) if n == "Arena" || n == "Crew" => false,
         Type::Named(_) => false, // non-POD / handled in TypeChecker::is_kick_sendable_ty
-        // Option/Result/tuple/enum handled in TypeChecker::is_kick_sendable_ty (fuller Send).
+        // Array/map/Option/Result/tuple/enum handled in TypeChecker::is_kick_sendable_ty.
         Type::Array(_)
         | Type::RawArray(_)
         | Type::Map(_, _)

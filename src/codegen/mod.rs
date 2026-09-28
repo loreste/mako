@@ -38804,6 +38804,25 @@ impl Codegen {
                                         ));
                                         self.line(&format!("*{boxn} = mako_str_clone({v});"));
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
+                                    } else if matches!(aty.as_str(),
+                                        "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
+                                        | "MakoFloatArray" | "MakoBoolArray")
+                                        || aty.starts_with("MakoArr_")
+                                        || matches!(pty,
+                                        "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
+                                        | "MakoFloatArray" | "MakoBoolArray")
+                                        || pty.starts_with("MakoArr_")
+                                    {
+                                        // Array: heap-box + O(1) RC clone for crew task.
+                                        let arr_ty = if aty.starts_with("Mako") { &aty } else { pty };
+                                        let clone_fn = Self::own_clone_fn(arr_ty)
+                                            .unwrap_or_else(|| format!("{arr_ty}_clone", arr_ty = arr_ty.replace("MakoArr_", "mako_arr_")));
+                                        let boxn = self.fresh("abox");
+                                        self.line(&format!(
+                                            "{arr_ty} *{boxn} = ({arr_ty}*)malloc(sizeof({arr_ty}));"
+                                        ));
+                                        self.line(&format!("*{boxn} = {clone_fn}({v});"));
+                                        self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if aty == "MakoFn" || pty == "MakoFn" {
                                         // Move ownership of capture env into the task box.
                                         let boxn = self.fresh("fnbox");
@@ -41394,6 +41413,19 @@ impl Codegen {
                     "double {local} = mako_bits_to_f64((int64_t)a[{i}]);\n"
                 ));
                 call_args.push(local);
+            } else if matches!(ty.as_str(),
+                "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
+                | "MakoFloatArray" | "MakoBoolArray")
+                || ty.starts_with("MakoArr_")
+            {
+                unpack.push_str(&format!(
+                    "{ty} {local} = *({ty}*)a[{i}]; free((void*)a[{i}]);\n"
+                ));
+                call_args.push(local.clone());
+                // Release the RC clone after the call.
+                let free_fn = Self::own_free_fn(ty)
+                    .unwrap_or_else(|| format!("{}_free", ty.replace("MakoArr_", "mako_arr_")));
+                cleanup.push_str(&format!("{free_fn}({local});\n"));
             } else if self.structs.contains_key(ty)
                 || self.structs.values().any(|s| s.c_name == *ty)
             {
