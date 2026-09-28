@@ -112,7 +112,7 @@ mako check .
 mako run -p app
 ```
 
-`makori version` (also `mako --version` / `-V`) prints `makori version mako0.6.34 darwin/arm64`. Use `makori version -v` for an optional commit line.
+`makori version` (also `mako --version` / `-V`) prints `makori version makori0.6.38 darwin/arm64`. Use `makori version -v` for an optional commit line.
 Override headers if needed: `export MAKO_RUNTIME=/path/to/runtime`.
 
 Incremental builds are **on by default** (`-j` / `MAKO_JOBS`, `--no-incremental` to disable) — see [BUILD.md](BUILD.md). Release: `makori build --release` → `-O3 -flto` ([PERFORMANCE.md](PERFORMANCE.md): optimized on microbenches).
@@ -2706,8 +2706,8 @@ mako check --json path.mko   # legacy JSON diagnostics array
 mako check --json=v1 path.mko # versioned report for new integrations
 mako build path.mko -o bin   # → C → .o cache → link (debug -O0; --release -O3 -flto)
 mako build -j 8 --no-incremental path.mko   # parallel jobs; disable cache
-mako run path.mko [-- args...]   # compile + run; trailing args → argc/args
-mako test [path] [--run PAT] [-v] [--count N] [--coverage] [--json] [--race] [--sanitize TYPE] [-p NAME]  # tests + categories
+mako run path.mko [--leak-check] [-- args...]   # compile + run; trailing args → argc/args
+mako test [path] [--run PAT] [-v] [--count N] [--coverage] [--json] [--race] [--sanitize TYPE] [--leak-check] [-p NAME]  # tests + categories
 mako fmt [paths...] [-w|-l|-d|--check] [-p NAME] # formatter: stdout / write / list / diff / check
 mako lint [path] [-p NAME]            # workspace-aware typecheck + rules
 mako bench [path] [-p NAME] [--json]  # workspace-aware bench_*.mko wall time
@@ -2732,10 +2732,30 @@ built-in `mako dap` adapter directly (no CodeLLDB or Microsoft C/C++
 extension needed).
 
 Flags of note: `--time`, `-j` / `MAKO_JOBS`, `--no-incremental`, `--target <triple>`,
-`--sanitize=thread|address`, `--static-link`, `--no-static-link`, `--emit-c`.
+`--sanitize=thread|address`, `--leak-check`, `--static-link`, `--no-static-link`, `--emit-c`.
 Linux musl targets default to static linking; glibc Linux, macOS, Windows, and
 WASM stay dynamic/default unless static linking is explicitly supported and requested.
 See [BUILD.md](BUILD.md) · [PERFORMANCE.md](PERFORMANCE.md) · [SECURITY.md](SECURITY.md).
+
+### Built-in Leak Detector (0.6.38)
+
+`--leak-check` enables the built-in cross-platform leak detector. No ASan or
+external tools required — works on macOS, Linux, and Windows.
+
+```bash
+mako run --leak-check src/main.mko        # report at exit
+mako test --leak-check examples/testing    # report per test
+MAKO_LEAK_CHECK=1 ./compiled_binary       # env var on any binary
+```
+
+Reports at process exit:
+- **Clean**: `mako leak-check: clean (42 allocs, 0 leaked)`
+- **Leak**: `leaked: 3 allocation(s), 128 bytes`
+
+The detector tracks refcounted (RC) allocations via atomic counters. String
+clones are O(1) refcount bumps (0.6.38), so the overhead is negligible.
+Programmatic leak scoping is also available via `leak_scope_enter()`,
+`leak_scope_exit()`, `leak_check()`, and `leak_assert_scope()` builtins.
 
 ### Deep Developer Tracing & Observability
 

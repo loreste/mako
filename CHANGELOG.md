@@ -28,8 +28,12 @@
 - Worker pool threads use configurable stack size (8 MB default), matching
   direct-spawned tasks. Fixes stack overflow on recursive SQL evaluation
   in UNION queries (issue #71).
+- **Built-in leak detector**: `mako run --leak-check` / `mako test --leak-check`
+  / `MAKO_LEAK_CHECK=1`. Tracks RC alloc/free counts via atomics and reports
+  leaked allocations at process exit. Cross-platform — works on macOS, Linux,
+  and Windows without ASan.
 - Windows: SQL/crypto/network tests skip gracefully when platform libraries
-  are unavailable. Quarantine reduced from 18 to 14 tests.
+  are unavailable. Quarantine reduced from 18 to 15 tests.
 - Generated single-port actor loops block on one `actor_recv` per message.
   `actor_try_recv` is a single-message poll (no thread-local prefetch, so named
   ports cannot mix mail). `actor_recv_batch` remains the opt-in drain of up to
