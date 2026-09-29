@@ -20215,8 +20215,8 @@ impl Codegen {
                         }
                         "cmap_set" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg(&args[1]);
+                            let v = self.emit_str_arg(&args[2]);
                             self.line(&format!("mako_cmap_set({m}, {k}, {v});"));
                             return ("void".into(), "/*void*/".into());
                         }
@@ -20236,21 +20236,21 @@ impl Codegen {
                         }
                         "cmap_get" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("cg");
                             self.line(&format!("MakoString {tmp} = mako_cmap_get({m}, {k});"));
                             return ("MakoString".into(), tmp);
                         }
                         "cmap_has" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("ch");
                             self.line(&format!("int64_t {tmp} = mako_cmap_has({m}, {k});"));
                             return ("int64_t".into(), tmp);
                         }
                         "cmap_del" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("cd");
                             self.line(&format!("int64_t {tmp} = mako_cmap_del({m}, {k});"));
                             return ("int64_t".into(), tmp);
@@ -38728,6 +38728,10 @@ impl Codegen {
                     if base_is_temp {
                         self.emit_line(format_args!("mako_str_free({b});"));
                     }
+                    // Register the slice result so the ownership system can
+                    // transfer it on `let` or `return`. Do NOT mark scope_drop_safe
+                    // — the return path must not free the value it is returning.
+                    self.register_own_drop(&tmp, "MakoString");
                     return ("MakoString".into(), tmp);
                 }
                 if bty == "MakoByteArray" {
