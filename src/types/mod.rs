@@ -1884,6 +1884,20 @@ impl TypeChecker {
             ),
         );
         fns.insert(
+            "pread_cached".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
+            "pread_line".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::String),
+            ),
+        );
+        fns.insert(
             "pwrite".into(),
             Type::Fn(
                 vec![Type::Int, Type::String, Type::Int],

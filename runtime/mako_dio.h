@@ -546,6 +546,190 @@ static inline MakoString mako_pread(int64_t fd, int64_t count, int64_t offset) {
     return (MakoString){buf, (size_t)n};
 }
 
+/* Thread-local page cache for pread. 2-slot LRU eliminates repeated syscalls
+ * when scanning consecutive rows on the same disk page.
+ * - Thread-local: no races (each crew worker has its own cache).
+ * - Raw malloc: no RC strings, no leak (caller gets a fresh copy).
+ * - Destructor: pthread_key cleanup frees buffers on thread exit. */
+typedef struct {
+    int fd;
+    int64_t offset;
+    int64_t size;
+    char *data;
+} MakoPreadCacheSlot;
+
+typedef struct {
+    MakoPreadCacheSlot slots[2];
+    int init;
+} MakoPreadCache;
+
+static _Thread_local MakoPreadCache _mako_pread_cache = {{{-1,0,0,NULL},{-1,0,0,NULL}}, 0};
+
+#if !defined(_WIN32) && !defined(MAKO_WASI)
+static pthread_key_t _mako_pread_cache_key;
+static pthread_once_t _mako_pread_cache_once = PTHREAD_ONCE_INIT;
+
+static void _mako_pread_cache_destroy(void *arg) {
+    (void)arg;
+    for (int i = 0; i < 2; i++) {
+        free(_mako_pread_cache.slots[i].data);
+        _mako_pread_cache.slots[i].data = NULL;
+        _mako_pread_cache.slots[i].fd = -1;
+    }
+}
+
+static void _mako_pread_cache_init_key(void) {
+    pthread_key_create(&_mako_pread_cache_key, _mako_pread_cache_destroy);
+}
+
+static inline void _mako_pread_cache_ensure(void) {
+    if (!_mako_pread_cache.init) {
+        pthread_once(&_mako_pread_cache_once, _mako_pread_cache_init_key);
+        /* Register this thread for cleanup. Value is arbitrary non-NULL. */
+        pthread_setspecific(_mako_pread_cache_key, (void*)1);
+        _mako_pread_cache.init = 1;
+    }
+}
+#else
+static inline void _mako_pread_cache_ensure(void) {
+    _mako_pread_cache.init = 1;
+}
+#endif
+
+static inline MakoString mako_pread_cached(int64_t fd, int64_t count, int64_t offset) {
+    if (fd < 0 || count <= 0 || (uint64_t)count >= (uint64_t)SIZE_MAX) {
+        return mako_str_from_cstr("");
+    }
+    _mako_pread_cache_ensure();
+    /* Check cache — exact match on (fd, offset, size). */
+    for (int i = 0; i < 2; i++) {
+        MakoPreadCacheSlot *s = &_mako_pread_cache.slots[i];
+        if (s->fd == (int)fd && s->offset == offset && s->size >= count && s->data) {
+            /* Hit: return a fresh copy (caller owns the MakoString). */
+            char *copy = (char *)malloc((size_t)count + 1);
+            if (!copy) break;
+            memcpy(copy, s->data, (size_t)count);
+            copy[count] = 0;
+            return (MakoString){copy, (size_t)count};
+        }
+    }
+    /* Miss: pread and cache. */
+    char *buf = (char *)malloc((size_t)count + 1);
+    if (!buf) return mako_str_from_cstr("");
+    ssize_t n = pread((int)fd, buf, (size_t)count, (off_t)offset);
+    if (n <= 0) {
+        free(buf);
+        return mako_str_from_cstr("");
+    }
+    buf[n] = 0;
+    /* Evict slot 1, promote slot 0 → 1, new entry → slot 0. */
+    free(_mako_pread_cache.slots[1].data);
+    _mako_pread_cache.slots[1] = _mako_pread_cache.slots[0];
+    char *cached = (char *)malloc((size_t)n);
+    if (cached) {
+        memcpy(cached, buf, (size_t)n);
+        _mako_pread_cache.slots[0] = (MakoPreadCacheSlot){(int)fd, offset, n, cached};
+    } else {
+        _mako_pread_cache.slots[0] = (MakoPreadCacheSlot){-1, 0, 0, NULL};
+    }
+    return (MakoString){buf, (size_t)n};
+}
+
+/* Cached pread + line extraction: returns the Nth newline-delimited line from
+ * a cached page. Caches the page AND pre-splits line offsets on first access.
+ * Subsequent rows from the same page are O(1) — no byte scanning.
+ * Thread-local, no races, no leaks (pthread_key destructor). */
+typedef struct {
+    int fd;
+    int64_t offset;
+    int64_t size;
+    char *data;
+    int64_t *line_offsets; /* start offset of each line */
+    int64_t *line_lens;   /* length of each line */
+    int64_t n_lines;
+} MakoPreadLineCacheSlot;
+
+static _Thread_local MakoPreadLineCacheSlot _mako_line_cache = {-1,0,0,NULL,NULL,NULL,0};
+
+static void _mako_line_cache_clear(void) {
+    free(_mako_line_cache.data);
+    free(_mako_line_cache.line_offsets);
+    free(_mako_line_cache.line_lens);
+    _mako_line_cache = (MakoPreadLineCacheSlot){-1,0,0,NULL,NULL,NULL,0};
+}
+
+#if !defined(_WIN32) && !defined(MAKO_WASI)
+static pthread_key_t _mako_line_cache_key;
+static pthread_once_t _mako_line_cache_once = PTHREAD_ONCE_INIT;
+
+static void _mako_line_cache_destroy(void *arg) {
+    (void)arg;
+    _mako_line_cache_clear();
+    /* Also clean pread cache */
+    _mako_pread_cache_destroy(NULL);
+}
+
+static void _mako_line_cache_init_key(void) {
+    pthread_key_create(&_mako_line_cache_key, _mako_line_cache_destroy);
+}
+#endif
+
+static inline void _mako_line_cache_load(int fd, int64_t offset, int64_t size) {
+    if (_mako_line_cache.fd == fd && _mako_line_cache.offset == offset
+        && _mako_line_cache.size == size && _mako_line_cache.data)
+        return; /* already loaded */
+    _mako_line_cache_clear();
+#if !defined(_WIN32) && !defined(MAKO_WASI)
+    pthread_once(&_mako_line_cache_once, _mako_line_cache_init_key);
+    pthread_setspecific(_mako_line_cache_key, (void*)1);
+#endif
+    char *buf = (char *)malloc((size_t)size + 1);
+    if (!buf) return;
+    ssize_t n = pread(fd, buf, (size_t)size, (off_t)offset);
+    if (n <= 0) { free(buf); return; }
+    buf[n] = 0;
+    /* Count lines first */
+    int64_t count = 0;
+    for (ssize_t i = 0; i < n; i++) {
+        if (buf[i] == '\n') count++;
+    }
+    if (n > 0 && buf[n-1] != '\n') count++; /* last line without newline */
+    int64_t *offs = (int64_t *)malloc((size_t)count * sizeof(int64_t));
+    int64_t *lens = (int64_t *)malloc((size_t)count * sizeof(int64_t));
+    if (!offs || !lens) { free(buf); free(offs); free(lens); return; }
+    /* Split lines */
+    int64_t li = 0, start = 0;
+    for (ssize_t i = 0; i < n && li < count; i++) {
+        if (buf[i] == '\n') {
+            offs[li] = start;
+            lens[li] = i - start;
+            li++;
+            start = i + 1;
+        }
+    }
+    if (start < n && li < count) {
+        offs[li] = start;
+        lens[li] = n - start;
+        li++;
+    }
+    _mako_line_cache = (MakoPreadLineCacheSlot){fd, offset, size, buf, offs, lens, li};
+}
+
+static inline MakoString mako_pread_line(int64_t fd, int64_t size, int64_t offset, int64_t line) {
+    if (fd < 0 || size <= 0) return mako_str_from_cstr("null");
+    _mako_line_cache_load((int)fd, offset, size);
+    if (!_mako_line_cache.data || line < 0 || line >= _mako_line_cache.n_lines)
+        return mako_str_from_cstr("null");
+    int64_t off = _mako_line_cache.line_offsets[line];
+    int64_t len = _mako_line_cache.line_lens[line];
+    if (len <= 0) return mako_str_from_cstr("null");
+    char *copy = (char *)malloc((size_t)len + 1);
+    if (!copy) return mako_str_from_cstr("null");
+    memcpy(copy, _mako_line_cache.data + off, (size_t)len);
+    copy[len] = 0;
+    return (MakoString){copy, (size_t)len};
+}
+
 /* Write data at file offset. Returns bytes written or -1. */
 static inline int64_t mako_pwrite(int64_t fd, MakoString data, int64_t offset) {
     if (fd < 0 || !data.data || data.len == 0) return -1;
