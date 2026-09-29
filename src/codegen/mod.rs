@@ -36618,7 +36618,13 @@ impl Codegen {
                         }
                         "has" => {
                             let (ty, m) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            // Use emit_str_arg for string keys so concat
+                            // temps are registered for scope-exit cleanup.
+                            let k = if ty.contains("MapS") || ty.contains("MapBS") {
+                                self.emit_str_arg(&args[1])
+                            } else {
+                                self.emit_expr(&args[1]).1
+                            };
                             if ty == "MakoMapSI*" {
                                 return ("bool".into(), format!("mako_map_si_has({m}, {k})"));
                             }
