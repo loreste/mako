@@ -124,6 +124,10 @@ pub struct Codegen {
     /// Mutable closure captures: maps original var name → heap cell C variable name.
     /// When a local is mutably captured, reads/writes go through `*cell` in outer scope.
     mut_capture_cells: HashMap<String, String>,
+    /// Mangled names of mutable string captures while a closure helper is being
+    /// emitted. The cell already owns a reference; assigns release the previous
+    /// cell value, and the helper must not drop or move that cell on return.
+    helper_mut_string_captures: std::collections::HashSet<String>,
     /// Functions with `mut self` as first param — callers pass &receiver, function takes pointer.
     mut_self_fns: std::collections::HashSet<String>,
     /// Functions whose struct params are passed by pointer (C borrow) instead of
@@ -291,6 +295,7 @@ impl Codegen {
             loop_drop_bases: Vec::new(),
             loop_label_drop_bases: HashMap::new(),
             mut_capture_cells: HashMap::new(),
+            helper_mut_string_captures: std::collections::HashSet::new(),
             mut_self_fns: std::collections::HashSet::new(),
             mut_ptr_params: HashMap::new(),
             unsafe_depth: 0,
@@ -5013,6 +5018,235 @@ impl Codegen {
         }
     }
 
+    /// True when storing `value` into a string adds a reference the previous
+    /// owner must release, even if both headers carry the same `data` pointer.
+    /// A retained clone shares that pointer; a borrowed header copy does not
+    /// add a reference, and freeing it would drop the surviving owner.
+    fn string_replacement_retains(&self, value: &Expr) -> bool {
+        match value {
+            Expr::Ident(n) => {
+                let mn = mangle(n);
+                if self.scope_drop_safe.contains(&mn) {
+                    return true;
+                }
+                // An owned local holds its own reference. A later use clones it
+                // and a last use moves it. That reference is independent of the
+                // destination, including when both headers share one buffer.
+                if self.own_drop_live.contains(&mn) {
+                    return true;
+                }
+                // Borrowed local: `prepare_own_store_rhs` clones before the store.
+                self.locals.contains_key(&mn) || self.locals.contains_key(n)
+            }
+            Expr::Field { .. } | Expr::Index { .. } => true,
+            Expr::Call { callee, args } => match callee.as_ref() {
+                Expr::Ident(name) => self.string_store_call_retains(name, args),
+                _ => false,
+            },
+            // string(s) where s is MakoString: prepare_string_passthrough clones
+            // the borrow, so the stored value owns a reference.
+            Expr::Convert { ty, args } => {
+                matches!(ty, TypeExpr::Named(n) if n == "string")
+                    && args
+                        .first()
+                        .is_some_and(|arg| self.peek_expr_c_ty(arg) == "MakoString")
+            }
+            // Arm transfer clones a passthrough and moves or clones every other
+            // string, so the result temp owns a reference of its own.
+            Expr::IfExpr { .. } | Expr::Match { .. } => true,
+            Expr::Method { receiver, method, .. } => {
+                self.method_returns_owned_string(receiver, method)
+            }
+            Expr::String(_) | Expr::StringInterp(_) | Expr::Slice { .. } => true,
+            Expr::Binary { op: BinOp::Add, .. } => true,
+            _ => false,
+        }
+    }
+
+    /// The call expression itself allocated or retained. `string` of an existing
+    /// `MakoString` returns that header unchanged and does not.
+    fn string_call_produces_owner(&self, name: &str, args: &[Expr]) -> bool {
+        if name == "string" {
+            return args
+                .first()
+                .is_some_and(|arg| self.peek_expr_c_ty(arg) != "MakoString");
+        }
+        if Self::builtin_returns_borrowed_string(name) {
+            return false;
+        }
+        if Self::builtin_returns_owned_string(name) {
+            return true;
+        }
+        let mono = self.generic_mono_name_for_call(name, args);
+        self.fn_rets
+            .get(&mono)
+            .or_else(|| self.fn_rets.get(name))
+            .is_some_and(|ty| ty == "MakoString")
+    }
+
+    /// Store rule for a call. `string(existing)` is rewritten into a clone or a
+    /// move before the store, so the written header owns a reference even though
+    /// the builtin returned an alias.
+    fn string_store_call_retains(&self, name: &str, args: &[Expr]) -> bool {
+        if name == "string" {
+            return true;
+        }
+        self.string_call_produces_owner(name, args)
+    }
+
+    /// True when `expr` already holds a string reference the caller can take
+    /// without cloning. Ident, field, and index borrows are handled by the
+    /// caller; this is the non-ident arm of `transfer_or_clone_expr_own`.
+    fn string_expr_owns_ref(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::String(_) | Expr::StringInterp(_) | Expr::Slice { .. } => true,
+            Expr::Binary { op: BinOp::Add, .. } => true,
+            Expr::IfExpr { .. } | Expr::Match { .. } => true,
+            Expr::Call { callee, args } => match callee.as_ref() {
+                Expr::Ident(name) => self.string_call_produces_owner(name, args),
+                _ => false,
+            },
+            Expr::Method { receiver, method, .. } => {
+                self.method_returns_owned_string(receiver, method)
+            }
+            _ => false,
+        }
+    }
+
+    /// User method whose C function returns `MakoString`. Those returns clone
+    /// or move, so the result owns a reference. Unresolved and extern methods
+    /// stay on the pointer guard.
+    fn method_returns_owned_string(&self, receiver: &Expr, method: &str) -> bool {
+        let rty = self.peek_expr_c_ty(receiver);
+        let base = if Self::is_user_struct_ptr(&rty) {
+            Self::user_struct_ptr_base(&rty).to_string()
+        } else {
+            rty
+        };
+        let mut keys = Vec::new();
+        if let Some((name, _)) = self
+            .structs
+            .iter()
+            .find(|(name, info)| *name == &base || info.c_name == base)
+        {
+            keys.push(format!("{name}_{method}"));
+        }
+        if let Some((name, _)) = self
+            .enums
+            .iter()
+            .find(|(name, info)| *name == &base || info.c_name == base)
+        {
+            keys.push(format!("{name}_{method}"));
+        }
+        keys.push(format!("{base}_{method}"));
+        keys.into_iter().any(|key| {
+            !self.extern_fns.contains(&key)
+                && self.fn_rets.get(&key).is_some_and(|ty| ty == "MakoString")
+        })
+    }
+
+    /// `string(s)` when `s` is already a `MakoString`: header copy, no retain.
+    fn string_header_passthrough(&self, value: &Expr) -> bool {
+        match value {
+            Expr::Call { callee, args } => match callee.as_ref() {
+                Expr::Ident(name) if name == "string" => args
+                    .first()
+                    .is_some_and(|arg| self.peek_expr_c_ty(arg) == "MakoString"),
+                _ => false,
+            },
+            Expr::Convert { ty, args } => {
+                matches!(ty, TypeExpr::Named(n) if n == "string")
+                    && args
+                        .first()
+                        .is_some_and(|arg| self.peek_expr_c_ty(arg) == "MakoString")
+            }
+            _ => false,
+        }
+    }
+
+    /// Give a `string(existing)` store its own reference.
+    /// A live owner that is used again is cloned. Its last use moves the drop.
+    /// Anything else is a borrow and is cloned so the destination cannot free it.
+    fn prepare_string_passthrough(&mut self, value: &Expr, c_ty: &str, val: String) -> String {
+        let args = match value {
+            Expr::Call { args, .. } => args,
+            Expr::Convert { args, .. } => args,
+            _ => return val,
+        };
+        let Some(arg) = args.first() else {
+            return val;
+        };
+        if let Expr::Ident(n) = arg {
+            let mn = mangle(n);
+            if self.own_drop_live.contains(&mn) {
+                if self.ident_used_after_current(n) {
+                    return self.clone_own_val(c_ty, &val);
+                }
+                self.note_own_drop_moved(&mn);
+                return val;
+            }
+            return self.clone_own_val(c_ty, &val);
+        }
+        if self.string_expr_owns_ref(arg) {
+            return val;
+        }
+        self.clone_own_val(c_ty, &val)
+    }
+
+    /// Free the string previously stored in `dest` after `dest = rhs`.
+    /// `retains` means the stored value owns a reference of its own.
+    fn emit_string_owner_replaced(&mut self, old: &str, dest: &str, retains: bool, cond_own: bool) {
+        if cond_own {
+            if retains {
+                self.emit_line(format_args!("if ({dest}__own) mako_str_free({old});"));
+            } else {
+                self.emit_line(format_args!(
+                    "if ({dest}__own && {old}.data != {dest}.data) mako_str_free({old});"
+                ));
+            }
+            self.emit_line(format_args!("{dest}__own = 1;"));
+        } else if retains {
+            self.emit_line(format_args!("mako_str_free({old});"));
+        } else {
+            self.emit_line(format_args!(
+                "if ({old}.data != {dest}.data) mako_str_free({old});"
+            ));
+        }
+    }
+
+    /// True when `mn` already holds a string reference that a store must release.
+    /// A mutable capture's cell is seeded with its own clone before the helper
+    /// runs, so it counts even though the helper frame does not own the cell.
+    fn string_dest_needs_release(&self, mn: &str, cond_own: bool) -> bool {
+        cond_own
+            || self.own_drop_live.contains(mn)
+            || self.helper_mut_string_captures.contains(mn)
+    }
+
+    /// Replace the string in a local. A mutable capture lives in `*cell`,
+    /// which was seeded with its own clone; the stack local keeps the
+    /// pre-capture reference and is freed at scope exit.
+    fn emit_string_local_replaced(
+        &mut self,
+        name: &str,
+        mn: &str,
+        val: &str,
+        retains: bool,
+        cond_own: bool,
+    ) {
+        if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
+            let old = self.fresh("old");
+            self.line(&format!("MakoString {old} = *{cell};"));
+            self.emit_line(format_args!("*{cell} = {val};"));
+            self.emit_string_owner_replaced(&old, &format!("(*{cell})"), retains, false);
+            return;
+        }
+        let old = self.fresh("old");
+        self.line(&format!("MakoString {old} = {mn};"));
+        self.emit_line(format_args!("{mn} = {val};"));
+        self.emit_string_owner_replaced(&old, mn, retains, cond_own);
+    }
+
     /// RHS for store into a new Own destination: move live owner, else clone borrows/aliases.
     /// Prevents double-free when both the source owner and the destination free the same data.
     fn prepare_own_store_rhs(&mut self, value: &Expr, c_ty: &str, val: String) -> String {
@@ -5050,6 +5284,9 @@ impl Codegen {
                 .unwrap_or_else(|| self.clone_own_val(c_ty, &val)),
             Expr::Index { .. } => self.clone_own_val(c_ty, &val),
             _ => {
+                if self.string_header_passthrough(value) {
+                    return self.prepare_string_passthrough(value, c_ty, val);
+                }
                 // Fresh owns (calls, concat, lits): if emit produced a tracked temp, move it.
                 if self.own_drop_live.contains(&val) {
                     self.note_own_drop_moved(&val);
@@ -14019,9 +14256,61 @@ impl Codegen {
                 }
             }
 
-            if let Expr::Block(b) = body {
-                self.emit_body(b);
+            // The helper is a separate C function. Outer owners (`snapshot`,
+            // the captured local's stack slot) are not in this frame; freeing
+            // them here does not compile, and returning a capture must clone
+            // because the cell keeps its reference.
+            let saved_drop = self.snapshot_drop_state();
+            let saved_call_owners = std::mem::take(&mut self.call_result_owners);
+            let saved_bind = std::mem::take(&mut self.own_bind_scope);
+            let saved_cond = std::mem::take(&mut self.own_cond_flags);
+            let saved_defer = std::mem::take(&mut self.defer_stack);
+            let saved_loops = std::mem::take(&mut self.loop_drop_bases);
+            let saved_loop_labels = std::mem::take(&mut self.loop_label_drop_bases);
+            let saved_ptr_params = std::mem::take(&mut self.ptr_param_locals);
+            let saved_elem_stack = std::mem::take(&mut self.struct_elem_ptr_scope_stack);
+            let saved_in_return = self.in_return_expr;
+            let saved_body = self.current_fn_body.clone();
+            let saved_idx = self.current_stmt_idx;
+            self.in_return_expr = false;
+            self.own_drop_live.clear();
+            self.own_drop_scopes.clear();
+            self.scope_drop_safe.clear();
+            self.share_live.clear();
+            self.share_scopes.clear();
+            self.fn_env_live.clear();
+            self.fn_env_scopes.clear();
+            let saved_helper_caps = std::mem::take(&mut self.helper_mut_string_captures);
+            for (src_name, cty) in &captures {
+                if mutated.contains(src_name) && cty == "MakoString" {
+                    self.helper_mut_string_captures.insert(mangle(src_name));
+                }
             }
+            self.push_share_scope();
+            if let Expr::Block(b) = body {
+                self.current_fn_body = Some(b.clone());
+                for (i, s) in b.stmts.iter().enumerate() {
+                    self.current_stmt_idx = i;
+                    self.emit_source_line(b, i);
+                    self.emit_stmt(s);
+                }
+            }
+            while !self.share_scopes.is_empty() {
+                self.pop_share_scope();
+            }
+            self.helper_mut_string_captures = saved_helper_caps;
+            self.restore_drop_state(saved_drop);
+            self.call_result_owners = saved_call_owners;
+            self.own_bind_scope = saved_bind;
+            self.own_cond_flags = saved_cond;
+            self.defer_stack = saved_defer;
+            self.loop_drop_bases = saved_loops;
+            self.loop_label_drop_bases = saved_loop_labels;
+            self.ptr_param_locals = saved_ptr_params;
+            self.struct_elem_ptr_scope_stack = saved_elem_stack;
+            self.in_return_expr = saved_in_return;
+            self.current_fn_body = saved_body;
+            self.current_stmt_idx = saved_idx;
 
             // Add #undef for capture aliases
             if !captures.is_empty() {
@@ -14225,7 +14514,11 @@ impl Codegen {
                     // pass pointer to env. Outer scope reads through the cell too.
                     let cell = self.fresh("cell");
                     self.line(&format!("{cty} *{cell} = ({cty}*)malloc(sizeof({cty}));"));
-                    self.line(&format!("*{cell} = {val};"));
+                    if cty == "MakoString" {
+                        self.line(&format!("*{cell} = mako_str_clone({val});"));
+                    } else {
+                        self.line(&format!("*{cell} = {val};"));
+                    }
                     self.line(&format!("{env_tmp}->{field} = {cell};"));
                     // Redirect the outer local to read through the cell.
                     // After this point, `counter` in the outer scope becomes `*cell`.
@@ -14605,6 +14898,7 @@ impl Codegen {
         self.struct_elem_ptr_scope_stack.clear();
         // Mut capture cells are per-function (heap cells for sequential outer mut).
         self.mut_capture_cells.clear();
+        self.helper_mut_string_captures.clear();
         self.result_err_enums.clear();
         self.owned_result_errors.clear();
         self.result_ok_kinds.clear();
@@ -16470,6 +16764,11 @@ impl Codegen {
                         .cloned()
                         .unwrap_or_else(|| vty.clone())
                 });
+                // Decide before `prepare_own_store_rhs` moves the source: a last
+                // use clears `own_drop_live`, which would otherwise look like a
+                // borrow that still needs a clone.
+                let string_rhs_retains =
+                    cty_for_rhs == "MakoString" && self.string_replacement_retains(value);
                 let val = self.prepare_own_store_rhs(value, &cty_for_rhs, val);
                 self.invalidate_struct_elem_ptr_cache(name);
                 // A POD self-reslice must not discard the sole owning header.
@@ -16520,6 +16819,25 @@ impl Codegen {
                     // makes every subsequent append see mako_rc_shared==true and
                     // take the (doubling) growth path on every call.
                     let slice_cty = self.locals.get(name).cloned().unwrap_or_default();
+                    // String arguments are borrowed, so the local header is still
+                    // intact after the call. User functions retain on return,
+                    // including when that return shares the old buffer (`msg = identity(msg)`).
+                    if slice_cty == "MakoString"
+                        && self.current_arena.is_none()
+                        && self.string_dest_needs_release(&mn, cond_own)
+                    {
+                        self.emit_string_local_replaced(
+                            name,
+                            &mn,
+                            &val,
+                            string_rhs_retains,
+                            cond_own,
+                        );
+                        if !self.helper_mut_string_captures.contains(&mn) {
+                            self.register_own_drop(&mn, "MakoString");
+                        }
+                        return;
+                    }
                     let is_slice = matches!(
                         slice_cty.as_str(),
                         "MakoIntArray"
@@ -16595,7 +16913,7 @@ impl Codegen {
                 if self.current_arena.is_none() {
                     if let Some(cty) = self.locals.get(name).cloned() {
                         if let Some(ff) = Self::own_free_fn(&cty) {
-                            if self.own_drop_live.contains(&mn) || cond_own {
+                            if self.string_dest_needs_release(&mn, cond_own) {
                                 if cty.ends_with('*') {
                                     // Map handle: free old pointer then overwrite.
                                     if cond_own {
@@ -16614,24 +16932,16 @@ impl Codegen {
                                     self.register_own_drop(&mn, &cty);
                                     return;
                                 } else if cty == "MakoString" {
-                                    let old = self.fresh("old");
-                                    self.line(&format!("MakoString {old} = {mn};"));
-                                    if let Some(cell) = self.mut_capture_cells.get(name).cloned() {
-                                        self.emit_line(format_args!("*{cell} = {val};"));
-                                    } else {
-                                        self.emit_line(format_args!("{mn} = {val};"));
+                                    self.emit_string_local_replaced(
+                                        name,
+                                        &mn,
+                                        &val,
+                                        string_rhs_retains,
+                                        cond_own,
+                                    );
+                                    if !self.helper_mut_string_captures.contains(&mn) {
+                                        self.register_own_drop(&mn, &cty);
                                     }
-                                    if cond_own {
-                                        self.emit_line(format_args!(
-                                        "if ({mn}__own && {old}.data != {mn}.data) mako_str_free({old});"
-                                    ));
-                                        self.emit_line(format_args!("{mn}__own = 1;"));
-                                    } else {
-                                        self.emit_line(format_args!(
-                                            "if ({old}.data != {mn}.data) mako_str_free({old});"
-                                        ));
-                                    }
-                                    self.register_own_drop(&mn, &cty);
                                     return;
                                 } else {
                                     // Slice/nested header: free old only if backing moved.
@@ -18808,9 +19118,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "str_replace" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, o) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
+                            // Views for literals; owned temps are registered so
+                            // `str_replace(s, "z", "q")` does not leak the needles.
+                            let s = self.emit_str_arg(&args[0]);
+                            let o = self.emit_str_arg(&args[1]);
+                            let n = self.emit_str_arg(&args[2]);
                             let tmp = self.fresh("srep");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_str_replace({s}, {o}, {n});"
@@ -40334,6 +40646,11 @@ impl Codegen {
         }
         let Expr::Ident(n) = expr else {
             // Fresh owns (calls, concat, lits) — result takes the value; no second free.
+            // A string passthrough does not add a reference. Clone it so the arm
+            // result owns one the destination can release when the pointer matches.
+            if c_ty == "MakoString" && !self.string_expr_owns_ref(expr) {
+                return self.clone_own_val(c_ty, &val);
+            }
             return val;
         };
         let mn = mangle(n);
@@ -41402,7 +41719,10 @@ impl Codegen {
                 unpack.push_str(&format!(
                     "MakoString {local} = *(MakoString*)a[{i}]; free((void*)a[{i}]);\n"
                 ));
-                // callee owns the clone for the call duration; free buffer after if needed
+                // Spawn cloned this header. The callee borrows it (a returned
+                // string is its own retain), so the worker releases the clone
+                // after the call. The boxed return is already copied out.
+                cleanup.push_str(&format!("mako_str_free({local});\n"));
                 call_args.push(local);
             } else if ty == "MakoFn" {
                 unpack.push_str(&format!(
@@ -43497,6 +43817,21 @@ mod ownership_tests {
     use crate::lexer::Lexer;
     use crate::parser::Parser;
 
+    fn fn_section<'a>(src: &'a str, start: &str, end: &str) -> &'a str {
+        let at = src.find(start).unwrap_or_else(|| panic!("missing {start}"));
+        let rest = &src[at + start.len()..];
+        let stop = rest.find(end).unwrap_or(rest.len());
+        &rest[..stop]
+    }
+
+    fn unconditional_old_str_free(line: &str) -> bool {
+        let trimmed = line.trim();
+        trimmed.contains("mako_str_free(")
+            && trimmed.contains("old_")
+            && !trimmed.contains("if (")
+            && !trimmed.contains(".data !=")
+    }
+
     #[test]
     fn only_owned_string_expressions_can_transfer_map_keys() {
         let int_string_call = Expr::Call {
@@ -43939,6 +44274,102 @@ fn main() {
         assert!(
             exec.contains("old_own_") && exec.contains(".data !="),
             "array field reassign must skip free when .data still aliases:\n{exec}"
+        );
+    }
+
+    #[test]
+    fn string_reassign_releases_retained_same_buffer() {
+        let source = r#"
+fn identity(value: string) -> string { return value }
+
+fn retain_assign() {
+    let mut msg = "a" + "b"
+    let replacement = identity(msg)
+    msg = replacement
+}
+
+fn direct_retain() {
+    let mut msg = "a" + "b"
+    msg = identity(msg)
+}
+
+fn direct_borrow() {
+    let mut msg = "a" + "b"
+    let other = "c" + "d"
+    msg = string(other)
+}
+
+fn if_retain() {
+    let mut msg = "a" + "b"
+    let mut flag = 1
+    msg = if flag == 1 { identity(msg) } else { identity(msg) }
+}
+
+fn main() {}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        let retain = fn_section(&generated, "retain_assign(void) {", "direct_retain(void) {");
+        let direct = fn_section(&generated, "direct_retain(void) {", "direct_borrow(void) {");
+        let borrow = fn_section(&generated, "direct_borrow(void) {", "if_retain(void) {");
+        let branch = fn_section(&generated, "if_retain(void) {", "mako_main(void) {");
+        assert!(
+            retain.lines().any(unconditional_old_str_free),
+            "named retained replacement must release the previous owner:\n{retain}"
+        );
+        assert!(
+            direct.lines().any(unconditional_old_str_free),
+            "self-consuming identity must release the previous owner:\n{direct}"
+        );
+        assert!(
+            borrow.lines().any(unconditional_old_str_free),
+            "string() of an owned local must release the destination:\n{borrow}"
+        );
+        assert!(
+            branch.lines().any(unconditional_old_str_free),
+            "if of retaining arms must release the previous owner:\n{branch}"
+        );
+    }
+
+    #[test]
+    fn closure_string_reassign_frees_cell_not_outer_alias() {
+        let source = r#"
+fn identity(value: string) -> string { return value }
+fn grow(value: string) -> string { return value + "!" }
+
+fn closure_reassign() {
+    let mut msg = "a" + "b"
+    let snapshot = msg
+    let f: fn() -> string = fn() {
+        msg = identity(msg)
+        msg = grow(msg)
+        return msg
+    }
+    let got = f()
+}
+
+fn main() {}
+"#;
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let generated = Codegen::new().emit(&program);
+        let helper = generated
+            .split("#define msg (*(e->msg))")
+            .nth(1)
+            .expect("closure helper defines the captured cell");
+        let helper = helper.split("#undef msg").next().expect("helper body");
+        assert!(
+            !helper.contains("mako_str_free(snapshot)"),
+            "closure helper must not free an outer alias:\n{helper}"
+        );
+        assert!(
+            helper.lines().any(unconditional_old_str_free),
+            "closure must release the previous cell value:\n{helper}"
+        );
+        assert!(
+            helper.contains("mako_str_clone(msg)"),
+            "returning a captured string must keep the cell's reference:\n{helper}"
         );
     }
 

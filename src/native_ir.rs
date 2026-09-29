@@ -2894,11 +2894,14 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
 /// (e.g. `Frontend` with 27 fields inside `UdpListener`) are not subject to the
 /// 16-bit nest string-mask pack — clone/drop walk layouts recursively without it.
 fn validate_struct_key_metadata(structs: &StructRegistry) -> Result<(), IrError> {
+    // str_mask is an i64 bitmask — fields 0..63 are tracked; fields 64+
+    // fall through to the C runtime generic path. Map key structs keep the
+    // tighter 62-field limit (16-bit nest packing) via validate_map_struct_key.
     let layouts = structs.layouts.borrow();
     for layout in layouts.iter() {
-        if layout.fields.len() > 62 {
+        if layout.fields.len() > 128 {
             return Err(IrError::new(format!(
-                "native IR: struct `{}` has {} fields; native struct metadata supports at most 62",
+                "native IR: struct `{}` has {} fields; limit is 128",
                 layout.name,
                 layout.fields.len()
             )));
@@ -9078,11 +9081,8 @@ impl<'a> FunctionLowerer<'a> {
                 // Go-like copy(dst, src) → count of elements copied.
                 if function == "copy" && args.len() == 2 {
                     let (dst, dt, do_) = self.lower_expr(&args[0])?;
-                    if do_ {
-                        return Err(IrError::new(
-                            "native IR: copy requires a borrowed destination local",
-                        ));
-                    }
+                    // Slice expressions (a[x:y]) are "owned" but still valid
+                    // copy destinations — copy writes into the backing array.
                     let (src, st, so) = self.lower_expr(&args[1])?;
                     if dt != st {
                         return Err(IrError::new(
@@ -9107,6 +9107,9 @@ impl<'a> FunctionLowerer<'a> {
                         args: vec![dst, src],
                         ret: Some(Type::I64),
                     });
+                    if do_ {
+                        self.emit_drop(dst, dt);
+                    }
                     if so {
                         self.emit_drop(src, st);
                     }
@@ -10711,10 +10714,11 @@ impl<'a> FunctionLowerer<'a> {
                     if let Some(sid) = deep_struct {
                         let nfields = self.structs.field_count(sid) as i64;
                         let mut str_mask: i64 = 0;
-                        let mut ok_layout = true;
+                        // str_mask is i64 — only safe for fields 0..63.
+                        let mut ok_layout = nfields <= 64;
                         for i in 0..self.structs.field_count(sid) {
                             match self.structs.field_type(sid, i) {
-                                Type::Str => str_mask |= 1 << i,
+                                Type::Str => str_mask |= 1i64 << i,
                                 Type::I64 | Type::I1 | Type::I32 | Type::F64 => {}
                                 _ => ok_layout = false,
                             }
@@ -32861,6 +32865,7 @@ impl<'a> FunctionLowerer<'a> {
     /// one level deep so `map[WrapOpt{o: Some(1)}]` matches equal keys.
     fn struct_key_meta(&mut self, sid: u32) -> (Value, Value, Value, Value, Value) {
         let nfields = self.structs.field_count(sid) as i64;
+        debug_assert!(nfields <= 62, "struct_key_meta called with >62 field struct");
         let mut str_mask: i64 = 0;
         let mut nest_mask: i64 = 0;
         let mut nest_nf_pack: i64 = 0;
@@ -34532,7 +34537,7 @@ mod tests {
 
     #[test]
     fn rejects_struct_layouts_too_wide_for_native_metadata() {
-        let fields = (0..63)
+        let fields = (0..129)
             .map(|index| format!("f{index}: int"))
             .collect::<Vec<_>>()
             .join(", ");
@@ -34540,7 +34545,7 @@ mod tests {
         let tokens = Lexer::new(&source).tokenize().unwrap();
         let program = Parser::new(tokens).parse().unwrap();
         let error = lower(&program).unwrap_err();
-        assert!(error.to_string().contains("supports at most 62"));
+        assert!(error.to_string().contains("limit is 128"));
     }
 
     #[test]

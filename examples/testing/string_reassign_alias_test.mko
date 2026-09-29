@@ -1,0 +1,274 @@
+// Same-buffer string reassignment must drop the previous owner's reference.
+// `mako test` stays green when that reference leaks: rerun with --leak-check
+// and confirm the report says 0 leaked.
+
+fn identity(value: string) -> string {
+    return value
+}
+
+fn grow(value: string) -> string {
+    return value + "!"
+}
+
+fn TestAliasedStringReplacement() {
+    let seed = "message"
+    let mut msg = seed + " body"
+    let snapshot = msg
+    let mut i = 0
+    while i < 1000 {
+        let replacement = identity(msg)
+        msg = replacement
+        i = i + 1
+    }
+    assert_eq_str(msg, snapshot)
+}
+
+fn TestDirectIdentityReplacement() {
+    let mut msg = "x" + "y"
+    let snapshot = msg
+    let mut i = 0
+    while i < 200 {
+        msg = identity(msg)
+        i = i + 1
+    }
+    assert_eq_str(msg, snapshot)
+}
+
+fn TestGrowReplacesBuffer() {
+    let mut msg = "x" + ""
+    let original = "x"
+    let mut i = 0
+    while i < 4 {
+        let replacement = grow(msg)
+        msg = replacement
+        i = i + 1
+    }
+    assert_eq_str(original, "x")
+    assert_eq_str(msg, "x!!!!")
+}
+
+fn TestDirectGrowReplacement() {
+    let mut msg = "x" + ""
+    msg = grow(msg)
+    msg = grow(msg)
+    assert_eq_str(msg, "x!!")
+}
+
+fn TestSelfAssignment() {
+    let mut msg = "ab" + "c"
+    msg = msg
+    assert_eq_str(msg, "abc")
+}
+
+fn TestBorrowedStringPassthrough() {
+    let mut msg = "hello" + "!"
+    let snapshot = msg
+    let replacement = string(msg)
+    msg = replacement
+    assert_eq_str(msg, snapshot)
+    msg = string(msg)
+    assert_eq_str(msg, "hello!")
+    assert_eq_str(snapshot, "hello!")
+}
+
+fn identity_g[T](value: T) -> T {
+    return value
+}
+
+fn alias_then_replace(seed: string) {
+    let mut msg = seed
+    let mut i = 0
+    while i < 50 {
+        msg = identity(msg)
+        i = i + 1
+    }
+    assert_eq_str(seed, "seed-value")
+    assert_eq_str(msg, "seed-value")
+}
+
+fn passthrough_param(seed: string) {
+    let mut msg = "x" + "y"
+    msg = string(seed)
+    msg = "z" + "z"
+    assert_eq_str(seed, "kept")
+    assert_eq_str(msg, "zz")
+}
+
+struct Holder {
+    n: int
+}
+
+fn Holder_echo(self: Holder, value: string) -> string {
+    return value
+}
+
+fn TestGenericIdentity() {
+    let mut msg = "hello" + "!"
+    let snapshot = msg
+    let mut i = 0
+    while i < 200 {
+        let replacement = identity_g(msg)
+        msg = replacement
+        i = i + 1
+    }
+    assert_eq_str(msg, snapshot)
+    msg = identity_g(msg)
+    assert_eq_str(msg, snapshot)
+    assert_eq_str(snapshot, "hello!")
+}
+
+fn TestIfBothRetain() {
+    let mut msg = "hello" + "!"
+    let snapshot = msg
+    let mut flip = 0
+    let mut i = 0
+    while i < 200 {
+        msg = if flip == 0 { identity(msg) } else { identity(msg) }
+        flip = 1 - flip
+        i = i + 1
+    }
+    assert_eq_str(msg, snapshot)
+    assert_eq_str(snapshot, "hello!")
+}
+
+fn TestIfMixedPassthrough() {
+    let mut msg = "hello" + "!"
+    let snapshot = msg
+    let mut flip = 0
+    let mut i = 0
+    while i < 200 {
+        msg = if flip == 0 { string(msg) } else { identity(msg) }
+        flip = 1 - flip
+        i = i + 1
+    }
+    assert_eq_str(msg, snapshot)
+    assert_eq_str(snapshot, "hello!")
+}
+
+fn TestIfGrowOrIdentity() {
+    let mut msg = "x" + ""
+    let original = "x"
+    msg = if 0 == 1 { identity(msg) } else { grow(msg) }
+    msg = if 1 == 1 { identity(msg) } else { grow(msg) }
+    assert_eq_str(original, "x")
+    assert_eq_str(msg, "x!")
+}
+
+fn TestMatchRetain() {
+    let mut msg = "hello" + "!"
+    let snapshot = msg
+    let mut flip = 0
+    let mut i = 0
+    while i < 100 {
+        msg = match flip {
+            0 => identity(msg)
+            _ => identity(msg)
+        }
+        flip = 1 - flip
+        i = i + 1
+    }
+    assert_eq_str(msg, snapshot)
+    assert_eq_str(snapshot, "hello!")
+}
+
+fn TestStringOfSurvivingAlias() {
+    let mut msg = "hello" + "!"
+    let snapshot = msg
+    msg = string(snapshot)
+    assert_eq_str(msg, "hello!")
+    assert_eq_str(snapshot, "hello!")
+    msg = "bye" + "!"
+    assert_eq_str(snapshot, "hello!")
+    assert_eq_str(msg, "bye!")
+}
+
+fn TestCondOwnAlias() {
+    let seed = "seed" + "-value"
+    alias_then_replace(seed)
+    assert_eq_str(seed, "seed-value")
+}
+
+fn TestParamPassthroughDoesNotFreeCaller() {
+    let seed = "ke" + "pt"
+    passthrough_param(seed)
+    assert_eq_str(seed, "kept")
+}
+
+fn TestMethodEcho() {
+    let h = Holder { n: 1 }
+    let mut msg = "hello" + "!"
+    let snapshot = msg
+    let mut i = 0
+    while i < 100 {
+        msg = h.echo(msg)
+        i = i + 1
+    }
+    assert_eq_str(msg, snapshot)
+    assert_eq_str(snapshot, "hello!")
+}
+
+fn TestStringArraySlot() {
+    let mut names = make([]string, 1)
+    names[0] = "al" + "ice"
+    let snapshot = names[0] + ""
+    let mut i = 0
+    while i < 100 {
+        names[0] = identity(names[0])
+        i = i + 1
+    }
+    assert_eq_str(names[0], "alice")
+    assert_eq_str(snapshot, "alice")
+}
+
+fn TestConcatKeepsOldAlias() {
+    let mut msg = "a" + ""
+    let original = msg
+    let mut i = 0
+    while i < 4 {
+        msg = msg + "!"
+        i = i + 1
+    }
+    assert_eq_str(original, "a")
+    assert_eq_str(msg, "a!!!!")
+}
+
+fn TestSliceReplaceKeepsAlias() {
+    let mut msg = "hello" + "!"
+    let snapshot = msg
+    msg = str_slice(msg, 0, 4)
+    assert_eq_str(snapshot, "hello!")
+    assert_eq_str(msg, "hell")
+}
+
+fn TestReplaceMissKeepsAlias() {
+    let mut msg = "hello" + "!"
+    let snapshot = msg
+    msg = str_replace(msg, "z", "q")
+    assert_eq_str(msg, snapshot)
+    assert_eq_str(snapshot, "hello!")
+}
+
+fn TestEmptyIdentity() {
+    let mut msg = ""
+    let mut i = 0
+    while i < 100 {
+        msg = identity(msg)
+        i = i + 1
+    }
+    assert_eq_str(msg, "")
+}
+
+fn echo_kick(value: string) -> string {
+    return identity(value)
+}
+
+fn TestKickClonedString() {
+    let msg = "hello" + "!"
+    crew c {
+        let a = c.kick(echo_kick(msg))
+        let b = c.kick(echo_kick(msg))
+        assert_eq_str(a.join(), "hello!")
+        assert_eq_str(b.join(), "hello!")
+    }
+    assert_eq_str(msg, "hello!")
+}

@@ -1170,7 +1170,8 @@ static inline MakoStrArray mako_str_array_set_cow(MakoStrArray s, int64_t i, Mak
     }
     MakoString old = s.data[i];
     s.data[i] = v;
-    if (old.data != v.data) mako_str_free(old);
+    /* `v` is an owned header. A retained clone of this slot shares `data`. */
+    mako_str_free(old);
     return s;
 }
 /* Legacy non-COW set — only safe when caller is sole owner */
@@ -1178,7 +1179,8 @@ static inline void mako_str_array_set(MakoStrArray a, int64_t i, MakoString v) {
     if (i < 0 || (size_t)i >= a.len) mako_abort("string slice index out of bounds");
     MakoString old = a.data[i];
     a.data[i] = v;
-    if (old.data != v.data) mako_str_free(old);
+    /* `v` is an owned header. A retained clone of this slot shares `data`. */
+    mako_str_free(old);
 }
 
 static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
