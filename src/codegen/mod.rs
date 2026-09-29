@@ -3578,6 +3578,8 @@ impl Codegen {
                             && Self::own_free_fn(c_ty).is_some()
                             && !c_ty.starts_with("MakoEnum_"))
             ),
+            // String slice s[low:high] allocates a new buffer via malloc.
+            Expr::Slice { .. } => c_ty == "MakoString",
             // crew.kick().join() returns an owned value unboxed from the heap.
             Expr::Join(_) => Self::own_free_fn(c_ty).is_some(),
             // Method calls (e.g. ch.recv()) that return a leaf owned value
@@ -20290,6 +20292,23 @@ impl Codegen {
                             let (_, o) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("pr");
                             self.line(&format!("MakoString {tmp} = mako_pread({f}, {c}, {o});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "pread_cached" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, c) = self.emit_expr(&args[1]);
+                            let (_, o) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("prc");
+                            self.line(&format!("MakoString {tmp} = mako_pread_cached({f}, {c}, {o});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "pread_line" => {
+                            let (_, f) = self.emit_expr(&args[0]);
+                            let (_, sz) = self.emit_expr(&args[1]);
+                            let (_, o) = self.emit_expr(&args[2]);
+                            let (_, ln) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("prl");
+                            self.line(&format!("MakoString {tmp} = mako_pread_line({f}, {sz}, {o}, {ln});"));
                             return ("MakoString".into(), tmp);
                         }
                         "pwrite" => {
@@ -38728,10 +38747,11 @@ impl Codegen {
                     if base_is_temp {
                         self.emit_line(format_args!("mako_str_free({b});"));
                     }
-                    // Register the slice result so the ownership system can
-                    // transfer it on `let` or `return`. Do NOT mark scope_drop_safe
-                    // — the return path must not free the value it is returning.
-                    self.register_own_drop(&tmp, "MakoString");
+                    // Do NOT register for own-drop here — the temp may be
+                    // immediately consumed by a tuple/struct field assignment
+                    // or a return statement. Stmt::Let handles ownership
+                    // transfer via expr_is_fresh_own(Expr::Slice). For inline
+                    // uses (concat arg), the concat codegen frees via _own.
                     return ("MakoString".into(), tmp);
                 }
                 if bty == "MakoByteArray" {
@@ -42193,7 +42213,7 @@ fn is_c_stdlib_name(name: &str) -> bool {
     matches!(
         name,
         // I/O and files
-        "read" | "write" | "open" | "close" | "creat" | "lseek" | "pread" | "pwrite"
+        "read" | "write" | "open" | "close" | "creat" | "lseek" | "pread" | "pread_cached" | "pwrite"
         | "remove" | "rename" | "unlink" | "link" | "symlink" | "readlink" | "access"
         | "stat" | "fstat" | "lstat" | "chmod" | "chown" | "truncate" | "ftruncate"
         | "mkdir" | "rmdir" | "chdir" | "getcwd" | "fsync" | "fdatasync" | "sync"

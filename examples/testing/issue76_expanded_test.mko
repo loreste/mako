@@ -1,0 +1,43 @@
+fn compiler_owned_identity(value: string) -> string {
+    return value
+}
+
+fn compiler_crypto_key(cid: string, tag: string) -> string {
+    return sha256("madis.b2bua.key|" + cid + "|" + tag)[0:32]
+}
+
+fn TestCompilerCryptoTemporaryOwnership() {
+    let cid = "call" + "-id"
+    let tag = "from" + "-tag"
+    let input = "madis.b2bua.key|" + cid + "|" + tag
+    let digest = sha256(input)
+    let expected = digest[0:32]
+    let mut i = 0
+    while i < 100 {
+        let key = compiler_crypto_key(cid, tag)
+        assert_eq_str(key, expected)
+        let chained = "call-in-" + sha256("madis.b2bua.key|" + cid + "|" + tag)[0:32]
+        let expected_chained = "call-in-" + expected
+        assert_eq_str(chained, expected_chained)
+        i = i + 1
+    }
+    assert_eq(len(digest), 64)
+    assert_eq_str(digest[0:32], expected)
+}
+
+fn TestCompilerRetainedStringReplacement() {
+    let seed = "message"
+    let mut msg = seed + " body"
+    let snapshot = msg
+    let mut i = 0
+    while i < 1000 {
+        let replacement = compiler_owned_identity(msg)
+        msg = replacement
+        msg = compiler_owned_identity(msg)
+        i = i + 1
+    }
+    assert_eq_str(msg, snapshot)
+    msg = msg + "!"
+    assert_eq_str(snapshot, "message body")
+    assert_eq_str(msg, "message body!")
+}
