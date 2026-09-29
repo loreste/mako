@@ -27052,14 +27052,14 @@ impl Codegen {
                             return ("int64_t".into(), format!("{fname}({a}, {v})"));
                         }
                         "sha256" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("sh");
                             self.line(&format!("MakoString {tmp} = mako_sha256_hex({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "hmac_sha256" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg(&args[0]);
+                            let m = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("hm");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_hmac_sha256_hex({k}, {m});"
@@ -27067,21 +27067,21 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sha256_raw" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("shr");
                             self.line(&format!("MakoString {tmp} = mako_sha256_raw({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "xor_bytes" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg(&args[0]);
+                            let b = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("xb");
                             self.line(&format!("MakoString {tmp} = mako_xor_bytes({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "hmac_sha256_raw" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg(&args[0]);
+                            let m = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("hmr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_hmac_sha256_raw({k}, {m});"
@@ -27089,8 +27089,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "pbkdf2_sha256" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg(&args[0]);
+                            let s = self.emit_str_arg(&args[1]);
                             let (_, it) = self.emit_expr(&args[2]);
                             let (_, dk) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("pbk");
@@ -35314,9 +35314,9 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_secret_eq_str({s}, {o})"));
                         }
                         "hkdf_sha256" => {
-                            let (_, ikm) = self.emit_expr(&args[0]);
-                            let (_, salt) = self.emit_expr(&args[1]);
-                            let (_, info) = self.emit_expr(&args[2]);
+                            let ikm = self.emit_str_arg(&args[0]);
+                            let salt = self.emit_str_arg(&args[1]);
+                            let info = self.emit_str_arg(&args[2]);
                             let (_, n) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("hkdf");
                             self.line(&format!(
@@ -38713,6 +38713,15 @@ impl Codegen {
                     self.line(&format!(
                         "MakoString {tmp} = mako_str_slice({b}, {low_c}, {high_c});"
                     ));
+                    // The slice copied the data; free the base if it is an
+                    // unnamed owned temp (call/concat result). Named locals
+                    // are freed at scope exit — never free those here.
+                    let base_is_temp = Self::expr_is_fresh_own(base)
+                        && !matches!(base.as_ref(), Expr::Ident(_))
+                        && !self.locals.contains_key(&b);
+                    if base_is_temp {
+                        self.emit_line(format_args!("mako_str_free({b});"));
+                    }
                     return ("MakoString".into(), tmp);
                 }
                 if bty == "MakoByteArray" {

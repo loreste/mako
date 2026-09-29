@@ -1,0 +1,42 @@
+fn identity(s: string) -> string { return s }
+
+fn TestSha256SliceBase() {
+    let mut i = 0
+    while i < 10 {
+        let key = sha256("prefix|" + string(i))[0:32]
+        assert(len(key) == 32)
+        i = i + 1
+    }
+}
+
+fn TestConcatArgLeak() {
+    let mut i = 0
+    while i < 10 {
+        let cid = "call-" + string(i)
+        let tag = "tag-" + string(i)
+        let key = sha256("madis.key|" + cid + "|" + tag)[0:32]
+        assert(len(key) == 32)
+        i = i + 1
+    }
+}
+
+fn TestConcatPassedToBuiltin() {
+    let mut i = 0
+    while i < 10 {
+        let name = "user" + string(i)
+        let result = len("prefix:" + name)
+        assert(result > 0)
+        i = i + 1
+    }
+}
+
+fn TestReturnConcatSlice() {
+    let mut i = 0
+    while i < 10 {
+        let cid = "call-" + string(i)
+        let tag = "tag-" + string(i)
+        let key = identity(sha256("test|" + cid + "|" + tag)[0:16])
+        assert(len(key) > 0)
+        i = i + 1
+    }
+}
