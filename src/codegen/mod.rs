@@ -4787,7 +4787,9 @@ impl Codegen {
     /// before assign UAFs `db.tables = replace_table(db.tables, …)` when the
     /// callee returns the same slice header (issue #51).
     fn append_releases_backing(&self, cty: &str) -> bool {
-        cty.starts_with("MakoRaw")
+        matches!(cty, "MakoIntArray" | "MakoByteArray" | "MakoFloatArray" | "MakoBoolArray"
+                     | "MakoStrArray")
+            || cty.starts_with("MakoRaw")
             || cty
                 .strip_prefix("MakoArr_")
                 .is_some_and(|element| !self.struct_own_field_frees(element).is_empty())
