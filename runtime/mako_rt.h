@@ -1199,7 +1199,7 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
              * pointers now live exclusively in the new backing. */
             if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoString));
         }
-        if (s.data && s.cap > 0) mako_rc_release(s.data);
+        /* Caller releases old s.data via reassignment or scope-exit. */
         s.data = nd;
         s.cap = ncap;
     }
@@ -1328,7 +1328,7 @@ static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v)
         if (ncap < s.len + 1) ncap = s.len + 1;
         double *nd = (double *)mako_rc_alloc(ncap * sizeof(double));
         if (s.len) memcpy(nd, s.data, s.len * sizeof(double));
-        if (s.data && s.cap > 0) mako_rc_release(s.data);
+        /* Caller releases old s.data via reassignment or scope-exit. */
         s.data = nd;
         s.cap = ncap;
     }
@@ -1448,7 +1448,7 @@ static inline MakoBoolArray mako_bool_array_append(MakoBoolArray s, bool v) {
         if (ncap < s.len + 1) ncap = s.len + 1;
         bool *nd = (bool *)mako_rc_alloc(ncap * sizeof(bool));
         if (s.len) memcpy(nd, s.data, s.len * sizeof(bool));
-        if (s.data && s.cap > 0) mako_rc_release(s.data);
+        /* Caller releases old s.data via reassignment or scope-exit. */
         s.data = nd;
         s.cap = ncap;
     }
@@ -5898,7 +5898,7 @@ static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     if (ncap < s.len + 1) ncap = s.len + 1;
     int64_t *nd = (int64_t *)mako_rc_alloc(ncap * sizeof(int64_t));
     if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));
-    if (s.data && s.cap > 0) mako_rc_release(s.data);
+    /* Caller releases old s.data via reassignment or scope-exit. */
     s.data = nd;
     s.cap = ncap;
     s.data[s.len++] = v;

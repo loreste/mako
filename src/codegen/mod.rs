@@ -4787,9 +4787,7 @@ impl Codegen {
     /// before assign UAFs `db.tables = replace_table(db.tables, …)` when the
     /// callee returns the same slice header (issue #51).
     fn append_releases_backing(&self, cty: &str) -> bool {
-        matches!(cty, "MakoIntArray" | "MakoByteArray" | "MakoFloatArray" | "MakoBoolArray"
-                     | "MakoStrArray")
-            || cty.starts_with("MakoRaw")
+        cty.starts_with("MakoRaw")
             || cty
                 .strip_prefix("MakoArr_")
                 .is_some_and(|element| !self.struct_own_field_frees(element).is_empty())
@@ -16531,8 +16529,7 @@ impl Codegen {
                             | "MakoBoolArray"
                     ) || slice_cty.starts_with("MakoArr_")
                         || slice_cty.starts_with("MakoRaw");
-                    let old_ptr = if is_self_append
-                        && is_slice
+                    let old_ptr = if is_slice
                         && !self.append_releases_backing(&slice_cty)
                         && self.current_arena.is_none()
                     {
