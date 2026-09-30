@@ -22956,15 +22956,15 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_header" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("sh");
                             self.line(&format!("MakoString {tmp} = mako_sip_header({m}, {n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_header_n" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
                             let (_, i) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("shn");
                             self.line(&format!(
@@ -22973,13 +22973,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_header_view" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
                             return ("int64_t".into(), format!("mako_sip_header_view({m}, {n})"));
                         }
                         "sip_header_view_n" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
                             let (_, i) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -23001,15 +23001,15 @@ impl Codegen {
                             return ("int64_t".into(), "mako_sip_view_offset()".into());
                         }
                         "sip_view_eq" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_view_eq({s})"));
                         }
                         "sip_view_ci_eq" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_view_ci_eq({s})"));
                         }
                         "sip_view_contains" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_view_contains({s})"));
                         }
                         "sip_view_copy" => {
@@ -23018,18 +23018,18 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_header_eq" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, e) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
+                            let e = self.emit_str_arg(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_sip_header_eq({m}, {n}, {e})"),
                             );
                         }
                         "sip_header_ci_eq" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, e) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
+                            let e = self.emit_str_arg(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_sip_header_ci_eq({m}, {n}, {e})"),
