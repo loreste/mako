@@ -16927,8 +16927,18 @@ impl Codegen {
                             "if ({od} != {mn}.data && {oc} > 0 && {od}) {{"
                         ));
                         self.indent += 1;
+                        // RC strings: clone retains (RC ≥ 2), so free decrements.
+                        // Non-RC strings (int_to_string, malloc'd): not shared
+                        // by the new array (clone deep-copies), so free directly.
+                        // Moved strings (RC == 1, same pointer in new array) are
+                        // skipped to avoid UaF.
                         self.emit_line(format_args!(
-                            "for (size_t __i = 0; __i < {ol}; __i++) {{ if ({od}[__i]._rc && {od}[__i].data && mako_rc_shared({od}[__i].data)) mako_str_free({od}[__i]); }}"
+                            "for (size_t __i = 0; __i < {ol}; __i++) {{ \
+                            if (!{od}[__i].data) continue; \
+                            if ({od}[__i]._rc) {{ if (mako_rc_shared({od}[__i].data)) mako_str_free({od}[__i]); }} \
+                            else {{ int __moved = 0; \
+                            for (size_t __j = 0; __j < {mn}.len; __j++) {{ if ({mn}.data[__j].data == {od}[__i].data) {{ __moved = 1; break; }} }} \
+                            if (!__moved) mako_str_free({od}[__i]); }} }}"
                         ));
                         self.emit_line(format_args!("mako_rc_release({od});"));
                         self.indent -= 1;
