@@ -16853,7 +16853,27 @@ impl Codegen {
                             | "MakoBoolArray"
                     ) || slice_cty.starts_with("MakoArr_")
                         || slice_cty.starts_with("MakoRaw");
+                    // For MakoStrArray non-append calls, save data+len+cap so
+                    // we can free contained strings individually when the backing
+                    // changes. Append moves elements via memcpy, so we must NOT
+                    // free them — only release the raw backing block.
+                    let old_str_arr_parts = if slice_cty == "MakoStrArray"
+                        && !is_self_append
+                        && !self.append_releases_backing(&slice_cty)
+                        && self.current_arena.is_none()
+                    {
+                        let od = self.fresh("old_data");
+                        let ol = self.fresh("old_len");
+                        let oc = self.fresh("old_cap");
+                        self.emit_line(format_args!("MakoString *{od} = {mn}.data;"));
+                        self.emit_line(format_args!("size_t {ol} = {mn}.len;"));
+                        self.emit_line(format_args!("size_t {oc} = {mn}.cap;"));
+                        Some((od, ol, oc))
+                    } else {
+                        None
+                    };
                     let old_ptr = if is_slice
+                        && old_str_arr_parts.is_none()
                         && !self.append_releases_backing(&slice_cty)
                         && self.current_arena.is_none()
                     {
@@ -16893,7 +16913,27 @@ impl Codegen {
                     } else {
                         self.emit_line(format_args!("{mn} = {val};"));
                     }
-                    if let Some((op, oc)) = old_ptr {
+                    if let Some((od, ol, oc)) = old_str_arr_parts {
+                        // Free old string elements when the backing changed.
+                        // Clone-based functions (set_cow) retain each string,
+                        // so mako_str_free just decrements RC. Move-based
+                        // functions (append/memcpy) leave RC at 1 — those are
+                        // excluded by the !is_self_append guard that creates
+                        // old_str_arr_parts. For safety, check RC > 1: if the
+                        // string was cloned into the new array it has RC ≥ 2
+                        // and freeing the old reference is safe; if RC == 1
+                        // (moved), skip to avoid use-after-free.
+                        self.emit_line(format_args!(
+                            "if ({od} != {mn}.data && {oc} > 0 && {od}) {{"
+                        ));
+                        self.indent += 1;
+                        self.emit_line(format_args!(
+                            "for (size_t __i = 0; __i < {ol}; __i++) {{ if ({od}[__i]._rc && {od}[__i].data && mako_rc_shared({od}[__i].data)) mako_str_free({od}[__i]); }}"
+                        ));
+                        self.emit_line(format_args!("mako_rc_release({od});"));
+                        self.indent -= 1;
+                        self.line("}");
+                    } else if let Some((op, oc)) = old_ptr {
                         let release = Self::slice_backing_release(&slice_cty);
                         self.emit_line(format_args!(
                             "if ({op} != {mn}.data && {oc} > 0 && {op}) {release}({op});"
