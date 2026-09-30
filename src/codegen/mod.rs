@@ -2670,6 +2670,10 @@ impl Codegen {
             Expr::Call { .. } | Expr::Method { .. } => true,
             // crew.kick().join() returns an owned value unboxed from the heap.
             Expr::Join(_) => true,
+            // String slice s[low:high] allocates a new buffer (malloc).
+            // Array/byte slices are non-owning views (cap==0), but their
+            // free functions check cap > 0 so registering them is a no-op.
+            Expr::Slice { .. } => true,
             // Match / if-expr results take ownership of arm values (pattern binds
             // move or outer owns are cloned into the result temp).
             Expr::Match { .. } | Expr::IfExpr { .. } => true,
