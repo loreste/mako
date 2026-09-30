@@ -22916,41 +22916,41 @@ impl Codegen {
                         }
                         // ---- SIP / SDP / RTP ----
                         "sip_is_request" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_is_request({m})"));
                         }
                         "sip_is_response" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_is_response({m})"));
                         }
                         "sip_ok" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_ok({m})"));
                         }
                         "sip_method" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("sm");
                             self.line(&format!("MakoString {tmp} = mako_sip_method({m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_request_uri" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("sru");
                             self.line(&format!("MakoString {tmp} = mako_sip_request_uri({m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_status_code" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_status_code({m})"));
                         }
                         "sip_reason" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("srn");
                             self.line(&format!("MakoString {tmp} = mako_sip_reason({m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_version" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("sv");
                             self.line(&format!("MakoString {tmp} = mako_sip_version({m});"));
                             return ("MakoString".into(), tmp);
@@ -22987,11 +22987,11 @@ impl Codegen {
                             );
                         }
                         "sip_body_view" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_body_view({m})"));
                         }
                         "sip_method_view" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_method_view({m})"));
                         }
                         "sip_view_len" => {
@@ -23036,45 +23036,45 @@ impl Codegen {
                             );
                         }
                         "sip_header_contains" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, e) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
+                            let e = self.emit_str_arg(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_sip_header_contains({m}, {n}, {e})"),
                             );
                         }
                         "sip_method_eq" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
                             return ("int64_t".into(), format!("mako_sip_method_eq({m}, {n})"));
                         }
                         "sip_header_count" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
                             return ("int64_t".into(), format!("mako_sip_header_count({m}, {n})"));
                         }
                         "sip_body" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("sb");
                             self.line(&format!("MakoString {tmp} = mako_sip_body({m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_content_length" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_content_length({m})"));
                         }
                         "sip_msg_complete" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_msg_complete({m})"));
                         }
                         "sip_msg_needed" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_msg_needed({m})"));
                         }
                         "sip_header_line" => {
-                            let (_, n) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg(&args[0]);
+                            let v = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("shl");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_header_line({n}, {v});"
@@ -23082,9 +23082,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_headers_append" => {
-                            let (_, h) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let h = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
+                            let v = self.emit_str_arg(&args[2]);
                             let tmp = self.fresh("sha");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_headers_append({h}, {n}, {v});"
@@ -23092,10 +23092,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_request" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, u) = self.emit_expr(&args[1]);
-                            let (_, h) = self.emit_expr(&args[2]);
-                            let (_, b) = self.emit_expr(&args[3]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let u = self.emit_str_arg(&args[1]);
+                            let h = self.emit_str_arg(&args[2]);
+                            let b = self.emit_str_arg(&args[3]);
                             let tmp = self.fresh("sreq");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_request({m}, {u}, {h}, {b});"
@@ -23104,9 +23104,9 @@ impl Codegen {
                         }
                         "sip_response" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, r) = self.emit_expr(&args[1]);
-                            let (_, h) = self.emit_expr(&args[2]);
-                            let (_, b) = self.emit_expr(&args[3]);
+                            let r = self.emit_str_arg(&args[1]);
+                            let h = self.emit_str_arg(&args[2]);
+                            let b = self.emit_str_arg(&args[3]);
                             let tmp = self.fresh("sresp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_response({c}, {r}, {h}, {b});"
@@ -23114,10 +23114,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_value" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg(&args[0]);
+                            let h = self.emit_str_arg(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
-                            let (_, b) = self.emit_expr(&args[3]);
+                            let b = self.emit_str_arg(&args[3]);
                             let tmp = self.fresh("svia");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_via_value({t}, {h}, {p}, {b});"
@@ -23125,11 +23125,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_value_nat" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg(&args[0]);
+                            let h = self.emit_str_arg(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
-                            let (_, b) = self.emit_expr(&args[3]);
-                            let (_, r) = self.emit_expr(&args[4]);
+                            let b = self.emit_str_arg(&args[3]);
+                            let r = self.emit_str_arg(&args[4]);
                             let (_, rp) = self.emit_expr(&args[5]);
                             let tmp = self.fresh("svvn");
                             self.line(&format!(
@@ -23138,10 +23138,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_value_rport" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg(&args[0]);
+                            let h = self.emit_str_arg(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
-                            let (_, b) = self.emit_expr(&args[3]);
+                            let b = self.emit_str_arg(&args[3]);
                             let tmp = self.fresh("svvr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_via_value_rport({t}, {h}, {p}, {b});"
@@ -23149,8 +23149,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_add_received" => {
-                            let (_, v) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let v = self.emit_str_arg(&args[0]);
+                            let h = self.emit_str_arg(&args[1]);
                             let (_, rp) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("svar");
                             self.line(&format!(
@@ -23159,8 +23159,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_fix_source" => {
-                            let (_, v) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let v = self.emit_str_arg(&args[0]);
+                            let h = self.emit_str_arg(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("svfs");
                             self.line(&format!(
@@ -23169,43 +23169,43 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_host" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("svh");
                             self.line(&format!("MakoString {tmp} = mako_sip_via_host({v});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_port" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_via_port({v})"));
                         }
                         "sip_via_has_rport" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_via_has_rport({v})"));
                         }
                         "sip_via_rport" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_via_rport({v})"));
                         }
                         "sip_via_received" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("svrcv");
                             self.line(&format!("MakoString {tmp} = mako_sip_via_received({v});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_maddr" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("svm");
                             self.line(&format!("MakoString {tmp} = mako_sip_via_maddr({v});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_transport" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("svt");
                             self.line(&format!("MakoString {tmp} = mako_sip_via_transport({v});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_response_host" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("svrh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_via_response_host({v});"
@@ -23213,11 +23213,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_response_port" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_via_response_port({v})"));
                         }
                         "sip_via_response_addr" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("svra");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_via_response_addr({v});"
@@ -23225,8 +23225,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_msg_fix_top_via" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let h = self.emit_str_arg(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("smfv");
                             self.line(&format!(
@@ -23235,7 +23235,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_msg_response_host" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("smrh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_msg_response_host({m});"
@@ -23243,13 +23243,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_msg_response_port" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_msg_response_port({m})"));
                         }
                         "sip_record_route" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, t) = self.emit_expr(&args[2]);
+                            let t = self.emit_str_arg(&args[2]);
                             let tmp = self.fresh("srr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_record_route({h}, {p}, {t});"
@@ -23257,9 +23257,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_prepend_header" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let n = self.emit_str_arg(&args[1]);
+                            let v = self.emit_str_arg(&args[2]);
                             let tmp = self.fresh("sph");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_prepend_header({m}, {n}, {v});"
@@ -23267,8 +23267,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_insert_via" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg(&args[0]);
+                            let v = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("siv");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_insert_via({m}, {v});"
@@ -23276,19 +23276,19 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_strip_via" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("ssv");
                             self.line(&format!("MakoString {tmp} = mako_sip_strip_via({m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_first_message_len" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_first_message_len({m})"));
                         }
                         "sip_from_value" => {
-                            let (_, d) = self.emit_expr(&args[0]);
-                            let (_, u) = self.emit_expr(&args[1]);
-                            let (_, t) = self.emit_expr(&args[2]);
+                            let d = self.emit_str_arg(&args[0]);
+                            let u = self.emit_str_arg(&args[1]);
+                            let t = self.emit_str_arg(&args[2]);
                             let tmp = self.fresh("sfv");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_from_value({d}, {u}, {t});"
@@ -23296,9 +23296,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_to_value" => {
-                            let (_, d) = self.emit_expr(&args[0]);
-                            let (_, u) = self.emit_expr(&args[1]);
-                            let (_, t) = self.emit_expr(&args[2]);
+                            let d = self.emit_str_arg(&args[0]);
+                            let u = self.emit_str_arg(&args[1]);
+                            let t = self.emit_str_arg(&args[2]);
                             let tmp = self.fresh("stv");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_to_value({d}, {u}, {t});"
@@ -23306,14 +23306,14 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_contact_value" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("scv");
                             self.line(&format!("MakoString {tmp} = mako_sip_contact_value({u});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_cseq_value" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg(&args[1]);
                             let tmp = self.fresh("scq");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_cseq_value({s}, {m});"
@@ -23321,13 +23321,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_addr_tag" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("sat");
                             self.line(&format!("MakoString {tmp} = mako_sip_addr_tag({a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_via_branch" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("svb");
                             self.line(&format!("MakoString {tmp} = mako_sip_via_branch({v});"));
                             return ("MakoString".into(), tmp);
@@ -23343,7 +23343,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_call_id_new" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg(&args[0]);
                             let tmp = self.fresh("scid");
                             self.line(&format!("MakoString {tmp} = mako_sip_call_id_new({h});"));
                             return ("MakoString".into(), tmp);
