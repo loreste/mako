@@ -22415,8 +22415,8 @@ impl Codegen {
                         }
                         "cmap_has2" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let a = self.emit_str_arg(&args[1]);
+                            let b = self.emit_str_arg(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_cmap_has2((MakoCMap*){m}, {a}, {b})"),
@@ -22424,8 +22424,8 @@ impl Codegen {
                         }
                         "cmap_get2" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let a = self.emit_str_arg(&args[1]);
+                            let b = self.emit_str_arg(&args[2]);
                             let tmp = self.fresh("cg2");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_cmap_get2((MakoCMap*){m}, {a}, {b});"
@@ -22434,8 +22434,8 @@ impl Codegen {
                         }
                         "cmap_del2" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let a = self.emit_str_arg(&args[1]);
+                            let b = self.emit_str_arg(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_cmap_del2((MakoCMap*){m}, {a}, {b})"),
@@ -22443,8 +22443,8 @@ impl Codegen {
                         }
                         "cmap_has3i" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let a = self.emit_str_arg(&args[1]);
+                            let b = self.emit_str_arg(&args[2]);
                             let (_, c) = self.emit_expr(&args[3]);
                             return (
                                 "int64_t".into(),
@@ -22472,14 +22472,14 @@ impl Codegen {
                         }
                         "cmap_set_int" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg(&args[1]);
                             let (_, v) = self.emit_expr(&args[2]);
                             self.line(&format!("mako_cmap_set_int((MakoCMap*){m}, {k}, {v});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "cmap_get_int" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg(&args[1]);
                             let (_, fb) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -22488,8 +22488,8 @@ impl Codegen {
                         }
                         "cmap_get_int2" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let a = self.emit_str_arg(&args[1]);
+                            let b = self.emit_str_arg(&args[2]);
                             let (_, fb) = self.emit_expr(&args[3]);
                             return (
                                 "int64_t".into(),
@@ -22498,8 +22498,8 @@ impl Codegen {
                         }
                         "cmap_set_int2" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let a = self.emit_str_arg(&args[1]);
+                            let b = self.emit_str_arg(&args[2]);
                             let (_, v) = self.emit_expr(&args[3]);
                             self.line(&format!(
                                 "mako_cmap_set_int2((MakoCMap*){m}, {a}, {b}, {v});"
