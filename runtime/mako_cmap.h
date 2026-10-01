@@ -476,8 +476,7 @@ static inline void mako_cmap_set_int(MakoCMap *m, MakoString key, int64_t val) {
     char buf[21];
     int n = snprintf(buf, sizeof(buf), "%lld", (long long)val);
     MakoString vs = {buf, (size_t)n};
-    MakoString owned = mako_str_clone(vs);
-    mako_cmap_set(m, key, owned);
+    mako_cmap_set(m, key, vs);
 }
 
 static inline int64_t mako_cmap_get_int(MakoCMap *m, MakoString key, int64_t fallback) {
@@ -487,7 +486,9 @@ static inline int64_t mako_cmap_get_int(MakoCMap *m, MakoString key, int64_t fal
     size_t cp = v.len < sizeof(buf) - 1 ? v.len : sizeof(buf) - 1;
     memcpy(buf, v.data, cp);
     buf[cp] = 0;
-    return strtoll(buf, NULL, 10);
+    int64_t result = strtoll(buf, NULL, 10);
+    mako_str_free(v);
+    return result;
 }
 
 /* Composite-key int helpers — prefix+suffix concatenated, value parsed as int. */
