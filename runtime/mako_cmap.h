@@ -481,7 +481,11 @@ static inline void mako_cmap_set_int(MakoCMap *m, MakoString key, int64_t val) {
 
 static inline int64_t mako_cmap_get_int(MakoCMap *m, MakoString key, int64_t fallback) {
     MakoString v = mako_cmap_get(m, key);
-    if (v.len == 0) return fallback;
+    if (v.len == 0) {
+        /* Existing empty values own a buffer; missing keys use the singleton. */
+        mako_str_free(v);
+        return fallback;
+    }
     char buf[32];
     size_t cp = v.len < sizeof(buf) - 1 ? v.len : sizeof(buf) - 1;
     memcpy(buf, v.data, cp);

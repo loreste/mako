@@ -2,6 +2,9 @@
 
 ## 0.6.38
 
+- CMap integer reads release temporary buffers for stored empty strings before
+  returning the fallback, including composite-key reads (issue #77). Linux
+  ASan/UBSan/LSan coverage checks missing keys, empty values, and replacements.
 - **Refcounted strings**: `mako_str_clone` is O(1) — atomic refcount bump
   instead of `malloc + memcpy`. MakoString gains a `_rc` flag (1 = RC, 0 =
   plain malloc). `mako_str_free` routes by flag. `mako_str_concat` and

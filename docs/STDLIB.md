@@ -1247,6 +1247,12 @@ import "sync"
 | `actor_spawn` / `actor_send` / `actor_recv` / `actor_stop` | actors |
 | `actor` / `receive` syntax | desugar (see GUIDE) |
 
+`cmap_get_int(map, key, fallback)` and
+`cmap_get_int2(map, prefix, suffix, fallback)` return `fallback` for missing
+keys or stored empty strings. Both release the temporary value copy on every
+return path, including empty values; repeated fallback reads do not retain
+buffers. Map locking and snapshot-copy semantics are unchanged.
+
 The compiler rejects unsynchronized mutable closure captures and unknown
 function environments across `kick`; `fan` mappers cannot capture locals.
 Race smoke: `makori test --race` (CI TSan job), which covers runtime and FFI
