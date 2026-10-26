@@ -5737,7 +5737,7 @@ impl Codegen {
             self.line(&format!("{lit}[{i}] = {v};"));
         }
         self.line(&format!(
-            "{arr_ty} {tmp} = mako_arr_{sn}_of({lit}, {});",
+            "{arr_ty} {tmp} = mako_arr_{sn}_of((const {sn} *){lit}, {});",
             elems.len()
         ));
         (arr_ty, tmp)
