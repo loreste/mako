@@ -1,0 +1,14 @@
+// Should fail: int does not implement Describable
+
+interface Describable {
+    fn describe(self) -> string
+}
+
+struct Labeled[T: Describable] {
+    item: T
+}
+
+fn main() {
+    let l = Labeled[int] { item: 42 }
+    print_int(l.item)
+}

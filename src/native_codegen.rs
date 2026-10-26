@@ -5900,6 +5900,7 @@ mod tests {
                 Item::Struct(StructDef {
                     name: "Pair".into(),
                     type_params: vec![],
+                    type_bounds: HashMap::new(),
                     fields: vec![
                         ("a".into(), TypeExpr::Named("int".into()), None),
                         ("b".into(), TypeExpr::Named("int".into()), None),

@@ -1,0 +1,74 @@
+// Bounded generic structs: struct Container[T: Iface]
+
+interface Describable {
+    fn describe(self) -> string
+}
+
+interface Measurable {
+    fn measure(self) -> int
+}
+
+struct Dog {
+    name: string
+    weight: int
+}
+
+on Dog {
+    fn describe(self) -> string {
+        return self.name
+    }
+    fn measure(self) -> int {
+        return self.weight
+    }
+}
+
+struct Cat {
+    color: string
+    age: int
+}
+
+on Cat {
+    fn describe(self) -> string {
+        return self.color
+    }
+    fn measure(self) -> int {
+        return self.age
+    }
+}
+
+// Single bound on struct.
+struct Labeled[T: Describable] {
+    item: T
+    tag: string
+}
+
+// Multi-bound on struct.
+struct Tracked[T: Describable + Measurable] {
+    item: T
+}
+
+fn TestLabeledDog() {
+    let d = Dog { name: "Rex", weight: 30 }
+    let l = Labeled[Dog] { item: d, tag: "pet" }
+    assert_eq_str(l.item.describe(), "Rex")
+    assert_eq_str(l.tag, "pet")
+}
+
+fn TestLabeledCat() {
+    let c = Cat { color: "orange", age: 5 }
+    let l = Labeled[Cat] { item: c, tag: "stray" }
+    assert_eq_str(l.item.describe(), "orange")
+}
+
+fn TestTrackedDog() {
+    let d = Dog { name: "Rex", weight: 30 }
+    let t = Tracked[Dog] { item: d }
+    assert_eq_str(t.item.describe(), "Rex")
+    assert_eq(t.item.measure(), 30)
+}
+
+fn TestTrackedCat() {
+    let c = Cat { color: "orange", age: 5 }
+    let t = Tracked[Cat] { item: c }
+    assert_eq(t.item.measure(), 5)
+}

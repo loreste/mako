@@ -108,7 +108,7 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
         }
         d.emit();
     })?;
-    for f in tc.mono_fns {
+    for f in tc.mono_fns.into_iter().chain(tc.default_method_fns) {
         if !program
             .items
             .iter()
@@ -302,7 +302,7 @@ fn check_file_structured(path: &Path) -> Result<Program, Diagnostic> {
     }
     tc.check(&program)
         .map_err(|e| diagnostic_from_type_error(&path_s, &src, e))?;
-    for f in tc.mono_fns {
+    for f in tc.mono_fns.into_iter().chain(tc.default_method_fns) {
         if !program
             .items
             .iter()
@@ -968,7 +968,7 @@ pub fn run_doc(path: &Path, out_dir: &Path) -> Result<(), ()> {
                     md.push_str("```mako\ninterface ");
                     md.push_str(&iface.name);
                     md.push_str(" {\n");
-                    for (m, params, ret) in &iface.methods {
+                    for (m, params, ret, _) in &iface.methods {
                         md.push_str("    fn ");
                         md.push_str(m);
                         md.push('(');
@@ -1268,7 +1268,7 @@ fn api_interface_signature(i: &InterfaceDef) -> String {
     let methods = i
         .methods
         .iter()
-        .map(|(name, params, ret)| {
+        .map(|(name, params, ret, _)| {
             format!(
                 "fn {name}({}) -> {}",
                 params.iter().map(fmt_type).collect::<Vec<_>>().join(", "),
@@ -1406,7 +1406,7 @@ fn interface_symbol_json(file: &str, i: &InterfaceDef) -> String {
     let methods = i
         .methods
         .iter()
-        .map(|(name, params, ret)| {
+        .map(|(name, params, ret, _)| {
             let params = params.iter().map(fmt_type).collect::<Vec<_>>();
             format!(
                 r#"{{"name":"{}","params":{},"return":"{}"}}"#,
@@ -2361,7 +2361,7 @@ fn rewrite_item_refs(item: &mut Item, alias: &str, names: &ImportNameSets) {
             }
         }
         Item::Interface(i) => {
-            for (_, params, ret) in &mut i.methods {
+            for (_, params, ret, _) in &mut i.methods {
                 for t in params {
                     rewrite_type_expr(t, alias, names);
                 }
@@ -3908,7 +3908,7 @@ pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), Tes
     }
     tc.check(&program)
         .map_err(|error| TestPackageLoadError::Invalid(error.to_string()))?;
-    for f in tc.mono_fns {
+    for f in tc.mono_fns.into_iter().chain(tc.default_method_fns) {
         if !program
             .items
             .iter()

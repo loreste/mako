@@ -1,0 +1,72 @@
+// Multi-bound generics: T: Iface1 + Iface2
+
+interface Describable {
+    fn describe(self) -> string
+}
+
+interface Measurable {
+    fn measure(self) -> int
+}
+
+struct Box {
+    label: string
+    width: int
+}
+
+on Box {
+    fn describe(self) -> string {
+        return self.label
+    }
+    fn measure(self) -> int {
+        return self.width
+    }
+}
+
+struct Crate {
+    tag: string
+    weight: int
+}
+
+on Crate {
+    fn describe(self) -> string {
+        return self.tag
+    }
+    fn measure(self) -> int {
+        return self.weight
+    }
+}
+
+// T must satisfy both interfaces.
+fn summarize[T: Describable + Measurable](item: T) -> string {
+    let desc = item.describe()
+    let m = item.measure()
+    return desc
+}
+
+fn check_size[T: Describable + Measurable](item: T) -> int {
+    return item.measure()
+}
+
+fn TestMultiBoundBox() {
+    let b = Box { label: "fragile", width: 30 }
+    let s = summarize(b)
+    assert_eq_str(s, "fragile")
+}
+
+fn TestMultiBoundBoxMeasure() {
+    let b = Box { label: "fragile", width: 30 }
+    let m = check_size(b)
+    assert_eq(m, 30)
+}
+
+fn TestMultiBoundCrate() {
+    let c = Crate { tag: "heavy", weight: 100 }
+    let s = summarize(c)
+    assert_eq_str(s, "heavy")
+}
+
+fn TestMultiBoundCrateMeasure() {
+    let c = Crate { tag: "heavy", weight: 100 }
+    let m = check_size(c)
+    assert_eq(m, 100)
+}

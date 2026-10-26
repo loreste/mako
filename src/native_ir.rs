@@ -1772,10 +1772,25 @@ fn build_structs(program: &Program) -> Result<StructRegistry, IrError> {
             Item::Interface(iface) => {
                 interfaces.insert(iface.name.clone());
                 let methods: Vec<String> =
-                    iface.methods.iter().map(|(n, _, _)| n.clone()).collect();
+                    iface.methods.iter().map(|(n, _, _, _)| n.clone()).collect();
                 interface_methods.insert(iface.name.clone(), methods);
             }
             _ => {}
+        }
+    }
+    // Propagate inherited methods from parent interfaces.
+    for item in &program.items {
+        if let Item::Interface(iface) = item {
+            for parent_name in &iface.parents {
+                if let Some(parent_methods) = interface_methods.get(parent_name).cloned() {
+                    let entry = interface_methods.entry(iface.name.clone()).or_default();
+                    for m in parent_methods {
+                        if !entry.contains(&m) {
+                            entry.push(m);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -2322,6 +2337,7 @@ fn monomorphize_generics(
                             let required_methods: Vec<String> = tmpl
                                 .type_bounds
                                 .values()
+                                .flatten()
                                 .flat_map(|iface| {
                                     iface_methods.get(iface).into_iter().flatten().cloned()
                                 })

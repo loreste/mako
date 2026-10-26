@@ -370,6 +370,8 @@ pub struct TypeChecker {
     mono_struct_generated: HashSet<String>,
     /// Monomorphized struct defs (for codegen emission).
     pub mono_structs: Vec<StructDef>,
+    /// Synthesized default method implementations (for codegen emission).
+    pub default_method_fns: Vec<FnDef>,
     /// `#[deprecated("msg")]` functions — call sites hard-error with the message.
     deprecated_fns: HashMap<String, String>,
     /// Active type parameters while checking a generic template body.
@@ -13820,6 +13822,7 @@ impl TypeChecker {
             generic_structs: HashMap::new(),
             mono_struct_generated: HashSet::new(),
             mono_structs: Vec::new(),
+            default_method_fns: Vec::new(),
             generic_enums: HashMap::new(),
             mono_enum_generated: HashSet::new(),
             mono_enums: Vec::new(),
@@ -14157,7 +14160,7 @@ impl TypeChecker {
                 }
                 Item::Interface(iface) => {
                     // Validate method type expressions; presence checked after fns collected.
-                    for (_mname, params, ret) in &iface.methods {
+                    for (_mname, params, ret, _) in &iface.methods {
                         for t in params {
                             let _ = self.resolve_type(t)?;
                         }
@@ -14286,7 +14289,7 @@ impl TypeChecker {
         let bound_ifaces: HashSet<String> = self
             .generic_fns
             .values()
-            .flat_map(|f| f.type_bounds.values().cloned())
+            .flat_map(|f| f.type_bounds.values().flatten().cloned())
             .collect();
         // Interface method presence: `Iface_method`, `Iface_Concrete_method`,
         // or Go-style `Concrete_method` method set.
@@ -14294,7 +14297,7 @@ impl TypeChecker {
             if bound_ifaces.contains(&iface.name) {
                 continue; // bound-only interfaces are checked at generic call sites
             }
-            for (mname, params, ret) in &iface.methods {
+            for (mname, params, ret, default_body) in &iface.methods {
                 let expected_params: Result<Vec<_>, _> =
                     params.iter().map(|t| self.resolve_type(t)).collect();
                 let expected_params = expected_params?;
@@ -14333,6 +14336,9 @@ impl TypeChecker {
                     }
                 }
                 if candidates.is_empty() {
+                    if default_body.is_some() {
+                        continue; // default body; synthesized per-type in check_interface_bound
+                    }
                     return Err(TypeError::new(format!(
                         "interface {}: missing implementation for `{mname}`",
                         iface.name
@@ -15468,13 +15474,15 @@ impl TypeChecker {
                         args.iter().map(|a| self.resolve_type(a)).collect();
                     let resolved_args = resolved_args?;
                     // Check if this is a generic struct or enum instantiation.
-                    if self.generic_structs.contains_key(other) {
+                    if let Some(tmpl) = self.generic_structs.get(other).cloned() {
+                        self.check_type_arg_bounds(other, &tmpl.type_params, &tmpl.type_bounds, &resolved_args)?;
                         let tags: Vec<String> =
                             resolved_args.iter().map(|t| t.mono_tag()).collect();
                         let mono_name = format!("{other}__{}", tags.join("__"));
                         return Ok(Type::Named(mono_name));
                     }
-                    if self.generic_enums.contains_key(other) {
+                    if let Some(tmpl) = self.generic_enums.get(other).cloned() {
+                        self.check_type_arg_bounds(other, &tmpl.type_params, &tmpl.type_bounds, &resolved_args)?;
                         let tags: Vec<String> =
                             resolved_args.iter().map(|t| t.mono_tag()).collect();
                         let mono_name = format!("{other}__{}", tags.join("__"));
@@ -19054,7 +19062,7 @@ impl TypeChecker {
                         let Some(iface) = self.interfaces.iter().find(|i| i.name == *iname) else {
                             return Err(TypeError::new(format!("unknown interface `{iname}`")));
                         };
-                        let Some((_, params, ret)) = iface.methods.iter().find(|(n, _, _)| n == m)
+                        let Some((_, params, ret, _)) = iface.methods.iter().find(|(n, _, _, _)| n == m)
                         else {
                             return Err(TypeError::new(format!(
                                 "interface `{iname}` has no method `{m}`"
@@ -19091,6 +19099,31 @@ impl TypeChecker {
                         };
                         if let Some(tname) = type_name {
                             let key = format!("{tname}_{m}");
+                            // Generic struct method fallback: `Pair__int_first` not found
+                            // → try `Pair_first[T]` and monomorphize with T=int.
+                            if !self.fns.contains_key(&key) {
+                                if let Some(pos) = tname.find("__") {
+                                    let base = &tname[..pos];
+                                    let tags: Vec<&str> = tname[pos + 2..].split("__").collect();
+                                    let generic_key = format!("{base}_{m}");
+                                    if let Some(tmpl) = self.generic_fns.get(&generic_key).cloned() {
+                                        let mut subst = HashMap::new();
+                                        for (tp, tag) in tmpl.type_params.iter().zip(tags.iter()) {
+                                            subst.insert(tp.clone(), self.type_from_mono_tag(tag));
+                                        }
+                                        let mono_name = format!("{tname}_{m}");
+                                        if !self.mono_generated.contains(&mono_name) {
+                                            let mono = crate::types::specialize_fn(&tmpl, &mono_name, &subst);
+                                            let params: Result<Vec<_>, _> = mono.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+                                            let ret_ty = mono.ret.as_ref().map(|r| self.resolve_type(r)).unwrap_or(Ok(Type::Void))?;
+                                            self.fns.insert(mono_name.clone(), Type::Fn(params?, Box::new(ret_ty)));
+                                            self.mono_generated.insert(mono_name.clone());
+                                            self.mono_fns.push(mono.clone());
+                                            self.check_fn(&mono)?;
+                                        }
+                                    }
+                                }
+                            }
                             if let Some(Type::Fn(fp, fr)) = self.fns.get(&key).cloned() {
                                 let has_self =
                                     !fp.is_empty() && self.types_equal_iface_self(&fp[0], other);
@@ -19132,8 +19165,8 @@ impl TypeChecker {
                         //   `recv.write(s)` → `Writer_write(s)` (no self)
                         //   or `Writer_write(self, s)` when impl takes receiver first.
                         for iface in &self.interfaces.clone() {
-                            if let Some((_, params, ret)) =
-                                iface.methods.iter().find(|(n, _, _)| n == m)
+                            if let Some((_, params, ret, _)) =
+                                iface.methods.iter().find(|(n, _, _, _)| n == m)
                             {
                                 let mut key = format!("{}_{}", iface.name, m);
                                 if let Type::Struct { name: sn, .. } = other {
@@ -20400,6 +20433,7 @@ impl TypeChecker {
         let mono_struct = StructDef {
             name: mono_name.to_string(),
             type_params: Vec::new(),
+            type_bounds: HashMap::new(),
             fields: mono_fields,
             derives: template.derives.clone(),
             exported: template.exported,
@@ -20501,6 +20535,7 @@ impl TypeChecker {
         let mono_enum = EnumDef {
             name: mono_name.to_string(),
             type_params: Vec::new(),
+            type_bounds: HashMap::new(),
             variants: mono_variants,
             exported: template.exported,
             source_file: None,
@@ -20542,6 +20577,107 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Check bounds on type arguments for generic struct/enum instantiation.
+    fn check_type_arg_bounds(
+        &self,
+        name: &str,
+        type_params: &[String],
+        type_bounds: &HashMap<String, Vec<String>>,
+        resolved_args: &[Type],
+    ) -> Result<(), TypeError> {
+        for (tp, concrete_ty) in type_params.iter().zip(resolved_args.iter()) {
+            if let Some(iface_names) = type_bounds.get(tp) {
+                for iface_name in iface_names {
+                    self.check_interface_bound(concrete_ty, iface_name, name, tp)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Synthesize missing default methods for a concrete type against an interface.
+    fn ensure_default_methods(&mut self, concrete_ty: &Type, iface_name: &str) {
+        let type_name = match concrete_ty {
+            Type::Struct { name, .. } => name.clone(),
+            Type::Named(n) => n.clone(),
+            _ => return,
+        };
+        let Some(iface) = self.interfaces.iter().find(|i| i.name == iface_name).cloned() else {
+            return;
+        };
+        // Also collect parent interface defaults.
+        let mut all_methods = iface.methods.clone();
+        for parent_name in &iface.parents {
+            if let Some(parent) = self.interfaces.iter().find(|d| d.name == *parent_name).cloned() {
+                for m in &parent.methods {
+                    if !all_methods.iter().any(|(n, _, _, _)| n == &m.0) {
+                        all_methods.push(m.clone());
+                    }
+                }
+            }
+        }
+        for (mname, params, ret, default_body) in &all_methods {
+            let Some(body) = default_body else { continue };
+            let impl_name = format!("{type_name}_{mname}");
+            if self.fns.contains_key(&impl_name) {
+                continue;
+            }
+            let mut fn_params = vec![Param {
+                name: "self".into(),
+                ty: TypeExpr::Named(type_name.clone()),
+                mutable: false,
+                variadic: false,
+            }];
+            for (i, pt) in params.iter().enumerate() {
+                fn_params.push(Param {
+                    name: format!("_p{i}"),
+                    ty: pt.clone(),
+                    mutable: false,
+                    variadic: false,
+                });
+            }
+            let syn_fn = FnDef {
+                name: impl_name.clone(),
+                type_params: Vec::new(),
+                type_bounds: HashMap::new(),
+                params: fn_params,
+                ret: Some(ret.clone()),
+                body: body.clone(),
+                exported: false,
+                is_const: false,
+                is_live: false,
+                stability: crate::ast::ApiStability::Unspecified,
+                contracts: vec![],
+                source_file: None,
+            };
+            if let Ok(resolved_ret) = self.resolve_type(ret) {
+                let resolved_params: Vec<Type> = std::iter::once(Ok(Type::Named(type_name.clone())))
+                    .chain(params.iter().map(|t| self.resolve_type(t)))
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap_or_default();
+                self.fns.insert(impl_name, Type::Fn(resolved_params, Box::new(resolved_ret)));
+            }
+            self.default_method_fns.push(syn_fn);
+        }
+    }
+
+    /// Reverse of `mono_tag()` for common scalar types; structs stay as Named.
+    fn type_from_mono_tag(&self, tag: &str) -> Type {
+        match tag {
+            "int" => Type::Int,
+            "int64" => Type::Int64,
+            "int32" => Type::Int32,
+            "int8" => Type::Int8,
+            "uint64" => Type::UInt64,
+            "byte" => Type::Byte,
+            "float" => Type::Float,
+            "bool" => Type::Bool,
+            "string" => Type::String,
+            "void" => Type::Void,
+            other => Type::Named(other.to_string()),
+        }
+    }
+
     /// Verify that `concrete_ty` satisfies the interface `iface_name`.
     /// Checks that the concrete type has methods matching all interface methods.
     fn check_interface_bound(
@@ -20558,7 +20694,17 @@ impl TypeChecker {
                 "unknown interface `{iface_name}` used as bound on `{tp_name}` in `{fn_name}`"
             )));
         };
-        let methods = iface_def.methods.clone();
+        let mut methods = iface_def.methods.clone();
+        // Include inherited methods from parent interfaces.
+        for parent_name in &iface_def.parents {
+            if let Some(parent) = self.interfaces.iter().find(|d| d.name == *parent_name) {
+                for m in &parent.methods {
+                    if !methods.iter().any(|(n, _, _, _)| n == &m.0) {
+                        methods.push(m.clone());
+                    }
+                }
+            }
+        }
         // Get the concrete type name for method lookup
         let type_name = match concrete_ty {
             Type::Struct { name, .. } => name.clone(),
@@ -20570,9 +20716,12 @@ impl TypeChecker {
             other => other.display(),
         };
         // Check each interface method exists on the concrete type with matching signature
-        for (method_name, iface_param_tys, iface_ret_ty) in &methods {
+        for (method_name, iface_param_tys, iface_ret_ty, default_body) in &methods {
             let impl_name = format!("{type_name}_{method_name}");
             if !self.fns.contains_key(&impl_name) {
+                if default_body.is_some() {
+                    continue; // default body — synthesized post-typecheck
+                }
                 return Err(TypeError::new(format!(
                     "type `{}` does not satisfy interface `{iface_name}`: missing method `{method_name}`",
                     concrete_ty.display()
@@ -20654,10 +20803,13 @@ impl TypeChecker {
                 .hint("pass arguments that determine T, or use a concrete helper"));
             }
         }
-        // Check interface bounds: if T: Stringer, verify the concrete type has the methods.
-        for (tp, iface_name) in &template.type_bounds {
+        // Check interface bounds; synthesize default methods before checking.
+        for (tp, iface_names) in &template.type_bounds {
             if let Some(concrete_ty) = subst.get(tp) {
-                self.check_interface_bound(concrete_ty, iface_name, name, tp)?;
+                for iface_name in iface_names {
+                    self.ensure_default_methods(concrete_ty, iface_name);
+                    self.check_interface_bound(concrete_ty, iface_name, name, tp)?;
+                }
             }
         }
         let mono_name = {
@@ -20781,9 +20933,15 @@ impl TypeChecker {
     /// - **Go-style implicit:** `Concrete_method` from `on Concrete { fn method… }` / free `fn Concrete_method`
     /// No-self-only interfaces are implemented by any concrete (unit dyn).
     fn implements_iface(&self, concrete: &Type, iface_name: &str) -> bool {
-        let Some(iface) = self.interfaces.iter().find(|i| i.name == iface_name) else {
+        let Some(iface) = self.interfaces.iter().find(|i| i.name == iface_name).cloned() else {
             return false;
         };
+        // Also check parent interface satisfaction.
+        for parent_name in &iface.parents {
+            if !self.implements_iface(concrete, parent_name) {
+                return false;
+            }
+        }
         let cname = match concrete {
             Type::Struct { name, .. } => Some(name.as_str()),
             Type::Named(n) if self.types.contains_key(n) => Some(n.as_str()),
@@ -20792,7 +20950,7 @@ impl TypeChecker {
             _ => None,
         };
         let mut all_no_self = true;
-        for (mname, params, ret) in &iface.methods {
+        for (mname, params, ret, _) in &iface.methods {
             let expected: Vec<Type> = params
                 .iter()
                 .filter_map(|t| self.resolve_type(t).ok())

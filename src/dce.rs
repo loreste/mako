@@ -45,6 +45,46 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
         }
     }
 
+    // Generic monomorphizations: if `show` is reachable, `show__Dog` is too.
+    // Struct method pattern: `Wrapper_show[T]` monomorphizes to `Wrapper__Dog_show`.
+    let generic_templates: Vec<&FnDef> = program.items.iter().filter_map(|item| match item {
+        Item::Fn(f) if !f.type_params.is_empty() && reachable_fns.contains(&f.name) => Some(f),
+        _ => None,
+    }).collect();
+    for item in &program.items {
+        if let Item::Fn(f) = item {
+            if reachable_fns.contains(&f.name) { continue; }
+            for tmpl in &generic_templates {
+                // Regular: show__Dog matches show__*
+                if f.name.starts_with(&format!("{}__", tmpl.name)) {
+                    reachable_fns.insert(f.name.clone());
+                    collect_fn_refs(f, &mut queue, &mut reachable_types);
+                    break;
+                }
+                // Struct method: Wrapper_show → Wrapper__Dog_show
+                // Match: base + "__" + tag + "_" + method
+                if let Some(uscore) = tmpl.name.find('_') {
+                    let base = &tmpl.name[..uscore];
+                    let method = &tmpl.name[uscore..]; // "_show"
+                    if f.name.starts_with(&format!("{base}__")) && f.name.ends_with(method) {
+                        reachable_fns.insert(f.name.clone());
+                        collect_fn_refs(f, &mut queue, &mut reachable_types);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // BFS again for anything the mono fns reference.
+    while let Some(name) = queue.pop() {
+        if !reachable_fns.insert(name.clone()) {
+            continue;
+        }
+        if let Some(f) = fn_map.get(&name) {
+            collect_fn_refs(f, &mut queue, &mut reachable_types);
+        }
+    }
+
     // Variant constructors/patterns are represented as bare call-like names
     // (`Text("hi")`, `Text(s)`) in expression walks. Map those names back to
     // their declaring enum so DCE does not discard a locally inferred enum
@@ -92,6 +132,40 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
 
     // Check for unused imports (if source file is provided).
     // This runs after BFS so reachable_fns is complete.
+
+    // Methods on reachable types: if `Dog` is reachable and `describe` is
+    // a called method, mark `Dog_describe` reachable so its body gets walked.
+    {
+        let type_names: HashSet<&str> = program.items.iter().filter_map(|item| match item {
+            Item::Struct(s) if reachable_types.contains(&s.name) => Some(s.name.as_str()),
+            Item::Enum(e) if reachable_types.contains(&e.name) => Some(e.name.as_str()),
+            _ => None,
+        }).collect();
+        let methods_called: HashSet<String> = reachable_fns.iter()
+            .filter(|n| !n.contains('_'))
+            .cloned()
+            .collect();
+        for item in &program.items {
+            if let Item::Fn(f) = item {
+                if reachable_fns.contains(&f.name) { continue; }
+                for method in methods_called.iter() {
+                    if let Some(prefix) = f.name.strip_suffix(&format!("_{method}")) {
+                        if type_names.contains(prefix) {
+                            reachable_fns.insert(f.name.clone());
+                            collect_fn_refs(f, &mut queue, &mut reachable_types);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        while let Some(name) = queue.pop() {
+            if !reachable_fns.insert(name.clone()) { continue; }
+            if let Some(f) = fn_map.get(&name) {
+                collect_fn_refs(f, &mut queue, &mut reachable_types);
+            }
+        }
+    }
 
     let declared_types: HashSet<&str> = program.items.iter().filter_map(|item| match item {
         Item::Struct(s) => Some(s.name.as_str()),

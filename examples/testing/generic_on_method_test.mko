@@ -1,0 +1,51 @@
+// Methods on generic structs via on-blocks
+
+struct Pair[T] {
+    a: T
+    b: T
+}
+
+on Pair[T] {
+    fn first(self) -> T {
+        return self.a
+    }
+    fn second(self) -> T {
+        return self.b
+    }
+}
+
+struct Box[T] {
+    val: T
+}
+
+on Box[T] {
+    fn unwrap(self) -> T {
+        return self.val
+    }
+}
+
+fn TestPairIntFirst() {
+    let p = Pair[int] { a: 10, b: 20 }
+    assert_eq(p.first(), 10)
+}
+
+fn TestPairIntSecond() {
+    let p = Pair[int] { a: 10, b: 20 }
+    assert_eq(p.second(), 20)
+}
+
+fn TestPairString() {
+    let p = Pair[string] { a: "hello", b: "world" }
+    assert_eq_str(p.first(), "hello")
+    assert_eq_str(p.second(), "world")
+}
+
+fn TestBoxInt() {
+    let b = Box[int] { val: 42 }
+    assert_eq(b.unwrap(), 42)
+}
+
+fn TestBoxString() {
+    let b = Box[string] { val: "test" }
+    assert_eq_str(b.unwrap(), "test")
+}

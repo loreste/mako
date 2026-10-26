@@ -501,7 +501,7 @@ impl Codegen {
                     }
                 }
                 Item::Interface(i) => {
-                    for (_name, params, ret) in &i.methods {
+                    for (_name, params, ret, _) in &i.methods {
                         for p in params {
                             self.collect_maps_in_type(p);
                         }
@@ -5837,8 +5837,8 @@ impl Codegen {
         for item in &program.items {
             if let Item::Interface(iface) = item {
                 let methods: Vec<String> =
-                    iface.methods.iter().map(|(n, _, _)| n.clone()).collect();
-                for (name, _, ret) in &iface.methods {
+                    iface.methods.iter().map(|(n, _, _, _)| n.clone()).collect();
+                for (name, _, ret, _) in &iface.methods {
                     self.fn_ret_types
                         .insert(format!("{}_{name}", iface.name), ret.clone());
                 }

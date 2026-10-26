@@ -1,0 +1,44 @@
+// Interface inheritance: child interface requires parent methods
+
+interface Describable {
+    fn describe(self) -> string
+}
+
+// Printable extends Describable — must also have describe().
+interface Printable: Describable {
+    fn format(self) -> string
+}
+
+struct Report {
+    title: string
+    pages: int
+}
+
+on Report {
+    fn describe(self) -> string {
+        return self.title
+    }
+    fn format(self) -> string {
+        return self.title
+    }
+}
+
+fn show[T: Printable](item: T) -> string {
+    return item.format()
+}
+
+fn desc[T: Describable](item: T) -> string {
+    return item.describe()
+}
+
+fn TestInheritedBound() {
+    let r = Report { title: "Q3", pages: 12 }
+    let s = show(r)
+    assert_eq_str(s, "Q3")
+}
+
+fn TestParentBound() {
+    let r = Report { title: "Q3", pages: 12 }
+    let d = desc(r)
+    assert_eq_str(d, "Q3")
+}

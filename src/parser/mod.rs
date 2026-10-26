@@ -345,6 +345,8 @@ impl Parser {
     fn parse_on(&mut self) -> Result<OnDef, ParseError> {
         self.expect(TokenKind::On)?;
         let ty = self.expect_ident()?;
+        // Optional type params: `on Pair[T]`
+        let (type_params, _) = self.parse_type_params_opt()?;
         let iface = if matches!(self.peek_kind(), TokenKind::Colon) {
             self.bump();
             Some(self.expect_ident()?)
@@ -361,6 +363,7 @@ impl Parser {
         self.expect(TokenKind::RBrace)?;
         Ok(OnDef {
             ty,
+            type_params,
             iface,
             methods,
             exported: false,
@@ -370,7 +373,7 @@ impl Parser {
     /// Optional `[T, U]` or `<T, U>` type parameter list.
     fn parse_type_params_opt(
         &mut self,
-    ) -> Result<(Vec<String>, std::collections::HashMap<String, String>), ParseError> {
+    ) -> Result<(Vec<String>, std::collections::HashMap<String, Vec<String>>), ParseError> {
         if !matches!(self.peek_kind(), TokenKind::LBracket | TokenKind::Lt) {
             return Ok((Vec::new(), std::collections::HashMap::new()));
         }
@@ -386,11 +389,16 @@ impl Parser {
         if std::mem::discriminant(self.peek_kind()) != std::mem::discriminant(&close) {
             loop {
                 let name = self.expect_ident()?;
-                // Optional bound: `T: InterfaceName`
+                // Optional bound: `T: Iface` or `T: Iface + Iface2`
                 if matches!(self.peek_kind(), TokenKind::Colon) {
                     self.bump();
-                    let bound = self.expect_ident()?;
-                    bounds.insert(name.clone(), bound);
+                    let mut param_bounds = Vec::new();
+                    param_bounds.push(self.expect_ident()?);
+                    while matches!(self.peek_kind(), TokenKind::Plus) {
+                        self.bump();
+                        param_bounds.push(self.expect_ident()?);
+                    }
+                    bounds.insert(name.clone(), param_bounds);
                 }
                 params.push(name);
                 if matches!(self.peek_kind(), TokenKind::Comma) {
@@ -728,6 +736,16 @@ impl Parser {
     fn parse_interface(&mut self) -> Result<InterfaceDef, ParseError> {
         self.expect(TokenKind::Interface)?;
         let name = self.expect_ident()?;
+        // Optional parent interfaces: `interface Printable: Describable + Formattable`
+        let mut parents = Vec::new();
+        if matches!(self.peek_kind(), TokenKind::Colon) {
+            self.bump();
+            parents.push(self.expect_ident()?);
+            while matches!(self.peek_kind(), TokenKind::Plus) {
+                self.bump();
+                parents.push(self.expect_ident()?);
+            }
+        }
         self.expect(TokenKind::LBrace)?;
         let mut methods = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace) {
@@ -786,13 +804,19 @@ impl Parser {
             } else {
                 TypeExpr::Named("void".into())
             };
-            methods.push((mname, params, ret));
+            // Optional default body: `fn describe(self) -> string { ... }`
+            let default_body = if matches!(self.peek_kind(), TokenKind::LBrace) {
+                Some(self.parse_block()?)
+            } else {
+                None
+            };
+            methods.push((mname, params, ret, default_body));
             if matches!(self.peek_kind(), TokenKind::Semicolon) {
                 self.bump();
             }
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(InterfaceDef { name, methods })
+        Ok(InterfaceDef { name, parents, methods })
     }
 
     fn parse_extern_c(&mut self) -> Result<ExternCDef, ParseError> {
@@ -1097,7 +1121,7 @@ impl Parser {
         } else {
             self.expect_ident()?
         };
-        let (type_params, _type_bounds) = self.parse_type_params_opt()?;
+        let (type_params, type_bounds) = self.parse_type_params_opt()?;
         self.expect(TokenKind::LBrace)?;
         let mut fields = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace) {
@@ -1130,6 +1154,7 @@ impl Parser {
         Ok(StructDef {
             name,
             type_params,
+            type_bounds,
             fields,
             derives: Vec::new(),
             exported: false,
@@ -1152,7 +1177,7 @@ impl Parser {
     fn parse_enum(&mut self) -> Result<EnumDef, ParseError> {
         self.expect(TokenKind::Enum)?;
         let name = self.expect_ident()?;
-        let (type_params, _type_bounds) = self.parse_type_params_opt()?;
+        let (type_params, type_bounds) = self.parse_type_params_opt()?;
         self.expect(TokenKind::LBrace)?;
         let mut variants = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace) {
@@ -1184,6 +1209,7 @@ impl Parser {
         Ok(EnumDef {
             name,
             type_params,
+            type_bounds,
             variants,
             exported: false,
             source_file: None,

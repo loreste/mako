@@ -371,7 +371,7 @@ pub fn typecheck_incremental(
             });
             if has_generics {
                 let _ = tc.check(program);
-                for f in tc.mono_fns {
+                for f in tc.mono_fns.into_iter().chain(tc.default_method_fns) {
                     if !program
                         .items
                         .iter()
@@ -417,7 +417,7 @@ pub fn typecheck_incremental(
     tc.check(program)
         .map_err(|e| emit_type_error(&path, src_for_diag, e))?;
 
-    for f in tc.mono_fns {
+    for f in tc.mono_fns.into_iter().chain(tc.default_method_fns) {
         if !program
             .items
             .iter()

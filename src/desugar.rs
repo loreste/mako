@@ -227,20 +227,28 @@ fn desugar_if_let_stmt(stmt: Stmt) -> Stmt {
 /// `on Counter : Adder { fn add… }` → `fn Adder_Counter_add(self: Counter, …)`
 fn expand_on(on: OnDef) -> Vec<Item> {
     let mut items = Vec::new();
+    // For generic on-blocks, self type is Generic(ty, params) not Named(ty).
+    let self_ty = if on.type_params.is_empty() {
+        TypeExpr::Named(on.ty.clone())
+    } else {
+        TypeExpr::Generic(
+            on.ty.clone(),
+            on.type_params.iter().map(|t| TypeExpr::Named(t.clone())).collect(),
+        )
+    };
     for mut method in on.methods {
         // Fill bare `self` / `__self` type with the receiver type.
         for p in &mut method.params {
             if p.name == "self" {
                 if matches!(&p.ty, TypeExpr::Named(n) if n == "__self") {
-                    p.ty = TypeExpr::Named(on.ty.clone());
+                    p.ty = self_ty.clone();
                 }
             }
         }
-        // If first param is self without proper type still Named(__self), fix it.
         if let Some(p) = method.params.first_mut() {
             if p.name == "self" {
                 if matches!(&p.ty, TypeExpr::Named(n) if n == "__self" || n.is_empty()) {
-                    p.ty = TypeExpr::Named(on.ty.clone());
+                    p.ty = self_ty.clone();
                 }
             }
         }
@@ -250,7 +258,10 @@ fn expand_on(on: OnDef) -> Vec<Item> {
             format!("{}_{}", on.ty, method.name)
         };
         method.exported = on.exported;
-        // Methods from `on` are concrete (no free type params unless user wrote them).
+        // Generic on-block: propagate type params to make this a generic fn template.
+        if !on.type_params.is_empty() {
+            method.type_params = on.type_params.clone();
+        }
         items.push(Item::Fn(method));
     }
     items
@@ -1762,6 +1773,7 @@ fn expand_actor_ports(
     items.push(Item::Struct(StructDef {
         name: handle.clone(),
         type_params: Vec::new(),
+        type_bounds: std::collections::HashMap::new(),
         fields: port_order
             .iter()
             .map(|p| (p.clone(), chan_int.clone(), None))
@@ -2282,6 +2294,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         items.push(Item::Struct(StructDef {
             name: state_ty.clone(),
             type_params: Vec::new(),
+            type_bounds: std::collections::HashMap::new(),
             fields: actor_fields.clone(),
             derives: Vec::new(),
             exported: false,
@@ -2295,6 +2308,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         items.push(Item::Struct(StructDef {
             name: ctor_env_name.clone(),
             type_params: Vec::new(),
+            type_bounds: std::collections::HashMap::new(),
             fields: envelope_struct_fields(&actor.ctor_params),
             derives: Vec::new(),
             exported: false,
@@ -2309,6 +2323,7 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             items.push(Item::Struct(StructDef {
                 name: env_name,
                 type_params: Vec::new(),
+                type_bounds: std::collections::HashMap::new(),
                 fields: envelope_struct_fields(&arm.params),
                 derives: Vec::new(),
                 exported: false,

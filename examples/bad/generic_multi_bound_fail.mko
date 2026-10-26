@@ -1,0 +1,29 @@
+// Should fail: HalfBox implements Describable but not Measurable
+
+interface Describable {
+    fn describe(self) -> string
+}
+
+interface Measurable {
+    fn measure(self) -> int
+}
+
+struct HalfBox {
+    label: string
+}
+
+on HalfBox {
+    fn describe(self) -> string {
+        return self.label
+    }
+}
+
+fn summarize[T: Describable + Measurable](item: T) -> string {
+    return item.describe()
+}
+
+fn main() {
+    let h = HalfBox { label: "oops" }
+    let s = summarize(h)
+    print(s)
+}

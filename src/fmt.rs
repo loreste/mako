@@ -303,7 +303,7 @@ fn fmt_item(item: &Item) -> String {
         }
         Item::Interface(i) => {
             let mut o = format!("interface {} {{\n", i.name);
-            for (n, params, ret) in &i.methods {
+            for (n, params, ret, default_body) in &i.methods {
                 o.push_str(INDENT);
                 o.push_str("fn ");
                 o.push_str(n);
@@ -316,6 +316,17 @@ fn fmt_item(item: &Item) -> String {
                 }
                 o.push_str(") -> ");
                 o.push_str(&fmt_type(ret));
+                if let Some(body) = default_body {
+                    o.push_str(" {\n");
+                    for stmt in &body.stmts {
+                        o.push_str(INDENT);
+                        o.push_str(INDENT);
+                        o.push_str(&fmt_stmt(stmt, 2));
+                        o.push('\n');
+                    }
+                    o.push_str(INDENT);
+                    o.push('}');
+                }
                 o.push('\n');
             }
             o.push('}');

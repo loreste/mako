@@ -1,0 +1,40 @@
+// Default method bodies in interfaces
+
+interface Describable {
+    fn describe(self) -> string {
+        return "unknown"
+    }
+}
+
+struct Dog {
+    name: string
+}
+
+// Dog overrides the default.
+on Dog {
+    fn describe(self) -> string {
+        return self.name
+    }
+}
+
+struct Mystery {
+    x: int
+}
+
+// Mystery uses the default — no describe() impl.
+
+fn show[T: Describable](item: T) -> string {
+    return item.describe()
+}
+
+fn TestOverride() {
+    let d = Dog { name: "Rex" }
+    let s = show(d)
+    assert_eq_str(s, "Rex")
+}
+
+fn TestDefault() {
+    let m = Mystery { x: 42 }
+    let s = show(m)
+    assert_eq_str(s, "unknown")
+}

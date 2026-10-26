@@ -1,0 +1,28 @@
+// Should fail: Stub has format() but not describe() from parent
+
+interface Describable {
+    fn describe(self) -> string
+}
+
+interface Printable: Describable {
+    fn format(self) -> string
+}
+
+struct Stub {
+    x: int
+}
+
+on Stub {
+    fn format(self) -> string {
+        return "stub"
+    }
+}
+
+fn show[T: Printable](item: T) -> string {
+    return item.format()
+}
+
+fn main() {
+    let s = Stub { x: 1 }
+    print(show(s))
+}

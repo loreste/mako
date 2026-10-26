@@ -69,6 +69,8 @@ pub enum ImportMode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OnDef {
     pub ty: String,
+    /// Type params for generic receivers: `on Pair[T] { ... }`.
+    pub type_params: Vec<String>,
     /// When set, method names become `{iface}_{ty}_{method}` for interface dispatch.
     pub iface: Option<String>,
     pub methods: Vec<FnDef>,
@@ -106,7 +108,10 @@ pub struct ReceiveArm {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InterfaceDef {
     pub name: String,
-    pub methods: Vec<(String, Vec<TypeExpr>, TypeExpr)>,
+    /// Parent interfaces: `interface Printable: Describable + Formattable`.
+    pub parents: Vec<String>,
+    /// `(name, params, return_type, optional_default_body)`.
+    pub methods: Vec<(String, Vec<TypeExpr>, TypeExpr, Option<Block>)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,9 +137,8 @@ pub struct FnDef {
     pub name: String,
     /// User generics: `fn id[T](x: T) -> T` or `fn id<T>(x: T) -> T` (dual syntax).
     pub type_params: Vec<String>,
-    /// Optional interface bounds: `fn sort[T: Orderable](a: []T)`.
-    /// Maps type param name → interface name. Only populated for bounded params.
-    pub type_bounds: HashMap<String, String>,
+    /// Optional interface bounds: `fn sort[T: Orderable](a: []T)`, `fn f[T: Reader + Closer](x: T)`.
+    pub type_bounds: HashMap<String, Vec<String>>,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,
     pub body: Block,
@@ -167,6 +171,8 @@ pub struct StructDef {
     pub name: String,
     /// User generics: `struct Foo[T, U]` or `struct Foo<T, U>` (dual syntax).
     pub type_params: Vec<String>,
+    /// Optional interface bounds: `struct Repo[T: Storable]`.
+    pub type_bounds: HashMap<String, Vec<String>>,
     /// `(name, type, optional default expr)` — defaults are const-ish literals in v1.
     pub fields: Vec<(String, TypeExpr, Option<Expr>)>,
     /// e.g. ["json"] from `#[derive(json)]`
@@ -181,6 +187,8 @@ pub struct EnumDef {
     pub name: String,
     /// User generics: `enum Tree[T] { Leaf(T), Node(Tree[T], Tree[T]) }`
     pub type_params: Vec<String>,
+    /// Optional interface bounds: `enum Container[T: Describable]`.
+    pub type_bounds: HashMap<String, Vec<String>>,
     pub variants: Vec<EnumVariant>,
     pub exported: bool,
     /// Origin file path for pulled modules (diagnostics).
