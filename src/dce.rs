@@ -133,31 +133,25 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
     // Check for unused imports (if source file is provided).
     // This runs after BFS so reachable_fns is complete.
 
-    // Methods on monomorphized generic types: if `Wrapper__Dog` is reachable
-    // and `show` is a called method, mark `Wrapper__Dog_show` reachable so its
-    // body gets BFS-walked (the filter-stage heuristic keeps it but doesn't walk).
-    // Scoped to mono types (contain `__`) to avoid broadening non-generic DCE.
+    // Methods on reachable types: if `Dog` or `Wrapper__Dog` is reachable,
+    // keep all `Dog_*` / `Wrapper__Dog_*` fns and BFS-walk their bodies so
+    // transitive deps (e.g. methods called from default bodies) survive.
     {
-        let mono_type_names: HashSet<&str> = program.items.iter().filter_map(|item| match item {
-            Item::Struct(s) if s.name.contains("__") && reachable_types.contains(&s.name) => Some(s.name.as_str()),
-            Item::Enum(e) if e.name.contains("__") && reachable_types.contains(&e.name) => Some(e.name.as_str()),
+        let type_prefixes: Vec<String> = program.items.iter().filter_map(|item| match item {
+            Item::Struct(s) if reachable_types.contains(&s.name) => {
+                Some(format!("{}_", s.name))
+            }
+            Item::Enum(e) if reachable_types.contains(&e.name) => {
+                Some(format!("{}_", e.name))
+            }
             _ => None,
         }).collect();
-        let methods_called: HashSet<String> = reachable_fns.iter()
-            .filter(|n| !n.contains('_'))
-            .cloned()
-            .collect();
         for item in &program.items {
             if let Item::Fn(f) = item {
                 if reachable_fns.contains(&f.name) { continue; }
-                for method in methods_called.iter() {
-                    if let Some(prefix) = f.name.strip_suffix(&format!("_{method}")) {
-                        if mono_type_names.contains(prefix) {
-                            reachable_fns.insert(f.name.clone());
-                            collect_fn_refs(f, &mut queue, &mut reachable_types);
-                            break;
-                        }
-                    }
+                if type_prefixes.iter().any(|p| f.name.starts_with(p)) {
+                    reachable_fns.insert(f.name.clone());
+                    collect_fn_refs(f, &mut queue, &mut reachable_types);
                 }
             }
         }
