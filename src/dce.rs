@@ -133,12 +133,14 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
     // Check for unused imports (if source file is provided).
     // This runs after BFS so reachable_fns is complete.
 
-    // Methods on reachable types: if `Dog` is reachable and `describe` is
-    // a called method, mark `Dog_describe` reachable so its body gets walked.
+    // Methods on monomorphized generic types: if `Wrapper__Dog` is reachable
+    // and `show` is a called method, mark `Wrapper__Dog_show` reachable so its
+    // body gets BFS-walked (the filter-stage heuristic keeps it but doesn't walk).
+    // Scoped to mono types (contain `__`) to avoid broadening non-generic DCE.
     {
-        let type_names: HashSet<&str> = program.items.iter().filter_map(|item| match item {
-            Item::Struct(s) if reachable_types.contains(&s.name) => Some(s.name.as_str()),
-            Item::Enum(e) if reachable_types.contains(&e.name) => Some(e.name.as_str()),
+        let mono_type_names: HashSet<&str> = program.items.iter().filter_map(|item| match item {
+            Item::Struct(s) if s.name.contains("__") && reachable_types.contains(&s.name) => Some(s.name.as_str()),
+            Item::Enum(e) if e.name.contains("__") && reachable_types.contains(&e.name) => Some(e.name.as_str()),
             _ => None,
         }).collect();
         let methods_called: HashSet<String> = reachable_fns.iter()
@@ -150,7 +152,7 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
                 if reachable_fns.contains(&f.name) { continue; }
                 for method in methods_called.iter() {
                     if let Some(prefix) = f.name.strip_suffix(&format!("_{method}")) {
-                        if type_names.contains(prefix) {
+                        if mono_type_names.contains(prefix) {
                             reachable_fns.insert(f.name.clone());
                             collect_fn_refs(f, &mut queue, &mut reachable_types);
                             break;

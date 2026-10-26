@@ -150,18 +150,15 @@ do
     fi
   fi
 done
-# Generics remain unsupported and must hard-error (no silent C fallback).
-if env PATH=/nonexistent "$repo_dir/target/debug/mako" build \
+# Basic generics (identity, first) now compile on LLVM after monomorphization
+# improvements. Verify they succeed rather than hard-error.
+if ! env PATH=/nonexistent "$repo_dir/target/debug/mako" build \
   "$repo_dir/examples/generics_user.mko" --release --backend llvm \
-  -o "$tmp_dir/unsupported" >"$tmp_dir/unsupported.out" 2>&1; then
-  echo "LLVM backend test: generics unexpectedly compiled" >&2
+  -o "$tmp_dir/generics_user" >"$tmp_dir/generics_user.out" 2>&1; then
+  echo "LLVM backend test: basic generics failed (expected to compile)" >&2
+  cat "$tmp_dir/generics_user.out" >&2
   exit 1
 fi
-grep -Eq "unsupported|not implemented|not in the scalar|generic|failed" "$tmp_dir/unsupported.out" || {
-  echo "LLVM backend test: unsupported construct did not produce a diagnostic" >&2
-  cat "$tmp_dir/unsupported.out" >&2
-  exit 1
-}
 
 echo "[5/5] LLVM release performance and artifact parity"
 # Keep these gates opt-out configurable for slower CI hosts, but make the
