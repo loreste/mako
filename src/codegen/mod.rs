@@ -5667,7 +5667,7 @@ impl Codegen {
         self.line(&format!("MakoString {lit}[] = {{ {body} }};"));
         // String arrays still heap-allocate (must own cloned element strings).
         self.line(&format!(
-            "MakoStrArray {tmp} = mako_str_array_of({lit}, {});",
+            "MakoStrArray {tmp} = mako_str_array_of((const MakoString *){lit}, {});",
             elems.len()
         ));
         for (expr, val) in elems.iter().zip(&vals) {
@@ -37669,7 +37669,7 @@ impl Codegen {
                     let lit = self.fresh("nlit");
                     self.line(&format!("{elem_ty} {lit}[] = {{ {} }};", vals.join(", ")));
                     self.line(&format!(
-                        "{outer} {tmp} = mako_arr_{tag}_of({lit}, {});",
+                        "{outer} {tmp} = mako_arr_{tag}_of((const {elem_ty} *){lit}, {});",
                         elems.len()
                     ));
                     return (outer, tmp);
@@ -37690,7 +37690,7 @@ impl Codegen {
                         let lit = self.fresh("mlit");
                         self.line(&format!("{ty0} {lit}[] = {{ {} }};", vals.join(", ")));
                         self.line(&format!(
-                            "{outer} {tmp} = mako_arr_{tag}_of({lit}, {});",
+                            "{outer} {tmp} = mako_arr_{tag}_of((const {ty0} *){lit}, {});",
                             elems.len()
                         ));
                         return (outer, tmp);
@@ -37708,7 +37708,7 @@ impl Codegen {
                         let lit = self.fresh("blit");
                         self.line(&format!("{ty0} {lit}[] = {{ {} }};", vals.join(", ")));
                         self.line(&format!(
-                            "{outer} {tmp} = mako_arr_{tag}_of({lit}, {});",
+                            "{outer} {tmp} = mako_arr_{tag}_of((const {ty0} *){lit}, {});",
                             elems.len()
                         ));
                         return (outer, tmp);
@@ -37737,7 +37737,7 @@ impl Codegen {
                         let lit = self.fresh("clit");
                         self.line(&format!("{ty0} {lit}[] = {{ {} }};", vals.join(", ")));
                         self.line(&format!(
-                            "{outer} {tmp} = mako_arr_{tag}_of({lit}, {});",
+                            "{outer} {tmp} = mako_arr_{tag}_of((const {ty0} *){lit}, {});",
                             elems.len()
                         ));
                         return (outer, tmp);
@@ -37797,7 +37797,7 @@ impl Codegen {
                         let lit = self.fresh("slit");
                         self.line(&format!("{sn} {lit}[] = {{ {} }};", vals.join(", ")));
                         self.line(&format!(
-                            "{arr_ty} {tmp} = mako_arr_{sn}_of({lit}, {});",
+                            "{arr_ty} {tmp} = mako_arr_{sn}_of((const {sn} *){lit}, {});",
                             elems.len()
                         ));
                         return (arr_ty, tmp);
@@ -37824,7 +37824,7 @@ impl Codegen {
                         let lit = self.fresh("vlit");
                         self.line(&format!("{ty0} {lit}[] = {{ {} }};", vals.join(", ")));
                         self.line(&format!(
-                            "{outer} {tmp} = mako_arr_{tag}_of({lit}, {});",
+                            "{outer} {tmp} = mako_arr_{tag}_of((const {ty0} *){lit}, {});",
                             elems.len()
                         ));
                         return (outer, tmp);
