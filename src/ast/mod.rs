@@ -71,6 +71,8 @@ pub struct OnDef {
     pub ty: String,
     /// Type params for generic receivers: `on Pair[T] { ... }`.
     pub type_params: Vec<String>,
+    /// Bounds on type params: `on Wrapper[T: Describable] { ... }`.
+    pub type_bounds: HashMap<String, Vec<String>>,
     /// When set, method names become `{iface}_{ty}_{method}` for interface dispatch.
     pub iface: Option<String>,
     pub methods: Vec<FnDef>,

@@ -346,7 +346,7 @@ impl Parser {
         self.expect(TokenKind::On)?;
         let ty = self.expect_ident()?;
         // Optional type params: `on Pair[T]`
-        let (type_params, _) = self.parse_type_params_opt()?;
+        let (type_params, type_bounds) = self.parse_type_params_opt()?;
         let iface = if matches!(self.peek_kind(), TokenKind::Colon) {
             self.bump();
             Some(self.expect_ident()?)
@@ -364,6 +364,7 @@ impl Parser {
         Ok(OnDef {
             ty,
             type_params,
+            type_bounds,
             iface,
             methods,
             exported: false,

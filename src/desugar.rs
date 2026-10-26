@@ -258,9 +258,10 @@ fn expand_on(on: OnDef) -> Vec<Item> {
             format!("{}_{}", on.ty, method.name)
         };
         method.exported = on.exported;
-        // Generic on-block: propagate type params to make this a generic fn template.
+        // Generic on-block: propagate type params and bounds.
         if !on.type_params.is_empty() {
             method.type_params = on.type_params.clone();
+            method.type_bounds = on.type_bounds.clone();
         }
         items.push(Item::Fn(method));
     }
