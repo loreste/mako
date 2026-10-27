@@ -60,6 +60,17 @@ cargo test --manifest-path "$repo_dir/Cargo.toml" --features llvm-backend --bin 
 
 echo "[2/4] C/LLVM differential execution"
 cargo build --manifest-path "$repo_dir/Cargo.toml" --features llvm-backend
+
+# Probe: verify bundled lld can link against the current macOS SDK.
+# Runner SDK updates can break TAPI parsing in older lld builds.
+if ! env -u SDKROOT PATH=/nonexistent "$repo_dir/target/debug/mako" build \
+  "$scalar_fixture" --release --backend llvm \
+  -o "$tmp_dir/lld-probe" >"$tmp_dir/lld-probe.log" 2>&1; then
+  if grep -q "TAPI file\|malformed file\|unknown architecture" "$tmp_dir/lld-probe.log"; then
+    skip_or_fail "bundled lld incompatible with current macOS SDK TAPI files (rebuild lld)"
+  fi
+fi
+
 for fixture in "$scalar_fixture" "$string_fixture" "$slice_fixture"; do
   name="$(basename "$fixture" .mko)"
   "$repo_dir/target/debug/mako" build "$fixture" --release --backend c \
