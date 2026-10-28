@@ -4703,6 +4703,12 @@ impl Codegen {
     /// A cloned replacement may retain the same slice backing. Pointer equality
     /// skips dest-destroy, but the superseded owner still owes one release.
     /// Views have no owner reference and must never inspect an RC header.
+    ///
+    /// NOTE: Disabled for slice/array types — the release was incorrect when
+    /// src and dest share the same backing without a clone (e.g. mutate-through-
+    /// pointer + return pattern). The spurious release caused refcount under-
+    /// counting, making subsequent COW operations see stale data. Channel types
+    /// retain their release because their ownership model differs.
     fn write_retained_replacement_release(
         &mut self,
         old: &str,
@@ -4718,23 +4724,10 @@ impl Codegen {
             );
             return;
         }
-        if Self::slice_backing_release(cty) != "mako_rc_release" {
-            return;
-        }
-        if cty.starts_with("MakoArr_")
-            || matches!(
-                cty,
-                "MakoIntArray"
-                    | "MakoByteArray"
-                    | "MakoStrArray"
-                    | "MakoFloatArray"
-                    | "MakoBoolArray"
-            )
-        {
-            let _ = writeln!(self.out,
-                "{indent}if ({old}.data == {new}.data && {old}.cap > 0 && {new}.cap > 0 && {old}.data && mako_rc_shared({old}.data)) mako_rc_release({old}.data);"
-            );
-        }
+        // Slice/array retained releases disabled: the pattern caused refcount
+        // under-counting when a function mutates a struct through a pointer and
+        // returns it, because no clone incremented the refcount, but the release
+        // still decremented it.
     }
 
     /// Overwrite `m->vals[i]` then dest-destroy the previous owning value.
@@ -16873,6 +16866,7 @@ impl Codegen {
                         None
                     };
                     let old_ptr = if is_slice
+                        && !is_self_append
                         && old_str_arr_parts.is_none()
                         && !self.append_releases_backing(&slice_cty)
                         && self.current_arena.is_none()
