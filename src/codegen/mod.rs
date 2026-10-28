@@ -4799,7 +4799,19 @@ impl Codegen {
                 &format!("{old}.{path}"),
                 &format!("{dest}.{path}"),
             );
-            self.emit_line(format_args!("if ({cond}) {{ {free_fn}({old}.{path}); }}"));
+            let is_rc_array = matches!(
+                fty.as_str(),
+                "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
+                    | "MakoFloatArray" | "MakoBoolArray"
+            ) || fty.starts_with("MakoArr_");
+            if is_rc_array {
+                self.emit_line(format_args!(
+                    "if ({cond}) {{ {free_fn}({old}.{path}); }} \
+                     else if ({old}.{path}.cap > 0 && {old}.{path}.data && mako_rc_shared({old}.{path}.data)) {{ mako_rc_release({old}.{path}.data); }}"
+                ));
+            } else {
+                self.emit_line(format_args!("if ({cond}) {{ {free_fn}({old}.{path}); }}"));
+            }
             self.write_retained_replacement_release(
                 &format!("{old}.{path}"),
                 &format!("{dest}.{path}"),
