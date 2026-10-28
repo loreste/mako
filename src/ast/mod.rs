@@ -81,6 +81,8 @@ pub struct OnDef {
     pub type_bounds: HashMap<String, Vec<String>>,
     /// When set, method names become `{iface}_{ty}_{method}` for interface dispatch.
     pub iface: Option<String>,
+    /// Associated type bindings: `type Item = int`.
+    pub assoc_types: Vec<(String, TypeExpr)>,
     pub methods: Vec<FnDef>,
     pub exported: bool,
 }
@@ -118,6 +120,8 @@ pub struct InterfaceDef {
     pub name: String,
     /// Parent interfaces: `interface Printable: Describable + Formattable`.
     pub parents: Vec<String>,
+    /// Associated types: `type Item` — resolved per-implementation.
+    pub assoc_types: Vec<String>,
     /// `(name, params, return_type, optional_default_body)`.
     pub methods: Vec<(String, Vec<TypeExpr>, TypeExpr, Option<Block>)>,
 }

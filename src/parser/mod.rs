@@ -370,8 +370,21 @@ impl Parser {
             None
         };
         self.expect(TokenKind::LBrace)?;
+        let mut assoc_types = Vec::new();
         let mut methods = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace | TokenKind::Eof) {
+            // Associated type binding: `type Item = int`
+            if matches!(self.peek_kind(), TokenKind::Type) {
+                self.bump();
+                let aname = self.expect_ident()?;
+                self.expect(TokenKind::Assign)?;
+                let aty = self.parse_type()?;
+                assoc_types.push((aname, aty));
+                if matches!(self.peek_kind(), TokenKind::Semicolon) {
+                    self.bump();
+                }
+                continue;
+            }
             let mut f = self.parse_fn()?;
             f.exported = false;
             methods.push(f);
@@ -382,6 +395,7 @@ impl Parser {
             type_params,
             type_bounds,
             iface,
+            assoc_types,
             methods,
             exported: false,
         })
@@ -765,8 +779,19 @@ impl Parser {
             }
         }
         self.expect(TokenKind::LBrace)?;
+        let mut assoc_types = Vec::new();
         let mut methods = Vec::new();
         while !matches!(self.peek_kind(), TokenKind::RBrace) {
+            // Associated type: `type Item`
+            if matches!(self.peek_kind(), TokenKind::Type) {
+                self.bump();
+                let aname = self.expect_ident()?;
+                assoc_types.push(aname);
+                if matches!(self.peek_kind(), TokenKind::Semicolon) {
+                    self.bump();
+                }
+                continue;
+            }
             // Go: `Write([]byte) (int, string)` or `func Write(...)` / Mako `fn write(...) -> int`
             if matches!(self.peek_kind(), TokenKind::Fn | TokenKind::Func) {
                 self.bump();
@@ -834,7 +859,7 @@ impl Parser {
             }
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(InterfaceDef { name, parents, methods })
+        Ok(InterfaceDef { name, parents, assoc_types, methods })
     }
 
     fn parse_extern_c(&mut self) -> Result<ExternCDef, ParseError> {
