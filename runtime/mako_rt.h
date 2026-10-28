@@ -947,14 +947,10 @@ static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
     size_t ncap = actual_cap;
     if (s.len + 1 > actual_cap) ncap = actual_cap ? actual_cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
-    void *old_data = s.data;
-    size_t old_actual_cap = actual_cap;
     uint8_t *nd = (uint8_t *)mako_rc_alloc(ncap);
     if (s.len) memcpy(nd, s.data, s.len);
     s.data = nd;
     s.cap = ncap;
-    /* Release old backing (skip pool-backed buffers — they're arena-managed). */
-    if (!is_pool && old_data && old_actual_cap > 0) mako_rc_release(old_data);
     s.data[s.len++] = (uint8_t)v;
     return s;
 }
@@ -1193,8 +1189,6 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
         if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
         MakoString *nd = (MakoString *)mako_rc_alloc(ncap * sizeof(MakoString));
-        MakoString *old_data = s.data;
-        size_t old_cap = s.cap;
         if (shared) {
             /* Shared backing: COW detach — clone every element so both
              * owners have independent string lifetimes. */
@@ -1203,11 +1197,9 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
             /* Sole owner growing: move elements (memcpy), not clone. */
             if (s.len) memcpy(nd, s.data, s.len * sizeof(MakoString));
         }
+        /* Caller releases old s.data via reassignment or scope-exit. */
         s.data = nd;
         s.cap = ncap;
-        /* Release old backing (shared: decrement ref; sole: free block).
-         * Elements are cloned (shared) or moved (sole), so this is safe. */
-        if (old_data && old_cap > 0) mako_rc_release(old_data);
     }
     s.data[s.len++] = mako_str_clone(v);
     return s;
@@ -1332,13 +1324,10 @@ static inline MakoFloatArray mako_float_array_append(MakoFloatArray s, double v)
         size_t ncap = s.cap;
         if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        void *old_data = s.data;
-        size_t old_cap = s.cap;
         double *nd = (double *)mako_rc_alloc(ncap * sizeof(double));
         if (s.len) memcpy(nd, s.data, s.len * sizeof(double));
         s.data = nd;
         s.cap = ncap;
-        if (old_data && old_cap > 0) mako_rc_release(old_data);
     }
     s.data[s.len++] = v;
     return s;
@@ -1454,13 +1443,10 @@ static inline MakoBoolArray mako_bool_array_append(MakoBoolArray s, bool v) {
         size_t ncap = s.cap;
         if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;
         if (ncap < s.len + 1) ncap = s.len + 1;
-        void *old_data = s.data;
-        size_t old_cap = s.cap;
         bool *nd = (bool *)mako_rc_alloc(ncap * sizeof(bool));
         if (s.len) memcpy(nd, s.data, s.len * sizeof(bool));
         s.data = nd;
         s.cap = ncap;
-        if (old_data && old_cap > 0) mako_rc_release(old_data);
     }
     s.data[s.len++] = v;
     return s;
@@ -5906,13 +5892,11 @@ static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     size_t ncap = s.cap;
     if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
-    void *old_data = s.data;
-    size_t old_cap = s.cap;
     int64_t *nd = (int64_t *)mako_rc_alloc(ncap * sizeof(int64_t));
     if (s.len) memcpy(nd, s.data, s.len * sizeof(int64_t));
+    /* Caller releases old s.data via reassignment or scope-exit. */
     s.data = nd;
     s.cap = ncap;
-    if (old_data && old_cap > 0) mako_rc_release(old_data);
     s.data[s.len++] = v;
     return s;
 }

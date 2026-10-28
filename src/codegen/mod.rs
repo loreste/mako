@@ -6595,8 +6595,6 @@ impl Codegen {
             "        if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;"
         );
         let _ = writeln!(self.out, "        if (ncap < s.len + 1) ncap = s.len + 1;");
-        let _ = writeln!(self.out, "        void *old_data = s.data;");
-        let _ = writeln!(self.out, "        size_t old_cap = s.cap;");
         let _ = writeln!(
             self.out,
             "        {c_ty} *nd = ({c_ty} *)mako_rc_alloc(ncap * sizeof({c_ty}));"
@@ -6606,7 +6604,6 @@ impl Codegen {
             "        if (s.len) memcpy(nd, s.data, s.len * sizeof({c_ty}));"
         );
         let _ = writeln!(self.out, "        s.data = nd; s.cap = ncap;");
-        let _ = writeln!(self.out, "        if (old_data && old_cap > 0) mako_rc_release(old_data);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "    s.data[s.len++] = v; return s;");
         let _ = writeln!(self.out, "}}");
@@ -7821,8 +7818,6 @@ impl Codegen {
             "        if (s.len + 1 > s.cap) ncap = s.cap ? s.cap * 2 : 1;"
         );
         let _ = writeln!(self.out, "        if (ncap < s.len + 1) ncap = s.len + 1;");
-        let _ = writeln!(self.out, "        void *old_data = s.data;");
-        let _ = writeln!(self.out, "        size_t old_cap = s.cap;");
         let _ = writeln!(
             self.out,
             "        {elem_c} *nd = ({elem_c} *)mako_rc_alloc(ncap * sizeof({elem_c}));"
@@ -7841,7 +7836,6 @@ impl Codegen {
             let _ = writeln!(self.out, "        }}");
         }
         let _ = writeln!(self.out, "        s.data = nd; s.cap = ncap;");
-        let _ = writeln!(self.out, "        if (old_data && old_cap > 0) mako_rc_release(old_data);");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "    s.data[s.len++] = v; return s;");
         let _ = writeln!(self.out, "}}");
@@ -16872,7 +16866,6 @@ impl Codegen {
                         None
                     };
                     let old_ptr = if is_slice
-                        && !is_self_append
                         && old_str_arr_parts.is_none()
                         && !self.append_releases_backing(&slice_cty)
                         && self.current_arena.is_none()
