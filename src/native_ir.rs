@@ -1927,6 +1927,7 @@ fn item_kind_name(item: &Item) -> &'static str {
         Item::On(_) => "on",
         Item::Package { .. } => "package",
         Item::Import { .. } => "import",
+        Item::ThreadLocal { .. } => "thread_local",
     }
 }
 
@@ -2709,7 +2710,8 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
             | Item::Import { .. }
             | Item::Const(_)
             | Item::On(_)
-            | Item::Interface(_) => {}
+            | Item::Interface(_)
+            | Item::ThreadLocal { .. } => {}
             other => {
                 return Err(IrError::new(format!(
                     "native IR: non-function top-level item ({})",

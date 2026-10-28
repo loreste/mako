@@ -232,7 +232,8 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
             | Item::ExternC(_)
             | Item::Actor(_)
             | Item::Package { .. }
-            | Item::Import { .. } => true,
+            | Item::Import { .. }
+            | Item::ThreadLocal { .. } => true,
         })
         .cloned()
         .collect();

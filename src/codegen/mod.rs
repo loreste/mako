@@ -517,7 +517,7 @@ impl Codegen {
                         self.collect_maps_in_type(r);
                     }
                 }
-                Item::Package { .. } | Item::Import { .. } => {}
+                Item::Package { .. } | Item::Import { .. } | Item::ThreadLocal { .. } => {}
             }
         }
     }
@@ -6215,6 +6215,21 @@ impl Codegen {
                 | Item::On(_)
                 | Item::Package { .. }
                 | Item::Import { .. } => {}
+                Item::ThreadLocal { name, ty, init } => {
+                    let c_ty = match ty {
+                        TypeExpr::Named(n) => match n.as_str() {
+                            "int" => "int64_t",
+                            "float" => "double",
+                            "bool" => "bool",
+                            "string" => "MakoString",
+                            "byte" => "uint8_t",
+                            _ => "int64_t",
+                        }.to_string(),
+                        _ => "int64_t".to_string(),
+                    };
+                    let (_, val) = self.emit_expr(init);
+                    let _ = writeln!(self.out, "static _Thread_local {c_ty} {} = {val};", mangle(name));
+                }
                 Item::ExternC(_) => {}
                 Item::Const(c) => {
                     if let Some(v) = fold_const_c_env(
@@ -7468,11 +7483,16 @@ impl Codegen {
     fn emit_struct_typedef(&mut self, s: &StructDef) {
         let info = self.structs.get(&s.name).unwrap().clone();
         let c_name = info.c_name.clone();
+        let packed = s.derives.iter().any(|d| d == "packed");
         let _ = writeln!(self.out, "typedef struct {c_name} {{");
         for (fname, fty) in &info.fields {
             let _ = writeln!(self.out, "    {fty} {fname};");
         }
-        let _ = writeln!(self.out, "}} {c_name};");
+        if packed {
+            let _ = writeln!(self.out, "}} __attribute__((packed)) {c_name};");
+        } else {
+            let _ = writeln!(self.out, "}} {c_name};");
+        }
         // Structural equality (content for strings; field-wise for nested structs).
         // Slice/map/array fields use identity (data pointer + len) — not deep content.
         let _ = writeln!(

@@ -14158,6 +14158,10 @@ impl TypeChecker {
                 Item::Actor(_) | Item::On(_) | Item::Package { .. } => {
                     // Desugared / informational; ignore.
                 }
+                Item::ThreadLocal { name, ty, .. } => {
+                    let resolved = self.resolve_type(ty)?;
+                    self.define(name, resolved, true);
+                }
                 Item::Interface(iface) => {
                     // Validate method type expressions; presence checked after fns collected.
                     for (_mname, params, ret, _) in &iface.methods {

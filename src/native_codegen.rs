@@ -2549,6 +2549,7 @@ fn item_name(item: &Item) -> &'static str {
         Item::On(_) => "method",
         Item::Package { .. } => "package",
         Item::Import { .. } => "import",
+        Item::ThreadLocal { .. } => "thread_local",
     }
 }
 

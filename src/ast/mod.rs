@@ -17,6 +17,12 @@ pub enum Item {
     Interface(InterfaceDef),
     ExternC(ExternCDef),
     Const(ConstDef),
+    /// `thread_local let name: type = init` — per-thread mutable storage.
+    ThreadLocal {
+        name: String,
+        ty: TypeExpr,
+        init: Expr,
+    },
     /// Mako-native method block: `on Point { fn distance(self) -> int { … } }`
     /// Desugars to free functions `Point_distance` (backward compatible with existing style).
     On(OnDef),

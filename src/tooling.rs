@@ -385,6 +385,7 @@ fn top_level_symbol_count(program: &Program) -> usize {
                     | Item::Const(_)
                     | Item::On(_)
                     | Item::Package { .. }
+                    | Item::ThreadLocal { .. }
             )
         })
         .count()
@@ -1009,7 +1010,7 @@ pub fn run_doc(path: &Path, out_dir: &Path) -> Result<(), ()> {
                     });
                     md.push_str("\n```\n\n");
                 }
-                Item::Actor(_) | Item::ExternC(_) | Item::On(_) | Item::Package { .. } => {}
+                Item::Actor(_) | Item::ExternC(_) | Item::On(_) | Item::Package { .. } | Item::ThreadLocal { .. } => {}
             }
         }
         let out = out_dir.join(format!("{stem}.md"));
@@ -1136,6 +1137,7 @@ pub fn run_metadata(path: &Path) -> Result<(), ()> {
                         json_escape(path)
                     ));
                 }
+                Item::ThreadLocal { .. } => {}
             }
         }
         file_json.push(format!(
@@ -1220,7 +1222,7 @@ fn api_item_signature(item: &Item) -> Option<(String, String)> {
             on.ty.clone(),
             format!("on {} ({} methods)", on.ty, on.methods.len()),
         )),
-        Item::Package { .. } | Item::Import { .. } => None,
+        Item::Package { .. } | Item::Import { .. } | Item::ThreadLocal { .. } => None,
     }
 }
 
@@ -2291,7 +2293,7 @@ fn apply_import_prefix(program: &mut Program, alias: &str) {
                     names.fns.insert(m.name.clone());
                 }
             }
-            Item::Package { .. } | Item::Import { .. } => {}
+            Item::Package { .. } | Item::Import { .. } | Item::ThreadLocal { .. } => {}
         }
     }
     for item in &mut program.items {
@@ -2329,7 +2331,7 @@ fn prefix_item_def(item: &mut Item, alias: &str) {
                 m.name = format!("{alias}__{}", m.name);
             }
         }
-        Item::Package { .. } | Item::Import { .. } => {}
+        Item::Package { .. } | Item::Import { .. } | Item::ThreadLocal { .. } => {}
     }
 }
 
@@ -2392,7 +2394,7 @@ fn rewrite_item_refs(item: &mut Item, alias: &str, names: &ImportNameSets) {
                 rewrite_block(&mut arm.body, alias, names);
             }
         }
-        Item::Package { .. } | Item::Import { .. } => {}
+        Item::Package { .. } | Item::Import { .. } | Item::ThreadLocal { .. } => {}
     }
 }
 
@@ -3291,7 +3293,7 @@ fn filter_exported_only(program: &mut Program) {
         Item::Const(c) => name_looks_exported(&c.name),
         Item::Actor(a) => name_looks_exported(&a.name),
         Item::ExternC(e) => name_looks_exported(&e.name),
-        Item::Package { .. } | Item::Import { .. } => false,
+        Item::Package { .. } | Item::Import { .. } | Item::ThreadLocal { .. } => false,
     });
 }
 

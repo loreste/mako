@@ -251,6 +251,22 @@ impl Parser {
         } else {
             false
         };
+        // `thread_local let name: type = init`
+        if matches!(self.peek_kind(), TokenKind::Ident(ref s) if s == "thread_local")
+            && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::Let))
+        {
+            self.bump(); // thread_local
+            self.bump(); // let
+            if matches!(self.peek_kind(), TokenKind::Mut) {
+                self.bump(); // optional mut
+            }
+            let name = self.expect_ident()?;
+            self.expect(TokenKind::Colon)?;
+            let ty = self.parse_type()?;
+            self.expect(TokenKind::Assign)?;
+            let init = self.parse_expr()?;
+            return Ok(Item::ThreadLocal { name, ty, init });
+        }
         // `const fn` — compile-time foldable function
         let is_const_fn = matches!(self.peek_kind(), TokenKind::Const)
             && matches!(
@@ -435,6 +451,7 @@ impl Parser {
                 self.expect(TokenKind::RParen)?;
                 ItemAttr::Derive(out)
             }
+            "packed" => ItemAttr::Derive(vec!["packed".into()]),
             "stable" => ItemAttr::Stable,
             "deprecated" => {
                 let message = if matches!(self.peek_kind(), TokenKind::LParen) {
@@ -1081,6 +1098,32 @@ impl Parser {
         } else {
             None
         };
+        // Optional `where` clause: `fn f[T](x: T) -> int where T: A + B { ... }`
+        let mut type_bounds = type_bounds;
+        if matches!(self.peek_kind(), TokenKind::Ident(ref s) if s == "where") {
+            self.bump();
+            loop {
+                let tp = self.expect_ident()?;
+                self.expect(TokenKind::Colon)?;
+                let mut bounds = Vec::new();
+                bounds.push(self.expect_ident()?);
+                while matches!(self.peek_kind(), TokenKind::Plus) {
+                    self.bump();
+                    bounds.push(self.expect_ident()?);
+                }
+                let entry = type_bounds.entry(tp).or_default();
+                for b in bounds {
+                    if !entry.contains(&b) {
+                        entry.push(b);
+                    }
+                }
+                if matches!(self.peek_kind(), TokenKind::Comma) {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+        }
         // Parse `prove` contract clauses before the body.
         let mut contracts = Vec::new();
         while matches!(self.peek_kind(), TokenKind::Ident(ref s) if s == "prove") {

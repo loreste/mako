@@ -358,6 +358,7 @@ fn fmt_item(item: &Item) -> String {
         Item::Const(c) => {
             format!("const {} = {}", c.name, fmt_expr(&c.value, 0))
         }
+        Item::ThreadLocal { name, ty, init: _ } => format!("thread_local let {name}: {} = ...", fmt_type(ty)),
     }
 }
 
