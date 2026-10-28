@@ -947,12 +947,14 @@ static inline MakoByteArray mako_byte_append(MakoByteArray s, int64_t v) {
     size_t ncap = actual_cap;
     if (s.len + 1 > actual_cap) ncap = actual_cap ? actual_cap * 2 : 1;
     if (ncap < s.len + 1) ncap = s.len + 1;
+    void *old_data = s.data;
+    size_t old_actual_cap = actual_cap;
     uint8_t *nd = (uint8_t *)mako_rc_alloc(ncap);
     if (s.len) memcpy(nd, s.data, s.len);
-    /* Do NOT release old s.data here — caller owns that pointer and will
-     * release it via replace_*_owned (reassignment) or scope-exit free. */
     s.data = nd;
     s.cap = ncap;
+    /* Release old backing (skip pool-backed buffers — they're arena-managed). */
+    if (!is_pool && old_data && old_actual_cap > 0) mako_rc_release(old_data);
     s.data[s.len++] = (uint8_t)v;
     return s;
 }
