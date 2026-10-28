@@ -1,0 +1,89 @@
+// Adversarial: hammer every append variant to catch backing buffer leaks.
+// Each loop forces multiple growth reallocations (cap 1→2→4→8→...→256+).
+// A leaked backing corrupts the heap after ~80 iterations.
+
+fn TestStringAppend200() {
+    let mut xs: []string = []
+    let mut i = 0
+    while i < 200 {
+        xs = append(xs, int_to_string(i))
+        i = i + 1
+    }
+    assert_eq(len(xs), 200)
+    assert_eq_str(xs[0], "0")
+    assert_eq_str(xs[199], "199")
+}
+
+fn TestIntAppend500() {
+    let mut xs: []int = []
+    let mut i = 0
+    while i < 500 {
+        xs = append(xs, i)
+        i = i + 1
+    }
+    assert_eq(len(xs), 500)
+    assert_eq(xs[0], 0)
+    assert_eq(xs[499], 499)
+}
+
+fn TestFloatAppend200() {
+    let mut xs: []float = []
+    let mut i = 0
+    while i < 200 {
+        xs = append(xs, 1.5)
+        i = i + 1
+    }
+    assert_eq(len(xs), 200)
+}
+
+fn TestBoolAppend200() {
+    let mut xs: []bool = []
+    let mut i = 0
+    while i < 200 {
+        xs = append(xs, i % 2 == 0)
+        i = i + 1
+    }
+    assert_eq(len(xs), 200)
+}
+
+fn TestByteAppend300() {
+    let mut xs: []byte = []
+    let mut i = 0
+    while i < 300 {
+        xs = append(xs, 65)
+        i = i + 1
+    }
+    assert_eq(len(xs), 300)
+}
+
+fn TestRepeatedStringRebuild() {
+    // Simulate DB column rebuild: build, discard, rebuild 10 times.
+    let mut round = 0
+    while round < 10 {
+        let mut col: []string = []
+        let mut i = 0
+        while i < 100 {
+            col = append(col, int_to_string(i))
+            i = i + 1
+        }
+        assert_eq(len(col), 100)
+        assert_eq_str(col[50], "50")
+        round = round + 1
+    }
+}
+
+fn TestInterleavedAppends() {
+    // Interleave int and string appends to stress heap fragmentation.
+    let mut ints: []int = []
+    let mut strs: []string = []
+    let mut i = 0
+    while i < 150 {
+        ints = append(ints, i)
+        strs = append(strs, int_to_string(i))
+        i = i + 1
+    }
+    assert_eq(len(ints), 150)
+    assert_eq(len(strs), 150)
+    assert_eq(ints[149], 149)
+    assert_eq_str(strs[149], "149")
+}
