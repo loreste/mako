@@ -4244,30 +4244,38 @@ impl Codegen {
                 ));
             }
             "MakoStrArray" => {
-                // Free the old array properly: mako_str_array_free checks the
-                // refcount — if shared (COW), just decrements; if last owner,
-                // frees contained strings then releases the backing.
                 self.emit_line(format_args!(
-                    "if ({old}.data != {new}.data) mako_str_array_free({old});"
+                    "if ({old}.data != {new}.data) mako_str_array_free({old}); \
+                     else if ({old}.cap > 0 && {old}.data && mako_rc_shared({old}.data)) mako_rc_release({old}.data);"
                 ));
             }
             other if other.starts_with("MakoArr_") => {
-                // Use the struct array's free function which checks refcount:
-                // if shared (COW), just decrements; if last owner, frees
-                // contained owned fields then releases the backing.
                 if let Some(ff) = Self::own_free_fn(other) {
                     self.emit_line(format_args!(
-                        "if ({old}.data != {new}.data) {ff}({old});"
+                        "if ({old}.data != {new}.data) {ff}({old}); \
+                         else if ({old}.cap > 0 && {old}.data && mako_rc_shared({old}.data)) mako_rc_release({old}.data);"
                     ));
                 } else {
                     self.emit_line(format_args!(
-                        "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data);"
+                        "if ({old}.data != {new}.data && {old}.cap > 0 && {old}.data) mako_rc_release({old}.data); \
+                         else if ({old}.cap > 0 && {old}.data && mako_rc_shared({old}.data)) mako_rc_release({old}.data);"
                     ));
                 }
             }
             _ => {
                 let cond = Self::owning_field_replaced_cond(c_ty, old, new);
-                self.emit_line(format_args!("if ({cond}) {free_fn}({old});"));
+                let is_rc_array = matches!(
+                    c_ty,
+                    "MakoIntArray" | "MakoByteArray" | "MakoFloatArray" | "MakoBoolArray"
+                );
+                if is_rc_array {
+                    self.emit_line(format_args!(
+                        "if ({cond}) {free_fn}({old}); \
+                         else if ({old}.cap > 0 && {old}.data && mako_rc_shared({old}.data)) mako_rc_release({old}.data);"
+                    ));
+                } else {
+                    self.emit_line(format_args!("if ({cond}) {free_fn}({old});"));
+                }
             }
         }
     }
@@ -4680,10 +4688,25 @@ impl Codegen {
                     &format!("{old}.{path}"),
                     &format!("{new}.{path}"),
                 );
-                let _ = writeln!(
-                    self.out,
-                    "{indent}if ({cond}) {{ {free_fn}({old}.{path}); }}"
-                );
+                let is_rc_array = matches!(
+                    fty.as_str(),
+                    "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
+                        | "MakoFloatArray" | "MakoBoolArray"
+                ) || fty.starts_with("MakoArr_");
+                if is_rc_array {
+                    // COW clone bumps RC but keeps the same pointer.
+                    // Different pointer: full free. Same pointer: drop the extra ref.
+                    let _ = writeln!(
+                        self.out,
+                        "{indent}if ({cond}) {{ {free_fn}({old}.{path}); }} \
+                         else if ({old}.{path}.cap > 0 && {old}.{path}.data && mako_rc_shared({old}.{path}.data)) {{ mako_rc_release({old}.{path}.data); }}"
+                    );
+                } else {
+                    let _ = writeln!(
+                        self.out,
+                        "{indent}if ({cond}) {{ {free_fn}({old}.{path}); }}"
+                    );
+                }
                 self.write_retained_replacement_release(
                     &format!("{old}.{path}"),
                     &format!("{new}.{path}"),
