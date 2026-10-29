@@ -2573,8 +2573,9 @@ static inline MakoString mako_json_object_str(MakoString key, MakoString val) {
     char *d = (char *)malloc(n);
     int wrote = snprintf(d, n, "{\"%s\":\"%s\"}", ek.data, ev.data);
     if (wrote < 0) wrote = 0;
-        mako_str_free(ek);
-        mako_str_free(ev);
+    mako_str_free(ek);
+    mako_str_free(ev);
+    mako_str_free(key);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2640,7 +2641,8 @@ static inline MakoString mako_json_i(MakoString key, int64_t val) {
     char *d = (char *)malloc(n);
     int wrote = snprintf(d, n, "{\"%s\":%lld}", ek.data, (long long)val);
     if (wrote < 0) wrote = 0;
-        mako_str_free(ek);
+    mako_str_free(ek);
+    mako_str_free(key);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2651,6 +2653,7 @@ static inline MakoString mako_json_f(MakoString key, double val) {
     int wrote = snprintf(d, n, "{\"%s\":%.17g}", ek.data, val);
     if (wrote < 0) wrote = 0;
     mako_str_free(ek);
+    mako_str_free(key);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2661,6 +2664,7 @@ static inline MakoString mako_json_b(MakoString key, int64_t val) {
     int wrote = snprintf(d, n, "{\"%s\":%s}", ek.data, val ? "true" : "false");
     if (wrote < 0) wrote = 0;
     mako_str_free(ek);
+    mako_str_free(key);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3094,6 +3098,9 @@ static inline MakoString mako_json_merge(MakoString a, MakoString b) {
     while (bi < bl && (bd[bi] == ' ' || bd[bi] == '\t')) bi++;
     int wrote = snprintf(d, n, "%.*s,%s", (int)ai, ad, bd + bi);
     if (wrote < 0) wrote = 0;
+    /* Consume inputs — derive-generated callers always pass fresh temps. */
+    mako_str_free(a);
+    mako_str_free(b);
     return (MakoString){d, (size_t)wrote};
 }
 
