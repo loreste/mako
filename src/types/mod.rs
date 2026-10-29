@@ -19602,9 +19602,21 @@ impl TypeChecker {
                     self.current_expected = Some(elem.clone());
                 }
                 let first = self.check_expr(&elems[0])?;
+                // When expected element is an interface, check each element
+                // against the interface (allows heterogeneous dyn collections).
+                let check_target = if let Some(ref elem) = expected_elem {
+                    if matches!(elem, Type::Interface { .. }) && self.compatible(&first, elem) {
+                        Some(elem.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 for e in elems.iter().skip(1) {
                     let t = self.check_expr(e)?;
-                    if !self.compatible(&t, &first) {
+                    let target = check_target.as_ref().unwrap_or(&first);
+                    if !self.compatible(&t, target) {
                         self.current_expected = saved_expected;
                         return Err(TypeError::new("array element type mismatch"));
                     }

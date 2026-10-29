@@ -7173,6 +7173,36 @@ impl Codegen {
                 let _ = writeln!(self.out, "    {ret} (*{m})({});", sig.join(", "));
             }
             let _ = writeln!(self.out, "}};");
+            // Array of interface fat pointers: []Renderer → MakoArr_iface_Renderer
+            let arr_c = format!("MakoArr_iface_{iname}");
+            let _ = writeln!(self.out, "typedef struct {{ {iface_c} *data; size_t len; size_t cap; }} {arr_c};");
+            let _ = writeln!(self.out, "static inline {arr_c} mako_arr_iface_{iname}_make(int64_t len, int64_t cap) {{");
+            let _ = writeln!(self.out, "    if (len < 0) len = 0; if (cap < len) cap = len;");
+            let _ = writeln!(self.out, "    if (len == 0 && cap == 0) {{ {arr_c} a = {{NULL, 0, 0}}; return a; }}");
+            let _ = writeln!(self.out, "    {iface_c} *d = ({iface_c} *)mako_rc_calloc((size_t)(cap ? cap : 1) * sizeof({iface_c}));");
+            let _ = writeln!(self.out, "    {arr_c} a = {{d, (size_t)len, (size_t)cap}}; return a;");
+            let _ = writeln!(self.out, "}}");
+            let _ = writeln!(self.out, "static inline void mako_arr_iface_{iname}_free({arr_c} a) {{ if (a.cap > 0 && a.data) mako_rc_release(a.data); }}");
+            let _ = writeln!(self.out, "static inline int64_t mako_arr_iface_{iname}_len({arr_c} a) {{ return (int64_t)a.len; }}");
+            let _ = writeln!(self.out, "static inline {iface_c} mako_arr_iface_{iname}_get({arr_c} a, int64_t i) {{");
+            let _ = writeln!(self.out, "    if (i < 0 || (size_t)i >= a.len) mako_abort(\"iface array index out of bounds\");");
+            let _ = writeln!(self.out, "    return a.data[i];");
+            let _ = writeln!(self.out, "}}");
+            let _ = writeln!(self.out, "static inline {arr_c} mako_arr_iface_{iname}_append({arr_c} s, {iface_c} v) {{");
+            let _ = writeln!(self.out, "    if (s.len + 1 > s.cap || mako_rc_shared(s.data)) {{");
+            let _ = writeln!(self.out, "        size_t ncap = s.cap ? s.cap * 2 : 1;");
+            let _ = writeln!(self.out, "        if (ncap < s.len + 1) ncap = s.len + 1;");
+            let _ = writeln!(self.out, "        {iface_c} *nd = ({iface_c} *)mako_rc_alloc(ncap * sizeof({iface_c}));");
+            let _ = writeln!(self.out, "        if (s.len) memcpy(nd, s.data, s.len * sizeof({iface_c}));");
+            let _ = writeln!(self.out, "        s.data = nd; s.cap = ncap;");
+            let _ = writeln!(self.out, "    }}");
+            let _ = writeln!(self.out, "    s.data[s.len++] = v; return s;");
+            let _ = writeln!(self.out, "}}");
+            let _ = writeln!(self.out, "static inline {arr_c} mako_arr_iface_{iname}_of(const {iface_c} *vals, size_t n) {{");
+            let _ = writeln!(self.out, "    {arr_c} a = mako_arr_iface_{iname}_make((int64_t)n, (int64_t)n);");
+            let _ = writeln!(self.out, "    if (n) memcpy(a.data, vals, n * sizeof({iface_c}));");
+            let _ = writeln!(self.out, "    return a;");
+            let _ = writeln!(self.out, "}}");
             let _ = writeln!(self.out);
         }
     }
@@ -13693,6 +13723,14 @@ impl Codegen {
             }
             TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "bool") => {
                 "MakoBoolArray".into()
+            }
+            TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if self.interfaces.iter().any(|(iname, _)| iname == n)) =>
+            {
+                let n = match inner.as_ref() {
+                    TypeExpr::Named(n) => n.as_str(),
+                    _ => "",
+                };
+                format!("MakoArr_iface_{n}")
             }
             TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if self.structs.contains_key(n) || self.enums.contains_key(n)) =>
             {
