@@ -89,12 +89,22 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
     // (`Text("hi")`, `Text(s)`) in expression walks. Map those names back to
     // their declaring enum so DCE does not discard a locally inferred enum
     // that never appears in a function signature.
+    // Also collect all used identifiers from reachable fns — unit variants
+    // (e.g. `let d = North`) appear as bare Ident, not calls.
+    let mut used_names: HashSet<String> = reachable_fns.clone();
+    for item in &program.items {
+        if let Item::Fn(f) = item {
+            if reachable_fns.contains(&f.name) {
+                collect_used_names_block(&f.body, &mut used_names);
+            }
+        }
+    }
     for item in &program.items {
         if let Item::Enum(def) = item {
             if def
                 .variants
                 .iter()
-                .any(|variant| reachable_fns.contains(&variant.name))
+                .any(|variant| used_names.contains(&variant.name))
             {
                 reachable_types.insert(def.name.clone());
             }
