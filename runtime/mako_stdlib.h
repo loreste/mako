@@ -1395,6 +1395,64 @@ static inline int64_t mako_syscall_getegid(void) {
     return (int64_t)getegid();
 #endif
 }
+/* ---- Process control (container runtime / database backends) ---- */
+static inline int64_t mako_fork(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return -1;
+#else
+    return (int64_t)fork();
+#endif
+}
+static inline int64_t mako_exec(MakoString path, MakoStrArray argv) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return -1;
+#else
+    size_t n = argv.len;
+    char **args = (char **)calloc(n + 1, sizeof(char *));
+    if (!args) return -1;
+    for (size_t i = 0; i < n; i++) args[i] = argv.data[i].data;
+    args[n] = NULL;
+    int r = execv(path.data, args);
+    free(args);
+    return (int64_t)r;
+#endif
+}
+static inline int64_t mako_waitpid(int64_t pid, int64_t flags) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return -1;
+#else
+    int status = 0;
+    pid_t r = waitpid((pid_t)pid, &status, (int)flags);
+    if (r < 0) return -1;
+    if (WIFEXITED(status)) return (int64_t)WEXITSTATUS(status);
+    return -1;
+#endif
+}
+static inline int64_t mako_pipe(MakoIntArray fds) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return -1;
+#else
+    int pfd[2];
+    if (pipe(pfd) != 0) return -1;
+    if (fds.len >= 2) { fds.data[0] = pfd[0]; fds.data[1] = pfd[1]; }
+    return 0;
+#endif
+}
+static inline int64_t mako_dup2(int64_t oldfd, int64_t newfd) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return -1;
+#else
+    return (int64_t)dup2((int)oldfd, (int)newfd);
+#endif
+}
+static inline int64_t mako_setsid(void) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return -1;
+#else
+    return (int64_t)setsid();
+#endif
+}
+
 static inline MakoString mako_syscall_hostname(void) {
     char buf[256];
 #if defined(_WIN32)

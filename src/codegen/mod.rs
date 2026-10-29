@@ -19783,6 +19783,43 @@ impl Codegen {
                             self.line(&format!("mako_exit({code});"));
                             return ("void".into(), "/*void*/".into());
                         }
+                        "process_fork" => {
+                            let tmp = self.fresh("pid");
+                            self.line(&format!("int64_t {tmp} = mako_fork();"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "process_exec" => {
+                            let (_, path) = self.emit_expr(&args[0]);
+                            let (_, argv) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("ex");
+                            self.line(&format!("int64_t {tmp} = mako_exec({path}, {argv});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "process_wait" => {
+                            let (_, pid) = self.emit_expr(&args[0]);
+                            let (_, flags) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("ws");
+                            self.line(&format!("int64_t {tmp} = mako_waitpid({pid}, {flags});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "process_pipe" => {
+                            let (_, fds) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("pp");
+                            self.line(&format!("int64_t {tmp} = mako_pipe({fds});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "process_dup2" => {
+                            let (_, old) = self.emit_expr(&args[0]);
+                            let (_, new) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("d2");
+                            self.line(&format!("int64_t {tmp} = mako_dup2({old}, {new});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "process_setsid" => {
+                            let tmp = self.fresh("sid");
+                            self.line(&format!("int64_t {tmp} = mako_setsid();"));
+                            return ("int64_t".into(), tmp);
+                        }
                         "now_ms" => {
                             let tmp = self.fresh("now");
                             self.line(&format!("int64_t {tmp} = mako_now_ms();"));

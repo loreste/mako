@@ -1603,6 +1603,13 @@ impl TypeChecker {
         ] {
             fns.insert(name.into(), Type::Fn(vec![], Box::new(Type::Int)));
         }
+        // Process control: process_fork/exec/waitpid/pipe/dup2/setsid
+        fns.insert("process_fork".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("process_setsid".into(), Type::Fn(vec![], Box::new(Type::Int)));
+        fns.insert("process_exec".into(), Type::Fn(vec![Type::String, Type::Array(Box::new(Type::String))], Box::new(Type::Int)));
+        fns.insert("process_wait".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("process_pipe".into(), Type::Fn(vec![Type::Array(Box::new(Type::Int))], Box::new(Type::Int)));
+        fns.insert("process_dup2".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
         fns.insert(
             "syscall_hostname".into(),
             Type::Fn(vec![], Box::new(Type::String)),
