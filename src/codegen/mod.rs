@@ -15095,13 +15095,11 @@ impl Codegen {
             }
         }
 
-        // Deep-clone owned fields of `mut` struct params so mutations don't
-        // corrupt the caller's data (C struct copy shares interior pointers).
-        // Pointer-passed params (issue #46) borrow the caller — skip clone.
+        // Retain RC fields of ALL struct params (not just mut) so the callee's
+        // destructor doesn't free fields shared with the caller's copy.
+        // C struct pass-by-value is a bitwise copy — RC fields are shared.
+        // Without retain, the callee's scope-end drop frees the caller's data.
         for (pi, p) in f.params.iter().enumerate() {
-            if !p.mutable {
-                continue;
-            }
             if p.name == "self" && is_mut_self_fn {
                 continue; // mut self is a pointer — handled separately
             }
