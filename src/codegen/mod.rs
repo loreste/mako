@@ -4698,12 +4698,13 @@ impl Codegen {
                         | "MakoFloatArray" | "MakoBoolArray"
                 ) || fty.starts_with("MakoArr_");
                 if is_rc_array {
-                    // COW clone bumps RC but keeps the same pointer.
-                    // Different pointer: full free. Same pointer: drop the extra ref.
+                    // Different pointer: full free of the old array.
+                    // Same pointer: the new element inherited the old's ref via
+                    // bitwise copy — no extra ref to release. Releasing here would
+                    // drop the refcount below the live reference in the new element.
                     let _ = writeln!(
                         self.out,
-                        "{indent}if ({cond}) {{ {free_fn}({old}.{path}); }} \
-                         else if ({old}.{path}.cap > 0 && {old}.{path}.data && mako_rc_shared({old}.{path}.data)) {{ mako_rc_release({old}.{path}.data); }}"
+                        "{indent}if ({cond}) {{ {free_fn}({old}.{path}); }}"
                     );
                 } else {
                     let _ = writeln!(
