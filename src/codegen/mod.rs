@@ -4702,6 +4702,28 @@ impl Codegen {
     /// when the array backing is shared (issue #65). The array-level destructor
     /// (mako_arr_T_free) handles cleanup via refcounting. Skip all field-level frees
     /// for struct types — only free scalar owning types (string, array, map).
+    /// Retain (bump RC on) all owning fields of a struct copy.
+    /// Used by arr_T_get so the returned copy has its own references.
+    fn write_struct_retain_fields(&mut self, var: &str, cty: &str, indent: &str) {
+        let fields = self.struct_own_field_frees(cty);
+        for (path, _) in fields {
+            let fty = self.struct_field_c_type(cty, &path).unwrap_or_default();
+            if fty == "MakoString"
+                || fty.starts_with("MakoArr_")
+                || matches!(
+                    fty.as_str(),
+                    "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
+                        | "MakoFloatArray" | "MakoBoolArray"
+                )
+            {
+                let _ = writeln!(
+                    self.out,
+                    "{indent}if ({var}.{path}.data) mako_rc_retain({var}.{path}.data);"
+                );
+            }
+        }
+    }
+
     fn write_elem_dest_destroy(&mut self, old: &str, new: &str, cty: &str, indent: &str) {
         let fields = self.struct_own_field_frees(cty);
         if !fields.is_empty() {
