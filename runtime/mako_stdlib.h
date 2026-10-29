@@ -22,6 +22,7 @@
 #else
 #include <unistd.h>
 #include <dirent.h>
+#include <sys/wait.h>
 #include <sys/utsname.h>
 #include <sys/resource.h>
 #endif
