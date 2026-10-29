@@ -4186,6 +4186,26 @@ impl Codegen {
         self.own_bind_scope.insert(mangled.to_string(), idx);
     }
 
+    /// Force-register for cleanup. Used when append turns a view into an owner.
+    fn force_own_drop(&mut self, mangled: &str, c_ty: &str) {
+        let ff = match Self::own_free_fn(c_ty) {
+            Some(f) => f,
+            None => return,
+        };
+        self.own_drop_live.insert(mangled.to_string());
+        self.scope_drop_safe.insert(mangled.to_string());
+        for scope in self.own_drop_scopes.iter() {
+            if scope.iter().any(|(n, _)| n == mangled) { return; }
+        }
+        let idx = self.own_bind_scope.get(mangled).copied()
+            .unwrap_or_else(|| self.own_drop_scopes.len().saturating_sub(1));
+        if let Some(scope) = self.own_drop_scopes.get_mut(idx) {
+            scope.push((mangled.to_string(), ff));
+        } else if let Some(scope) = self.own_drop_scopes.last_mut() {
+            scope.push((mangled.to_string(), ff));
+        }
+    }
+
     fn register_own_drop(&mut self, mangled: &str, c_ty: &str) {
         // Memory-safe by construction. Do not disable — fix free placement bugs.
         let ff = if let Some(ff) = Self::own_free_fn(c_ty) {
@@ -17045,20 +17065,10 @@ impl Codegen {
                         self.emit_line(format_args!("{mn}__own = 1;"));
                     }
                     // Append may turn a borrowed view (cap=0) into an owned
-                    // buffer — force-add to scope cleanup. The free function
-                    // is a no-op when cap==0 (view still alive).
+                    // buffer — force into scope cleanup + scope_drop_safe.
                     {
                         let drop_cty = self.locals.get(name).cloned().unwrap_or_else(|| slice_cty.clone());
-                        if let Some(ff) = Self::own_free_fn(&drop_cty) {
-                            self.own_drop_live.insert(mn.clone());
-                            let idx = self.own_bind_scope.get(&mn).copied()
-                                .unwrap_or_else(|| self.own_drop_scopes.len().saturating_sub(1));
-                            if let Some(scope) = self.own_drop_scopes.get_mut(idx) {
-                                if !scope.iter().any(|(n, _)| n == &mn) {
-                                    scope.push((mn.clone(), ff));
-                                }
-                            }
-                        }
+                        self.force_own_drop(&mn, &drop_cty);
                     }
                     // Propagate opaque array element type through append reassign.
                     if let Some(et) = self.opaque_arr_elems.get(&val).cloned() {
