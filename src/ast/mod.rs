@@ -223,6 +223,8 @@ pub enum TypeExpr {
     /// Non-COW array: `raw []T` — single-owner, move semantics, plain malloc.
     RawArray(Box<TypeExpr>),
     Fn(Vec<TypeExpr>, Box<TypeExpr>),
+    /// Fixed-size array: `[int; 8192]` — stack-allocated, no RC overhead.
+    FixedArray(Box<TypeExpr>, usize),
     /// Product type: `(int, string)` — Mako tuples (additive).
     Tuple(Vec<TypeExpr>),
 }
@@ -257,6 +259,7 @@ impl fmt::Display for TypeExpr {
             TypeExpr::Map(k, v) => write!(f, "map[{k}]{v}"),
             TypeExpr::Array(t) => write!(f, "[]{t}"),
             TypeExpr::RawArray(t) => write!(f, "raw []{t}"),
+            TypeExpr::FixedArray(t, n) => write!(f, "[{t}; {n}]"),
             TypeExpr::Fn(params, ret) => {
                 write!(f, "fn(")?;
                 for (i, p) in params.iter().enumerate() {

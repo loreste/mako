@@ -1329,7 +1329,7 @@ impl Parser {
             self.expect(TokenKind::RBracket)?;
             return Ok(TypeExpr::RawArray(Box::new(inner)));
         }
-        // Go-like `[]T` or existing `[T]`
+        // Go-like `[]T`, `[T]`, or fixed-size `[T; N]`
         if matches!(self.peek_kind(), TokenKind::LBracket) {
             self.bump();
             if matches!(self.peek_kind(), TokenKind::RBracket) {
@@ -1338,6 +1338,16 @@ impl Parser {
                 return Ok(TypeExpr::Array(Box::new(inner)));
             }
             let inner = self.parse_type()?;
+            // Fixed-size array: `[int; 8192]`
+            if matches!(self.peek_kind(), TokenKind::Semicolon) {
+                self.bump();
+                let size = match self.peek_kind().clone() {
+                    TokenKind::Int(n) => { self.bump(); n as usize }
+                    _ => return Err(self.err("expected integer size for fixed array".into())),
+                };
+                self.expect(TokenKind::RBracket)?;
+                return Ok(TypeExpr::FixedArray(Box::new(inner), size));
+            }
             self.expect(TokenKind::RBracket)?;
             return Ok(TypeExpr::Array(Box::new(inner)));
         }
@@ -3658,5 +3668,6 @@ fn type_expr_mono_tag(t: &TypeExpr) -> String {
             format!("tup_{}", tags.join("_"))
         }
         TypeExpr::Fn(_, _) => "fn".into(),
+        TypeExpr::FixedArray(inner, n) => format!("fixarr{n}_{}", type_expr_mono_tag(inner)),
     }
 }

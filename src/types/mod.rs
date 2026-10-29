@@ -35,6 +35,8 @@ pub enum Type {
     Array(Box<Type>),
     /// Non-COW array: `raw []T` — single-owner, move semantics, plain malloc.
     RawArray(Box<Type>),
+    /// Fixed-size array: `[int; 8192]` — stack-allocated.
+    FixedArray(Box<Type>, usize),
     /// Go-like `map[K]V`
     Map(Box<Type>, Box<Type>),
     Named(String),
@@ -116,6 +118,7 @@ impl Type {
             Type::String => "string".into(),
             Type::Array(t) => format!("[]{}", t.display()),
             Type::RawArray(t) => format!("raw []{}", t.display()),
+            Type::FixedArray(t, n) => format!("[{}; {}]", t.display(), n),
             Type::Map(k, v) => format!("map[{}]{}", k.display(), v.display()),
             Type::Named(n) => n.clone(),
             Type::Option(t) => format!("Option[{}]", t.display()),
@@ -173,6 +176,7 @@ impl Type {
             Type::Void => "void".into(),
             Type::Array(t) => format!("arr_{}", t.mono_tag()),
             Type::RawArray(t) => format!("rawarr_{}", t.mono_tag()),
+            Type::FixedArray(t, n) => format!("fixarr_{}_{}", t.mono_tag(), n),
             Type::Chan(t) => format!("chan_{}", t.mono_tag()),
             Type::Queue(t) => format!("queue_{}", t.mono_tag()),
             Type::Graphql => "Graphql".into(),
@@ -15510,6 +15514,7 @@ impl TypeChecker {
             }
             TypeExpr::Array(inner) => Ok(Type::Array(Box::new(self.resolve_type(inner)?))),
             TypeExpr::RawArray(inner) => Ok(Type::RawArray(Box::new(self.resolve_type(inner)?))),
+            TypeExpr::FixedArray(inner, n) => Ok(Type::FixedArray(Box::new(self.resolve_type(inner)?), *n)),
             TypeExpr::Fn(params, ret) => {
                 let params: Result<Vec<_>, _> =
                     params.iter().map(|p| self.resolve_type(p)).collect();
@@ -19271,7 +19276,7 @@ impl TypeChecker {
                 let bt = self.check_expr(base)?;
                 let it = self.check_expr(index)?;
                 match bt {
-                    Type::Array(e) | Type::RawArray(e) => {
+                    Type::Array(e) | Type::RawArray(e) | Type::FixedArray(e, _) => {
                         if it != Type::Int {
                             return Err(TypeError::new("index must be int"));
                         }
@@ -20358,6 +20363,10 @@ impl TypeChecker {
             (Type::Named(a), Type::Named(b)) if a == b => true,
             (Type::Array(a), Type::Array(b)) => self.compatible(a, b),
             (Type::RawArray(a), Type::RawArray(b)) => self.compatible(a, b),
+            (Type::FixedArray(a, n1), Type::FixedArray(b, n2)) => n1 == n2 && self.compatible(a, b),
+            // Array literal can initialize a fixed array (and vice versa for passing).
+            (Type::Array(a), Type::FixedArray(b, _)) => self.compatible(a, b),
+            (Type::FixedArray(a, _), Type::Array(b)) => self.compatible(a, b),
             (Type::Map(k1, v1), Type::Map(k2, v2)) => {
                 self.compatible(k1, k2) && self.compatible(v1, v2)
             }
@@ -23269,6 +23278,7 @@ pub fn subst_type_expr(t: &TypeExpr, subst: &HashMap<String, Type>) -> TypeExpr 
         }
         TypeExpr::Array(inner) => TypeExpr::Array(Box::new(subst_type_expr(inner, subst))),
         TypeExpr::RawArray(inner) => TypeExpr::RawArray(Box::new(subst_type_expr(inner, subst))),
+        TypeExpr::FixedArray(inner, n) => TypeExpr::FixedArray(Box::new(subst_type_expr(inner, subst)), *n),
         TypeExpr::Map(k, v) => TypeExpr::Map(
             Box::new(subst_type_expr(k, subst)),
             Box::new(subst_type_expr(v, subst)),

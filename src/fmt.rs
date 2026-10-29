@@ -385,6 +385,7 @@ fn fmt_type(t: &TypeExpr) -> String {
             let e: Vec<_> = elems.iter().map(fmt_type).collect();
             format!("({})", e.join(", "))
         }
+        TypeExpr::FixedArray(inner, n) => format!("[{n}]{}", fmt_type(inner)),
     }
 }
 

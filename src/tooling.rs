@@ -75,6 +75,7 @@ pub fn check_file(path: &Path) -> Result<Program, ()> {
         Diagnostic::error(&path_s, &src, Span::unknown(), e).emit();
     })?;
     desugar::desugar_if_let_all(&mut program);
+    desugar::lower_fixed_arrays(&mut program);
     if is_test_file(path) {
         program
             .items
@@ -288,6 +289,7 @@ fn check_file_structured(path: &Path) -> Result<Program, Diagnostic> {
     let mut program = merge_path_dependencies(path, program)
         .map_err(|e| Diagnostic::error(&path_s, &src, Span::unknown(), e))?;
     desugar::desugar_if_let_all(&mut program);
+    desugar::lower_fixed_arrays(&mut program);
     if is_test_file(path) {
         program
             .items
@@ -2423,6 +2425,9 @@ fn rewrite_type_expr(ty: &mut TypeExpr, alias: &str, names: &ImportNameSets) {
             }
             rewrite_type_expr(ret, alias, names);
         }
+        TypeExpr::FixedArray(inner, _) => {
+            rewrite_type_expr(inner, alias, names);
+        }
     }
 }
 
@@ -3898,6 +3903,8 @@ pub fn load_test_package(test_file: &Path) -> Result<(Program, Vec<String>), Tes
     program = merge_path_dependencies(test_file, program).map_err(TestPackageLoadError::Invalid)?;
     // Post-merge desugar: expand actors, if-let, embed in merged files.
     crate::desugar::desugar_if_let_all(&mut program);
+    crate::desugar::lower_fixed_arrays(&mut program);
+    desugar::lower_fixed_arrays(&mut program);
     program
         .items
         .retain(|item| !matches!(item, Item::Fn(f) if f.name == "main"));

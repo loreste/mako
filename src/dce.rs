@@ -1093,6 +1093,9 @@ fn collect_type_refs(ty: &TypeExpr, types: &mut HashSet<String>) {
                 collect_type_refs(e, types);
             }
         }
+        TypeExpr::FixedArray(inner, _) => {
+            collect_type_refs(inner, types);
+        }
     }
 }
 

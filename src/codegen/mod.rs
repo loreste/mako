@@ -768,6 +768,10 @@ impl Codegen {
                 self.collect_maps_in_type(ret);
             }
             TypeExpr::Named(_) => {}
+            TypeExpr::FixedArray(inner, _) => {
+                self.register_arr_elem_type(inner);
+                self.collect_maps_in_type(inner);
+            }
         }
     }
 
@@ -42448,6 +42452,7 @@ fn type_expr_schema(t: &TypeExpr) -> String {
             let e: Vec<_> = elems.iter().map(type_expr_schema).collect();
             format!("({})", e.join(","))
         }
+        TypeExpr::FixedArray(inner, n) => format!("[{n}]{}", type_expr_schema(inner)),
     }
 }
 
@@ -42529,6 +42534,7 @@ impl Codegen {
                     }
                     walk_ty(ret, out);
                 }
+                TypeExpr::FixedArray(inner, _) => walk_ty(inner, out),
             }
         }
         fn walk_expr(e: &Expr, out: &mut Vec<Vec<TypeExpr>>) {

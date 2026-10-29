@@ -2940,3 +2940,82 @@ pub fn desugar_if_let_all(program: &mut Program) {
         }
     }
 }
+
+/// Normalize `[T; N]` → `[]T` in all type positions so the C codegen
+/// doesn't need FixedArray-specific handling at 50+ sites. The type
+/// checker already enforced the size constraint.
+pub fn lower_fixed_arrays(program: &mut Program) {
+    for item in &mut program.items {
+        match item {
+            Item::Fn(f) => lower_fixed_arrays_fn(f),
+            Item::Struct(s) => {
+                for (_, ty, _) in &mut s.fields {
+                    lower_fixed_array_ty(ty);
+                }
+            }
+            Item::Enum(e) => {
+                for v in &mut e.variants {
+                    for t in &mut v.fields {
+                        lower_fixed_array_ty(t);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn lower_fixed_arrays_fn(f: &mut FnDef) {
+    for p in &mut f.params {
+        lower_fixed_array_ty(&mut p.ty);
+    }
+    if let Some(ret) = &mut f.ret {
+        lower_fixed_array_ty(ret);
+    }
+    lower_fixed_arrays_block(&mut f.body);
+}
+
+fn lower_fixed_array_ty(ty: &mut TypeExpr) {
+    match ty {
+        TypeExpr::FixedArray(inner, _) => {
+            lower_fixed_array_ty(inner);
+            *ty = TypeExpr::Array(Box::new(*inner.clone()));
+        }
+        TypeExpr::Array(inner) | TypeExpr::RawArray(inner) => lower_fixed_array_ty(inner),
+        TypeExpr::Generic(_, args) => {
+            for a in args { lower_fixed_array_ty(a); }
+        }
+        TypeExpr::Map(k, v) => { lower_fixed_array_ty(k); lower_fixed_array_ty(v); }
+        TypeExpr::Fn(params, ret) => {
+            for p in params { lower_fixed_array_ty(p); }
+            lower_fixed_array_ty(ret);
+        }
+        TypeExpr::Tuple(elems) => {
+            for e in elems { lower_fixed_array_ty(e); }
+        }
+        TypeExpr::Named(_) => {}
+    }
+}
+
+fn lower_fixed_arrays_block(block: &mut Block) {
+    for stmt in &mut block.stmts {
+        lower_fixed_arrays_stmt(stmt);
+    }
+}
+
+fn lower_fixed_arrays_stmt(stmt: &mut Stmt) {
+    match stmt {
+        Stmt::Let { ty, .. } => {
+            if let Some(t) = ty { lower_fixed_array_ty(t); }
+        }
+        Stmt::If { then_block, else_block, .. } => {
+            lower_fixed_arrays_block(then_block);
+            if let Some(eb) = else_block { lower_fixed_arrays_block(eb); }
+        }
+        Stmt::While { body, .. } | Stmt::For { body, .. }
+        | Stmt::Defer { body } | Stmt::Unsafe { body } => {
+            lower_fixed_arrays_block(body);
+        }
+        _ => {}
+    }
+}
