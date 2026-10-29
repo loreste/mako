@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.0
+
+### Generics parity
+
+- Multi-bound type parameters: `fn f[T: Reader + Closer](x: T)`.
+- Bounded generic structs and enums: `struct Repo[T: Storable] { item: T }`.
+- Interface inheritance: `interface Printable: Describable { fn format(self) -> string }`.
+- Default method bodies in interfaces; types that don't override get the default.
+- Methods on generic structs: `on Pair[T] { fn first(self) -> T { return self.a } }`.
+- Where clauses: `fn f[T](x: T) where T: A + B { ... }` as alternative to inline bounds.
+- Associated types: `interface Iterator { type Item }` / `on Counter: Iterator { type Item = int }`.
+- Enum methods via on-blocks: `on Direction { fn name(self) -> string { ... } }`.
+- Fixed-size array types: `[int; 8192]` with type-level size enforcement.
+- Dynamic dispatch foundation: vtable generation, fat pointers (`MakoIface_*`), and heterogeneous interface array types.
+
+### Systems programming
+
+- Thread-local storage: `thread_local let counter: int = 0` — emits C11 `_Thread_local`.
+- Packed structs: `#[packed] struct PageHeader { ... }` — `__attribute__((packed))` for wire protocols and on-disk layouts.
+- Process control builtins: `process_fork`, `process_exec`, `process_wait`, `process_pipe`, `process_dup2`, `process_setsid` — POSIX wrappers for container runtimes and database backends.
+
+### Memory safety
+
+- COW refcount leak fix: struct field replacement with same-pointer COW clones (from `mako_int_array_clone` RC bump) now releases the extra reference. Three codegen sites patched: `write_elem_dest_destroy`, `emit_reassign_free`, `emit_assign_owning_struct`.
+- DCE enum retention: unit enum variants used as bare values (`let d = North`) now keep the declaring enum alive.
+- DCE method retention: all `TypeName_*` functions on reachable types are BFS-walked so transitive dependencies (e.g. methods called from default interface bodies) survive elimination.
+- DCE generic mono retention: monomorphized functions (`show__Dog`) and struct method monos (`Wrapper__Dog_show`) are preserved when their generic template or mono type is reachable.
+- GCC 14+ compatibility: const-cast all `mako_arr_*_of` and `mako_str_array_of` call sites to satisfy stricter `incompatible-pointer-types` enforcement.
+- LLVM backend: graceful skip when bundled lld is incompatible with updated macOS SDK TAPI files.
+
 ## 0.6.38
 
 - CMap integer reads release temporary buffers for stored empty strings before

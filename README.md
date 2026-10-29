@@ -11,7 +11,7 @@ no VM, nothing extra to install next to them at runtime.
 > backward-compatible alias, and the `.mko` file extension is unchanged —
 > existing code requires zero modifications.
 
-**Status: alpha (v0.6.38).** It works, it compiles real programs, people have
+**Status: alpha (v0.7.0).** It works, it compiles real programs, people have
 built things with it. It is not stable. APIs will change, features are missing,
 and there are bugs. If that's fine with you, read on.
 
@@ -191,6 +191,34 @@ message inspection, site history, reports, alerts, and traffic metrics.
 - Package security model is not independently audited
 
 [STATUS.md](docs/STATUS.md) has the full honest list.
+
+## New in 0.7.0
+
+**Generics parity** — Mako's generics now match Rust's core feature set:
+
+- **Multi-bound generics:** `fn f[T: Reader + Closer](x: T)`
+- **Bounded generic structs/enums:** `struct Repo[T: Storable] { ... }`
+- **Interface inheritance:** `interface Printable: Describable { ... }`
+- **Default method bodies:** `fn describe(self) -> string { return "unknown" }`
+- **Methods on generic structs:** `on Pair[T] { fn first(self) -> T { ... } }`
+- **Where clauses:** `fn f[T](x: T) where T: A + B { ... }`
+- **Associated types:** `interface Iterator { type Item; fn next(self) -> Option[Item] }`
+- **Enum methods:** `on Direction { fn name(self) -> string { ... } }`
+- **Fixed-size arrays:** `let buf: [int; 8192]` — const generic array types
+- **Dynamic dispatch foundation:** vtables, fat pointers, and heterogeneous interface arrays
+
+**Systems programming features:**
+
+- **Thread-local storage:** `thread_local let conn_id: int = 0`
+- **Packed structs:** `#[packed] struct PageHeader { ... }` — exact byte layout
+- **Process control:** `process_fork`, `process_exec`, `process_wait`, `process_pipe`, `process_dup2`, `process_setsid`
+
+**Memory safety fixes:**
+
+- **COW refcount leak:** struct field replacement with same-pointer COW clones now releases the extra reference (3 codegen sites fixed)
+- **DCE enum retention:** unit enum variants used as values no longer stripped
+- **DCE method retention:** methods on reachable types are BFS-walked so transitive deps survive
+- **GCC 14+ compat:** const-cast all `_of` array helper call sites
 
 ## New in 0.6.38
 
