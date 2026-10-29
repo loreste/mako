@@ -17044,8 +17044,21 @@ impl Codegen {
                     if cond_own {
                         self.emit_line(format_args!("{mn}__own = 1;"));
                     }
-                    if let Some(cty) = self.locals.get(name).cloned() {
-                        self.register_own_drop(&mn, &cty);
+                    // Append may turn a borrowed view (cap=0) into an owned
+                    // buffer — force-add to scope cleanup. The free function
+                    // is a no-op when cap==0 (view still alive).
+                    {
+                        let drop_cty = self.locals.get(name).cloned().unwrap_or_else(|| slice_cty.clone());
+                        if let Some(ff) = Self::own_free_fn(&drop_cty) {
+                            self.own_drop_live.insert(mn.clone());
+                            let idx = self.own_bind_scope.get(&mn).copied()
+                                .unwrap_or_else(|| self.own_drop_scopes.len().saturating_sub(1));
+                            if let Some(scope) = self.own_drop_scopes.get_mut(idx) {
+                                if !scope.iter().any(|(n, _)| n == &mn) {
+                                    scope.push((mn.clone(), ff));
+                                }
+                            }
+                        }
                     }
                     // Propagate opaque array element type through append reassign.
                     if let Some(et) = self.opaque_arr_elems.get(&val).cloned() {

@@ -22502,6 +22502,10 @@ fn is_copy_type(t: &Type) -> bool {
             | Type::Float
             // Uuid/ULID: 16-byte POD — free to copy, kick, re-read (hot path).
             | Type::Uuid
+            // Strings are RC-shared: field read clones (bumps RC), not moves.
+            // Without this, reading stmt.table twice is a move error — breaks
+            // every real-world SQL dispatcher that reads parsed fields multiple times.
+            | Type::String
     )
 }
 
