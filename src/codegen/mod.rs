@@ -17085,8 +17085,9 @@ impl Codegen {
                         self.emit_line(format_args!("{mn}__own = 1;"));
                     }
                     // Append may turn a borrowed view (cap=0) into an owned
-                    // buffer — force into scope cleanup + scope_drop_safe.
-                    {
+                    // buffer — force into scope cleanup. Only for actual
+                    // append calls; skip inside arenas (bulk free).
+                    if is_self_append && self.current_arena.is_none() {
                         let drop_cty = self.locals.get(name).cloned().unwrap_or_else(|| slice_cty.clone());
                         self.force_own_drop(&mn, &drop_cty);
                     }
