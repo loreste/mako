@@ -1841,6 +1841,59 @@ static inline int64_t mako_simd_sum_i64_4(int64_t a0, int64_t a1, int64_t a2, in
     return a0 + a1 + a2 + a3;
 }
 
+/* ---- SIMD f32 vector ops (codec hot paths: DCT, quantization, FFT) ----
+ * Written so compilers auto-vectorize to NEON/SSE at -O2.
+ * 4-wide element ops map to float32x4 / __m128 naturally. */
+static inline void mako_simd_f32x4_mul(
+    double *out, const double *a, const double *b
+) {
+    out[0]=a[0]*b[0]; out[1]=a[1]*b[1]; out[2]=a[2]*b[2]; out[3]=a[3]*b[3];
+}
+
+static inline double mako_simd_f32x4_dot(
+    double a0, double a1, double a2, double a3,
+    double b0, double b1, double b2, double b3
+) {
+    return a0*b0 + a1*b1 + a2*b2 + a3*b3;
+}
+
+static inline double mako_simd_f32x4_hadd(double a0, double a1, double a2, double a3) {
+    return a0 + a1 + a2 + a3;
+}
+
+/* Fused multiply-add: a * b + c (single rounding on FMA-capable HW) */
+static inline double mako_simd_fma(double a, double b, double c) {
+#if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
+    return __builtin_fma(a, b, c);
+#else
+    return a * b + c;
+#endif
+}
+
+/* ---- Bit manipulation (codec entropy coding, Huffman, CABAC) ---- */
+static inline int64_t mako_clz(int64_t x) {
+    if (x == 0) return 64;
+    return (int64_t)__builtin_clzll((unsigned long long)x);
+}
+static inline int64_t mako_ctz(int64_t x) {
+    if (x == 0) return 64;
+    return (int64_t)__builtin_ctzll((unsigned long long)x);
+}
+static inline int64_t mako_popcount(int64_t x) {
+    return (int64_t)__builtin_popcountll((unsigned long long)x);
+}
+static inline int64_t mako_bswap64(int64_t x) {
+    return (int64_t)__builtin_bswap64((uint64_t)x);
+}
+static inline int64_t mako_bswap32(int64_t x) {
+    return (int64_t)__builtin_bswap32((uint32_t)x);
+}
+static inline int64_t mako_rotl64(int64_t x, int64_t n) {
+    uint64_t v = (uint64_t)x;
+    n &= 63;
+    return (int64_t)((v << n) | (v >> (64 - n)));
+}
+
 /* ---- Multiplayer rollback ring ---- */
 #define MAKO_RB_MAX 64
 typedef struct {

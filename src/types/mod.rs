@@ -2334,6 +2334,17 @@ impl TypeChecker {
             ),
         );
 
+        // SIMD f32 + bit manipulation (codec hot paths)
+        fns.insert("simd_f32x4_dot".into(), Type::Fn(vec![Type::Float,Type::Float,Type::Float,Type::Float,Type::Float,Type::Float,Type::Float,Type::Float], Box::new(Type::Float)));
+        fns.insert("simd_f32x4_hadd".into(), Type::Fn(vec![Type::Float,Type::Float,Type::Float,Type::Float], Box::new(Type::Float)));
+        fns.insert("simd_fma".into(), Type::Fn(vec![Type::Float,Type::Float,Type::Float], Box::new(Type::Float)));
+        fns.insert("clz".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("ctz".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("popcount".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("bswap64".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("bswap32".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("rotl64".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+
         fns.insert(
             "lsm_new".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Named("Lsm".into()))),

@@ -19928,6 +19928,20 @@ impl Codegen {
                             self.line(&format!("int64_t {tmp} = mako_{name}({});", cargs.join(", ")));
                             return ("int64_t".into(), tmp);
                         }
+                        "simd_f32x4_dot" | "simd_f32x4_hadd" | "simd_fma" => {
+                            let mut cargs = Vec::new();
+                            for a in args { let (_, v) = self.emit_expr(a); cargs.push(v); }
+                            let tmp = self.fresh("sf");
+                            self.line(&format!("double {tmp} = mako_{name}({});", cargs.join(", ")));
+                            return ("double".into(), tmp);
+                        }
+                        "clz" | "ctz" | "popcount" | "bswap64" | "bswap32" | "rotl64" => {
+                            let mut cargs = Vec::new();
+                            for a in args { let (_, v) = self.emit_expr(a); cargs.push(v); }
+                            let tmp = self.fresh("bm");
+                            self.line(&format!("int64_t {tmp} = mako_{name}({});", cargs.join(", ")));
+                            return ("int64_t".into(), tmp);
+                        }
                         "now_ms" => {
                             let tmp = self.fresh("now");
                             self.line(&format!("int64_t {tmp} = mako_now_ms();"));
