@@ -193,10 +193,12 @@ impl Parser {
     fn parse_item(&mut self) -> Result<Item, ParseError> {
         let mut derives = Vec::new();
         let mut stability = crate::ast::ApiStability::Unspecified;
+        let mut no_alloc = false;
         while matches!(self.peek_kind(), TokenKind::Hash) {
             let attr = self.parse_attr()?;
             match attr {
                 ItemAttr::Derive(d) => derives.extend(d),
+                ItemAttr::NoAlloc => no_alloc = true,
                 ItemAttr::Stable => stability = crate::ast::ApiStability::Stable,
                 ItemAttr::Deprecated(message) => {
                     stability = crate::ast::ApiStability::Deprecated { message }
@@ -236,6 +238,7 @@ impl Parser {
                             exported: false,
                             is_const: false,
                             is_live: false,
+                            no_alloc: false,
                             stability: crate::ast::ApiStability::Unspecified,
                             type_bounds: std::collections::HashMap::new(),
                             contracts: vec![],
@@ -292,6 +295,7 @@ impl Parser {
                 f.exported = exported || is_exported_name(&f.name);
                 f.is_const = is_const_fn;
                 f.is_live = is_live_fn;
+                f.no_alloc = no_alloc;
                 f.stability = stability;
                 Ok(Item::Fn(f))
             }
@@ -466,6 +470,7 @@ impl Parser {
                 ItemAttr::Derive(out)
             }
             "packed" => ItemAttr::Derive(vec!["packed".into()]),
+            "no_alloc" => ItemAttr::NoAlloc,
             "stable" => ItemAttr::Stable,
             "deprecated" => {
                 let message = if matches!(self.peek_kind(), TokenKind::LParen) {
@@ -1176,6 +1181,7 @@ impl Parser {
             exported: false,
             is_const: false,
             is_live: false,
+            no_alloc: false,
             stability: crate::ast::ApiStability::Unspecified,
             contracts,
             source_file: None,
@@ -3585,6 +3591,7 @@ enum ItemAttr {
     Stable,
     Deprecated(String),
     Cfg(String, String),
+    NoAlloc,
 }
 
 /// Go-style: names starting with an uppercase letter are package-exported.

@@ -292,6 +292,8 @@ pub struct TypeChecker {
     variants: HashMap<String, VariantCtor>,
     scopes: Vec<HashMap<String, (Type, bool)>>,
     current_ret: Type,
+    /// True inside `#[no_alloc]` functions — rejects allocating calls.
+    no_alloc_fn: bool,
     /// Expected type for nested Ok/Err/Some constructors (e.g. Ok(Some(Ok(x)))).
     current_expected: Option<Type>,
     interfaces: Vec<InterfaceDef>,
@@ -13824,6 +13826,7 @@ impl TypeChecker {
             variants: HashMap::new(),
             scopes: vec![HashMap::new()],
             current_ret: Type::Void,
+            no_alloc_fn: false,
             current_expected: None,
             interfaces: Vec::new(),
             moved_holds: HashMap::new(),
@@ -15679,6 +15682,7 @@ impl TypeChecker {
             )));
         };
         self.current_ret = *ret;
+        self.no_alloc_fn = f.no_alloc;
         self.pending_defers.clear();
         self.moved_holds.clear();
         self.hold_vars.clear();
@@ -17539,6 +17543,11 @@ impl TypeChecker {
                         } else if lt == Type::Float && rt == Type::Float {
                             Ok(Type::Float)
                         } else if *op == BinOp::Add && lt == Type::String && rt == Type::String {
+                            if self.no_alloc_fn {
+                                return Err(TypeError::new(
+                                    "string concatenation allocates and cannot be used in a #[no_alloc] function"
+                                ).hint("use pre-allocated buffers or arena string builders"));
+                            }
                             Ok(Type::String)
                         } else if matches!(lt, Type::Option(_)) || matches!(rt, Type::Option(_)) {
                             Err(TypeError::new(format!(
@@ -17783,6 +17792,24 @@ impl TypeChecker {
                             "unsafe_index may only be used inside an unsafe block",
                         )
                         .hint("wrap the proven-safe access in `unsafe { ... }`"));
+                    }
+                    // #[no_alloc]: reject heap-allocating calls.
+                    if self.no_alloc_fn {
+                        let alloc_fns = [
+                            "append", "make", "str_builder", "builder_string",
+                            "str_repeat", "str_replace", "str_split", "str_fields",
+                            "str_to_lower", "str_to_upper", "str_trim", "str_trim_space",
+                            "str_trim_left", "str_trim_right", "int_to_string",
+                            "format_int", "format_float", "fmt_sprintf",
+                            "json_encode", "json_decode",
+                            "chan_open", "cmap_new",
+                        ];
+                        if alloc_fns.contains(&name.as_str()) {
+                            return Err(TypeError::new(format!(
+                                "`{name}` allocates and cannot be called in a #[no_alloc] function"
+                            )).hint("use arena-allocated alternatives or pre-allocated buffers"));
+                        }
+                        // String concat via + also allocates — caught separately below.
                     }
                     // fn_drop / fn_has_env accept any fn value (arity-independent).
                     if name == "fn_drop" {
@@ -20703,7 +20730,7 @@ impl TypeChecker {
                 body: body.clone(),
                 exported: false,
                 is_const: false,
-                is_live: false,
+                is_live: false, no_alloc: false,
                 stability: crate::ast::ApiStability::Unspecified,
                 contracts: vec![],
                 source_file: None,
@@ -23391,6 +23418,7 @@ pub fn specialize_fn(template: &FnDef, mono_name: &str, subst: &HashMap<String, 
         exported: template.exported,
         is_const: template.is_const,
         is_live: template.is_live,
+        no_alloc: template.no_alloc,
         stability: template.stability.clone(),
         contracts: template.contracts.clone(),
         source_file: template.source_file.clone(),

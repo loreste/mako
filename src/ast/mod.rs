@@ -161,6 +161,8 @@ pub struct FnDef {
     /// `live fn` — hot-reloadable: compiled as indirect call through a function pointer
     /// that can be swapped at runtime via `dlopen`/`dlsym` without restarting.
     pub is_live: bool,
+    /// `#[no_alloc]` — real-time safe: compiler rejects RC/malloc/append/concat in body.
+    pub no_alloc: bool,
     /// Compiler-checked API stability (`#[stable]` / `#[deprecated(...)]`).
     pub stability: ApiStability,
     /// `prove` contracts: conditions the compiler verifies or emits as runtime assertions.
