@@ -23,7 +23,16 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
+#include <sys/ioctl.h>
 #include <sys/utsname.h>
+#ifndef MAP_ANONYMOUS
+#ifdef MAP_ANON
+#define MAP_ANONYMOUS MAP_ANON
+#else
+#define MAP_ANONYMOUS 0x20
+#endif
+#endif
 #include <sys/resource.h>
 #endif
 
@@ -1452,6 +1461,62 @@ static inline int64_t mako_setsid(void) {
 #else
     return (int64_t)setsid();
 #endif
+}
+
+/* ---- Hypervisor / low-level VM primitives ---- */
+static inline int64_t mako_ioctl(int64_t fd, int64_t request, int64_t arg) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return -1;
+#else
+    return (int64_t)ioctl((int)fd, (unsigned long)request, (void *)(uintptr_t)arg);
+#endif
+}
+
+static inline int64_t mako_mmap_anon(int64_t size) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return 0;
+#else
+    void *p = mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == MAP_FAILED) return 0;
+    return (int64_t)(uintptr_t)p;
+#endif
+}
+
+static inline int64_t mako_munmap(int64_t addr, int64_t size) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return -1;
+#else
+    return munmap((void *)(uintptr_t)addr, (size_t)size) == 0 ? 0 : -1;
+#endif
+}
+
+static inline int64_t mako_mprotect(int64_t addr, int64_t size, int64_t prot) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    return -1;
+#else
+    return mprotect((void *)(uintptr_t)addr, (size_t)size, (int)prot) == 0 ? 0 : -1;
+#endif
+}
+
+/* Read/write raw memory at an address (for KVM shared structs, MMIO) */
+static inline int64_t mako_mem_read_i64(int64_t addr, int64_t offset) {
+    return *(int64_t *)((char *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_i64(int64_t addr, int64_t offset, int64_t val) {
+    *(int64_t *)((char *)(uintptr_t)addr + offset) = val;
+}
+static inline int64_t mako_mem_read_i32(int64_t addr, int64_t offset) {
+    return (int64_t)*(int32_t *)((char *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_i32(int64_t addr, int64_t offset, int64_t val) {
+    *(int32_t *)((char *)(uintptr_t)addr + offset) = (int32_t)val;
+}
+static inline int64_t mako_mem_read_byte(int64_t addr, int64_t offset) {
+    return (int64_t)*((uint8_t *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_byte(int64_t addr, int64_t offset, int64_t val) {
+    *((uint8_t *)(uintptr_t)addr + offset) = (uint8_t)val;
 }
 
 static inline MakoString mako_syscall_hostname(void) {

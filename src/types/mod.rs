@@ -1614,6 +1614,17 @@ impl TypeChecker {
         fns.insert("process_wait".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
         fns.insert("process_pipe".into(), Type::Fn(vec![Type::Array(Box::new(Type::Int))], Box::new(Type::Int)));
         fns.insert("process_dup2".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+        // Hypervisor / low-level VM primitives
+        fns.insert("ioctl".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("mmap_anon".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
+        fns.insert("munmap".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("mprotect".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("mem_read_i64".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("mem_write_i64".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)));
+        fns.insert("mem_read_i32".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("mem_write_i32".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)));
+        fns.insert("mem_read_byte".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert("mem_write_byte".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)));
         fns.insert(
             "syscall_hostname".into(),
             Type::Fn(vec![], Box::new(Type::String)),

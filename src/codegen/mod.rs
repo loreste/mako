@@ -19907,6 +19907,20 @@ impl Codegen {
                             self.line(&format!("int64_t {tmp} = mako_setsid();"));
                             return ("int64_t".into(), tmp);
                         }
+                        "ioctl" | "mmap_anon" | "munmap" | "mprotect"
+                        | "mem_read_i64" | "mem_read_i32" | "mem_read_byte" => {
+                            let mut cargs = Vec::new();
+                            for a in args { let (_, v) = self.emit_expr(a); cargs.push(v); }
+                            let tmp = self.fresh("vm");
+                            self.line(&format!("int64_t {tmp} = mako_{name}({});", cargs.join(", ")));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "mem_write_i64" | "mem_write_i32" | "mem_write_byte" => {
+                            let mut cargs = Vec::new();
+                            for a in args { let (_, v) = self.emit_expr(a); cargs.push(v); }
+                            self.line(&format!("mako_{name}({});", cargs.join(", ")));
+                            return ("void".into(), "/*void*/".into());
+                        }
                         "now_ms" => {
                             let tmp = self.fresh("now");
                             self.line(&format!("int64_t {tmp} = mako_now_ms();"));
