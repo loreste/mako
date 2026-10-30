@@ -2575,7 +2575,6 @@ static inline MakoString mako_json_object_str(MakoString key, MakoString val) {
     if (wrote < 0) wrote = 0;
     mako_str_free(ek);
     mako_str_free(ev);
-    mako_str_free(key);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2642,7 +2641,6 @@ static inline MakoString mako_json_i(MakoString key, int64_t val) {
     int wrote = snprintf(d, n, "{\"%s\":%lld}", ek.data, (long long)val);
     if (wrote < 0) wrote = 0;
     mako_str_free(ek);
-    mako_str_free(key);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2653,7 +2651,6 @@ static inline MakoString mako_json_f(MakoString key, double val) {
     int wrote = snprintf(d, n, "{\"%s\":%.17g}", ek.data, val);
     if (wrote < 0) wrote = 0;
     mako_str_free(ek);
-    mako_str_free(key);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -2664,7 +2661,6 @@ static inline MakoString mako_json_b(MakoString key, int64_t val) {
     int wrote = snprintf(d, n, "{\"%s\":%s}", ek.data, val ? "true" : "false");
     if (wrote < 0) wrote = 0;
     mako_str_free(ek);
-    mako_str_free(key);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -3098,9 +3094,6 @@ static inline MakoString mako_json_merge(MakoString a, MakoString b) {
     while (bi < bl && (bd[bi] == ' ' || bd[bi] == '\t')) bi++;
     int wrote = snprintf(d, n, "%.*s,%s", (int)ai, ad, bd + bi);
     if (wrote < 0) wrote = 0;
-    /* Consume inputs — derive-generated callers always pass fresh temps. */
-    mako_str_free(a);
-    mako_str_free(b);
     return (MakoString){d, (size_t)wrote};
 }
 
@@ -5549,7 +5542,7 @@ static inline MakoStrArray mako_yaml_get_list(MakoString doc, MakoString key) {
             j++;
             while (j < line_end && (p[j] == ' ' || p[j] == '\t')) j++;
             MakoString item = mako_trim_config_value(p + j, line_end - j);
-            out = mako_str_array_append(out, item); /* append clones — drop our copy */
+            mako_str_array_push(&out, item); /* append clones — drop our copy */
             mako_str_free(item);
         } else if (j < line_end && p[j] != '#') {
             break;
@@ -5577,7 +5570,7 @@ static inline MakoStrArray mako_yaml_keys(MakoString doc) {
             if (!d) continue;
             memcpy(d, p + k0, i - k0);
             d[i - k0] = 0;
-            out = mako_str_array_append(out, (MakoString){d, i - k0}); /* clones */
+            mako_str_array_push(&out, (MakoString){d, i - k0}); /* clones */
             free(d);
         }
     }
@@ -5809,7 +5802,7 @@ static inline MakoStrArray mako_toml_keys(MakoString doc) {
             if (!d) continue;
             memcpy(d, p + k0, k1 - k0);
             d[k1 - k0] = 0;
-            out = mako_str_array_append(out, (MakoString){d, k1 - k0}); /* clones */
+            mako_str_array_push(&out, (MakoString){d, k1 - k0}); /* clones */
             free(d);
         }
     }
@@ -6059,7 +6052,7 @@ static inline MakoIntArray mako_msgpack_decode_array_int(MakoString bin) {
             if (off < n) {
                 unsigned char bb = p[off];
                 if (bb <= 0x7f || (bb & 0xe0) == 0xe0) {
-                    out = mako_slice_append(out, mako_msgpack_decode_int(
+                    mako_slice_push(&out, mako_msgpack_decode_int(
                         (MakoString){(char *)(uintptr_t)(p + off), 1}));
                     off += 1;
                     mako_str_free(enc);
@@ -6069,7 +6062,7 @@ static inline MakoIntArray mako_msgpack_decode_array_int(MakoString bin) {
             mako_str_free(enc);
             break;
         }
-        out = mako_slice_append(out, v);
+        mako_slice_push(&out, v);
         off += enc.len;
         mako_str_free(enc);
     }
@@ -6234,9 +6227,9 @@ static inline MakoIntArray mako_cbor_decode_array_int(MakoString bin) {
         uint64_t v = 0;
         if (mako_cbor_read_head((const unsigned char *)bin.data, bin.len, &off, &m, &v) != 0) break;
         if (m == 0)
-            out = mako_slice_append(out, (int64_t)v);
+            mako_slice_push(&out, (int64_t)v);
         else if (m == 1)
-            out = mako_slice_append(out, (int64_t)(-1 - (int64_t)v));
+            mako_slice_push(&out, (int64_t)(-1 - (int64_t)v));
         else {
             (void)start;
             break;
@@ -6437,7 +6430,7 @@ static inline MakoIntArray mako_avro_decode_array_long(MakoString s) {
         rest = (MakoString){(char *)(s.data + off), s.len - off};
         ll = mako_avro_long_len(rest);
         if (ll < 0) break;
-        out = mako_slice_append(out, mako_avro_decode_long(rest));
+        mako_slice_push(&out, mako_avro_decode_long(rest));
         off += (size_t)ll;
     }
     return out;

@@ -31,6 +31,11 @@
 #ifdef __linux__
 #include <sys/sendfile.h>
 #endif
+#if defined(__APPLE__) && defined(_POSIX_C_SOURCE) && !defined(MAKO_SENDFILE_DECL)
+#define MAKO_SENDFILE_DECL
+struct sf_hdtr;
+int sendfile(int fd, int s, off_t offset, off_t *len, struct sf_hdtr *hdtr, int flags);
+#endif
 #ifndef MAP_ANONYMOUS
 #ifdef MAP_ANON
 #define MAP_ANONYMOUS MAP_ANON
@@ -557,7 +562,7 @@ static inline MakoStrArray mako_read_dir(MakoString path) {
     do {
         if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
         /* append clones — pass a borrow so the temp is not leaked per entry. */
-        a = mako_str_array_append(a, mako_str_view(fd.cFileName, strlen(fd.cFileName)));
+        mako_str_array_push(&a, mako_str_view(fd.cFileName, strlen(fd.cFileName)));
     } while (FindNextFileA(h, &fd));
     FindClose(h);
 #else
@@ -567,7 +572,7 @@ static inline MakoStrArray mako_read_dir(MakoString path) {
     while ((ent = readdir(d)) != NULL) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
         /* append clones — pass a borrow so the temp is not leaked per entry. */
-        a = mako_str_array_append(a, mako_str_view(ent->d_name, strlen(ent->d_name)));
+        mako_str_array_push(&a, mako_str_view(ent->d_name, strlen(ent->d_name)));
     }
     closedir(d);
 #endif
@@ -660,14 +665,17 @@ static inline MakoStrArray mako_list_new_str(void) {
     return mako_str_array_make(0, 8);
 }
 static inline MakoIntArray mako_list_push_int(MakoIntArray a, int64_t v) {
-    return mako_slice_append(a, v);
+    mako_slice_push(&a, v);
+    return a;
 }
 static inline MakoStrArray mako_list_push_str(MakoStrArray a, MakoString v) {
-    return mako_str_array_append(a, v);
+    mako_str_array_push(&a, v);
+    return a;
 }
 /* Pop last: drop_last returns shortened list; last_* peeks without remove. */
 static int64_t mako_list_popped_int_tls = 0;
-static MakoString mako_list_popped_str_tls;
+static char mako_list_popped_str_buf[4096];
+static size_t mako_list_popped_str_len = 0;
 static inline MakoIntArray mako_list_pop_int(MakoIntArray a) {
     if (a.len == 0) {
         mako_list_popped_int_tls = 0;
@@ -680,21 +688,29 @@ static inline MakoIntArray mako_list_pop_int(MakoIntArray a) {
 static inline int64_t mako_list_popped_int(void) { return mako_list_popped_int_tls; }
 static inline MakoStrArray mako_list_pop_str(MakoStrArray a) {
     if (a.len == 0) {
-        mako_list_popped_str_tls = mako_str_from_cstr("");
+        mako_list_popped_str_buf[0] = 0;
+        mako_list_popped_str_len = 0;
         return a;
     }
-    mako_list_popped_str_tls = a.data[a.len - 1];
+    MakoString last = a.data[a.len - 1];
+    size_t n = last.len < sizeof(mako_list_popped_str_buf) - 1 ? last.len : sizeof(mako_list_popped_str_buf) - 1;
+    if (n && last.data) memcpy(mako_list_popped_str_buf, last.data, n);
+    mako_list_popped_str_buf[n] = 0;
+    mako_list_popped_str_len = n;
+    if (!mako_rc_shared(a.data)) mako_str_free(last);
     a.len--;
     return a;
 }
-static inline MakoString mako_list_popped_str(void) { return mako_list_popped_str_tls; }
+static inline MakoString mako_list_popped_str(void) {
+    return mako_str_view(mako_list_popped_str_buf, mako_list_popped_str_len);
+}
 static inline int64_t mako_list_get_int(MakoIntArray a, int64_t i) {
     if (i < 0 || (size_t)i >= a.len) return 0;
     return a.data[i];
 }
-static inline MakoString mako_list_get_str(MakoStrArray a, int64_t i) {
-    if (i < 0 || (size_t)i >= a.len) return mako_str_from_cstr("");
-    return a.data[i];
+static inline MakoString mako_list_get_str(MakoStrArray a, int64_t a_idx) {
+    if (a_idx < 0 || (size_t)a_idx >= a.len) return mako_str_from_cstr("");
+    return a.data[a_idx];
 }
 static inline int64_t mako_list_len_int(MakoIntArray a) { return (int64_t)a.len; }
 static inline int64_t mako_list_len_str(MakoStrArray a) { return (int64_t)a.len; }
@@ -703,6 +719,9 @@ static inline MakoIntArray mako_list_clear_int(MakoIntArray a) {
     return a;
 }
 static inline MakoStrArray mako_list_clear_str(MakoStrArray a) {
+    if (!mako_rc_shared(a.data)) {
+        for (size_t i = 0; i < a.len; i++) mako_str_free(a.data[i]);
+    }
     a.len = 0;
     return a;
 }
@@ -726,10 +745,10 @@ static inline MakoStrArray mako_list_insert_str(MakoStrArray a, int64_t i, MakoS
     MakoStrArray out = mako_str_array_make((int64_t)a.len + 1, (int64_t)a.len + 1);
     size_t j = 0;
     for (size_t k = 0; k < a.len; k++) {
-        if ((int64_t)k == i) out.data[j++] = v;
-        out.data[j++] = a.data[k];
+        if ((int64_t)k == i) out.data[j++] = mako_str_clone(v);
+        out.data[j++] = mako_str_clone(a.data[k]);
     }
-    if ((size_t)i == a.len) out.data[j++] = v;
+    if ((size_t)i == a.len) out.data[j++] = mako_str_clone(v);
     out.len = j;
     return out;
 }
@@ -748,7 +767,7 @@ static inline MakoIntArray mako_list_remove_int(MakoIntArray a, int64_t i) {
 static inline MakoStrArray mako_list_remove_str(MakoStrArray a, int64_t i) {
     if (i < 0 || (size_t)i >= a.len) {
         MakoStrArray out = mako_str_array_make((int64_t)a.len, (int64_t)a.len);
-        for (size_t k = 0; k < a.len; k++) out.data[k] = a.data[k];
+        for (size_t k = 0; k < a.len; k++) out.data[k] = mako_str_clone(a.data[k]);
         out.len = a.len;
         return out;
     }
@@ -756,7 +775,7 @@ static inline MakoStrArray mako_list_remove_str(MakoStrArray a, int64_t i) {
     size_t j = 0;
     for (size_t k = 0; k < a.len; k++) {
         if ((int64_t)k == i) continue;
-        out.data[j++] = a.data[k];
+        out.data[j++] = mako_str_clone(a.data[k]);
     }
     out.len = j;
     return out;
@@ -772,7 +791,8 @@ static inline MakoString mako_stack_peek_str(MakoStrArray a) {
 }
 /* Queue: pop front — returns shortened list; value in queue_popped_*. */
 static int64_t mako_queue_popped_int_tls = 0;
-static MakoString mako_queue_popped_str_tls;
+static char mako_queue_popped_str_buf[4096];
+static size_t mako_queue_popped_str_len = 0;
 static inline MakoIntArray mako_queue_pop_int(MakoIntArray a) {
     if (a.len == 0) {
         mako_queue_popped_int_tls = 0;
@@ -787,16 +807,23 @@ static inline MakoIntArray mako_queue_pop_int(MakoIntArray a) {
 static inline int64_t mako_queue_popped_int(void) { return mako_queue_popped_int_tls; }
 static inline MakoStrArray mako_queue_pop_str(MakoStrArray a) {
     if (a.len == 0) {
-        mako_queue_popped_str_tls = mako_str_from_cstr("");
+        mako_queue_popped_str_buf[0] = 0;
+        mako_queue_popped_str_len = 0;
         return a;
     }
-    mako_queue_popped_str_tls = a.data[0];
+    MakoString front = a.data[0];
+    size_t n = front.len < sizeof(mako_queue_popped_str_buf) - 1 ? front.len : sizeof(mako_queue_popped_str_buf) - 1;
+    if (n && front.data) memcpy(mako_queue_popped_str_buf, front.data, n);
+    mako_queue_popped_str_buf[n] = 0;
+    mako_queue_popped_str_len = n;
     MakoStrArray out = mako_str_array_make((int64_t)a.len - 1, (int64_t)a.len - 1);
-    for (size_t i = 1; i < a.len; i++) out.data[i - 1] = a.data[i];
+    for (size_t i = 1; i < a.len; i++) out.data[i - 1] = mako_str_clone(a.data[i]);
     out.len = a.len - 1;
     return out;
 }
-static inline MakoString mako_queue_popped_str(void) { return mako_queue_popped_str_tls; }
+static inline MakoString mako_queue_popped_str(void) {
+    return mako_str_view(mako_queue_popped_str_buf, mako_queue_popped_str_len);
+}
 /* Set-like uniqueness: ints already have slices_unique; strings here. */
 static inline MakoStrArray mako_slices_unique_strs(MakoStrArray a) {
     MakoStrArray sorted = mako_sort_strings(a);
@@ -823,7 +850,7 @@ static inline MakoStrArray mako_slices_unique_strs(MakoStrArray a) {
 }
 static inline MakoStrArray mako_slices_reverse_strs(MakoStrArray a) {
     MakoStrArray out = mako_str_array_make((int64_t)a.len, (int64_t)a.len);
-    for (size_t i = 0; i < a.len; i++) out.data[i] = a.data[a.len - 1 - i];
+    for (size_t i = 0; i < a.len; i++) out.data[i] = mako_str_clone(a.data[a.len - 1 - i]);
     out.len = a.len;
     return out;
 }
@@ -835,7 +862,7 @@ static inline int64_t mako_strings_index(MakoStrArray a, MakoString v) {
 }
 static inline MakoStrArray mako_strings_copy(MakoStrArray a) {
     MakoStrArray out = mako_str_array_make((int64_t)a.len, (int64_t)a.len);
-    for (size_t i = 0; i < a.len; i++) out.data[i] = a.data[i];
+    for (size_t i = 0; i < a.len; i++) out.data[i] = mako_str_clone(a.data[i]);
     out.len = a.len;
     return out;
 }
@@ -867,8 +894,8 @@ static inline MakoIntArray mako_list_concat_int(MakoIntArray a, MakoIntArray b) 
 }
 static inline MakoStrArray mako_list_concat_str(MakoStrArray a, MakoStrArray b) {
     MakoStrArray out = mako_str_array_make((int64_t)(a.len + b.len), (int64_t)(a.len + b.len));
-    for (size_t i = 0; i < a.len; i++) out.data[i] = a.data[i];
-    for (size_t i = 0; i < b.len; i++) out.data[a.len + i] = b.data[i];
+    for (size_t i = 0; i < a.len; i++) out.data[i] = mako_str_clone(a.data[i]);
+    for (size_t i = 0; i < b.len; i++) out.data[a.len + i] = mako_str_clone(b.data[i]);
     out.len = a.len + b.len;
     return out;
 }
@@ -1530,12 +1557,14 @@ static inline int64_t mako_writev(int64_t fd, MakoStrArray bufs) {
     (void)fd; (void)bufs; return -1;
 #else
     size_t n = bufs.len;
-    struct iovec *iov = (struct iovec *)malloc(n * sizeof(struct iovec));
+    struct iovec *iov = n ? (struct iovec *)malloc(n * sizeof(struct iovec)) : NULL;
     for (size_t i = 0; i < n; i++) {
         iov[i].iov_base = bufs.data[i].data;
         iov[i].iov_len = bufs.data[i].len;
     }
-    return (int64_t)writev((int)fd, iov, (int)n);
+    ssize_t total = writev((int)fd, iov, (int)n);
+    free(iov);
+    return (int64_t)total;
 #endif
 }
 
@@ -1544,8 +1573,8 @@ static inline int64_t mako_readv(int64_t fd, MakoIntArray sizes, int64_t out_add
     (void)fd; (void)sizes; (void)out_addr; return -1;
 #else
     size_t n = sizes.len;
-    struct iovec *iov = (struct iovec *)malloc(n * sizeof(struct iovec));
-    char **ptrs = (char **)malloc(n * sizeof(char *));
+    struct iovec *iov = n ? (struct iovec *)malloc(n * sizeof(struct iovec)) : NULL;
+    char **ptrs = n ? (char **)malloc(n * sizeof(char *)) : NULL;
     for (size_t i = 0; i < n; i++) {
         ptrs[i] = (char *)malloc((size_t)sizes.data[i]);
         iov[i].iov_base = ptrs[i];
@@ -1555,6 +1584,8 @@ static inline int64_t mako_readv(int64_t fd, MakoIntArray sizes, int64_t out_add
     /* Store buffer pointers at out_addr as int64 array for mem_read access */
     int64_t *out = (int64_t *)(uintptr_t)out_addr;
     for (size_t i = 0; i < n; i++) out[i] = (int64_t)(uintptr_t)ptrs[i];
+    free(ptrs);
+    free(iov);
     return (int64_t)total;
 #endif
 }
@@ -1564,7 +1595,7 @@ static inline int64_t mako_sendmsg(int64_t fd, MakoStrArray bufs, int64_t flags)
     (void)fd; (void)bufs; (void)flags; return -1;
 #else
     size_t n = bufs.len;
-    struct iovec *iov = (struct iovec *)malloc(n * sizeof(struct iovec));
+    struct iovec *iov = n ? (struct iovec *)malloc(n * sizeof(struct iovec)) : NULL;
     for (size_t i = 0; i < n; i++) {
         iov[i].iov_base = bufs.data[i].data;
         iov[i].iov_len = bufs.data[i].len;
@@ -1572,7 +1603,9 @@ static inline int64_t mako_sendmsg(int64_t fd, MakoStrArray bufs, int64_t flags)
     struct msghdr msg = {0};
     msg.msg_iov = iov;
     msg.msg_iovlen = n;
-    return (int64_t)sendmsg((int)fd, &msg, (int)flags);
+    ssize_t total = sendmsg((int)fd, &msg, (int)flags);
+    free(iov);
+    return (int64_t)total;
 #endif
 }
 
@@ -1581,8 +1614,8 @@ static inline int64_t mako_recvmsg(int64_t fd, MakoIntArray sizes, int64_t out_a
     (void)fd; (void)sizes; (void)out_addr; (void)flags; return -1;
 #else
     size_t n = sizes.len;
-    struct iovec *iov = (struct iovec *)malloc(n * sizeof(struct iovec));
-    char **ptrs = (char **)malloc(n * sizeof(char *));
+    struct iovec *iov = n ? (struct iovec *)malloc(n * sizeof(struct iovec)) : NULL;
+    char **ptrs = n ? (char **)malloc(n * sizeof(char *)) : NULL;
     for (size_t i = 0; i < n; i++) {
         ptrs[i] = (char *)malloc((size_t)sizes.data[i]);
         iov[i].iov_base = ptrs[i];
@@ -1594,6 +1627,8 @@ static inline int64_t mako_recvmsg(int64_t fd, MakoIntArray sizes, int64_t out_a
     ssize_t total = recvmsg((int)fd, &msg, (int)flags);
     int64_t *out = (int64_t *)(uintptr_t)out_addr;
     for (size_t i = 0; i < n; i++) out[i] = (int64_t)(uintptr_t)ptrs[i];
+    free(ptrs);
+    free(iov);
     return (int64_t)total;
 #endif
 }

@@ -1478,7 +1478,7 @@ static inline void mako_filepath_walk_into(MakoString root, int64_t depth, int64
     MakoStrArray top = mako_read_dir(root);
     for (size_t i = 0; i < top.len; i++) {
         MakoString full = mako_path_join(root, top.data[i]);
-        *out = mako_str_array_append(*out, full); /* append clones */
+        mako_str_array_push(out, full); /* append clones */
         if (mako_is_dir(full) && depth < max_depth) {
             mako_filepath_walk_into(full, depth + 1, max_depth, out);
         }
@@ -3684,7 +3684,7 @@ static inline MakoStrArray mako_regex_find_all(MakoString pat, MakoString text, 
             mako_str_free(m);
             break;
         }
-        out = mako_str_array_append(out, m); /* append clones */
+        mako_str_array_push(&out, m); /* append clones */
         found++;
         /* advance past match */
         const char *t = text.data ? text.data : "";
@@ -4392,7 +4392,7 @@ static inline MakoStrArray mako_zip_list(MakoString zip_path) {
         memcpy(d, raw.data + off + 30, nlen);
         d[nlen] = 0;
         MakoString entry = {d, nlen};
-        out = mako_str_array_append(out, entry); /* append clones */
+        mako_str_array_push(&out, entry); /* append clones */
         mako_str_free(entry);
         off += 30 + nlen + elen + csize;
     }
@@ -5267,7 +5267,8 @@ static inline MakoStrArray mako_gob_decode_strs(MakoString g) {
         char *d = (char *)malloc((size_t)sl + 1);
         memcpy(d, p + off, (size_t)sl); d[sl] = 0;
         off += (size_t)sl;
-        out = mako_str_array_append(out, (MakoString){d, (size_t)sl});
+        mako_str_array_push(&out, (MakoString){d, (size_t)sl});
+        free(d);
     }
     return out;
 }

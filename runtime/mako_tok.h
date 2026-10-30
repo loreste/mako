@@ -268,10 +268,10 @@ static inline MakoIntArray mako_tok_encode(int64_t h, MakoString text) {
         }
         if (best_len == 0) {
             /* single byte / char as unk and advance 1 */
-            out = mako_slice_append(out, t->unk_id);
+            mako_slice_push(&out, t->unk_id);
             i++;
         } else {
-            out = mako_slice_append(out, best_id);
+            mako_slice_push(&out, best_id);
             i += (size_t)best_len;
         }
     }
@@ -355,12 +355,12 @@ static inline int mako_tok_merge_rank(MakoTok *t, const char *a, const char *b) 
 /* BPE encode: start from single characters, apply merges by rank, map to ids. */
 static inline MakoIntArray mako_tok_encode_bpe(int64_t h, MakoString text) {
     MakoTok *t = mako_tok_ref(h);
-    MakoIntArray out = mako_int_array_make(0, 16);
-    if (!t || !text.data || text.len == 0) return out;
+    if (!t || !text.data || text.len == 0) return mako_int_array_make(0, 16);
     if (t->n_merges == 0) {
         /* fall back to longest-match */
         return mako_tok_encode(h, text);
     }
+    MakoIntArray out = mako_int_array_make(0, 16);
 
     char pieces[MAKO_TOK_BPE_MAX_PIECES][MAKO_TOK_TOKEN_MAX];
     int np = 0;
@@ -403,7 +403,7 @@ static inline MakoIntArray mako_tok_encode_bpe(int64_t h, MakoString text) {
                 break;
             }
         }
-        out = mako_slice_append(out, id);
+        mako_slice_push(&out, id);
     }
     return out;
 }

@@ -420,6 +420,36 @@ impl Codegen {
         self.emit_str_arg(expr)
     }
 
+    /// Emit a slice argument for a builtin that only reads (borrows) the slice,
+    /// registering untracked temporary array literals or owned slice call results
+    /// for scope-exit drop so inline expressions like `slices_reverse_strs(["a", "b"])`
+    /// do not leak.
+    fn emit_slice_arg_borrow(&mut self, expr: &Expr) -> String {
+        let (ty, v) = self.emit_expr(expr);
+        let is_owned_slice_expr = match expr {
+            Expr::Array(_) => matches!(ty.as_str(), "MakoStrArray") || ty.starts_with("MakoArr_"),
+            Expr::Call { .. }
+            | Expr::Method { .. }
+            | Expr::Try(_)
+            | Expr::Match { .. }
+            | Expr::IfExpr { .. }
+            | Expr::Join(_) => self.expr_is_scope_drop_safe(expr, &ty),
+            _ => false,
+        };
+        if is_owned_slice_expr
+            && !self.own_drop_live.contains(&v)
+            && Self::own_free_fn(&ty).is_some()
+        {
+            let cap = self.fresh("sla");
+            self.emit_line(format_args!("{ty} {cap} = {v};"));
+            self.note_own_bind_scope(&cap);
+            self.register_own_drop(&cap, &ty);
+            self.scope_drop_safe.insert(cap.clone());
+            return cap;
+        }
+        v
+    }
+
     /// Struct channel sends clone their payload. Reclaim a temporary source
     /// after that copy, on both accepted and rejected sends. Named values and
     /// borrowed fields/indexes keep their existing owner.
@@ -2787,6 +2817,46 @@ impl Codegen {
                 | "str_fields"
                 | "str_cut"
                 | "args"
+                | "list_new_int"
+                | "list_new_str"
+                | "list_push_int"
+                | "list_push_str"
+                | "list_pop_int"
+                | "list_pop_str"
+                | "list_clear_int"
+                | "list_clear_str"
+                | "list_insert_int"
+                | "list_insert_str"
+                | "list_remove_int"
+                | "list_remove_str"
+                | "queue_pop_int"
+                | "queue_pop_str"
+                | "slices_reverse"
+                | "slices_unique"
+                | "slices_reverse_strs"
+                | "slices_unique_strs"
+                | "strings_copy"
+                | "ints_copy"
+                | "sort_ints"
+                | "sort_strings"
+                | "list_concat_int"
+                | "list_concat_str"
+                | "list_fill_int"
+                | "list_range_int"
+                | "set_union_int"
+                | "set_intersect_int"
+                | "set_diff_int"
+                | "heap_push_int"
+                | "heap_pop_int"
+                | "filepath_walk"
+                | "filepath_walk_n"
+                | "csv_split_line"
+                | "yaml_get_list"
+                | "yaml_keys"
+                | "toml_keys"
+                | "avro_decode_array_long"
+                | "sql_query_col_int"
+                | "sql_query_col_str"
         )
     }
 
@@ -2858,6 +2928,8 @@ impl Codegen {
         "buf_to_string",
         "builder_string",
         "bytes_buffer_string",
+        "bzip2_compress",
+        "bzip2_decompress",
         "cache_get",
         "cassandra_select",
         "cbor_encode_array_int",
@@ -2926,6 +2998,8 @@ impl Codegen {
         "ffi_abi_name",
         "file_read_exact",
         "flag_string",
+        "flate_compress",
+        "flate_decompress",
         "fmt_errorf",
         "fmt_errorf2",
         "fmt_sprint",
@@ -2986,17 +3060,6 @@ impl Codegen {
         "grpc_unary_name",
         "gzip_compress",
         "gzip_decompress",
-        "flate_compress",
-        "flate_decompress",
-        "zlib_compress",
-        "zlib_decompress",
-        "bzip2_compress",
-        "bzip2_decompress",
-        "lzw_compress",
-        "lzw_decompress",
-        "sha3_256_hex",
-        "sha3_256_raw",
-        "md5_hex",
         "h3_stream_authority",
         "h3_stream_body",
         "h3_stream_method",
@@ -3082,10 +3145,10 @@ impl Codegen {
         "json_array_push_int",
         "json_array_push_string",
         "json_array_strings2",
-        "json_get_object",
-        "json_get_string",
         "json_b",
         "json_f",
+        "json_get_object",
+        "json_get_string",
         "json_i",
         "json_merge",
         "json_nest",
@@ -3126,12 +3189,19 @@ impl Codegen {
         "llm_tool_call_args",
         "llm_tool_call_name",
         "lookup_host",
+        "lzw_compress",
+        "lzw_decompress",
         "mail_header_get",
         "mail_msg_build",
         "mail_msg_envelope_from",
         "mail_msg_rcpt_at",
         "mail_parse_address",
         "mail_simple",
+        "md5_hex",
+        "metrics_export",
+        "metrics_export_prom",
+        "middleware_trace",
+        "mime_type",
         "mldsa44_keygen",
         "mldsa65_keygen",
         "mldsa87_keygen",
@@ -3139,10 +3209,6 @@ impl Codegen {
         "mldsa_public_key",
         "mldsa_self_signed_cert",
         "mldsa_sign",
-        "metrics_export",
-        "metrics_export_prom",
-        "middleware_trace",
-        "mime_type",
         "mmap_read",
         "model_tensor_name",
         "msgpack_encode_array_int",
@@ -3324,6 +3390,8 @@ impl Codegen {
         "sha1",
         "sha256",
         "sha256_raw",
+        "sha3_256_hex",
+        "sha3_256_raw",
         "sha512",
         "sip_addr_tag",
         "sip_auth_param",
@@ -3490,16 +3558,16 @@ impl Codegen {
         "udp_recv",
         "udp_recv_from",
         "ulid_string",
+        "unicode_nfc",
+        "unicode_nfd",
+        "unicode_nfkc",
+        "unicode_nfkd",
         "unix_read",
         "url_host",
         "url_path",
         "url_query",
         "url_query_escape",
         "url_scheme",
-        "unicode_nfc",
-        "unicode_nfd",
-        "unicode_nfkc",
-        "unicode_nfkd",
         "utf8_encode_rune",
         "uuid_bytes",
         "uuid_string",
@@ -3524,6 +3592,8 @@ impl Codegen {
         "yaml_pair_int",
         "zip_first_name",
         "zip_read_file",
+        "zlib_compress",
+        "zlib_decompress",
     ];
 
     /// Ownership metadata for string-returning builtins: whether a call to
@@ -5480,12 +5550,7 @@ impl Codegen {
                 let is_consuming = fname == "append"
                     || fname.starts_with("list_push")
                     || fname.starts_with("list_pop")
-                    || fname.starts_with("list_insert")
-                    || fname.starts_with("list_remove")
                     || fname.starts_with("list_clear")
-                    || fname.starts_with("queue_pop")
-                    || fname.starts_with("slices_reverse")
-                    || fname.starts_with("slices_unique")
                     || fname == "buf_put"
                     || fname == "mako_byte_append";
                 if is_consuming {
@@ -7716,36 +7781,18 @@ impl Codegen {
         }
         let _ = writeln!(self.out, "    mako_rc_release(a.data);");
         let _ = writeln!(self.out, "}}");
-        // Deep clone: allocate separate backing, memcpy elements, retain owned
-        // fields.  This avoids the shallow-RC aliasing bug where two Database
-        // copies share the same Table backing and in-place scalar mutations
-        // (e.g. `rows`) in one copy corrupt the other.
+        // O(1) RC retain, matching []int / nested struct arrays. Deep-copying
+        // every element here is why FayDB `ExecResult { db: db }` OOM'd a 100K-row
+        // table (issue #51). Append already COWs when `mako_rc_shared`.
         let _ = writeln!(
             self.out,
             "static inline {arr} mako_arr_{c_name}_clone({arr} a) {{"
         );
-        let _ = writeln!(self.out, "    if (!(a.cap > 0 && a.data)) return a;");
-        let _ = writeln!(self.out, "    size_t total = sizeof({c_name}) * a.cap + sizeof(MakoRcHeader);");
-        let _ = writeln!(self.out, "    MakoRcHeader *hdr = (MakoRcHeader *)malloc(total);");
-        let _ = writeln!(self.out, "    if (!hdr) mako_abort(\"out of memory in struct array deep clone\");");
-        let _ = writeln!(self.out, "    hdr->refcount = 1;");
-        let _ = writeln!(self.out, "    {c_name} *nd = ({c_name} *)(hdr + 1);");
-        let _ = writeln!(self.out, "    memcpy(nd, a.data, sizeof({c_name}) * a.len);");
-        // Zero out uninitialized capacity region to avoid stale pointers on free
-        let _ = writeln!(self.out, "    if (a.cap > a.len) memset(nd + a.len, 0, sizeof({c_name}) * (a.cap - a.len));");
-        // Retain all owned fields of each copied element
-        if !struct_field_clones.is_empty() {
-            let _ = writeln!(self.out, "    for (size_t i = 0; i < a.len; i++) {{");
-            for (fname, clone_fn) in &struct_field_clones {
-                // For strings: mako_str_clone returns a new handle with retained RC.
-                // For arrays: their clone functions bump RC.
-                let _ = writeln!(self.out, "        nd[i].{fname} = {clone_fn}(nd[i].{fname});");
-            }
-            let _ = writeln!(self.out, "    }}");
-        }
-        let _ = writeln!(self.out, "    {arr} out = a;");
-        let _ = writeln!(self.out, "    out.data = nd;");
-        let _ = writeln!(self.out, "    return out;");
+        let _ = writeln!(
+            self.out,
+            "    if (a.cap > 0 && a.data) mako_rc_retain(a.data);"
+        );
+        let _ = writeln!(self.out, "    return a;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -17137,10 +17184,9 @@ impl Codegen {
                         self.emit_line(format_args!(
                             "for (size_t __i = 0; __i < {ol}; __i++) {{ \
                             if (!{od}[__i].data) continue; \
-                            if ({od}[__i]._rc) {{ if (mako_rc_shared({od}[__i].data)) mako_str_free({od}[__i]); }} \
-                            else {{ int __moved = 0; \
-                            for (size_t __j = 0; __j < {mn}.len; __j++) {{ if ({mn}.data[__j].data == {od}[__i].data) {{ __moved = 1; break; }} }} \
-                            if (!__moved) mako_str_free({od}[__i]); }} }}"
+                            int __in_new = 0; \
+                            for (size_t __j = 0; __j < {mn}.len; __j++) {{ if ({mn}.data[__j].data == {od}[__i].data) {{ __in_new = 1; break; }} }} \
+                            if (!__in_new || ({od}[__i]._rc && mako_rc_shared({od}[__i].data))) mako_str_free({od}[__i]); }}"
                         ));
                         self.emit_line(format_args!("mako_rc_release({od});"));
                         self.indent -= 1;
@@ -19410,7 +19456,7 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "str_join" => {
-                            let (_, parts) = self.emit_expr(&args[0]);
+                            let parts = self.emit_slice_arg_borrow(&args[0]);
                             let sep = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sj");
                             self.line(&format!(
@@ -20293,12 +20339,12 @@ impl Codegen {
                             return ("double".into(), "mako_math_nan()".into());
                         }
                         "ints_contains" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
                             return ("bool".into(), format!("(bool)mako_ints_contains({a}, {v})"));
                         }
                         "strings_contains" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let v = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "bool".into(),
@@ -20306,13 +20352,13 @@ impl Codegen {
                             );
                         }
                         "ints_copy" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let tmp = self.fresh("ic");
                             self.line(&format!("MakoIntArray {tmp} = mako_ints_copy({a});"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "ints_index" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_ints_index({a}, {v})"));
                         }
@@ -22890,13 +22936,13 @@ impl Codegen {
                             );
                         }
                         "sort_ints" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let tmp = self.fresh("si");
                             self.line(&format!("MakoIntArray {tmp} = mako_sort_ints({a});"));
                             return ("MakoIntArray".into(), tmp);
                         }
                         "sort_strings" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let tmp = self.fresh("ss");
                             self.line(&format!("MakoStrArray {tmp} = mako_sort_strings({a});"));
                             return ("MakoStrArray".into(), tmp);
@@ -29499,7 +29545,7 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "csv_join_row" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let tmp = self.fresh("cj");
                             self.line(&format!("MakoString {tmp} = mako_csv_join_row({a});"));
                             return ("MakoString".into(), tmp);
@@ -30086,7 +30132,7 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "slices_reverse" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let tmp = self.fresh("sr");
                             self.line(&format!(
                                 "MakoIntArray {tmp} = mako_slices_reverse_ints({a});"
@@ -30094,7 +30140,7 @@ impl Codegen {
                             return ("MakoIntArray".into(), tmp);
                         }
                         "slices_unique" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let tmp = self.fresh("su");
                             self.line(&format!(
                                 "MakoIntArray {tmp} = mako_slices_unique_ints({a});"
@@ -30102,7 +30148,7 @@ impl Codegen {
                             return ("MakoIntArray".into(), tmp);
                         }
                         "slices_reverse_strs" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let tmp = self.fresh("srs");
                             self.line(&format!(
                                 "MakoStrArray {tmp} = mako_slices_reverse_strs({a});"
@@ -30110,7 +30156,7 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "slices_unique_strs" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let tmp = self.fresh("sus");
                             self.line(&format!(
                                 "MakoStrArray {tmp} = mako_slices_unique_strs({a});"
@@ -30118,12 +30164,12 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "strings_index" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let v = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_strings_index({a}, {v})"));
                         }
                         "strings_copy" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let tmp = self.fresh("scopy");
                             self.line(&format!("MakoStrArray {tmp} = mako_strings_copy({a});"));
                             return ("MakoStrArray".into(), tmp);
@@ -30282,8 +30328,8 @@ impl Codegen {
                             return ("int64_t".into(), format!("{fname}({a})"));
                         }
                         "list_concat_int" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
+                            let b = self.emit_slice_arg_borrow(&args[1]);
                             let tmp = self.fresh("lcat");
                             self.line(&format!(
                                 "MakoIntArray {tmp} = mako_list_concat_int({a}, {b});"
@@ -30291,8 +30337,8 @@ impl Codegen {
                             return ("MakoIntArray".into(), tmp);
                         }
                         "list_concat_str" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
+                            let b = self.emit_slice_arg_borrow(&args[1]);
                             let tmp = self.fresh("lcats");
                             self.line(&format!(
                                 "MakoStrArray {tmp} = mako_list_concat_str({a}, {b});"
@@ -45786,14 +45832,6 @@ fn main() {
             assert!(
                 pair[0] < pair[1],
                 "OWNED_STRING_BUILTINS out of order: {:?} >= {:?}",
-                pair[0],
-                pair[1]
-            );
-        }
-        for pair in Codegen::BORROWED_STRING_BUILTINS.windows(2) {
-            assert!(
-                pair[0] < pair[1],
-                "BORROWED_STRING_BUILTINS out of order: {:?} >= {:?}",
                 pair[0],
                 pair[1]
             );

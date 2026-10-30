@@ -148,7 +148,7 @@ static inline void *mako_rc_alloc(size_t data_bytes) {
     }
     _Atomic uint32_t *rc = (_Atomic uint32_t *)block;
     atomic_init(rc, 1);
-    *(uint32_t *)(block + 4) = 0;
+    *(uint32_t *)(block + 4) = data_bytes <= UINT32_MAX ? (uint32_t)data_bytes : UINT32_MAX;
     atomic_fetch_add_explicit(&mako_rc_alloc_count, 1, memory_order_relaxed);
     atomic_fetch_add_explicit(&mako_rc_alloc_bytes, (int64_t)data_bytes, memory_order_relaxed);
     if (mako_leak_trace_enabled) {
@@ -188,7 +188,17 @@ static inline int mako_rc_release_last(void *data) {
     if (!data) return 0;
     uint32_t prev = atomic_fetch_sub_explicit(mako_rc_of(data), 1, memory_order_acq_rel);
     if (prev == 0) { fprintf(stderr, "mako: slice refcount underflow\n"); abort(); }
-    return prev == 1;
+    if (prev == 1) {
+        uint32_t sz = *(uint32_t *)((char *)data - 4);
+        atomic_fetch_add_explicit(&mako_rc_free_count, 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&mako_rc_free_bytes, (int64_t)sz, memory_order_relaxed);
+        if (mako_leak_trace_enabled) {
+            fprintf(stderr, "[leak-trace] free at %p\n", data);
+            mako_rc_alloc_backtrace();
+        }
+        return 1;
+    }
+    return 0;
 }
 static inline int mako_rc_release(void *data) {
     if (!data) return 0;
@@ -198,7 +208,9 @@ static inline int mako_rc_release(void *data) {
         abort();
     }
     if (prev == 1) {
+        uint32_t sz = *(uint32_t *)((char *)data - 4);
         atomic_fetch_add_explicit(&mako_rc_free_count, 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&mako_rc_free_bytes, (int64_t)sz, memory_order_relaxed);
         if (mako_leak_trace_enabled) {
             fprintf(stderr, "[leak-trace] free at %p\n", data);
             mako_rc_alloc_backtrace();
@@ -1203,6 +1215,13 @@ static inline MakoStrArray mako_str_array_append(MakoStrArray s, MakoString v) {
     }
     s.data[s.len++] = mako_str_clone(v);
     return s;
+}
+
+static inline void mako_str_array_push(MakoStrArray *s, MakoString v) {
+    MakoString *old_data = s->data;
+    size_t old_cap = s->cap;
+    *s = mako_str_array_append(*s, v);
+    if (old_data && old_cap > 0 && old_data != s->data) mako_rc_release(old_data);
 }
 
 static inline void mako_str_array_free(MakoStrArray a) {
@@ -2611,7 +2630,7 @@ static inline MakoString mako_int_to_string(int64_t n) {
         d[1] = 0;
         return (MakoString){d, 1};
     }
-    static const char dtable[200] =
+    static const char dtable[201] =
         "0001020304050607080910111213141516171819"
         "2021222324252627282930313233343536373839"
         "4041424344454647484950515253545556575859"
@@ -5899,6 +5918,13 @@ static inline MakoIntArray mako_slice_append(MakoIntArray s, int64_t v) {
     s.cap = ncap;
     s.data[s.len++] = v;
     return s;
+}
+
+static inline void mako_slice_push(MakoIntArray *s, int64_t v) {
+    int64_t *old_data = s->data;
+    size_t old_cap = s->cap;
+    *s = mako_slice_append(*s, v);
+    if (old_data && old_cap > 0 && old_data != s->data) mako_rc_release(old_data);
 }
 
 /* Go-like s[low:high] / s[low:high:max] — shares backing store.
@@ -11170,7 +11196,7 @@ static inline MakoStrArray mako_env_keys(void) {
         const char *eq = strchr(*e, '=');
         size_t n = eq ? (size_t)(eq - *e) : strlen(*e);
         /* append clones its argument — pass a borrow so no temp is leaked. */
-        a = mako_str_array_append(a, mako_str_view(*e, n));
+        mako_str_array_push(&a, mako_str_view(*e, n));
     }
     return a;
 #endif
