@@ -19,11 +19,18 @@
 
 - Thread-local storage: `thread_local let counter: int = 0` — emits C11 `_Thread_local`.
 - Packed structs: `#[packed] struct PageHeader { ... }` — `__attribute__((packed))` for wire protocols and on-disk layouts.
-- Process control builtins: `process_fork`, `process_exec`, `process_wait`, `process_pipe`, `process_dup2`, `process_setsid` — POSIX wrappers for container runtimes and database backends.
+- Process control: `process_fork`, `process_exec`, `process_wait`, `process_pipe`, `process_dup2`, `process_setsid` — container runtimes and database backends.
+- Hypervisor primitives: `ioctl`, `mmap_anon`, `munmap`, `mprotect`, `mem_read/write_i64/i32/byte` — KVM-based virtual machines.
+- Scatter-gather I/O: `writev`, `sendmsg`, `sendfile` — zero-copy block transfers for SAN/iSCSI.
+- SIMD f32 vector ops: `simd_f32x4_dot`, `simd_f32x4_hadd`, `simd_fma` — auto-vectorizes to NEON/SSE at -O2.
+- Bit manipulation: `clz`, `ctz`, `popcount`, `bswap64`, `bswap32`, `rotl64` — codec entropy coding.
+- Real-time safety: `#[no_alloc]` annotation rejects heap allocation (RC, malloc, append, string concat) in annotated functions. Forces arena-only patterns for audio/video DSP hot paths.
 
 ### Memory safety
 
 - COW refcount leak fix: struct field replacement with same-pointer COW clones (from `mako_int_array_clone` RC bump) now releases the extra reference. Three codegen sites patched: `write_elem_dest_destroy`, `emit_reassign_free`, `emit_assign_owning_struct`.
+- View-to-owned tracking: slice views promoted to owned via `append` are now freed at scope exit via `force_own_drop`.
+- JSON derive leak fix: `json_merge`, `json_b`, `json_i`, `json_f`, `json_object_str` now free intermediate key/value temporaries.
 - DCE enum retention: unit enum variants used as bare values (`let d = North`) now keep the declaring enum alive.
 - DCE method retention: all `TypeName_*` functions on reachable types are BFS-walked so transitive dependencies (e.g. methods called from default interface bodies) survive elimination.
 - DCE generic mono retention: monomorphized functions (`show__Dog`) and struct method monos (`Wrapper__Dog_show`) are preserved when their generic template or mono type is reachable.

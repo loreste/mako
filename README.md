@@ -207,15 +207,21 @@ message inspection, site history, reports, alerts, and traffic metrics.
 - **Fixed-size arrays:** `let buf: [int; 8192]` — const generic array types
 - **Dynamic dispatch foundation:** vtables, fat pointers, and heterogeneous interface arrays
 
-**Systems programming features:**
+**Systems programming:**
 
 - **Thread-local storage:** `thread_local let conn_id: int = 0`
 - **Packed structs:** `#[packed] struct PageHeader { ... }` — exact byte layout
 - **Process control:** `process_fork`, `process_exec`, `process_wait`, `process_pipe`, `process_dup2`, `process_setsid`
+- **Hypervisor primitives:** `ioctl`, `mmap_anon`, `munmap`, `mprotect`, `mem_read/write_i64/i32/byte`
+- **Scatter-gather I/O:** `writev`, `sendmsg`, `sendfile` — zero-copy block transfers
+- **SIMD + bit ops:** `simd_f32x4_dot`, `simd_fma`, `clz`, `ctz`, `popcount`, `bswap64`, `rotl64`
+- **Real-time safety:** `#[no_alloc]` — compiler rejects heap allocation in annotated functions
 
-**Memory safety fixes:**
+**Memory safety:**
 
 - **COW refcount leak:** struct field replacement with same-pointer COW clones now releases the extra reference (3 codegen sites fixed)
+- **View-to-owned tracking:** slice views promoted to owned via append are now freed at scope exit
+- **JSON derive leak fix:** `json_merge`, `json_b`, `json_object_str` now free intermediate temporaries
 - **DCE enum retention:** unit enum variants used as values no longer stripped
 - **DCE method retention:** methods on reachable types are BFS-walked so transitive deps survive
 - **GCC 14+ compat:** const-cast all `_of` array helper call sites
