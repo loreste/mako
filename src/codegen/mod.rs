@@ -382,12 +382,24 @@ impl Codegen {
         // an owned temp. Idents/fields/indexes and borrowed builtin calls are
         // borrows — skip those to avoid double-frees.
         let is_owned_str_expr = match expr {
-            Expr::Call { .. } | Expr::Method { .. } => self.expr_is_scope_drop_safe(expr, &ty),
+            Expr::Call { .. }
+            | Expr::Method { .. }
+            | Expr::Try(_)
+            | Expr::Match { .. }
+            | Expr::IfExpr { .. }
+            | Expr::Join(_) => self.expr_is_scope_drop_safe(expr, &ty),
             Expr::Binary {
                 op: crate::ast::BinOp::Add,
                 ..
             } => true,
             Expr::StringInterp(_) | Expr::Slice { .. } => true,
+            Expr::Index { base, .. } => matches!(
+                base.as_ref(),
+                Expr::Ident(name)
+                    if self.locals.get(name).is_some_and(|ty| {
+                        matches!(ty.as_str(), "MakoMapIS*" | "MakoMapSS*" | "MakoMapFS*")
+                    })
+            ),
             _ => false,
         };
         if ty == "MakoString" && !self.own_drop_live.contains(&v) && is_owned_str_expr {
@@ -417,6 +429,48 @@ impl Codegen {
                 if matches!(callee.as_ref(), Expr::Ident(n) if self.fn_ret_types.contains_key(n)));
         if fresh && !self.own_drop_live.contains(value) {
             self.emit_struct_field_drop(ty, value, false);
+        }
+    }
+
+    /// Reclaim temporary enum or struct values constructed inline as operands of `==` / `!=`.
+    fn emit_temp_eq_operand_drop(&mut self, expr: &Expr, c_ty: &str, var: &str) {
+        if self.current_arena.is_some() || self.own_drop_live.contains(var) {
+            return;
+        }
+        if let Some(info) = self.enums.values().find(|e| e.c_name == c_ty).cloned() {
+            if let Expr::Call { callee, args } = expr {
+                if let Expr::Ident(vname) = callee.as_ref() {
+                    if let Some((_tag, fields)) = info.variants.get(vname).cloned() {
+                        let mut str_slot = 0usize;
+                        for (i, a) in args.iter().enumerate() {
+                            if fields.get(i).copied() == Some("string") {
+                                if str_slot < 2
+                                    && (matches!(a, Expr::String(_) | Expr::StringInterp(_))
+                                        || self.expr_is_owned_print_temp(a))
+                                {
+                                    self.emit_line(format_args!(
+                                        "mako_str_free({var}.s{str_slot});"
+                                    ));
+                                }
+                                str_slot += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        if !self.struct_own_field_frees(c_ty).is_empty()
+            && matches!(
+                expr,
+                Expr::StructLit { .. }
+                    | Expr::StructLitPos { .. }
+                    | Expr::Call { .. }
+                    | Expr::Method { .. }
+                    | Expr::Try(_)
+            )
+        {
+            self.emit_struct_field_drop(c_ty, var, false);
         }
     }
 
@@ -2681,6 +2735,8 @@ impl Codegen {
             // Match / if-expr results take ownership of arm values (pattern binds
             // move or outer owns are cloned into the result temp).
             Expr::Match { .. } | Expr::IfExpr { .. } => true,
+            // `expr?` unboxes the Ok/Some payload from a fresh Result/Option.
+            Expr::Try(_) => true,
             _ => false,
         }
     }
@@ -2813,6 +2869,8 @@ impl Codegen {
         "chan_select_value_str",
         "clickhouse_select",
         "cmap_get",
+        "cmap_get2",
+        "cmap_get3i",
         "cookie_get",
         "cookie_make",
         "csrf_token",
@@ -3592,10 +3650,10 @@ impl Codegen {
             Expr::Join(_) => Self::own_free_fn(c_ty).is_some(),
             // Method calls (e.g. ch.recv()) that return a leaf owned value
             // are freshly allocated — safe to reclaim at scope exit.
-            Expr::Method { .. } => Self::own_free_fn(c_ty).is_some(),
+            Expr::Method { .. } | Expr::Try(_) => Self::own_free_fn(c_ty).is_some(),
             // Transient call/method result field extraction produces an owned value.
             Expr::Field { base, .. } => {
-                matches!(base.as_ref(), Expr::Call { .. } | Expr::Method { .. })
+                matches!(base.as_ref(), Expr::Call { .. } | Expr::Method { .. } | Expr::Try(_))
                     && (Self::own_free_fn(c_ty).is_some()
                         || !self.struct_own_field_frees(c_ty).is_empty())
             }
@@ -3857,6 +3915,20 @@ impl Codegen {
         val: &str,
     ) -> bool {
         if !matches!(c_ty, "MakoOptionInt" | "MakoResultInt" | "MakoResultFloat") {
+            if !c_ty.ends_with('*')
+                && !c_ty.starts_with("MakoEnum_")
+                && self.current_arena.is_none()
+                && !self.own_drop_live.contains(val)
+                && Self::extract_consumed_arg(expr).is_none()
+                && self.expr_is_scope_drop_safe(expr, c_ty)
+            {
+                if let Some(ff) = Self::own_free_fn(c_ty) {
+                    let tmp = self.fresh("discard_own");
+                    self.emit_line(format_args!("{c_ty} {tmp} = {val};"));
+                    self.emit_line(format_args!("{ff}({tmp});"));
+                    return true;
+                }
+            }
             // Discarded owning struct from a fresh call/literal (including a
             // clone of a borrowed param returned by value) must drop its fields.
             // Field/index/ident discards stay with the parent owner.
@@ -3866,6 +3938,7 @@ impl Codegen {
                     | Expr::Method { .. }
                     | Expr::StructLit { .. }
                     | Expr::StructLitPos { .. }
+                    | Expr::Try(_)
             ) {
                 return false;
             }
@@ -4702,28 +4775,6 @@ impl Codegen {
     /// when the array backing is shared (issue #65). The array-level destructor
     /// (mako_arr_T_free) handles cleanup via refcounting. Skip all field-level frees
     /// for struct types — only free scalar owning types (string, array, map).
-    /// Retain (bump RC on) all owning fields of a struct copy.
-    /// Used by arr_T_get so the returned copy has its own references.
-    fn write_struct_retain_fields(&mut self, var: &str, cty: &str, indent: &str) {
-        let fields = self.struct_own_field_frees(cty);
-        for (path, _) in fields {
-            let fty = self.struct_field_c_type(cty, &path).unwrap_or_default();
-            if fty == "MakoString"
-                || fty.starts_with("MakoArr_")
-                || matches!(
-                    fty.as_str(),
-                    "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
-                        | "MakoFloatArray" | "MakoBoolArray"
-                )
-            {
-                let _ = writeln!(
-                    self.out,
-                    "{indent}if ({var}.{path}.data) mako_rc_retain({var}.{path}.data);"
-                );
-            }
-        }
-    }
-
     fn write_elem_dest_destroy(&mut self, old: &str, new: &str, cty: &str, indent: &str) {
         let fields = self.struct_own_field_frees(cty);
         if !fields.is_empty() {
@@ -7665,18 +7716,36 @@ impl Codegen {
         }
         let _ = writeln!(self.out, "    mako_rc_release(a.data);");
         let _ = writeln!(self.out, "}}");
-        // O(1) RC retain, matching []int / nested struct arrays. Deep-copying
-        // every element here is why FayDB `ExecResult { db: db }` OOM'd a 100K-row
-        // table (issue #51). Append already COWs when `mako_rc_shared`.
+        // Deep clone: allocate separate backing, memcpy elements, retain owned
+        // fields.  This avoids the shallow-RC aliasing bug where two Database
+        // copies share the same Table backing and in-place scalar mutations
+        // (e.g. `rows`) in one copy corrupt the other.
         let _ = writeln!(
             self.out,
             "static inline {arr} mako_arr_{c_name}_clone({arr} a) {{"
         );
-        let _ = writeln!(
-            self.out,
-            "    if (a.cap > 0 && a.data) mako_rc_retain(a.data);"
-        );
-        let _ = writeln!(self.out, "    return a;");
+        let _ = writeln!(self.out, "    if (!(a.cap > 0 && a.data)) return a;");
+        let _ = writeln!(self.out, "    size_t total = sizeof({c_name}) * a.cap + sizeof(MakoRcHeader);");
+        let _ = writeln!(self.out, "    MakoRcHeader *hdr = (MakoRcHeader *)malloc(total);");
+        let _ = writeln!(self.out, "    if (!hdr) mako_abort(\"out of memory in struct array deep clone\");");
+        let _ = writeln!(self.out, "    hdr->refcount = 1;");
+        let _ = writeln!(self.out, "    {c_name} *nd = ({c_name} *)(hdr + 1);");
+        let _ = writeln!(self.out, "    memcpy(nd, a.data, sizeof({c_name}) * a.len);");
+        // Zero out uninitialized capacity region to avoid stale pointers on free
+        let _ = writeln!(self.out, "    if (a.cap > a.len) memset(nd + a.len, 0, sizeof({c_name}) * (a.cap - a.len));");
+        // Retain all owned fields of each copied element
+        if !struct_field_clones.is_empty() {
+            let _ = writeln!(self.out, "    for (size_t i = 0; i < a.len; i++) {{");
+            for (fname, clone_fn) in &struct_field_clones {
+                // For strings: mako_str_clone returns a new handle with retained RC.
+                // For arrays: their clone functions bump RC.
+                let _ = writeln!(self.out, "        nd[i].{fname} = {clone_fn}(nd[i].{fname});");
+            }
+            let _ = writeln!(self.out, "    }}");
+        }
+        let _ = writeln!(self.out, "    {arr} out = a;");
+        let _ = writeln!(self.out, "    out.data = nd;");
+        let _ = writeln!(self.out, "    return out;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
@@ -15145,13 +15214,10 @@ impl Codegen {
             }
         }
 
-        // Register mut struct params for owned-drop tracking so field
-        // reassignment emits free-before-assign (prevents leaks).
+        // Register mut params and value-passed owning struct params for
+        // owned-drop tracking (their RC fields were retained at entry above).
         // Pointer-passed params are caller-owned — do not drop at exit.
         for (pi, p) in f.params.iter().enumerate() {
-            if !p.mutable {
-                continue;
-            }
             if p.name == "self" && is_mut_self_fn {
                 continue;
             }
@@ -15159,7 +15225,11 @@ impl Codegen {
                 continue;
             }
             let pty = self.type_expr_c(&p.ty);
-            if Self::own_free_fn(&pty).is_some() || !self.struct_own_field_frees(&pty).is_empty() {
+            let is_owned_struct = !self.struct_own_field_frees(&pty).is_empty();
+            if !p.mutable && !is_owned_struct {
+                continue;
+            }
+            if Self::own_free_fn(&pty).is_some() || is_owned_struct {
                 let mn = mangle(&p.name);
                 self.register_own_drop(&mn, &pty);
                 self.scope_drop_safe.insert(mn);
@@ -16388,7 +16458,7 @@ impl Codegen {
                 let transient_call_result_struct = *ownership != Ownership::Share
                     && self.current_arena.is_none()
                     && !self.struct_own_field_frees(&ty).is_empty()
-                    && matches!(init, Expr::Call { .. } | Expr::Method { .. });
+                    && matches!(init, Expr::Call { .. } | Expr::Method { .. } | Expr::Try(_));
                 let (val, field_value_owned) = if ty == "MakoFn"
                     && matches!(
                         init,
@@ -18232,11 +18302,16 @@ impl Codegen {
                     && (self.structs.values().any(|s| s.c_name == lt)
                         || self.enums.values().any(|e| e.c_name == lt))
                 {
-                    let eq = format!("mako_eq_{lt}({lv}, {rv})");
+                    let tmp = self.fresh("seq");
+                    self.emit_line(format_args!("bool {tmp} = mako_eq_{lt}({lv}, {rv});"));
+                    self.emit_temp_eq_operand_drop(left, &lt, &lv);
+                    if lv != rv {
+                        self.emit_temp_eq_operand_drop(right, &rt, &rv);
+                    }
                     return if *op == BinOp::Eq {
-                        ("bool".into(), eq)
+                        ("bool".into(), tmp)
                     } else {
-                        ("bool".into(), format!("(!{eq})"))
+                        ("bool".into(), format!("(!{tmp})"))
                     };
                 }
                 if *op == BinOp::BitClear {
@@ -18622,14 +18697,14 @@ impl Codegen {
                         }
                         "wrap_err" | "error_context" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            let (_, msg) = self.emit_expr(&args[1]);
+                            let msg = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("we");
                             self.line(&format!("MakoResultInt {tmp} = mako_wrap_err({r}, {msg});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         // Error tracing (source-location context)
                         "error_trace" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("et");
                             let (file, line) = self.current_source_loc();
                             self.line(&format!(
@@ -18638,8 +18713,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "error_wrap_trace" => {
-                            let (_, err) = self.emit_expr(&args[0]);
-                            let (_, ctx) = self.emit_expr(&args[1]);
+                            let err = self.emit_str_arg_borrow(&args[0]);
+                            let ctx = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("ewt");
                             let (file, line) = self.current_source_loc();
                             self.line(&format!(
@@ -18648,19 +18723,19 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "error_message" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("em");
                             self.line(&format!("MakoString {tmp} = mako_error_message({v});"));
                             return ("MakoString".into(), tmp);
                         }
                         "error_cause" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ec");
                             self.line(&format!("MakoString {tmp} = mako_error_cause({v});"));
                             return ("MakoString".into(), tmp);
                         }
                         "error_chain" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ech");
                             self.line(&format!("MakoString {tmp} = mako_error_chain({v});"));
                             return ("MakoString".into(), tmp);
@@ -18673,8 +18748,8 @@ impl Codegen {
                             return ("MakoResultInt".into(), tmp);
                         }
                         "error_tag" => {
-                            let (_, tag) = self.emit_expr(&args[0]);
-                            let (_, msg) = self.emit_expr(&args[1]);
+                            let tag = self.emit_str_arg_borrow(&args[0]);
+                            let msg = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("et");
                             self.line(&format!(
                                 "MakoResultInt {tmp} = mako_error_tag({tag}, {msg});"
@@ -18682,15 +18757,15 @@ impl Codegen {
                             return ("MakoResultInt".into(), tmp);
                         }
                         "errorf" => {
-                            let (_, fmt) = self.emit_expr(&args[0]);
-                            let (_, arg) = self.emit_expr(&args[1]);
+                            let fmt = self.emit_str_arg_borrow(&args[0]);
+                            let arg = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("ef");
                             self.line(&format!("MakoResultInt {tmp} = mako_errorf({fmt}, {arg});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "error_is" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return ("bool".into(), format!("(mako_error_is({r}, {n}) != 0)"));
                         }
                         "error_string" => {
@@ -18719,7 +18794,7 @@ impl Codegen {
                         }
                         "error_has_tag" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "bool".into(),
                                 format!("(mako_error_has_tag({r}, {t}) != 0)"),
@@ -18766,7 +18841,7 @@ impl Codegen {
                             }
                         }
                         "dbg_str" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             let expr_lit = match &args[0] {
                                 Expr::Ident(n) => n.as_str(),
                                 _ => "expr",
@@ -18920,12 +18995,12 @@ impl Codegen {
                             return ("void".into(), "/*void*/".into());
                         }
                         "t_run" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_t_run({m});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "t_run_nested" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_t_run_nested({m});"));
                             return ("void".into(), "/*void*/".into());
                         }
@@ -18937,11 +19012,11 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "str_len" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_str_len({v})"));
                         }
                         "rune_count" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_rune_count({v})"));
                         }
                         "str_builder" => {
@@ -19003,13 +19078,13 @@ impl Codegen {
                         }
                         "uuid_v5" => {
                             let (_, ns) = self.emit_expr(&args[0]);
-                            let (_, name) = self.emit_expr(&args[1]);
+                            let name = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("u");
                             self.line(&format!("MakoUuid {tmp} = mako_uuid_v5({ns}, {name});"));
                             return ("MakoUuid".into(), tmp);
                         }
                         "uuid_v8" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("u");
                             self.line(&format!("MakoUuid {tmp} = mako_uuid_v8({d});"));
                             return ("MakoUuid".into(), tmp);
@@ -19070,7 +19145,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "uuid_from_bytes" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("uf");
                             self.line(&format!(
                                 "MakoUuid {tmp} = mako_uuid_from_bytes_checked({s});"
@@ -19078,13 +19153,13 @@ impl Codegen {
                             return ("MakoUuid".into(), tmp);
                         }
                         "uuid_parse" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("up");
                             self.line(&format!("MakoUuid {tmp} = mako_uuid_parse({s}, NULL);"));
                             return ("MakoUuid".into(), tmp);
                         }
                         "uuid_parse_ok" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("bool".into(), format!("mako_uuid_parse_ok({s})"));
                         }
                         "uuid_eq" => {
@@ -19110,7 +19185,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_uuid_variant({u})"));
                         }
                         "uuid_check" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("uc");
                             self.line(&format!("MakoResultInt {tmp} = mako_uuid_check({s});"));
                             return ("MakoResultInt".into(), tmp);
@@ -19127,13 +19202,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "ulid_parse" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ulp");
                             self.line(&format!("MakoUuid {tmp} = mako_ulid_parse({s}, NULL);"));
                             return ("MakoUuid".into(), tmp);
                         }
                         "ulid_parse_ok" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("bool".into(), format!("mako_ulid_parse_ok({s})"));
                         }
                         "ulid_timestamp_ms" => {
@@ -19172,10 +19247,10 @@ impl Codegen {
                             );
                         }
                         "str_slice_eq" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, l) = self.emit_expr(&args[2]);
-                            let (_, t) = self.emit_expr(&args[3]);
+                            let t = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_str_slice_eq({s}, {o}, {l}, {t})"),
@@ -19211,33 +19286,33 @@ impl Codegen {
                             );
                         }
                         "str_slice_contains" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, l) = self.emit_expr(&args[2]);
-                            let (_, t) = self.emit_expr(&args[3]);
+                            let t = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_str_slice_contains({s}, {o}, {l}, {t})"),
                             );
                         }
                         "str_slice_index" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, l) = self.emit_expr(&args[2]);
-                            let (_, t) = self.emit_expr(&args[3]);
+                            let t = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_str_slice_index({s}, {o}, {l}, {t})"),
                             );
                         }
                         "str_at_eq" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
-                            let (_, t) = self.emit_expr(&args[2]);
+                            let t = self.emit_str_arg_borrow(&args[2]);
                             return ("int64_t".into(), format!("mako_str_at_eq({s}, {o}, {t})"));
                         }
                         "str_byte_at" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_str_byte_at({s}, {i})"));
                         }
@@ -19252,7 +19327,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_str_last_index({a}, {b})"));
                         }
                         "str_slice" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             let (_, c) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("sl");
@@ -19329,14 +19404,14 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "str_fields" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sf");
                             self.line(&format!("MakoStrArray {tmp} = mako_str_fields({s});"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "str_join" => {
                             let (_, parts) = self.emit_expr(&args[0]);
-                            let (_, sep) = self.emit_expr(&args[1]);
+                            let sep = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sj");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_str_join({parts}, {sep});"
@@ -19363,20 +19438,20 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "parse_bool" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pb");
                             self.line(&format!("MakoResultInt {tmp} = mako_parse_bool({s});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "fmt_sprintf" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("fs");
                             self.line(&format!("MakoString {tmp} = mako_fmt_sprintf1({f}, {a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprintf_d" => {
-                            let (_, f) = self.emit_expr(&args[0]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("fd");
                             self.line(&format!(
@@ -19385,7 +19460,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprintf_dd" => {
-                            let (_, f) = self.emit_expr(&args[0]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
                             let (_, b) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("fdd");
@@ -19453,7 +19528,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "format_pad" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, w) = self.emit_expr(&args[1]);
                             let (_, z) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("fpad");
@@ -19463,7 +19538,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "parse_int_base" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("pib");
                             self.line(&format!(
@@ -19472,33 +19547,33 @@ impl Codegen {
                             return ("MakoResultInt".into(), tmp);
                         }
                         "parse_int_hex" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pih");
                             self.line(&format!("MakoResultInt {tmp} = mako_parse_int_hex({s});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "parse_int_bin" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pibin");
                             self.line(&format!("MakoResultInt {tmp} = mako_parse_int_bin({s});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "parse_int_oct" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pio");
                             self.line(&format!("MakoResultInt {tmp} = mako_parse_int_oct({s});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "parse_int_auto" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pia");
                             self.line(&format!("MakoResultInt {tmp} = mako_parse_int_auto({s});"));
                             return ("MakoResultInt".into(), tmp);
                         }
                         "fmt_sprintf2" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("fs2");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_fmt_sprintf2({f}, {a}, {b});"
@@ -19506,10 +19581,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprintf3" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
-                            let (_, c) = self.emit_expr(&args[3]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
+                            let c = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("fs3");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_fmt_sprintf3({f}, {a}, {b}, {c});"
@@ -19517,11 +19592,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprintf4" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
-                            let (_, c) = self.emit_expr(&args[3]);
-                            let (_, d) = self.emit_expr(&args[4]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
+                            let c = self.emit_str_arg_borrow(&args[3]);
+                            let d = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("fs4");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_fmt_sprintf4({f}, {a}, {b}, {c}, {d});"
@@ -19529,7 +19604,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprintf_f" => {
-                            let (_, f) = self.emit_expr(&args[0]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("fsf");
@@ -19539,22 +19614,22 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprint" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("fsp");
                             self.line(&format!("MakoString {tmp} = mako_fmt_sprint1({a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprint2" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("fsp2");
                             self.line(&format!("MakoString {tmp} = mako_fmt_sprint2({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprint3" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
-                            let (_, c) = self.emit_expr(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("fsp3");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_fmt_sprint3({a}, {b}, {c});"
@@ -19562,81 +19637,81 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprintln" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("fsl");
                             self.line(&format!("MakoString {tmp} = mako_fmt_sprintln1({a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_sprintln2" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("fsl2");
                             self.line(&format!("MakoString {tmp} = mako_fmt_sprintln2({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_print" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_fmt_print1({a})"));
                         }
                         "fmt_print2" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_fmt_print2({a}, {b})"));
                         }
                         "fmt_println" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_fmt_println1({a})"));
                         }
                         "fmt_println2" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_fmt_println2({a}, {b})"));
                         }
                         "fmt_printf" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_fmt_printf1({f}, {a})"));
                         }
                         "fmt_printf2" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             return ("int64_t".into(), format!("mako_fmt_printf2({f}, {a}, {b})"));
                         }
                         "fmt_printf3" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
-                            let (_, c) = self.emit_expr(&args[3]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
+                            let c = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_fmt_printf3({f}, {a}, {b}, {c})"),
                             );
                         }
                         "fmt_eprint" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_fmt_eprint1({a})"));
                         }
                         "fmt_eprintln" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_fmt_eprintln1({a})"));
                         }
                         "fmt_eprintf" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_fmt_eprintf1({f}, {a})"));
                         }
                         "fmt_errorf" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("fe");
                             self.line(&format!("MakoString {tmp} = mako_fmt_errorf1({f}, {a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "fmt_errorf2" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("fe2");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_fmt_errorf2({f}, {a}, {b});"
@@ -19644,26 +19719,26 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "print_raw" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_fmt_print1({a})"));
                         }
                         "eprint" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_fmt_eprint1({a})"));
                         }
                         "eprintln" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_fmt_eprintln1({a})"));
                         }
                         "hex_encode" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("he");
                             self.line(&format!("MakoString {tmp} = mako_hex_encode({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "arena_text" => {
                             let (_, a) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("at");
                             self.line(&format!("MakoString {tmp} = mako_arena_text(&{a}, {s});"));
                             return ("MakoString".into(), tmp);
@@ -19682,7 +19757,7 @@ impl Codegen {
                         }
                         "http_serve" => {
                             let (_, port) = self.emit_expr(&args[0]);
-                            let (_, body) = self.emit_expr(&args[1]);
+                            let body = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("hs");
                             self.line(&format!("int64_t {tmp} = mako_http_serve({port}, {body});"));
                             return ("int64_t".into(), tmp);
@@ -19877,7 +19952,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "process_exec" => {
-                            let (_, path) = self.emit_expr(&args[0]);
+                            let path = self.emit_str_arg_borrow(&args[0]);
                             let (_, argv) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("ex");
                             self.line(&format!("int64_t {tmp} = mako_exec({path}, {argv});"));
@@ -20013,7 +20088,7 @@ impl Codegen {
                             return ("MakoString".into(), s);
                         }
                         "str_to_owned" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sown");
                             self.line(&format!("MakoString {tmp} = mako_str_clone({s});"));
                             return ("MakoString".into(), tmp);
@@ -20030,38 +20105,38 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "path_join" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("pj");
                             self.line(&format!("MakoString {tmp} = mako_path_join({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "path_clean" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pc");
                             self.line(&format!("MakoString {tmp} = mako_path_clean({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "path_base" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pb");
                             self.line(&format!("MakoString {tmp} = mako_path_base({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "path_dir" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pd");
                             self.line(&format!("MakoString {tmp} = mako_path_dir({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "path_ext" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pe");
                             self.line(&format!("MakoString {tmp} = mako_path_ext({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "path_is_abs" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("bool".into(), format!("(bool)mako_path_is_abs({p})"));
                         }
                         "getcwd" => {
@@ -20070,17 +20145,17 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "chdir" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_chdir({p})"));
                         }
                         "read_dir" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rd");
                             self.line(&format!("MakoStrArray {tmp} = mako_read_dir({p});"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "is_dir" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("bool".into(), format!("(bool)mako_is_dir({p})"));
                         }
                         "abs" => {
@@ -20224,7 +20299,7 @@ impl Codegen {
                         }
                         "strings_contains" => {
                             let (_, a) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "bool".into(),
                                 format!("(bool)mako_strings_contains({a}, {v})"),
@@ -20405,7 +20480,7 @@ impl Codegen {
                         }
                         "syscall_write" => {
                             let (_, fd) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_syscall_write({fd}, {d})"));
                         }
                         "syscall_read" => {
@@ -20422,12 +20497,12 @@ impl Codegen {
                             return ("int64_t".into(), format!("{fname}({p}, {m})"));
                         }
                         "syscall_symlink" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, l) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let l = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_syscall_symlink({t}, {l})"));
                         }
                         "syscall_readlink" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sysrl");
                             self.line(&format!("MakoString {tmp} = mako_syscall_readlink({p});"));
                             return ("MakoString".into(), tmp);
@@ -20527,7 +20602,7 @@ impl Codegen {
                         }
                         "cmap_incr" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let (_, d) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("ci");
                             self.line(&format!("int64_t {tmp} = mako_cmap_incr({m}, {k}, {d});"));
@@ -20575,7 +20650,7 @@ impl Codegen {
                         }
                         "pwrite" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             let (_, o) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("pw");
                             self.line(&format!("int64_t {tmp} = mako_pwrite({f}, {d}, {o});"));
@@ -20583,15 +20658,15 @@ impl Codegen {
                         }
                         "file_append" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("fa");
                             self.line(&format!("int64_t {tmp} = mako_file_append({f}, {d});"));
                             return ("int64_t".into(), tmp);
                         }
                         "file_append2" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("fa2");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_file_append2({f}, {a}, {b});"
@@ -20600,9 +20675,9 @@ impl Codegen {
                         }
                         "file_append3" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
-                            let (_, c) = self.emit_expr(&args[3]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
+                            let c = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("fa3");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_file_append3({f}, {a}, {b}, {c});"
@@ -20635,7 +20710,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "path_file_size" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pfsz");
                             self.line(&format!("int64_t {tmp} = mako_path_file_size({p});"));
                             return ("int64_t".into(), tmp);
@@ -20665,14 +20740,14 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "mmap_open" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("mm");
                             self.line(&format!("MakoMMap *{tmp} = mako_mmap_open({p}, {m});"));
                             return ("MakoMMap*".into(), tmp);
                         }
                         "mmap_create" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("mc");
                             self.line(&format!("MakoMMap *{tmp} = mako_mmap_create({p}, {s});"));
@@ -20691,7 +20766,7 @@ impl Codegen {
                         "mmap_write" => {
                             let (_, m) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("mw");
                             self.line(&format!("int64_t {tmp} = mako_mmap_write({m}, {o}, {d});"));
                             return ("int64_t".into(), tmp);
@@ -20722,7 +20797,7 @@ impl Codegen {
                         "page_write" => {
                             let (_, p) = self.emit_expr(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             return ("int64_t".into(), format!("mako_page_write({p}, {o}, {d})"));
                         }
                         "page_read" => {
@@ -20740,14 +20815,14 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_page_free({p})"));
                         }
                         "wal_open" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("wal");
                             self.line(&format!("MakoWal *{tmp} = mako_wal_open({p});"));
                             return ("MakoWal*".into(), tmp);
                         }
                         "wal_append" => {
                             let (_, w) = self.emit_expr(&args[0]);
-                            let (_, r) = self.emit_expr(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_wal_append({w}, {r})"));
                         }
                         "wal_sync" => {
@@ -20868,11 +20943,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "snap_count" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_snap_count({s})"));
                         }
                         "snap_get" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_snap_get({s}, {i})"));
                         }
@@ -20887,15 +20962,15 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_snap_reconcile({p}, {a})"));
                         }
                         "snap_diff" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sdf");
                             self.line(&format!("MakoString {tmp} = mako_snap_diff({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "snap_apply_delta" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sad");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_snap_apply_delta({a}, {b});"
@@ -20979,17 +21054,17 @@ impl Codegen {
 
                         "btree_save" => {
                             let (_, t) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_btree_save({t}, {p})"));
                         }
                         "btree_load" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("btl");
                             self.line(&format!("MakoBTree *{tmp} = mako_btree_load({p});"));
                             return ("MakoBTree*".into(), tmp);
                         }
                         "sst_build4" => {
-                            let (_, path) = self.emit_expr(&args[0]);
+                            let path = self.emit_str_arg_borrow(&args[0]);
                             let (_, k0) = self.emit_expr(&args[1]);
                             let (_, v0) = self.emit_expr(&args[2]);
                             let (_, k1) = self.emit_expr(&args[3]);
@@ -21109,12 +21184,12 @@ impl Codegen {
                         }
                         "lsm_compact" => {
                             let (_, l) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_lsm_compact({l}, {p})"));
                         }
                         "lsm_compact_down" => {
                             let (_, l) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_lsm_compact_down({l}, {p})"));
                         }
                         "lsm_sst_levels" => {
@@ -21191,16 +21266,16 @@ impl Codegen {
                         }
                         "bloom_add_str" => {
                             let (_, b) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_bloom_add_str({b}, {k})"));
                         }
                         "bloom_maybe_str" => {
                             let (_, b) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_bloom_maybe_str({b}, {k})"));
                         }
                         "str_hash64" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_str_hash64({s})"));
                         }
                         "btree_range" => {
@@ -21219,7 +21294,7 @@ impl Codegen {
                         }
                         "btree_put_str" => {
                             let (_, t) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let (_, v) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -21228,13 +21303,13 @@ impl Codegen {
                         }
                         "btree_get_str" => {
                             let (_, t) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_btree_get_str({t}, {k})"));
                         }
                         "btree_range_str" => {
                             let (_, t) = self.emit_expr(&args[0]);
-                            let (_, lo) = self.emit_expr(&args[1]);
-                            let (_, hi) = self.emit_expr(&args[2]);
+                            let lo = self.emit_str_arg_borrow(&args[1]);
+                            let hi = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_btree_range_str({t}, {lo}, {hi})"),
@@ -21383,7 +21458,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_domain_reg_del({id})"));
                         }
                         "pman_open" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pm");
                             self.line(&format!("MakoPageMan *{tmp} = mako_pman_open({p});"));
                             return ("MakoPageMan*".into(), tmp);
@@ -21455,25 +21530,25 @@ impl Codegen {
                             );
                         }
                         "file_mtime_ns" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("fmtns");
                             self.line(&format!("int64_t {tmp} = mako_file_mtime_ns({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "hot_reload_watch" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hrw");
                             self.line(&format!("int64_t {tmp} = mako_hot_reload_watch({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "hot_reload_changed" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hrc");
                             self.line(&format!("int64_t {tmp} = mako_hot_reload_changed({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "hot_reload_unwatch" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_hot_reload_unwatch({p})"));
                         }
                         "hot_reload_watch_count" => {
@@ -21496,7 +21571,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "hot_reload_plugin_watch" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_hot_reload_plugin_watch({p})"),
@@ -21506,8 +21581,8 @@ impl Codegen {
                             return ("int64_t".into(), "mako_hot_reload_plugin_poll()".into());
                         }
                         "hot_reload_plugin_call" => {
-                            let (_, o) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let o = self.emit_str_arg_borrow(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("hrpc");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_hot_reload_plugin_call({o}, {p});"
@@ -21564,7 +21639,7 @@ impl Codegen {
                         "rollback_push" => {
                             let (_, r) = self.emit_expr(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
-                            let (_, sn) = self.emit_expr(&args[2]);
+                            let sn = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_rollback_push({r}, {t}, {sn})"),
@@ -21598,7 +21673,7 @@ impl Codegen {
                         "gfx_window_open" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
-                            let (_, t) = self.emit_expr(&args[2]);
+                            let t = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("gw");
                             self.line(&format!(
                                 "MakoGfxWindow *{tmp} = mako_gfx_window_open({w}, {h}, {t});"
@@ -21686,11 +21761,11 @@ impl Codegen {
                             );
                         }
                         "gfx_shader_compile" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_gfx_shader_compile({s})"));
                         }
                         "gfx_asset_size" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_gfx_asset_size({p})"));
                         }
                         "audio_mix" => {
@@ -21799,7 +21874,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_f32_to_f16_bits({b})"));
                         }
                         "debug_set_loc" => {
-                            let (_, f) = self.emit_expr(&args[0]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
                             let (_, l) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_debug_set_loc({f}, {l})"));
                         }
@@ -21916,7 +21991,7 @@ impl Codegen {
                         }
                         "nb_write" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("nw");
                             self.line(&format!("int64_t {tmp} = mako_nb_write({f}, {d});"));
                             return ("int64_t".into(), tmp);
@@ -21953,7 +22028,7 @@ impl Codegen {
                             return ("MakoBuf*".into(), tmp);
                         }
                         "buf_from_string" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("bfs");
                             self.line(&format!("MakoBuf *{tmp} = mako_buf_from_string({s});"));
                             return ("MakoBuf*".into(), tmp);
@@ -22057,7 +22132,7 @@ impl Codegen {
                             return ("MakoGameUDP*".into(), tmp);
                         }
                         "game_udp_bind_addr" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("guba");
                             self.line(&format!(
@@ -22087,9 +22162,9 @@ impl Codegen {
                         }
                         "game_udp_send_to" => {
                             let (_, u) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let h = self.emit_str_arg_borrow(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
-                            let (_, d) = self.emit_expr(&args[3]);
+                            let d = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("gst");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_game_udp_send_to({u}, {h}, {p}, {d});"
@@ -22099,7 +22174,7 @@ impl Codegen {
                         "game_udp_send" => {
                             let (_, u) = self.emit_expr(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("gsd");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_game_udp_send({u}, {p}, {d});"
@@ -22108,7 +22183,7 @@ impl Codegen {
                         }
                         "game_udp_broadcast" => {
                             let (_, u) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("gbc");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_game_udp_broadcast({u}, {d});"
@@ -22161,7 +22236,7 @@ impl Codegen {
                         }
                         "chash_get" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("cg");
                             self.line(&format!("int64_t {tmp} = mako_chash_get({r}, {k});"));
                             return ("int64_t".into(), tmp);
@@ -22258,15 +22333,15 @@ impl Codegen {
                             return ("void".into(), "/*void*/".into());
                         }
                         "jwt_sign" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("js");
                             self.line(&format!("MakoString {tmp} = mako_jwt_sign({p}, {s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "jwt_sign_es256" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jse");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_jwt_sign_es256({p}, {k});"
@@ -22274,35 +22349,35 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "jwt_verify" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jv");
                             self.line(&format!("int64_t {tmp} = mako_jwt_verify({t}, {s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "jwt_verify_rs256" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jvr");
                             self.line(&format!("int64_t {tmp} = mako_jwt_verify_rs256({t}, {k});"));
                             return ("int64_t".into(), tmp);
                         }
                         "jwt_verify_es256" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jve");
                             self.line(&format!("int64_t {tmp} = mako_jwt_verify_es256({t}, {k});"));
                             return ("int64_t".into(), tmp);
                         }
                         "jwt_verify_jwks" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, j) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let j = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jwj");
                             self.line(&format!("int64_t {tmp} = mako_jwt_verify_jwks({t}, {j});"));
                             return ("int64_t".into(), tmp);
                         }
                         "jwt_payload" => {
-                            let (_, t) = self.emit_expr(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("jp");
                             self.line(&format!("MakoString {tmp} = mako_jwt_payload({t});"));
                             return ("MakoString".into(), tmp);
@@ -22340,10 +22415,10 @@ impl Codegen {
                         }
                         "httpengine_route" => {
                             let (_, e) = self.emit_expr(&args[0]);
-                            let (_, path) = self.emit_expr(&args[1]);
+                            let path = self.emit_str_arg_borrow(&args[1]);
                             let (_, status) = self.emit_expr(&args[2]);
-                            let (_, ctype) = self.emit_expr(&args[3]);
-                            let (_, body) = self.emit_expr(&args[4]);
+                            let ctype = self.emit_str_arg_borrow(&args[3]);
+                            let body = self.emit_str_arg_borrow(&args[4]);
                             self.line(&format!(
                                 "mako_httpengine_route({e}, {path}, {status}, {ctype}, {body});"
                             ));
@@ -22438,14 +22513,14 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_random_int({lo}, {hi})"));
                         }
                         "log_debug" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_log_debug({s});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "log_kv" => {
-                            let (_, lvl) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let lvl = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[2]);
                             self.line(&format!("mako_log_kv({lvl}, {k}, {v});"));
                             return ("void".into(), "/*void*/".into());
                         }
@@ -22494,83 +22569,83 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "mkdir" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("md");
                             self.line(&format!("int64_t {tmp} = mako_mkdir({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "file_exists" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("fe");
                             self.line(&format!("bool {tmp} = mako_file_exists({p});"));
                             return ("bool".into(), tmp);
                         }
                         "remove_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rm");
                             self.line(&format!("int64_t {tmp} = mako_remove_file({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "rename" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rn");
                             self.line(&format!("int64_t {tmp} = mako_rename({a}, {b});"));
                             return ("int64_t".into(), tmp);
                         }
                         "mkdir_all" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("mda");
                             self.line(&format!("int64_t {tmp} = mako_mkdir_all({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "rmdir" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rd");
                             self.line(&format!("int64_t {tmp} = mako_rmdir({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "remove_all" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rma");
                             self.line(&format!("int64_t {tmp} = mako_remove_all({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "copy_file" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("cpf");
                             self.line(&format!("int64_t {tmp} = mako_copy_file({a}, {b});"));
                             return ("int64_t".into(), tmp);
                         }
                         "is_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("isf");
                             self.line(&format!("int64_t {tmp} = mako_is_file({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "path_size" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("psz");
                             self.line(&format!("int64_t {tmp} = mako_path_size({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "file_mtime" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("fmt");
                             self.line(&format!("int64_t {tmp} = mako_file_mtime({p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "chmod" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("chm");
                             self.line(&format!("int64_t {tmp} = mako_chmod({p}, {m});"));
                             return ("int64_t".into(), tmp);
                         }
                         "atomic_write_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, c) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let c = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("awf");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_atomic_write_file({p}, {c});"
@@ -22589,20 +22664,20 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "symlink" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, l) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let l = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sl");
                             self.line(&format!("int64_t {tmp} = mako_symlink({t}, {l});"));
                             return ("int64_t".into(), tmp);
                         }
                         "readlink" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rl");
                             self.line(&format!("MakoString {tmp} = mako_readlink({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "realpath" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rp");
                             self.line(&format!("MakoString {tmp} = mako_realpath({p});"));
                             return ("MakoString".into(), tmp);
@@ -22620,43 +22695,43 @@ impl Codegen {
                             return ("double".into(), tmp);
                         }
                         "base64_encode" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("b64e");
                             self.line(&format!("MakoString {tmp} = mako_base64_encode({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "base64_decode" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("b64d");
                             self.line(&format!("MakoString {tmp} = mako_base64_decode({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "base64url_encode" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("b64ue");
                             self.line(&format!("MakoString {tmp} = mako_base64url_encode({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "base64url_decode" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("b64ud");
                             self.line(&format!("MakoString {tmp} = mako_base64url_decode({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "p256_keygen" => {
-                            let (_, path) = self.emit_expr(&args[0]);
+                            let path = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("p256kg");
                             self.line(&format!("int64_t {tmp} = mako_p256_keygen({path});"));
                             return ("int64_t".into(), tmp);
                         }
                         "p256_public_jwk" => {
-                            let (_, key) = self.emit_expr(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("p256jwk");
                             self.line(&format!("MakoString {tmp} = mako_p256_public_jwk({key});"));
                             return ("MakoString".into(), tmp);
                         }
                         "p256_jwk_thumbprint" => {
-                            let (_, key) = self.emit_expr(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("p256th");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_p256_jwk_thumbprint({key});"
@@ -22664,9 +22739,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "jwt_sign_es256_header" | "jwt_sign_custom" => {
-                            let (_, payload) = self.emit_expr(&args[0]);
-                            let (_, key) = self.emit_expr(&args[1]);
-                            let (_, header) = self.emit_expr(&args[2]);
+                            let payload = self.emit_str_arg_borrow(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[1]);
+                            let header = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("jwt");
                             self.line(&format!("MakoString {tmp} = mako_jwt_sign_es256_header({payload}, {key}, {header});"));
                             return ("MakoString".into(), tmp);
@@ -22765,7 +22840,7 @@ impl Codegen {
                             return ("void".into(), "/*void*/".into());
                         }
                         "nb_udp_bind_reuseport_addr" => {
-                            let (_, ip) = self.emit_expr(&args[0]);
+                            let ip = self.emit_str_arg_borrow(&args[0]);
                             let (_, port) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -22782,7 +22857,7 @@ impl Codegen {
                         }
                         "tls_server_pool_write" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_tls_srv_pool_send({h}, {d})"),
@@ -22807,8 +22882,8 @@ impl Codegen {
                         }
                         "tls_reload_cert" => {
                             let (_, srv) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_tls_server_reload({srv}, {cert}, {key})"),
@@ -22827,21 +22902,21 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "http_get" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hg");
                             self.line(&format!("MakoString {tmp} = mako_http_get({u});"));
                             return ("MakoString".into(), tmp);
                         }
                         "http_post" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("hp");
                             self.line(&format!("MakoString {tmp} = mako_http_post({u}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "https_get" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, ca) = self.emit_expr(&args[1]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let ca = self.emit_str_arg_borrow(&args[1]);
                             let (_, t) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("hsg");
                             self.line(&format!(
@@ -22850,10 +22925,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "https_post" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
-                            let (_, ct) = self.emit_expr(&args[2]);
-                            let (_, ca) = self.emit_expr(&args[3]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
+                            let ct = self.emit_str_arg_borrow(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[3]);
                             let (_, t) = self.emit_expr(&args[4]);
                             let tmp = self.fresh("hsp");
                             self.line(&format!(
@@ -22862,8 +22937,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "oidc_discovery" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, ca) = self.emit_expr(&args[1]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let ca = self.emit_str_arg_borrow(&args[1]);
                             let (_, t) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("odisc");
                             self.line(&format!(
@@ -22872,9 +22947,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "oidc_token" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, form) = self.emit_expr(&args[1]);
-                            let (_, ca) = self.emit_expr(&args[2]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let form = self.emit_str_arg_borrow(&args[1]);
+                            let ca = self.emit_str_arg_borrow(&args[2]);
                             let (_, t) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("otok");
                             self.line(&format!(
@@ -22883,15 +22958,15 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_message" => {
-                            let (_, r) = self.emit_expr(&args[0]);
-                            let (_, c) = self.emit_expr(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
+                            let c = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("lm");
                             self.line(&format!("MakoString {tmp} = mako_llm_message({r}, {c});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_messages_append" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("lma");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_llm_messages_append({a}, {m});"
@@ -22899,8 +22974,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_chat_body" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, msgs) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
+                            let msgs = self.emit_str_arg_borrow(&args[1]);
                             let (_, s) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("lcb");
                             self.line(&format!(
@@ -22909,9 +22984,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_system_user" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, sy) = self.emit_expr(&args[1]);
-                            let (_, u) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
+                            let sy = self.emit_str_arg_borrow(&args[1]);
+                            let u = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("lsu");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_llm_system_user({m}, {sy}, {u});"
@@ -22919,8 +22994,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_body_with_tools" => {
-                            let (_, b) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("lbwt");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_llm_body_with_tools({b}, {t});"
@@ -22928,7 +23003,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_estimate_tokens" => {
-                            let (_, t) = self.emit_expr(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("letk");
                             self.line(&format!("int64_t {tmp} = mako_llm_estimate_tokens({t});"));
                             return ("int64_t".into(), tmp);
@@ -22944,25 +23019,25 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "llm_redact_key" => {
-                            let (_, k) = self.emit_expr(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lrk");
                             self.line(&format!("MakoString {tmp} = mako_llm_redact_key({k});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_content" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lc");
                             self.line(&format!("MakoString {tmp} = mako_llm_content({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_finish_reason" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lfr");
                             self.line(&format!("MakoString {tmp} = mako_llm_finish_reason({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_usage_prompt_tokens" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lupt");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_llm_usage_prompt_tokens({r});"
@@ -22970,7 +23045,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "llm_usage_completion_tokens" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("luct");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_llm_usage_completion_tokens({r});"
@@ -22978,7 +23053,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "llm_usage_total_tokens" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lutt");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_llm_usage_total_tokens({r});"
@@ -22986,13 +23061,13 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "llm_tool_call_count" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ltcc");
                             self.line(&format!("int64_t {tmp} = mako_llm_tool_call_count({r});"));
                             return ("int64_t".into(), tmp);
                         }
                         "llm_tool_call_name" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("ltcn");
                             self.line(&format!(
@@ -23001,7 +23076,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_tool_call_args" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("ltca");
                             self.line(&format!(
@@ -23010,20 +23085,20 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_sse_data" => {
-                            let (_, l) = self.emit_expr(&args[0]);
+                            let l = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lsd");
                             self.line(&format!("MakoString {tmp} = mako_llm_sse_data({l});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_sse_delta" => {
-                            let (_, c) = self.emit_expr(&args[0]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lsdd");
                             self.line(&format!("MakoString {tmp} = mako_llm_sse_delta({c});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_stream_append" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("lsa");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_llm_stream_append({a}, {d});"
@@ -23031,7 +23106,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_json_extract" => {
-                            let (_, t) = self.emit_expr(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lje");
                             self.line(&format!("MakoString {tmp} = mako_llm_json_extract({t});"));
                             return ("MakoString".into(), tmp);
@@ -23052,9 +23127,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_https_post" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let (_, t) = self.emit_expr(&args[3]);
                             let (_, v) = self.emit_expr(&args[4]);
                             let tmp = self.fresh("lhp");
@@ -23064,9 +23139,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_chat" => {
-                            let (_, base) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let base = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let (_, t) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("lch");
                             self.line(&format!(
@@ -23075,8 +23150,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_ask" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, u) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[1]);
                             let (_, t) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("lask");
                             self.line(&format!("MakoString {tmp} = mako_llm_ask({s}, {u}, {t});"));
@@ -23091,23 +23166,23 @@ impl Codegen {
                             return ("int64_t".into(), "mako_llm_last_status()".into());
                         }
                         "llm_is_error" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_llm_is_error({r})"));
                         }
                         "llm_error_message" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lem");
                             self.line(&format!("MakoString {tmp} = mako_llm_error_message({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_should_retry" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_llm_should_retry({r})"));
                         }
                         "llm_chat_stream" => {
-                            let (_, base) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let base = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let (_, t) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("lcs");
                             self.line(&format!(
@@ -23116,9 +23191,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_chat_retry" => {
-                            let (_, base) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let base = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let (_, t) = self.emit_expr(&args[3]);
                             let (_, a) = self.emit_expr(&args[4]);
                             let tmp = self.fresh("lcr");
@@ -23128,7 +23203,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_body_force_stream" => {
-                            let (_, b) = self.emit_expr(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lbfs");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_llm_body_force_stream({b});"
@@ -23136,8 +23211,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_embed_body" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, i) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
+                            let i = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("leb");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_llm_embed_body({m}, {i});"
@@ -23145,9 +23220,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_embeddings" => {
-                            let (_, base) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let base = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let (_, t) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("lemb");
                             self.line(&format!(
@@ -23156,18 +23231,18 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "llm_embed" => {
-                            let (_, i) = self.emit_expr(&args[0]);
+                            let i = self.emit_str_arg_borrow(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("le");
                             self.line(&format!("MakoString {tmp} = mako_llm_embed({i}, {t});"));
                             return ("MakoString".into(), tmp);
                         }
                         "llm_embedding_dim" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_llm_embedding_dim({r})"));
                         }
                         "llm_embedding_json" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lej");
                             self.line(&format!("MakoString {tmp} = mako_llm_embedding_json({r});"));
                             return ("MakoString".into(), tmp);
@@ -23610,9 +23685,9 @@ impl Codegen {
                             return ("int64_t".into(), "mako_sip_cseq_new()".into());
                         }
                         "sip_dialog_id" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, l) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let l = self.emit_str_arg_borrow(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("sdi");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_dialog_id({c}, {l}, {r});"
@@ -23620,37 +23695,37 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_txn_key" => {
-                            let (_, b) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("stk");
                             self.line(&format!("MakoString {tmp} = mako_sip_txn_key({b}, {m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_uri_scheme" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sus");
                             self.line(&format!("MakoString {tmp} = mako_sip_uri_scheme({u});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_uri_user" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("suu");
                             self.line(&format!("MakoString {tmp} = mako_sip_uri_user({u});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_uri_host" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("suh");
                             self.line(&format!("MakoString {tmp} = mako_sip_uri_host({u});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_uri_port" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_sip_uri_port({u})"));
                         }
                         "sip_uri_build" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("sub");
                             self.line(&format!(
@@ -23659,15 +23734,15 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_udp_bind" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_sip_udp_bind({h}, {p})"));
                         }
                         "sip_udp_send" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let h = self.emit_str_arg_borrow(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
-                            let (_, m) = self.emit_expr(&args[3]);
+                            let m = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_sip_udp_send({f}, {h}, {p}, {m})"),
@@ -23682,22 +23757,22 @@ impl Codegen {
                         }
                         "sip_tcp_send" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_sip_tcp_send({f}, {m})"));
                         }
                         "sip_md5_hex" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("smd5");
                             self.line(&format!("MakoString {tmp} = mako_sip_md5_hex({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sip_digest_response" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, r) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
-                            let (_, m) = self.emit_expr(&args[3]);
-                            let (_, uri) = self.emit_expr(&args[4]);
-                            let (_, n) = self.emit_expr(&args[5]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[3]);
+                            let uri = self.emit_str_arg_borrow(&args[4]);
+                            let n = self.emit_str_arg_borrow(&args[5]);
                             let tmp = self.fresh("sdr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_digest_response({u}, {r}, {p}, {m}, {uri}, {n});"
@@ -23705,10 +23780,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_digest_response_ha1" => {
-                            let (_, ha1) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
-                            let (_, uri) = self.emit_expr(&args[2]);
-                            let (_, n) = self.emit_expr(&args[3]);
+                            let ha1 = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
+                            let uri = self.emit_str_arg_borrow(&args[2]);
+                            let n = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("sdrh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_digest_response_ha1({ha1}, {m}, {uri}, {n});"
@@ -23716,8 +23791,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_www_authenticate" => {
-                            let (_, r) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("swa");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_www_authenticate({r}, {n});"
@@ -23725,8 +23800,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_proxy_authenticate" => {
-                            let (_, r) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("spa");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_proxy_authenticate({r}, {n});"
@@ -23734,11 +23809,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_authorization_digest" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, r) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
-                            let (_, uri) = self.emit_expr(&args[3]);
-                            let (_, resp) = self.emit_expr(&args[4]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[2]);
+                            let uri = self.emit_str_arg_borrow(&args[3]);
+                            let resp = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("sad");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_authorization_digest({u}, {r}, {n}, {uri}, {resp});"
@@ -23746,8 +23821,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_auth_param" => {
-                            let (_, h) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sap");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_auth_param({h}, {k});"
@@ -23755,7 +23830,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_copy_headers_for_response" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("schr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_copy_headers_for_response({m});"
@@ -23763,11 +23838,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_reply" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
                             let (_, c) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
-                            let (_, e) = self.emit_expr(&args[3]);
-                            let (_, b) = self.emit_expr(&args[4]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
+                            let e = self.emit_str_arg_borrow(&args[3]);
+                            let b = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("srep");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_reply({m}, {c}, {r}, {e}, {b});"
@@ -23775,8 +23850,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_ensure_to_tag" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sett");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_ensure_to_tag({m}, {t});"
@@ -23784,12 +23859,12 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_reply_with_to_tag" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
                             let (_, c) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
-                            let (_, e) = self.emit_expr(&args[3]);
-                            let (_, b) = self.emit_expr(&args[4]);
-                            let (_, t) = self.emit_expr(&args[5]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
+                            let e = self.emit_str_arg_borrow(&args[3]);
+                            let b = self.emit_str_arg_borrow(&args[4]);
+                            let t = self.emit_str_arg_borrow(&args[5]);
                             let tmp = self.fresh("srtt");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sip_reply_with_to_tag({m}, {c}, {r}, {e}, {b}, {t});"
@@ -23797,52 +23872,52 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sip_method_is" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_sip_method_is({m}, {n})"));
                         }
                         "sdp_ok" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_sdp_ok({s})"));
                         }
                         "sdp_version" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sdv");
                             self.line(&format!("MakoString {tmp} = mako_sdp_version({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_origin" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sdo");
                             self.line(&format!("MakoString {tmp} = mako_sdp_origin({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_origin_addr" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sdoa");
                             self.line(&format!("MakoString {tmp} = mako_sdp_origin_addr({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_session_name" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sdsn");
                             self.line(&format!("MakoString {tmp} = mako_sdp_session_name({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_timing" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sdt");
                             self.line(&format!("MakoString {tmp} = mako_sdp_timing({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_connection" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sdc");
                             self.line(&format!("MakoString {tmp} = mako_sdp_connection({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_connection_addr" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sdca");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_connection_addr({s});"
@@ -23850,22 +23925,22 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_connection_is_ip6" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_sdp_connection_is_ip6({s})"));
                         }
                         "sdp_media_count" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_sdp_media_count({s})"));
                         }
                         "sdp_media" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sdm");
                             self.line(&format!("MakoString {tmp} = mako_sdp_media({s}, {i});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_media_type" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sdmt");
                             self.line(&format!(
@@ -23874,12 +23949,12 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_media_port" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_sdp_media_port({s}, {i})"));
                         }
                         "sdp_media_proto" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sdmp");
                             self.line(&format!(
@@ -23888,7 +23963,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_media_formats" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sdmf");
                             self.line(&format!(
@@ -23897,7 +23972,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_media_connection" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sdmc");
                             self.line(&format!(
@@ -23906,7 +23981,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_media_connection_addr" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sdmca");
                             self.line(&format!(
@@ -23915,16 +23990,16 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_attr" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sda");
                             self.line(&format!("MakoString {tmp} = mako_sdp_attr({s}, {n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_media_attr" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
+                            let n = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("sdma");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_media_attr({s}, {i}, {n});"
@@ -23932,13 +24007,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_direction" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sdd");
                             self.line(&format!("MakoString {tmp} = mako_sdp_direction({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_media_direction" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("sdmd");
                             self.line(&format!(
@@ -23947,9 +24022,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_set_media_direction" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("sdsd");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_set_media_direction({s}, {i}, {d});"
@@ -23957,8 +24032,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_replace_connection_addr" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sdrca");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_replace_connection_addr({s}, {a});"
@@ -23966,7 +24041,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_replace_media_port" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("sdrmp");
@@ -23976,8 +24051,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_append_line" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, l) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let l = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sdal");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_append_line({s}, {l});"
@@ -23985,11 +24060,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_build_audio" => {
-                            let (_, o) = self.emit_expr(&args[0]);
-                            let (_, sn) = self.emit_expr(&args[1]);
-                            let (_, ip) = self.emit_expr(&args[2]);
+                            let o = self.emit_str_arg_borrow(&args[0]);
+                            let sn = self.emit_str_arg_borrow(&args[1]);
+                            let ip = self.emit_str_arg_borrow(&args[2]);
                             let (_, p) = self.emit_expr(&args[3]);
-                            let (_, c) = self.emit_expr(&args[4]);
+                            let c = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("sdba");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_build_audio({o}, {sn}, {ip}, {p}, {c});"
@@ -23997,13 +24072,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sdp_build_av" => {
-                            let (_, o) = self.emit_expr(&args[0]);
-                            let (_, sn) = self.emit_expr(&args[1]);
-                            let (_, ip) = self.emit_expr(&args[2]);
+                            let o = self.emit_str_arg_borrow(&args[0]);
+                            let sn = self.emit_str_arg_borrow(&args[1]);
+                            let ip = self.emit_str_arg_borrow(&args[2]);
                             let (_, ap) = self.emit_expr(&args[3]);
-                            let (_, ac) = self.emit_expr(&args[4]);
+                            let ac = self.emit_str_arg_borrow(&args[4]);
                             let (_, vp) = self.emit_expr(&args[5]);
-                            let (_, vc) = self.emit_expr(&args[6]);
+                            let vc = self.emit_str_arg_borrow(&args[6]);
                             let tmp = self.fresh("sdbav");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_build_av({o}, {sn}, {ip}, {ap}, {ac}, {vp}, {vc});"
@@ -24012,7 +24087,7 @@ impl Codegen {
                         }
                         "sdp_attr_rtpmap" => {
                             let (_, pt) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let (_, r) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("sdar");
                             self.line(&format!(
@@ -24022,7 +24097,7 @@ impl Codegen {
                         }
                         "sdp_attr_fmtp" => {
                             let (_, pt) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sdaf");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_attr_fmtp({pt}, {p});"
@@ -24032,11 +24107,11 @@ impl Codegen {
                         "sdp_attr_candidate" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, c) = self.emit_expr(&args[1]);
-                            let (_, t) = self.emit_expr(&args[2]);
+                            let t = self.emit_str_arg_borrow(&args[2]);
                             let (_, pr) = self.emit_expr(&args[3]);
-                            let (_, a) = self.emit_expr(&args[4]);
+                            let a = self.emit_str_arg_borrow(&args[4]);
                             let (_, p) = self.emit_expr(&args[5]);
-                            let (_, ty) = self.emit_expr(&args[6]);
+                            let ty = self.emit_str_arg_borrow(&args[6]);
                             let tmp = self.fresh("sdac");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sdp_attr_candidate({f}, {c}, {t}, {pr}, {a}, {p}, {ty});"
@@ -24047,35 +24122,35 @@ impl Codegen {
                             return ("int64_t".into(), "mako_rtp_header_len()".into());
                         }
                         "rtp_parse_ok" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_rtp_parse_ok({p})"));
                         }
                         "rtp_version" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_rtp_version({p})"));
                         }
                         "rtp_marker" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_rtp_marker({p})"));
                         }
                         "rtp_payload_type" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_rtp_payload_type({p})"));
                         }
                         "rtp_seq" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_rtp_seq({p})"));
                         }
                         "rtp_timestamp" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_rtp_timestamp({p})"));
                         }
                         "rtp_ssrc" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_rtp_ssrc({p})"));
                         }
                         "rtp_payload" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rtpp");
                             self.line(&format!("MakoString {tmp} = mako_rtp_payload({p});"));
                             return ("MakoString".into(), tmp);
@@ -24086,7 +24161,7 @@ impl Codegen {
                             let (_, ts) = self.emit_expr(&args[2]);
                             let (_, ssrc) = self.emit_expr(&args[3]);
                             let (_, mk) = self.emit_expr(&args[4]);
-                            let (_, pl) = self.emit_expr(&args[5]);
+                            let pl = self.emit_str_arg_borrow(&args[5]);
                             let tmp = self.fresh("rtpk");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_rtp_pack({pt}, {seq}, {ts}, {ssrc}, {mk}, {pl});"
@@ -24094,9 +24169,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http_request" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, u) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let (_, t) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("hrq");
                             self.line(&format!(
@@ -24105,11 +24180,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "https_request" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, u) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
-                            let (_, ct) = self.emit_expr(&args[3]);
-                            let (_, ca) = self.emit_expr(&args[4]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
+                            let ct = self.emit_str_arg_borrow(&args[3]);
+                            let ca = self.emit_str_arg_borrow(&args[4]);
                             let (_, t) = self.emit_expr(&args[5]);
                             let tmp = self.fresh("hsrq");
                             self.line(&format!(
@@ -24118,7 +24193,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http_get_timeout" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("hgt");
                             self.line(&format!(
@@ -24127,8 +24202,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http_post_timeout" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let (_, t) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("hpt");
                             self.line(&format!(
@@ -24147,13 +24222,13 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "http_last_header" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hlh");
                             self.line(&format!("MakoString {tmp} = mako_http_last_header({n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "https_last_header" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hslh");
                             self.line(&format!("MakoString {tmp} = mako_https_last_header({n});"));
                             return ("MakoString".into(), tmp);
@@ -24165,7 +24240,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "udp_bind_addr" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, port) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("udba");
                             self.line(&format!("int64_t {tmp} = mako_udp_bind_addr({h}, {port});"));
@@ -24173,9 +24248,9 @@ impl Codegen {
                         }
                         "udp_send_to" => {
                             let (_, fd) = self.emit_expr(&args[0]);
-                            let (_, host) = self.emit_expr(&args[1]);
+                            let host = self.emit_str_arg_borrow(&args[1]);
                             let (_, port) = self.emit_expr(&args[2]);
-                            let (_, data) = self.emit_expr(&args[3]);
+                            let data = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("udps");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_udp_send_to({fd}, {host}, {port}, {data});"
@@ -24230,7 +24305,7 @@ impl Codegen {
                             return ("int64_t".into(), "mako_unix_socket_pair_peer()".into());
                         }
                         "unix_listen" => {
-                            let (_, path) = self.emit_expr(&args[0]);
+                            let path = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("uxl");
                             self.line(&format!("int64_t {tmp} = mako_unix_listen({path});"));
                             return ("int64_t".into(), tmp);
@@ -24240,18 +24315,18 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_unix_accept({fd})"));
                         }
                         "unix_connect" => {
-                            let (_, path) = self.emit_expr(&args[0]);
+                            let path = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("uxc");
                             self.line(&format!("int64_t {tmp} = mako_unix_connect({path});"));
                             return ("int64_t".into(), tmp);
                         }
                         "unix_unlink" => {
-                            let (_, path) = self.emit_expr(&args[0]);
+                            let path = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_unix_unlink({path})"));
                         }
                         "unix_write" => {
                             let (_, fd) = self.emit_expr(&args[0]);
-                            let (_, data) = self.emit_expr(&args[1]);
+                            let data = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("uxw");
                             self.line(&format!("int64_t {tmp} = mako_unix_write({fd}, {data});"));
                             return ("int64_t".into(), tmp);
@@ -24268,13 +24343,13 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_unix_close({fd})"));
                         }
                         "http2_detect" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2");
                             self.line(&format!("bool {tmp} = mako_http2_detect({s});"));
                             return ("bool".into(), tmp);
                         }
                         "http2_settings_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2s");
                             self.line(&format!("int64_t {tmp} = mako_http2_settings_len({s});"));
                             return ("int64_t".into(), tmp);
@@ -24308,7 +24383,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http2_is_settings_ack" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2ia");
                             self.line(&format!("bool {tmp} = mako_http2_is_settings_ack({s});"));
                             return ("bool".into(), tmp);
@@ -24334,7 +24409,7 @@ impl Codegen {
                             return ("int64_t".into(), "0".into());
                         }
                         "http2_conn_recv" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2cr");
                             self.line(&format!("int64_t {tmp} = mako_http2_conn_recv({s});"));
                             return ("int64_t".into(), tmp);
@@ -24362,7 +24437,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http2_conn_pump" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2pump");
                             self.line(&format!("MakoString {tmp} = mako_http2_conn_pump({s});"));
                             return ("MakoString".into(), tmp);
@@ -24487,25 +24562,25 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "http2_frame_type" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2t");
                             self.line(&format!("int64_t {tmp} = mako_http2_frame_type({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_frame_stream" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2st");
                             self.line(&format!("int64_t {tmp} = mako_http2_frame_stream({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_frame_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2ln");
                             self.line(&format!("int64_t {tmp} = mako_http2_frame_len({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_frame_flags" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2fl");
                             self.line(&format!("int64_t {tmp} = mako_http2_frame_flags({s});"));
                             return ("int64_t".into(), tmp);
@@ -24519,7 +24594,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "hpack_decode_indexed" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hpd");
                             self.line(&format!("int64_t {tmp} = mako_hpack_decode_indexed({s});"));
                             return ("int64_t".into(), tmp);
@@ -24537,8 +24612,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "hpack_encode_literal" => {
-                            let (_, n) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("hpl");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_hpack_encode_literal({n}, {v});"
@@ -24546,13 +24621,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "hpack_literal_name" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hpln");
                             self.line(&format!("MakoString {tmp} = mako_hpack_literal_name({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "hpack_literal_value" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hplv");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_hpack_literal_value({s});"
@@ -24560,7 +24635,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "hpack_decode_block" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hpdb");
                             self.line(&format!("int64_t {tmp} = mako_hpack_decode_block({s});"));
                             return ("int64_t".into(), tmp);
@@ -24590,7 +24665,7 @@ impl Codegen {
                         }
                         "http2_headers_frame" => {
                             let (_, st) = self.emit_expr(&args[0]);
-                            let (_, bl) = self.emit_expr(&args[1]);
+                            let bl = self.emit_str_arg_borrow(&args[1]);
                             let (_, fl) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("h2h");
                             self.line(&format!(
@@ -24600,7 +24675,7 @@ impl Codegen {
                         }
                         "http2_data_frame" => {
                             let (_, st) = self.emit_expr(&args[0]);
-                            let (_, pl) = self.emit_expr(&args[1]);
+                            let pl = self.emit_str_arg_borrow(&args[1]);
                             let (_, fl) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("h2d");
                             self.line(&format!(
@@ -24611,7 +24686,7 @@ impl Codegen {
                         "http2_response" => {
                             let (_, st) = self.emit_expr(&args[0]);
                             let (_, code) = self.emit_expr(&args[1]);
-                            let (_, body) = self.emit_expr(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("h2rsp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http2_response({st}, {code}, {body});"
@@ -24621,8 +24696,8 @@ impl Codegen {
                         "http2_response_ct" => {
                             let (_, st) = self.emit_expr(&args[0]);
                             let (_, code) = self.emit_expr(&args[1]);
-                            let (_, ct) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
+                            let ct = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("h2rspct");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http2_response_ct({st}, {code}, {ct}, {body});"
@@ -24711,7 +24786,7 @@ impl Codegen {
                             );
                         }
                         "http2_frame_payload" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2p");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http2_frame_payload({s});"
@@ -24720,7 +24795,7 @@ impl Codegen {
                         }
                         "http2_continuation_frame" => {
                             let (_, st) = self.emit_expr(&args[0]);
-                            let (_, bl) = self.emit_expr(&args[1]);
+                            let bl = self.emit_str_arg_borrow(&args[1]);
                             let (_, fl) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("h2c");
                             self.line(&format!(
@@ -24738,7 +24813,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http2_ping_frame" => {
-                            let (_, op) = self.emit_expr(&args[0]);
+                            let op = self.emit_str_arg_borrow(&args[0]);
                             let (_, fl) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("h2pi");
                             self.line(&format!(
@@ -24756,25 +24831,25 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http2_is_goaway" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2ig");
                             self.line(&format!("bool {tmp} = mako_http2_is_goaway({s});"));
                             return ("bool".into(), tmp);
                         }
                         "http2_is_ping" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2ip");
                             self.line(&format!("bool {tmp} = mako_http2_is_ping({s});"));
                             return ("bool".into(), tmp);
                         }
                         "http2_is_window_update" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2iw");
                             self.line(&format!("bool {tmp} = mako_http2_is_window_update({s});"));
                             return ("bool".into(), tmp);
                         }
                         "http2_goaway_last_stream" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2gl");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_http2_goaway_last_stream({s});"
@@ -24782,13 +24857,13 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "http2_goaway_error" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2ge");
                             self.line(&format!("int64_t {tmp} = mako_http2_goaway_error({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_window_update_increment" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2wi");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_http2_window_update_increment({s});"
@@ -24816,19 +24891,19 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http2_is_rst_stream" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2ir");
                             self.line(&format!("bool {tmp} = mako_http2_is_rst_stream({s});"));
                             return ("bool".into(), tmp);
                         }
                         "http2_is_priority" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2ipri");
                             self.line(&format!("bool {tmp} = mako_http2_is_priority({s});"));
                             return ("bool".into(), tmp);
                         }
                         "http2_rst_stream_error" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2re");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_http2_rst_stream_error({s});"
@@ -24836,19 +24911,19 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "http2_priority_dep" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2pd");
                             self.line(&format!("int64_t {tmp} = mako_http2_priority_dep({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_priority_weight" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2pw");
                             self.line(&format!("int64_t {tmp} = mako_http2_priority_weight({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_priority_exclusive" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2pe");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_http2_priority_exclusive({s});"
@@ -24856,7 +24931,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "http2_priority_apply" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2pa");
                             self.line(&format!("int64_t {tmp} = mako_http2_priority_apply({s});"));
                             return ("int64_t".into(), tmp);
@@ -24901,7 +24976,7 @@ impl Codegen {
                         "http2_push_promise_frame" => {
                             let (_, st) = self.emit_expr(&args[0]);
                             let (_, ps) = self.emit_expr(&args[1]);
-                            let (_, bl) = self.emit_expr(&args[2]);
+                            let bl = self.emit_str_arg_borrow(&args[2]);
                             let (_, fl) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("h2pp");
                             self.line(&format!(
@@ -24910,13 +24985,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http2_is_push_promise" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2ipp");
                             self.line(&format!("bool {tmp} = mako_http2_is_push_promise({s});"));
                             return ("bool".into(), tmp);
                         }
                         "http2_push_promise_stream" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2pps");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_http2_push_promise_stream({s});"
@@ -24924,8 +24999,8 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "http2_concat_frames" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("h2x");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http2_concat_frames({a}, {b});"
@@ -24933,7 +25008,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http2_header_block" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, st) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("h2hb");
                             self.line(&format!(
@@ -24942,7 +25017,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http2_frame_at" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("h2a");
                             self.line(&format!(
@@ -24951,8 +25026,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "hpack_dyn_insert" => {
-                            let (_, n) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("hdi");
                             self.line(&format!("int64_t {tmp} = mako_hpack_dyn_insert({n}, {v});"));
                             return ("int64_t".into(), tmp);
@@ -24989,7 +25064,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "hpack_huffman_encode" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hhe");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_hpack_huffman_encode({s});"
@@ -24997,7 +25072,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "hpack_huffman_decode" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hhd");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_hpack_huffman_decode({s});"
@@ -25025,13 +25100,13 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "http2_stream_apply" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2sa");
                             self.line(&format!("int64_t {tmp} = mako_http2_stream_apply({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "http2_stream_apply_local" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("h2sal");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_http2_stream_apply_local({s});"
@@ -25055,49 +25130,49 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "quic_detect" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qd");
                             self.line(&format!("bool {tmp} = mako_quic_detect({s});"));
                             return ("bool".into(), tmp);
                         }
                         "quic_long_header" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qlh");
                             self.line(&format!("bool {tmp} = mako_quic_long_header({s});"));
                             return ("bool".into(), tmp);
                         }
                         "quic_short_header" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qsh");
                             self.line(&format!("bool {tmp} = mako_quic_short_header({s});"));
                             return ("bool".into(), tmp);
                         }
                         "quic_spin_bit" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qsb");
                             self.line(&format!("int64_t {tmp} = mako_quic_spin_bit({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_key_phase" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qkp");
                             self.line(&format!("int64_t {tmp} = mako_quic_key_phase({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_long_type" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qlt");
                             self.line(&format!("int64_t {tmp} = mako_quic_long_type({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_is_retry" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qir");
                             self.line(&format!("bool {tmp} = mako_quic_is_retry({s});"));
                             return ("bool".into(), tmp);
                         }
                         "quic_is_version_negotiation" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qivn");
                             self.line(&format!(
                                 "bool {tmp} = mako_quic_is_version_negotiation({s});"
@@ -25105,13 +25180,13 @@ impl Codegen {
                             return ("bool".into(), tmp);
                         }
                         "quic_vn_version_count" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qvnc");
                             self.line(&format!("int64_t {tmp} = mako_quic_vn_version_count({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_vn_version_at" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("qvna");
                             self.line(&format!(
@@ -25120,26 +25195,26 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "quic_vn_select" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("qvns");
                             self.line(&format!("int64_t {tmp} = mako_quic_vn_select({s}, {p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_has_crypto" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qhc");
                             self.line(&format!("bool {tmp} = mako_quic_has_crypto({s});"));
                             return ("bool".into(), tmp);
                         }
                         "quic_crypto_offset" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qco");
                             self.line(&format!("int64_t {tmp} = mako_quic_crypto_offset({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_crypto_data_offset" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qcdo");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_quic_crypto_data_offset({s});"
@@ -25147,19 +25222,19 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "quic_crypto_data_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qcdl");
                             self.line(&format!("int64_t {tmp} = mako_quic_crypto_data_len({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_crypto_data" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qcd");
                             self.line(&format!("MakoString {tmp} = mako_quic_crypto_data({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "quic_crypto_frame" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("qcf");
                             self.line(&format!(
@@ -25168,7 +25243,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_crypto_payload" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             let (_, m) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("qcp");
@@ -25178,7 +25253,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_payload_crypto_data" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qpcd");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_payload_crypto_data({s});"
@@ -25186,7 +25261,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_payload_crypto_data_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qpcl");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_quic_payload_crypto_data_len({s});"
@@ -25204,37 +25279,37 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_ack_largest" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qal");
                             self.line(&format!("int64_t {tmp} = mako_quic_ack_largest({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_ack_delay" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qad");
                             self.line(&format!("int64_t {tmp} = mako_quic_ack_delay({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_ack_range_count" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qarc");
                             self.line(&format!("int64_t {tmp} = mako_quic_ack_range_count({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_ack_first_range" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qafr");
                             self.line(&format!("int64_t {tmp} = mako_quic_ack_first_range({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_ack_smallest" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qas");
                             self.line(&format!("int64_t {tmp} = mako_quic_ack_smallest({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_is_ack" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qia");
                             self.line(&format!("int64_t {tmp} = mako_quic_is_ack({s});"));
                             return ("int64_t".into(), tmp);
@@ -25242,7 +25317,7 @@ impl Codegen {
                         "quic_stream_frame" => {
                             let (_, sid) = self.emit_expr(&args[0]);
                             let (_, off) = self.emit_expr(&args[1]);
-                            let (_, data) = self.emit_expr(&args[2]);
+                            let data = self.emit_str_arg_borrow(&args[2]);
                             let (_, fin) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("qsf");
                             self.line(&format!(
@@ -25251,80 +25326,80 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_is_stream" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qis");
                             self.line(&format!("int64_t {tmp} = mako_quic_is_stream({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_stream_fin" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qsfin");
                             self.line(&format!("int64_t {tmp} = mako_quic_stream_fin({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_stream_id_of" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qsid");
                             self.line(&format!("int64_t {tmp} = mako_quic_stream_id_of({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_stream_offset" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qsoff");
                             self.line(&format!("int64_t {tmp} = mako_quic_stream_offset({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_stream_data_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qsdl");
                             self.line(&format!("int64_t {tmp} = mako_quic_stream_data_len({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_stream_data" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qsdata");
                             self.line(&format!("MakoString {tmp} = mako_quic_stream_data({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "quic_version" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qv");
                             self.line(&format!("int64_t {tmp} = mako_quic_version({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_dcid_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qdl");
                             self.line(&format!("int64_t {tmp} = mako_quic_dcid_len({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_dcid" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qdc");
                             self.line(&format!("MakoString {tmp} = mako_quic_dcid({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "quic_scid_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qsl");
                             self.line(&format!("int64_t {tmp} = mako_quic_scid_len({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_scid" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qsc");
                             self.line(&format!("MakoString {tmp} = mako_quic_scid({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "quic_payload_offset" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qpo");
                             self.line(&format!("int64_t {tmp} = mako_quic_payload_offset({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "quic_hkdf_expand_label" => {
-                            let (_, sec) = self.emit_expr(&args[0]);
-                            let (_, lab) = self.emit_expr(&args[1]);
+                            let sec = self.emit_str_arg_borrow(&args[0]);
+                            let lab = self.emit_str_arg_borrow(&args[1]);
                             let (_, n) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("qhk");
                             self.line(&format!(
@@ -25333,8 +25408,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_hkdf_expand_label_hex" => {
-                            let (_, sec) = self.emit_expr(&args[0]);
-                            let (_, lab) = self.emit_expr(&args[1]);
+                            let sec = self.emit_str_arg_borrow(&args[0]);
+                            let lab = self.emit_str_arg_borrow(&args[1]);
                             let (_, n) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("qhkh");
                             self.line(&format!(
@@ -25343,7 +25418,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_client_secret" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qics");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_client_secret({d});"
@@ -25351,7 +25426,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_client_secret_hex" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qicsh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_client_secret_hex({d});"
@@ -25359,7 +25434,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_client_key" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qick");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_client_key({d});"
@@ -25367,7 +25442,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_client_iv" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qici");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_client_iv({d});"
@@ -25375,7 +25450,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_client_key_hex" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qickh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_client_key_hex({d});"
@@ -25383,7 +25458,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_client_iv_hex" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qicih");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_client_iv_hex({d});"
@@ -25391,7 +25466,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_client_hp" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qichp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_client_hp({d});"
@@ -25399,7 +25474,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_client_hp_hex" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("qichph");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_client_hp_hex({d});"
@@ -25407,10 +25482,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_protect" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let (_, pn) = self.emit_expr(&args[1]);
-                            let (_, a) = self.emit_expr(&args[2]);
-                            let (_, p) = self.emit_expr(&args[3]);
+                            let a = self.emit_str_arg_borrow(&args[2]);
+                            let p = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("qip");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_protect({d}, {pn}, {a}, {p});"
@@ -25418,10 +25493,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_unprotect" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let (_, pn) = self.emit_expr(&args[1]);
-                            let (_, a) = self.emit_expr(&args[2]);
-                            let (_, s) = self.emit_expr(&args[3]);
+                            let a = self.emit_str_arg_borrow(&args[2]);
+                            let s = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("qiu");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_unprotect({d}, {pn}, {a}, {s});"
@@ -25429,8 +25504,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_header_protection_mask" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("qhpm");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_header_protection_mask({k}, {s});"
@@ -25438,8 +25513,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_header_protection_mask_hex" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("qhpmh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_header_protection_mask_hex({k}, {s});"
@@ -25447,8 +25522,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_hp_mask" => {
-                            let (_, d) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("qihm");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_hp_mask({d}, {s});"
@@ -25456,8 +25531,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_hp_mask_hex" => {
-                            let (_, d) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("qihmh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_hp_mask_hex({d}, {s});"
@@ -25465,9 +25540,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_header_protect_apply" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
-                            let (_, m) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("qhpa");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_header_protect_apply({h}, {o}, {m});"
@@ -25475,9 +25550,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_header_protect_remove" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
-                            let (_, m) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("qhpr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_header_protect_remove({h}, {o}, {m});"
@@ -25485,11 +25560,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_packet_protect" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let (_, pn) = self.emit_expr(&args[1]);
-                            let (_, h) = self.emit_expr(&args[2]);
+                            let h = self.emit_str_arg_borrow(&args[2]);
                             let (_, o) = self.emit_expr(&args[3]);
-                            let (_, p) = self.emit_expr(&args[4]);
+                            let p = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("qipp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_quic_initial_packet_protect({d}, {pn}, {h}, {o}, {p});"
@@ -25497,8 +25572,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quic_initial_packet_unprotect" => {
-                            let (_, d) = self.emit_expr(&args[0]);
-                            let (_, pkt) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
+                            let pkt = self.emit_str_arg_borrow(&args[1]);
                             let (_, hl) = self.emit_expr(&args[2]);
                             let (_, o) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("qipu");
@@ -25508,34 +25583,34 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "hex_decode" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hx");
                             self.line(&format!("MakoString {tmp} = mako_hex_decode({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tls_record_type" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("trt");
                             self.line(&format!("int64_t {tmp} = mako_tls_record_type({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "tls_record_version" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("trv");
                             self.line(&format!("int64_t {tmp} = mako_tls_record_version({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "tls_record_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("trl");
                             self.line(&format!("int64_t {tmp} = mako_tls_record_len({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "tls_aead_seal" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
-                            let (_, a) = self.emit_expr(&args[3]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("tas");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_aead_seal({k}, {n}, {p}, {a});"
@@ -25543,10 +25618,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_aead_open" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, s) = self.emit_expr(&args[2]);
-                            let (_, a) = self.emit_expr(&args[3]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("tao");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_aead_open({k}, {n}, {s}, {a});"
@@ -25554,9 +25629,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_record_appdata_seal" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tras");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_record_appdata_seal({k}, {n}, {p});"
@@ -25564,9 +25639,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_record_appdata_open" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("trao");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_record_appdata_open({k}, {n}, {r});"
@@ -25589,9 +25664,9 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_record_appdata_seal_seq" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, iv) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let iv = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("trss");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_record_appdata_seal_seq({k}, {iv}, {p});"
@@ -25599,9 +25674,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_record_appdata_open_seq" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, iv) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let iv = self.emit_str_arg_borrow(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tros");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_record_appdata_open_seq({k}, {iv}, {r});"
@@ -25609,13 +25684,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_client_hello" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tch");
                             self.line(&format!("MakoString {tmp} = mako_tls_client_hello({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tls_client_hello_legacy_version" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tclv");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_client_hello_legacy_version({s});"
@@ -25623,7 +25698,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_client_hello_random" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tchr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_client_hello_random({s});"
@@ -25631,7 +25706,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_client_hello_has_aes128_gcm" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tcha");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_client_hello_has_aes128_gcm({s});"
@@ -25639,13 +25714,13 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_server_hello" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tsh");
                             self.line(&format!("MakoString {tmp} = mako_tls_server_hello({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tls_server_hello_random" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tshr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_server_hello_random({s});"
@@ -25653,13 +25728,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_certificate" => {
-                            let (_, der) = self.emit_expr(&args[0]);
+                            let der = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tcert");
                             self.line(&format!("MakoString {tmp} = mako_tls_certificate({der});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tls_certificate_der" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tcder");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_certificate_der({s});"
@@ -25668,7 +25743,7 @@ impl Codegen {
                         }
                         "tls_certificate_verify" => {
                             let (_, sch) = self.emit_expr(&args[0]);
-                            let (_, sig) = self.emit_expr(&args[1]);
+                            let sig = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tcv");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_certificate_verify({sch}, {sig});"
@@ -25676,7 +25751,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_certificate_verify_scheme" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tcvs");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_certificate_verify_scheme({s});"
@@ -25684,7 +25759,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_certificate_verify_sig" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tcvg");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_certificate_verify_sig({s});"
@@ -25699,13 +25774,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_finished" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tfin");
                             self.line(&format!("MakoString {tmp} = mako_tls_finished({v});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tls_hs_msg_type" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("thmt");
                             self.line(&format!("int64_t {tmp} = mako_tls_hs_msg_type({s});"));
                             return ("int64_t".into(), tmp);
@@ -25721,7 +25796,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_hs_advance" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("thsa");
                             self.line(&format!("int64_t {tmp} = mako_tls_hs_advance({s});"));
                             return ("int64_t".into(), tmp);
@@ -25737,13 +25812,13 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_hs_session_feed" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("thsf");
                             self.line(&format!("int64_t {tmp} = mako_tls_hs_session_feed({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "tls_hs_session_client_hello" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("thsch");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_hs_session_client_hello({r});"
@@ -25751,7 +25826,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_hs_session_server_hello" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("thssh");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_hs_session_server_hello({r});"
@@ -25759,7 +25834,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_hs_session_finished_hex" => {
-                            let (_, k) = self.emit_expr(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("thsfh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_hs_session_finished_hex({k});"
@@ -25774,7 +25849,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_hs_session_certificate" => {
-                            let (_, d) = self.emit_expr(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("thsc");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_hs_session_certificate({d});"
@@ -25783,7 +25858,7 @@ impl Codegen {
                         }
                         "tls_hs_session_certificate_verify" => {
                             let (_, sch) = self.emit_expr(&args[0]);
-                            let (_, sig) = self.emit_expr(&args[1]);
+                            let sig = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("thscv");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_hs_session_certificate_verify({sch}, {sig});"
@@ -25791,8 +25866,8 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_hs_session_finished" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("thsfin");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_hs_session_finished({k}, {v});"
@@ -25800,8 +25875,8 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_finished_verify_data" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tfvd");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_finished_verify_data({k}, {t});"
@@ -25809,8 +25884,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_finished_verify_data_hex" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tfvh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_finished_verify_data_hex({k}, {t});"
@@ -25823,7 +25898,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_transcript_append" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tta");
                             self.line(&format!("int64_t {tmp} = mako_tls_transcript_append({s});"));
                             return ("int64_t".into(), tmp);
@@ -25834,7 +25909,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_transcript_finished_hex" => {
-                            let (_, k) = self.emit_expr(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ttf");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_transcript_finished_hex({k});"
@@ -25842,9 +25917,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_derive_secret" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, l) = self.emit_expr(&args[1]);
-                            let (_, t) = self.emit_expr(&args[2]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let l = self.emit_str_arg_borrow(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tds");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_derive_secret({s}, {l}, {t});"
@@ -25852,9 +25927,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_derive_secret_hex" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, l) = self.emit_expr(&args[1]);
-                            let (_, t) = self.emit_expr(&args[2]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let l = self.emit_str_arg_borrow(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tdsh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_derive_secret_hex({s}, {l}, {t});"
@@ -25862,8 +25937,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_client_handshake_traffic_secret" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tchts");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_client_handshake_traffic_secret({s}, {t});"
@@ -25871,8 +25946,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_server_handshake_traffic_secret" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tshts");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_server_handshake_traffic_secret({s}, {t});"
@@ -25880,8 +25955,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_client_handshake_traffic_secret_hex" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tchtsh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_client_handshake_traffic_secret_hex({s}, {t});"
@@ -25889,8 +25964,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_server_handshake_traffic_secret_hex" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tshtsh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_server_handshake_traffic_secret_hex({s}, {t});"
@@ -25898,8 +25973,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_client_application_traffic_secret" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tcats");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_client_application_traffic_secret({s}, {t});"
@@ -25907,8 +25982,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_server_application_traffic_secret" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tsats");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_server_application_traffic_secret({s}, {t});"
@@ -25916,8 +25991,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_client_application_traffic_secret_hex" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tcatsh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_client_application_traffic_secret_hex({s}, {t});"
@@ -25925,8 +26000,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_server_application_traffic_secret_hex" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tsatsh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_server_application_traffic_secret_hex({s}, {t});"
@@ -25940,13 +26015,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "pb_decode_varint" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pbd");
                             self.line(&format!("int64_t {tmp} = mako_pb_decode_varint({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "pb_varint_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pbl");
                             self.line(&format!("int64_t {tmp} = mako_pb_varint_len({s});"));
                             return ("int64_t".into(), tmp);
@@ -25959,13 +26034,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "pb_key_field" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pbkf");
                             self.line(&format!("int64_t {tmp} = mako_pb_key_field({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "pb_key_wire" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pbkw");
                             self.line(&format!("int64_t {tmp} = mako_pb_key_wire({s});"));
                             return ("int64_t".into(), tmp);
@@ -25989,19 +26064,19 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "pb_decode_sint" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pbsd");
                             self.line(&format!("int64_t {tmp} = mako_pb_decode_sint({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "pb_encode_bytes" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pbb");
                             self.line(&format!("MakoString {tmp} = mako_pb_encode_bytes({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "pb_bytes_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pbbl");
                             self.line(&format!("int64_t {tmp} = mako_pb_bytes_len({s});"));
                             return ("int64_t".into(), tmp);
@@ -26016,7 +26091,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "pb_encode_simple" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("pbsm");
                             self.line(&format!(
@@ -26025,21 +26100,21 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "pb_simple_name" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pbsn");
                             self.line(&format!("MakoString {tmp} = mako_pb_simple_name({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "pb_simple_id" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pbsi");
                             self.line(&format!("int64_t {tmp} = mako_pb_simple_id({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "pb_encode_nested" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
-                            let (_, iname) = self.emit_expr(&args[2]);
+                            let iname = self.emit_str_arg_borrow(&args[2]);
                             let (_, iid) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("pbn");
                             self.line(&format!(
@@ -26048,7 +26123,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "pb_nested_inner" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pbni");
                             self.line(&format!("MakoString {tmp} = mako_pb_nested_inner({s});"));
                             return ("MakoString".into(), tmp);
@@ -26064,7 +26139,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "pb_repeated_count" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, f) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("pbrc");
                             self.line(&format!(
@@ -26073,7 +26148,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "pb_repeated_at" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, f) = self.emit_expr(&args[1]);
                             let (_, ix) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("pbra");
@@ -26083,22 +26158,22 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "regex_match" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rm");
                             self.line(&format!("bool {tmp} = mako_regex_match({p}, {t});"));
                             return ("bool".into(), tmp);
                         }
                         "regex_find" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rf");
                             self.line(&format!("MakoString {tmp} = mako_regex_find({p}, {t});"));
                             return ("MakoString".into(), tmp);
                         }
                         "regex_capture" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let (_, n) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("rc");
                             self.line(&format!(
@@ -26123,8 +26198,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "json_array_push_string" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jps");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_json_array_push_string({a}, {v});"
@@ -26258,7 +26333,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tcp_listen_addr" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("tla");
                             self.line(&format!("int64_t {tmp} = mako_tcp_listen_addr({h}, {p});"));
@@ -26367,7 +26442,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tcp_listen_backlog" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let (_, bl) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("tlb");
@@ -26377,8 +26452,8 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "json_object" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jo");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_json_object_str({k}, {v});"
@@ -26386,9 +26461,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "json_si" => {
-                            let (_, k1) = self.emit_expr(&args[0]);
-                            let (_, v1) = self.emit_expr(&args[1]);
-                            let (_, k2) = self.emit_expr(&args[2]);
+                            let k1 = self.emit_str_arg_borrow(&args[0]);
+                            let v1 = self.emit_str_arg_borrow(&args[1]);
+                            let k2 = self.emit_str_arg_borrow(&args[2]);
                             let (_, v2) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("jsi");
                             self.line(&format!(
@@ -26397,10 +26472,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "json_ss" => {
-                            let (_, k1) = self.emit_expr(&args[0]);
-                            let (_, v1) = self.emit_expr(&args[1]);
-                            let (_, k2) = self.emit_expr(&args[2]);
-                            let (_, v2) = self.emit_expr(&args[3]);
+                            let k1 = self.emit_str_arg_borrow(&args[0]);
+                            let v1 = self.emit_str_arg_borrow(&args[1]);
+                            let k2 = self.emit_str_arg_borrow(&args[2]);
+                            let v2 = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("jss");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_json_ss({k1}, {v1}, {k2}, {v2});"
@@ -26408,14 +26483,14 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "json_i" => {
-                            let (_, k) = self.emit_expr(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("ji");
                             self.line(&format!("MakoString {tmp} = mako_json_i({k}, {v});"));
                             return ("MakoString".into(), tmp);
                         }
                         "json_f" => {
-                            let (_, k) = self.emit_expr(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("jf");
                             self.line(&format!("MakoString {tmp} = mako_json_f({k}, {v});"));
@@ -26431,29 +26506,29 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "json_get_float" => {
-                            let (_, j) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jgf");
                             self.line(&format!("double {tmp} = mako_json_get_float({j}, {k});"));
                             return ("double".into(), tmp);
                         }
                         "json_get_bool" => {
-                            let (_, j) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_json_get_bool({j}, {k})"));
                         }
                         "json_has" => {
-                            let (_, j) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, e) = self.emit_expr(&args[2]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let e = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_json_has_string({j}, {k}, {e})"),
                             );
                         }
                         "json_get_string" => {
-                            let (_, j) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jgs");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_json_get_string({j}, {k});"
@@ -26461,20 +26536,20 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "json_get_int" => {
-                            let (_, j) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_json_get_int({j}, {k})"));
                         }
                         "json_nest" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jn");
                             self.line(&format!("MakoString {tmp} = mako_json_nest({k}, {v});"));
                             return ("MakoString".into(), tmp);
                         }
                         "json_get_object" => {
-                            let (_, j) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jgo");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_json_get_object({j}, {k});"
@@ -26482,9 +26557,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "json_path_string" => {
-                            let (_, j) = self.emit_expr(&args[0]);
-                            let (_, k1) = self.emit_expr(&args[1]);
-                            let (_, k2) = self.emit_expr(&args[2]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
+                            let k1 = self.emit_str_arg_borrow(&args[1]);
+                            let k2 = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("jps");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_json_path_string({j}, {k1}, {k2});"
@@ -26492,25 +26567,25 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "json_path_int" => {
-                            let (_, j) = self.emit_expr(&args[0]);
-                            let (_, k1) = self.emit_expr(&args[1]);
-                            let (_, k2) = self.emit_expr(&args[2]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
+                            let k1 = self.emit_str_arg_borrow(&args[1]);
+                            let k2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_json_path_int({j}, {k1}, {k2})"),
                             );
                         }
                         "json_merge" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jm");
                             self.line(&format!("MakoString {tmp} = mako_json_merge({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "openapi_route" => {
-                            let (_, method) = self.emit_expr(&args[0]);
-                            let (_, path) = self.emit_expr(&args[1]);
-                            let (_, summary) = self.emit_expr(&args[2]);
+                            let method = self.emit_str_arg_borrow(&args[0]);
+                            let path = self.emit_str_arg_borrow(&args[1]);
+                            let summary = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("oar");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_openapi_route({method}, {path}, {summary});"
@@ -26518,9 +26593,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "openapi_doc" => {
-                            let (_, title) = self.emit_expr(&args[0]);
-                            let (_, version) = self.emit_expr(&args[1]);
-                            let (_, paths) = self.emit_expr(&args[2]);
+                            let title = self.emit_str_arg_borrow(&args[0]);
+                            let version = self.emit_str_arg_borrow(&args[1]);
+                            let paths = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("oad");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_openapi_doc({title}, {version}, {paths});"
@@ -26528,14 +26603,14 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_field" => {
-                            let (_, query) = self.emit_expr(&args[0]);
+                            let query = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gqlf");
                             self.line(&format!("MakoString {tmp} = mako_graphql_field({query});"));
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_arg" => {
-                            let (_, query) = self.emit_expr(&args[0]);
-                            let (_, name) = self.emit_expr(&args[1]);
+                            let query = self.emit_str_arg_borrow(&args[0]);
+                            let name = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("gqla");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_graphql_arg({query}, {name});"
@@ -26543,8 +26618,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_data" => {
-                            let (_, field) = self.emit_expr(&args[0]);
-                            let (_, json) = self.emit_expr(&args[1]);
+                            let field = self.emit_str_arg_borrow(&args[0]);
+                            let json = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("gqld");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_graphql_data({field}, {json});"
@@ -26552,7 +26627,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_error" => {
-                            let (_, message) = self.emit_expr(&args[0]);
+                            let message = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gqle");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_graphql_error({message});"
@@ -26560,7 +26635,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_request" => {
-                            let (_, query) = self.emit_expr(&args[0]);
+                            let query = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gqlr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_graphql_request({query});"
@@ -26568,15 +26643,15 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_is_mutation" => {
-                            let (_, query) = self.emit_expr(&args[0]);
+                            let query = self.emit_str_arg_borrow(&args[0]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_graphql_is_mutation({query})"),
                             );
                         }
                         "sse_event" => {
-                            let (_, event) = self.emit_expr(&args[0]);
-                            let (_, data) = self.emit_expr(&args[1]);
+                            let event = self.emit_str_arg_borrow(&args[0]);
+                            let data = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sse");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sse_event({event}, {data});"
@@ -26590,8 +26665,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "rpc_frame" => {
-                            let (_, method) = self.emit_expr(&args[0]);
-                            let (_, payload) = self.emit_expr(&args[1]);
+                            let method = self.emit_str_arg_borrow(&args[0]);
+                            let payload = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rpcf");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_rpc_frame({method}, {payload});"
@@ -26599,23 +26674,23 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "rpc_method" => {
-                            let (_, frame) = self.emit_expr(&args[0]);
+                            let frame = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rpcm");
                             self.line(&format!("MakoString {tmp} = mako_rpc_method({frame});"));
                             return ("MakoString".into(), tmp);
                         }
                         "rpc_payload" => {
-                            let (_, frame) = self.emit_expr(&args[0]);
+                            let frame = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rpcp");
                             self.line(&format!("MakoString {tmp} = mako_rpc_payload({frame});"));
                             return ("MakoString".into(), tmp);
                         }
                         "json_array_len" => {
-                            let (_, j) = self.emit_expr(&args[0]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_json_array_len({j})"));
                         }
                         "json_array_get_int" => {
-                            let (_, j) = self.emit_expr(&args[0]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -26623,7 +26698,7 @@ impl Codegen {
                             );
                         }
                         "json_array_get_string" => {
-                            let (_, j) = self.emit_expr(&args[0]);
+                            let j = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("jags");
                             self.line(&format!(
@@ -26642,8 +26717,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "json_array_strings2" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("jas");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_json_array_strings2({a}, {b});"
@@ -26651,7 +26726,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "json_array_push_int" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("jap");
                             self.line(&format!(
@@ -26666,8 +26741,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "yaml_get_string" => {
-                            let (_, doc) = self.emit_expr(&args[0]);
-                            let (_, key) = self.emit_expr(&args[1]);
+                            let doc = self.emit_str_arg_borrow(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("ygs");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_yaml_get_string({doc}, {key});"
@@ -26681,7 +26756,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("{fname}({doc}, {key})"));
                         }
                         "yaml_escape" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ye");
                             self.line(&format!("MakoString {tmp} = mako_yaml_escape({s});"));
                             return ("MakoString".into(), tmp);
@@ -26703,8 +26778,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "yaml_get_list" => {
-                            let (_, doc) = self.emit_expr(&args[0]);
-                            let (_, key) = self.emit_expr(&args[1]);
+                            let doc = self.emit_str_arg_borrow(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("ygl");
                             self.line(&format!(
                                 "MakoStrArray {tmp} = mako_yaml_get_list({doc}, {key});"
@@ -26712,14 +26787,14 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "yaml_keys" => {
-                            let (_, doc) = self.emit_expr(&args[0]);
+                            let doc = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("yk");
                             self.line(&format!("MakoStrArray {tmp} = mako_yaml_keys({doc});"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "toml_get_string" => {
-                            let (_, doc) = self.emit_expr(&args[0]);
-                            let (_, key) = self.emit_expr(&args[1]);
+                            let doc = self.emit_str_arg_borrow(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tgs");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_toml_get_string({doc}, {key});"
@@ -26733,17 +26808,17 @@ impl Codegen {
                             return ("int64_t".into(), format!("{fname}({doc}, {key})"));
                         }
                         "toml_get_float" => {
-                            let (_, doc) = self.emit_expr(&args[0]);
-                            let (_, key) = self.emit_expr(&args[1]);
+                            let doc = self.emit_str_arg_borrow(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "double".into(),
                                 format!("mako_toml_get_float({doc}, {key})"),
                             );
                         }
                         "toml_get_in" => {
-                            let (_, doc) = self.emit_expr(&args[0]);
-                            let (_, sec) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
+                            let doc = self.emit_str_arg_borrow(&args[0]);
+                            let sec = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tgi");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_toml_get_in({doc}, {sec}, {key});"
@@ -26751,9 +26826,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "toml_get_int_in" => {
-                            let (_, doc) = self.emit_expr(&args[0]);
-                            let (_, sec) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
+                            let doc = self.emit_str_arg_borrow(&args[0]);
+                            let sec = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_toml_get_int_in({doc}, {sec}, {key})"),
@@ -26783,7 +26858,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "toml_keys" => {
-                            let (_, doc) = self.emit_expr(&args[0]);
+                            let doc = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tk");
                             self.line(&format!("MakoStrArray {tmp} = mako_toml_keys({doc});"));
                             return ("MakoStrArray".into(), tmp);
@@ -26839,7 +26914,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "avro_decode_array_long" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("avd");
                             self.line(&format!(
                                 "MakoIntArray {tmp} = mako_avro_decode_array_long({s});"
@@ -26847,11 +26922,11 @@ impl Codegen {
                             return ("MakoIntArray".into(), tmp);
                         }
                         "graphql_is_query" => {
-                            let (_, q) = self.emit_expr(&args[0]);
+                            let q = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_graphql_is_query({q})"));
                         }
                         "graphql_operation_name" => {
-                            let (_, q) = self.emit_expr(&args[0]);
+                            let q = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gon");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_graphql_operation_name({q});"
@@ -26859,8 +26934,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_request_vars" => {
-                            let (_, q) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("grv");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_graphql_request_vars({q}, {v});"
@@ -26868,18 +26943,18 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_has_field" => {
-                            let (_, q) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_graphql_has_field({q}, {n})"),
                             );
                         }
                         "graphql_data2" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
-                            let (_, c) = self.emit_expr(&args[2]);
-                            let (_, d) = self.emit_expr(&args[3]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[2]);
+                            let d = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("gd2");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_graphql_data2({a}, {b}, {c}, {d});"
@@ -26887,7 +26962,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_query_from_body" => {
-                            let (_, b) = self.emit_expr(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gqb");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_graphql_query_from_body({b});"
@@ -26895,7 +26970,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_parse" => {
-                            let (_, b) = self.emit_expr(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gpar");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_graphql_query_from_body({b});"
@@ -26906,7 +26981,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_variables_from_body" => {
-                            let (_, b) = self.emit_expr(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gvb");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_graphql_variables_from_body({b});"
@@ -26914,7 +26989,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "graphql_fields" => {
-                            let (_, q) = self.emit_expr(&args[0]);
+                            let q = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gfl");
                             self.line(&format!("MakoString {tmp} = mako_graphql_fields({q});"));
                             return ("MakoString".into(), tmp);
@@ -26928,31 +27003,31 @@ impl Codegen {
                         }
                         "mq_declare" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let (_, c) = self.emit_expr(&args[2]);
                             return ("int64_t".into(), format!("mako_mq_declare({id}, {n}, {c})"));
                         }
                         "mq_publish" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             return ("int64_t".into(), format!("mako_mq_publish({id}, {n}, {b})"));
                         }
                         "mq_try_take" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("mqt");
                             self.line(&format!("MakoString {tmp} = mako_mq_try_take({id}, {n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mq_len" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_mq_len({id}, {n})"));
                         }
                         "mq_purge" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_mq_purge({id}, {n})"));
                         }
                         "nats_new" => {
@@ -26964,19 +27039,19 @@ impl Codegen {
                         }
                         "nats_sub" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let (_, c) = self.emit_expr(&args[2]);
                             return ("int64_t".into(), format!("mako_nats_sub({id}, {s}, {c})"));
                         }
                         "nats_pub" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             return ("int64_t".into(), format!("mako_nats_pub({id}, {s}, {b})"));
                         }
                         "nats_try_next" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("ntn");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_nats_try_next({id}, {s});"
@@ -26985,12 +27060,12 @@ impl Codegen {
                         }
                         "nats_len" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_nats_len({id}, {s})"));
                         }
                         "nats_pub_frame" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("npf");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_nats_pub_frame({s}, {b});"
@@ -26998,8 +27073,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "nats_sub_frame" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, sid) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let sid = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("nsf");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_nats_sub_frame({s}, {sid});"
@@ -27025,7 +27100,7 @@ impl Codegen {
                         }
                         "redis_mq_declare" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let (_, c) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -27034,8 +27109,8 @@ impl Codegen {
                         }
                         "redis_mq_lpush" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_redis_mq_lpush({id}, {k}, {b})"),
@@ -27043,7 +27118,7 @@ impl Codegen {
                         }
                         "redis_mq_rpop" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rmr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_mq_rpop({id}, {k});"
@@ -27052,7 +27127,7 @@ impl Codegen {
                         }
                         "redis_mq_llen" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_redis_mq_llen({id}, {k})"));
                         }
                         "graphql_schema_new" => {
@@ -27064,7 +27139,7 @@ impl Codegen {
                         }
                         "graphql_schema_add_type" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_graphql_schema_add_type({id}, {n})"),
@@ -27072,9 +27147,9 @@ impl Codegen {
                         }
                         "graphql_schema_add_field" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
-                            let (_, f) = self.emit_expr(&args[2]);
-                            let (_, r) = self.emit_expr(&args[3]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
+                            let f = self.emit_str_arg_borrow(&args[2]);
+                            let r = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_graphql_schema_add_field({id}, {t}, {f}, {r})"),
@@ -27082,8 +27157,8 @@ impl Codegen {
                         }
                         "graphql_schema_set_resolver" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, f) = self.emit_expr(&args[1]);
-                            let (_, j) = self.emit_expr(&args[2]);
+                            let f = self.emit_str_arg_borrow(&args[1]);
+                            let j = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_graphql_schema_set_resolver({id}, {f}, {j})"),
@@ -27091,7 +27166,7 @@ impl Codegen {
                         }
                         "graphql_schema_has_type" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_graphql_schema_has_type({id}, {n})"),
@@ -27099,7 +27174,7 @@ impl Codegen {
                         }
                         "graphql_schema_has_resolver" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, f) = self.emit_expr(&args[1]);
+                            let f = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_graphql_schema_has_resolver({id}, {f})"),
@@ -27132,8 +27207,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "openapi_response" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("oar");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_openapi_response({c}, {d});"
@@ -27141,9 +27216,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "openapi_operation" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
-                            let (_, t) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("oao");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_openapi_operation({m}, {s}, {t});"
@@ -27151,8 +27226,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "openapi_paths_merge" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("opm");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_openapi_paths_merge({a}, {b});"
@@ -27160,9 +27235,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "openapi_info" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("oai");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_openapi_info({t}, {v}, {d});"
@@ -27170,8 +27245,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "openapi_doc_full" => {
-                            let (_, i) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let i = self.emit_str_arg_borrow(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("odf");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_openapi_doc_full({i}, {p});"
@@ -27179,7 +27254,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_service_new" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_grpc_service_new({n})"));
                         }
                         "grpc_service_free" => {
@@ -27188,8 +27263,8 @@ impl Codegen {
                         }
                         "grpc_service_add_method" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_grpc_service_add_method({id}, {m}, {r})"),
@@ -27197,7 +27272,7 @@ impl Codegen {
                         }
                         "grpc_service_has_method" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_grpc_service_has_method({id}, {m})"),
@@ -27205,8 +27280,8 @@ impl Codegen {
                         }
                         "grpc_service_handle" => {
                             let (_, id) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("gsh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_grpc_service_handle({id}, {m}, {r});"
@@ -27228,7 +27303,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "time_offset_named" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_time_offset_named({n})"));
                         }
                         "time_format_offset" => {
@@ -27381,26 +27456,26 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "log_info" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_log_info({s});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "log_warn" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_log_warn({s});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "log_error" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_log_error({s});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "validate_required" => {
-                            let (_, value) = self.emit_expr(&args[0]);
+                            let value = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_validate_required({value})"));
                         }
                         "validate_min_len" => {
-                            let (_, value) = self.emit_expr(&args[0]);
+                            let value = self.emit_str_arg_borrow(&args[0]);
                             let (_, min) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -27408,7 +27483,7 @@ impl Codegen {
                             );
                         }
                         "validate_max_len" => {
-                            let (_, value) = self.emit_expr(&args[0]);
+                            let value = self.emit_str_arg_borrow(&args[0]);
                             let (_, max) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -27425,7 +27500,7 @@ impl Codegen {
                             );
                         }
                         "validate_email" => {
-                            let (_, value) = self.emit_expr(&args[0]);
+                            let value = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_validate_email({value})"));
                         }
                         "game_fixed_steps" => {
@@ -27511,7 +27586,7 @@ impl Codegen {
                             );
                         }
                         "replay_append" => {
-                            let (_, stream) = self.emit_expr(&args[0]);
+                            let stream = self.emit_str_arg_borrow(&args[0]);
                             let (_, tick) = self.emit_expr(&args[1]);
                             let (_, input) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("rpa");
@@ -27521,7 +27596,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "replay_input" => {
-                            let (_, stream) = self.emit_expr(&args[0]);
+                            let stream = self.emit_str_arg_borrow(&args[0]);
                             let (_, tick) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -27574,16 +27649,16 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_lfq_len({id})"));
                         }
                         "sg_gather2" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sg2");
                             self.line(&format!("MakoString {tmp} = mako_sg_gather2({a}, {b});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sg_gather3" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
-                            let (_, c) = self.emit_expr(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("sg3");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sg_gather3({a}, {b}, {c});"
@@ -27591,7 +27666,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "sg_slice" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, offset) = self.emit_expr(&args[1]);
                             let (_, len) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("sgs");
@@ -27601,9 +27676,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "fsm_rule" => {
-                            let (_, from) = self.emit_expr(&args[0]);
-                            let (_, event) = self.emit_expr(&args[1]);
-                            let (_, to) = self.emit_expr(&args[2]);
+                            let from = self.emit_str_arg_borrow(&args[0]);
+                            let event = self.emit_str_arg_borrow(&args[1]);
+                            let to = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("fsmr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_fsm_rule({from}, {event}, {to});"
@@ -27611,26 +27686,26 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "fsm_is" => {
-                            let (_, state) = self.emit_expr(&args[0]);
-                            let (_, expected) = self.emit_expr(&args[1]);
+                            let state = self.emit_str_arg_borrow(&args[0]);
+                            let expected = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_fsm_is({state}, {expected})"),
                             );
                         }
                         "fsm_can" => {
-                            let (_, current) = self.emit_expr(&args[0]);
-                            let (_, event) = self.emit_expr(&args[1]);
-                            let (_, rules) = self.emit_expr(&args[2]);
+                            let current = self.emit_str_arg_borrow(&args[0]);
+                            let event = self.emit_str_arg_borrow(&args[1]);
+                            let rules = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_fsm_can({current}, {event}, {rules})"),
                             );
                         }
                         "fsm_transition" => {
-                            let (_, current) = self.emit_expr(&args[0]);
-                            let (_, event) = self.emit_expr(&args[1]);
-                            let (_, rules) = self.emit_expr(&args[2]);
+                            let current = self.emit_str_arg_borrow(&args[0]);
+                            let event = self.emit_str_arg_borrow(&args[1]);
+                            let rules = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("fsmt");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_fsm_transition({current}, {event}, {rules});"
@@ -27837,9 +27912,9 @@ impl Codegen {
                             return ("int64_t".into(), "mako_trace_export_otlp_pb_len()".into());
                         }
                         "otlp_http_export" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
-                            let (_, ct) = self.emit_expr(&args[2]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
+                            let ct = self.emit_str_arg_borrow(&args[2]);
                             let (_, t) = self.emit_expr(&args[3]);
                             return (
                                 "int64_t".into(),
@@ -27847,7 +27922,7 @@ impl Codegen {
                             );
                         }
                         "otlp_export_traces_json" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -27855,7 +27930,7 @@ impl Codegen {
                             );
                         }
                         "otlp_export_traces_pb" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -27863,11 +27938,11 @@ impl Codegen {
                             );
                         }
                         "http_request_ct" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, u) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let (_, t) = self.emit_expr(&args[3]);
-                            let (_, ct) = self.emit_expr(&args[4]);
+                            let ct = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("hrct");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http_request_ct({m}, {u}, {b}, {t}, {ct});"
@@ -27885,21 +27960,21 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "trace_set" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_trace_set({s})"));
                         }
                         "trace_clear" => {
                             return ("int64_t".into(), "mako_trace_clear()".into());
                         }
                         "trace_begin" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_trace_begin({n})"));
                         }
                         "trace_end" => {
                             return ("int64_t".into(), "mako_trace_end()".into());
                         }
                         "trace_log" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_trace_log({m})"));
                         }
                         "stack_trace" => {
@@ -27945,7 +28020,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "debug_break" => {
-                            let (_, lab) = self.emit_expr(&args[0]);
+                            let lab = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_debug_break({lab})"));
                         }
                         "debug_break_hits" => {
@@ -27955,12 +28030,12 @@ impl Codegen {
                             return ("int64_t".into(), "mako_debug_break_reset()".into());
                         }
                         "debug_set_int" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_debug_set_int({n}, {v})"));
                         }
                         "debug_get_int" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_debug_get_int({n})"));
                         }
                         "debug_locals_json" => {
@@ -27988,7 +28063,7 @@ impl Codegen {
                             return ("int64_t".into(), "mako_debug_trap_enabled_p()".into());
                         }
                         "debug_line_bp_set" => {
-                            let (_, f) = self.emit_expr(&args[0]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
                             let (_, ln) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -28004,9 +28079,9 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_debug_line_bp_hits({id})"));
                         }
                         "debug_push_frame" => {
-                            let (_, f) = self.emit_expr(&args[0]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
                             let (_, ln) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
+                            let n = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_debug_push_frame({f}, {ln}, {n})"),
@@ -28047,7 +28122,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "dap_stopped_event" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let (_, t) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dapstop");
                             self.line(&format!(
@@ -28064,7 +28139,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "dap_request_command" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("dapcmd");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_dap_request_command({r});"
@@ -28072,17 +28147,17 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "dap_request_seq" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_dap_request_seq({r})"));
                         }
                         "dap_handle_request" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("daph");
                             self.line(&format!("MakoString {tmp} = mako_dap_handle_request({r});"));
                             return ("MakoString".into(), tmp);
                         }
                         "crash_report_install" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_crash_report_install({p})"));
                         }
                         "crash_report_installed" => {
@@ -28106,7 +28181,7 @@ impl Codegen {
                             return ("int64_t".into(), "mako_profile_sample_clear()".into());
                         }
                         "profile_sample_once" => {
-                            let (_, lab) = self.emit_expr(&args[0]);
+                            let lab = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_profile_sample_once({lab})"));
                         }
                         "profile_sample_count" => {
@@ -28154,7 +28229,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "profile_http_route" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("phr");
                             self.line(&format!("MakoString {tmp} = mako_profile_http_route({p});"));
                             return ("MakoString".into(), tmp);
@@ -28296,8 +28371,8 @@ impl Codegen {
                             );
                         }
                         "cookie_get" => {
-                            let (_, header) = self.emit_expr(&args[0]);
-                            let (_, name) = self.emit_expr(&args[1]);
+                            let header = self.emit_str_arg_borrow(&args[0]);
+                            let name = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("ckg");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_cookie_get({header}, {name});"
@@ -28305,8 +28380,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "cookie_make" => {
-                            let (_, name) = self.emit_expr(&args[0]);
-                            let (_, value) = self.emit_expr(&args[1]);
+                            let name = self.emit_str_arg_borrow(&args[0]);
+                            let value = self.emit_str_arg_borrow(&args[1]);
                             let (_, max_age) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("ckm");
                             self.line(&format!(
@@ -28372,26 +28447,26 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "session_cancel" => {
-                            let (_, t) = self.emit_expr(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_session_cancel({t})"));
                         }
                         "session_cancelled" => {
-                            let (_, t) = self.emit_expr(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_session_cancelled({t})"));
                         }
                         "session_cancel_clear" => {
-                            let (_, t) = self.emit_expr(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_session_cancel_clear({t})"));
                         }
                         "scram_gs2_header" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sg2");
                             self.line(&format!("MakoString {tmp} = mako_scram_gs2_header({n});"));
                             return ("MakoString".into(), tmp);
                         }
                         "scram_cbind_b64" => {
-                            let (_, g) = self.emit_expr(&args[0]);
-                            let (_, c) = self.emit_expr(&args[1]);
+                            let g = self.emit_str_arg_borrow(&args[0]);
+                            let c = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("scb");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_scram_cbind_b64({g}, {c});"
@@ -28399,8 +28474,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "scram_client_final_without_proof" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, r) = self.emit_expr(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("scfp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_scram_client_final_without_proof({c}, {r});"
@@ -28413,15 +28488,15 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "csrf_check" => {
-                            let (_, expected) = self.emit_expr(&args[0]);
-                            let (_, submitted) = self.emit_expr(&args[1]);
+                            let expected = self.emit_str_arg_borrow(&args[0]);
+                            let submitted = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_csrf_check({expected}, {submitted})"),
                             );
                         }
                         "auth_bearer" => {
-                            let (_, authorization) = self.emit_expr(&args[0]);
+                            let authorization = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ab");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_auth_bearer({authorization});"
@@ -28429,16 +28504,16 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "auth_check_bearer" => {
-                            let (_, authorization) = self.emit_expr(&args[0]);
-                            let (_, expected) = self.emit_expr(&args[1]);
+                            let authorization = self.emit_str_arg_borrow(&args[0]);
+                            let expected = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_auth_check_bearer({authorization}, {expected})"),
                             );
                         }
                         "auth_basic_header" => {
-                            let (_, user) = self.emit_expr(&args[0]);
-                            let (_, pass) = self.emit_expr(&args[1]);
+                            let user = self.emit_str_arg_borrow(&args[0]);
+                            let pass = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("abh");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_auth_basic_header({user}, {pass});"
@@ -28446,33 +28521,33 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "auth_check_basic" => {
-                            let (_, authorization) = self.emit_expr(&args[0]);
-                            let (_, user) = self.emit_expr(&args[1]);
-                            let (_, pass) = self.emit_expr(&args[2]);
+                            let authorization = self.emit_str_arg_borrow(&args[0]);
+                            let user = self.emit_str_arg_borrow(&args[1]);
+                            let pass = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_auth_check_basic({authorization}, {user}, {pass})"),
                             );
                         }
                         "auth_role_has" => {
-                            let (_, roles) = self.emit_expr(&args[0]);
-                            let (_, role) = self.emit_expr(&args[1]);
+                            let roles = self.emit_str_arg_borrow(&args[0]);
+                            let role = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_auth_role_has({roles}, {role})"),
                             );
                         }
                         "authz_allow_role" => {
-                            let (_, roles) = self.emit_expr(&args[0]);
-                            let (_, required) = self.emit_expr(&args[1]);
+                            let roles = self.emit_str_arg_borrow(&args[0]);
+                            let required = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_authz_allow_role({roles}, {required})"),
                             );
                         }
                         "auth_token_sign" => {
-                            let (_, subject) = self.emit_expr(&args[0]);
-                            let (_, secret) = self.emit_expr(&args[1]);
+                            let subject = self.emit_str_arg_borrow(&args[0]);
+                            let secret = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("ats");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_auth_token_sign({subject}, {secret});"
@@ -28480,7 +28555,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "auth_token_subject" => {
-                            let (_, token) = self.emit_expr(&args[0]);
+                            let token = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("atsub");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_auth_token_subject({token});"
@@ -28488,24 +28563,24 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "auth_token_check" => {
-                            let (_, token) = self.emit_expr(&args[0]);
-                            let (_, secret) = self.emit_expr(&args[1]);
+                            let token = self.emit_str_arg_borrow(&args[0]);
+                            let secret = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_auth_token_check({token}, {secret})"),
                             );
                         }
                         "auth_session_cookie" => {
-                            let (_, header) = self.emit_expr(&args[0]);
-                            let (_, name) = self.emit_expr(&args[1]);
-                            let (_, expected) = self.emit_expr(&args[2]);
+                            let header = self.emit_str_arg_borrow(&args[0]);
+                            let name = self.emit_str_arg_borrow(&args[1]);
+                            let expected = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_auth_session_cookie({header}, {name}, {expected})"),
                             );
                         }
                         "rate_allow" => {
-                            let (_, key) = self.emit_expr(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[0]);
                             let (_, limit) = self.emit_expr(&args[1]);
                             let (_, window_ms) = self.emit_expr(&args[2]);
                             return (
@@ -28514,7 +28589,7 @@ impl Codegen {
                             );
                         }
                         "rate_remaining" => {
-                            let (_, key) = self.emit_expr(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[0]);
                             let (_, limit) = self.emit_expr(&args[1]);
                             let (_, window_ms) = self.emit_expr(&args[2]);
                             return (
@@ -28523,7 +28598,7 @@ impl Codegen {
                             );
                         }
                         "http_content_encoding" => {
-                            let (_, accept_encoding) = self.emit_expr(&args[0]);
+                            let accept_encoding = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hce");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http_content_encoding({accept_encoding});"
@@ -28531,8 +28606,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http_compress_if_accepted" => {
-                            let (_, body) = self.emit_expr(&args[0]);
-                            let (_, accept_encoding) = self.emit_expr(&args[1]);
+                            let body = self.emit_str_arg_borrow(&args[0]);
+                            let accept_encoding = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("hca");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http_compress_if_accepted({body}, {accept_encoding});"
@@ -28540,8 +28615,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "cache_put" => {
-                            let (_, key) = self.emit_expr(&args[0]);
-                            let (_, value) = self.emit_expr(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[0]);
+                            let value = self.emit_str_arg_borrow(&args[1]);
                             let (_, ttl_ms) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -28549,17 +28624,17 @@ impl Codegen {
                             );
                         }
                         "cache_get" => {
-                            let (_, key) = self.emit_expr(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("cg");
                             self.line(&format!("MakoString {tmp} = mako_cache_get({key});"));
                             return ("MakoString".into(), tmp);
                         }
                         "cache_has" => {
-                            let (_, key) = self.emit_expr(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_cache_has({key})"));
                         }
                         "job_schedule" => {
-                            let (_, name) = self.emit_expr(&args[0]);
+                            let name = self.emit_str_arg_borrow(&args[0]);
                             let (_, delay_ms) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -28567,19 +28642,19 @@ impl Codegen {
                             );
                         }
                         "job_due" => {
-                            let (_, name) = self.emit_expr(&args[0]);
+                            let name = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_job_due({name})"));
                         }
                         "job_delay_ms" => {
-                            let (_, name) = self.emit_expr(&args[0]);
+                            let name = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_job_delay_ms({name})"));
                         }
                         "job_cancel" => {
-                            let (_, name) = self.emit_expr(&args[0]);
+                            let name = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_job_cancel({name})"));
                         }
                         "conn_pool_slot" => {
-                            let (_, key) = self.emit_expr(&args[0]);
+                            let key = self.emit_str_arg_borrow(&args[0]);
                             let (_, pool_size) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -28594,9 +28669,9 @@ impl Codegen {
                             );
                         }
                         "lb_pick2" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("lb");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_lb_pick2({a}, {b}, {key});"
@@ -28604,10 +28679,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "lb_pick3" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
-                            let (_, c) = self.emit_expr(&args[2]);
-                            let (_, key) = self.emit_expr(&args[3]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[2]);
+                            let key = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("lb");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_lb_pick3({a}, {b}, {c}, {key});"
@@ -28615,15 +28690,15 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "slog_redact" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sr");
                             self.line(&format!("MakoString {tmp} = mako_slog_redact({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "slog_with_redacted" => {
-                            let (_, level) = self.emit_expr(&args[0]);
-                            let (_, msg) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
+                            let level = self.emit_str_arg_borrow(&args[0]);
+                            let msg = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
                             self.line(&format!("mako_slog_with_redacted({level}, {msg}, {key});"));
                             return ("void".into(), "/*void*/".into());
                         }
@@ -28738,7 +28813,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_slice_get({s}, {i})"));
                         }
                         "as_bytes" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ab");
                             self.line(&format!("MakoByteArray {tmp} = mako_as_bytes({s});"));
                             return ("MakoByteArray".into(), tmp);
@@ -28797,7 +28872,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http_request_parse" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hrq");
                             self.line(&format!(
                                 "MakoHttpRequest {tmp} = mako_http_request_parse({s});"
@@ -28834,8 +28909,8 @@ impl Codegen {
                         }
                         "http_route_match" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("hrt");
                             self.line(&format!(
                                 "bool {tmp} = mako_http_route_match({r}, {m}, {p});"
@@ -28844,8 +28919,8 @@ impl Codegen {
                         }
                         "http_route_param" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("hrtp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http_route_param({r}, {p}, {n});"
@@ -28857,7 +28932,7 @@ impl Codegen {
                         }
                         "router_group" => {
                             let (_, router) = self.emit_expr(&args[0]);
-                            let (_, prefix) = self.emit_expr(&args[1]);
+                            let prefix = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_router_group({router}, {prefix})"),
@@ -28865,9 +28940,9 @@ impl Codegen {
                         }
                         "router_add" => {
                             let (_, router) = self.emit_expr(&args[0]);
-                            let (_, method) = self.emit_expr(&args[1]);
-                            let (_, pattern) = self.emit_expr(&args[2]);
-                            let (_, handler) = self.emit_expr(&args[3]);
+                            let method = self.emit_str_arg_borrow(&args[1]);
+                            let pattern = self.emit_str_arg_borrow(&args[2]);
+                            let handler = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!(
@@ -28886,8 +28961,8 @@ impl Codegen {
                         }
                         "router_match_path" => {
                             let (_, router) = self.emit_expr(&args[0]);
-                            let (_, method) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
+                            let method = self.emit_str_arg_borrow(&args[1]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rmp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_router_match_path({router}, {method}, {path});"
@@ -28897,7 +28972,7 @@ impl Codegen {
                         "router_param" => {
                             let (_, router) = self.emit_expr(&args[0]);
                             let (_, req) = self.emit_expr(&args[1]);
-                            let (_, name) = self.emit_expr(&args[2]);
+                            let name = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rpar");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_router_param({router}, {req}, {name});"
@@ -28913,8 +28988,8 @@ impl Codegen {
                         }
                         "reqctx_set" => {
                             let (_, ctx) = self.emit_expr(&args[0]);
-                            let (_, key) = self.emit_expr(&args[1]);
-                            let (_, value) = self.emit_expr(&args[2]);
+                            let key = self.emit_str_arg_borrow(&args[1]);
+                            let value = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_reqctx_set({ctx}, {key}, {value})"),
@@ -28922,7 +28997,7 @@ impl Codegen {
                         }
                         "reqctx_get" => {
                             let (_, ctx) = self.emit_expr(&args[0]);
-                            let (_, key) = self.emit_expr(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rcg");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_reqctx_get_value({ctx}, {key});"
@@ -28931,7 +29006,7 @@ impl Codegen {
                         }
                         "reqctx_has" => {
                             let (_, ctx) = self.emit_expr(&args[0]);
-                            let (_, key) = self.emit_expr(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_reqctx_has({ctx}, {key})"));
                         }
                         "reqctx_count" => {
@@ -28940,7 +29015,7 @@ impl Codegen {
                         }
                         "middleware_allow_methods" => {
                             let (_, req) = self.emit_expr(&args[0]);
-                            let (_, methods) = self.emit_expr(&args[1]);
+                            let methods = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_middleware_allow_methods({req}, {methods})"),
@@ -28948,7 +29023,7 @@ impl Codegen {
                         }
                         "middleware_next" => {
                             let (_, ctx) = self.emit_expr(&args[0]);
-                            let (_, name) = self.emit_expr(&args[1]);
+                            let name = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_middleware_next({ctx}, {name})"),
@@ -28956,7 +29031,7 @@ impl Codegen {
                         }
                         "middleware_ran" => {
                             let (_, ctx) = self.emit_expr(&args[0]);
-                            let (_, name) = self.emit_expr(&args[1]);
+                            let name = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_middleware_ran({ctx}, {name})"),
@@ -28970,14 +29045,14 @@ impl Codegen {
                         }
                         "middleware_require_context" => {
                             let (_, ctx) = self.emit_expr(&args[0]);
-                            let (_, key) = self.emit_expr(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_middleware_require_context({ctx}, {key})"),
                             );
                         }
                         "http_health_json" => {
-                            let (_, service) = self.emit_expr(&args[0]);
+                            let service = self.emit_str_arg_borrow(&args[0]);
                             let (_, ready) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("hhj");
                             self.line(&format!(
@@ -28987,7 +29062,7 @@ impl Codegen {
                         }
                         "http_respond_health" => {
                             let (_, conn) = self.emit_expr(&args[0]);
-                            let (_, service) = self.emit_expr(&args[1]);
+                            let service = self.emit_str_arg_borrow(&args[1]);
                             let (_, ready) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("hrh");
                             self.line(&format!(
@@ -28996,13 +29071,13 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "buf_reader_new" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("br");
                             self.line(&format!("MakoBufReader *{tmp} = mako_buf_reader_new({p});"));
                             return ("MakoBufReader*".into(), tmp);
                         }
                         "buf_reader_from_string" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("brs");
                             self.line(&format!(
                                 "MakoBufReader *{tmp} = mako_buf_reader_from_string({s});"
@@ -29027,14 +29102,14 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_buf_reader_close({r})"));
                         }
                         "buf_writer_new" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("bw");
                             self.line(&format!("MakoBufWriter *{tmp} = mako_buf_writer_new({p});"));
                             return ("MakoBufWriter*".into(), tmp);
                         }
                         "buf_write" => {
                             let (_, w) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_buf_write({w}, {s})"));
                         }
                         "buf_write_byte" => {
@@ -29051,13 +29126,13 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_buf_writer_close({w})"));
                         }
                         "sql_open_sqlite" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sq");
                             self.line(&format!("MakoSqlDB {tmp} = mako_sql_open_sqlite({p});"));
                             return ("MakoSqlDB".into(), tmp);
                         }
                         "sql_open_postgres" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sp");
                             self.line(&format!("MakoSqlDB {tmp} = mako_sql_open_postgres({u});"));
                             return ("MakoSqlDB".into(), tmp);
@@ -29072,7 +29147,7 @@ impl Codegen {
                         }
                         "sql_query_int" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             let (_, a) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -29081,22 +29156,22 @@ impl Codegen {
                         }
                         "sql_exec" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             let (_, a) = self.emit_expr(&args[2]);
                             return ("int64_t".into(), format!("mako_sql_exec({d}, {q}, {a})"));
                         }
                         "sql_exec_plain" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_sql_exec_plain({d}, {q})"));
                         }
                         "sql_exec_str4" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
-                            let (_, p1) = self.emit_expr(&args[2]);
-                            let (_, p2) = self.emit_expr(&args[3]);
-                            let (_, p3) = self.emit_expr(&args[4]);
-                            let (_, p4) = self.emit_expr(&args[5]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
+                            let p1 = self.emit_str_arg_borrow(&args[2]);
+                            let p2 = self.emit_str_arg_borrow(&args[3]);
+                            let p3 = self.emit_str_arg_borrow(&args[4]);
+                            let p4 = self.emit_str_arg_borrow(&args[5]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_sql_exec_str4({d}, {q}, {p1}, {p2}, {p3}, {p4})"),
@@ -29104,8 +29179,8 @@ impl Codegen {
                         }
                         "sql_query_str" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
-                            let (_, p1) = self.emit_expr(&args[2]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
+                            let p1 = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("sqs");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sql_query_str({d}, {q}, {p1});"
@@ -29114,9 +29189,9 @@ impl Codegen {
                         }
                         "sql_query_str2" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
-                            let (_, p1) = self.emit_expr(&args[2]);
-                            let (_, p2) = self.emit_expr(&args[3]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
+                            let p1 = self.emit_str_arg_borrow(&args[2]);
+                            let p2 = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("sqs2");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sql_query_str2({d}, {q}, {p1}, {p2});"
@@ -29125,10 +29200,10 @@ impl Codegen {
                         }
                         "sql_query_str3" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
-                            let (_, p1) = self.emit_expr(&args[2]);
-                            let (_, p2) = self.emit_expr(&args[3]);
-                            let (_, p3) = self.emit_expr(&args[4]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
+                            let p1 = self.emit_str_arg_borrow(&args[2]);
+                            let p2 = self.emit_str_arg_borrow(&args[3]);
+                            let p3 = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("sqs3");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sql_query_str3({d}, {q}, {p1}, {p2}, {p3});"
@@ -29137,11 +29212,11 @@ impl Codegen {
                         }
                         "sql_query_str4" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
-                            let (_, p1) = self.emit_expr(&args[2]);
-                            let (_, p2) = self.emit_expr(&args[3]);
-                            let (_, p3) = self.emit_expr(&args[4]);
-                            let (_, p4) = self.emit_expr(&args[5]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
+                            let p1 = self.emit_str_arg_borrow(&args[2]);
+                            let p2 = self.emit_str_arg_borrow(&args[3]);
+                            let p3 = self.emit_str_arg_borrow(&args[4]);
+                            let p4 = self.emit_str_arg_borrow(&args[5]);
                             let tmp = self.fresh("sqs4");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sql_query_str4({d}, {q}, {p1}, {p2}, {p3}, {p4});"
@@ -29158,7 +29233,7 @@ impl Codegen {
                         }
                         "sql_query_rows" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             let (_, a) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -29167,8 +29242,8 @@ impl Codegen {
                         }
                         "sql_query_rows_str" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_sql_query_rows_str({d}, {q}, {p})"),
@@ -29204,7 +29279,7 @@ impl Codegen {
                         }
                         "sql_query_col_int" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             let (_, m) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("sqci");
                             self.line(&format!(
@@ -29214,7 +29289,7 @@ impl Codegen {
                         }
                         "sql_query_col_str" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             let (_, m) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("sqcs");
                             self.line(&format!(
@@ -29236,7 +29311,7 @@ impl Codegen {
                         }
                         "sql_prepare" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_sql_prepare({d}, {q})"));
                         }
                         "sql_stmt_query_int" => {
@@ -29267,17 +29342,17 @@ impl Codegen {
                         "sql_migrate" => {
                             let (_, d) = self.emit_expr(&args[0]);
                             let (_, v) = self.emit_expr(&args[1]);
-                            let (_, up) = self.emit_expr(&args[2]);
+                            let up = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_sql_migrate({d}, {v}, {up})"),
                             );
                         }
                         "sql_check_typed" => {
-                            let (_, schema) = self.emit_expr(&args[0]);
-                            let (_, sql) = self.emit_expr(&args[1]);
-                            let (_, params) = self.emit_expr(&args[2]);
-                            let (_, result) = self.emit_expr(&args[3]);
+                            let schema = self.emit_str_arg_borrow(&args[0]);
+                            let sql = self.emit_str_arg_borrow(&args[1]);
+                            let params = self.emit_str_arg_borrow(&args[2]);
+                            let result = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!(
@@ -29286,7 +29361,7 @@ impl Codegen {
                             );
                         }
                         "sql_pool_open_sqlite" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -29294,7 +29369,7 @@ impl Codegen {
                             );
                         }
                         "sql_pool_open_postgres" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -29319,7 +29394,7 @@ impl Codegen {
                         }
                         "sql_pool_query_int" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             let (_, a) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -29328,7 +29403,7 @@ impl Codegen {
                         }
                         "sql_pool_exec" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             let (_, a) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -29361,64 +29436,64 @@ impl Codegen {
                             return ("void".into(), "/*void*/".into());
                         }
                         "flag_string" => {
-                            let (_, n) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("fs");
                             self.line(&format!("MakoString {tmp} = mako_flag_string({n}, {d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "flag_int" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_flag_int({n}, {d})"));
                         }
                         "flag_bool" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_flag_bool({n}, {d})"));
                         }
                         "exec_output" => {
-                            let (_, c) = self.emit_expr(&args[0]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("eo");
                             self.line(&format!("MakoString {tmp} = mako_exec_output({c});"));
                             return ("MakoString".into(), tmp);
                         }
                         "exec_run" => {
-                            let (_, c) = self.emit_expr(&args[0]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_exec_run({c})"));
                         }
                         "url_query_escape" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ue");
                             self.line(&format!("MakoString {tmp} = mako_url_query_escape({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "url_scheme" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("us");
                             self.line(&format!("MakoString {tmp} = mako_url_scheme({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "url_host" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("uh");
                             self.line(&format!("MakoString {tmp} = mako_url_host({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "url_path" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("up");
                             self.line(&format!("MakoString {tmp} = mako_url_path({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "url_query" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("uq");
                             self.line(&format!("MakoString {tmp} = mako_url_query({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "csv_split_line" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("cs");
                             self.line(&format!("MakoStrArray {tmp} = mako_csv_split_line({s});"));
                             return ("MakoStrArray".into(), tmp);
@@ -29430,32 +29505,32 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "xml_escape" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("xe");
                             self.line(&format!("MakoString {tmp} = mako_xml_escape({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "html_escape" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("he");
                             self.line(&format!("MakoString {tmp} = mako_html_escape({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "xml_tag_text" => {
-                            let (_, x) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let x = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("xt");
                             self.line(&format!("MakoString {tmp} = mako_xml_tag_text({x}, {t});"));
                             return ("MakoString".into(), tmp);
                         }
                         "gzip_compress" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gz");
                             self.line(&format!("MakoString {tmp} = mako_gzip_compress({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "gzip_decompress" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gzd");
                             self.line(&format!("MakoString {tmp} = mako_gzip_decompress({s});"));
                             return ("MakoString".into(), tmp);
@@ -29464,13 +29539,13 @@ impl Codegen {
                             return ("int64_t".into(), "mako_gzip_available()".into());
                         }
                         "flate_compress" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("fl");
                             self.line(&format!("MakoString {tmp} = mako_flate_compress({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "flate_decompress" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("fld");
                             self.line(&format!("MakoString {tmp} = mako_flate_decompress({s});"));
                             return ("MakoString".into(), tmp);
@@ -29479,13 +29554,13 @@ impl Codegen {
                             return ("int64_t".into(), "mako_flate_available()".into());
                         }
                         "zlib_compress" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("zl");
                             self.line(&format!("MakoString {tmp} = mako_zlib_compress({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "zlib_decompress" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("zld");
                             self.line(&format!("MakoString {tmp} = mako_zlib_decompress({s});"));
                             return ("MakoString".into(), tmp);
@@ -29494,13 +29569,13 @@ impl Codegen {
                             return ("int64_t".into(), "mako_zlib_available()".into());
                         }
                         "bzip2_compress" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("bz");
                             self.line(&format!("MakoString {tmp} = mako_bzip2_compress({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "bzip2_decompress" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("bzd");
                             self.line(&format!("MakoString {tmp} = mako_bzip2_decompress({s});"));
                             return ("MakoString".into(), tmp);
@@ -29509,56 +29584,56 @@ impl Codegen {
                             return ("int64_t".into(), "mako_bzip2_available()".into());
                         }
                         "lzw_compress" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lzw");
                             self.line(&format!("MakoString {tmp} = mako_lzw_compress({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "lzw_decompress" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lzwd");
                             self.line(&format!("MakoString {tmp} = mako_lzw_decompress({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sha3_256_hex" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("s3");
                             self.line(&format!("MakoString {tmp} = mako_sha3_256_hex({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sha3_256_raw" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("s3r");
                             self.line(&format!("MakoString {tmp} = mako_sha3_256_raw({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "md5_hex" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("md5");
                             self.line(&format!("MakoString {tmp} = mako_sip_md5_hex({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "crc64_ecma" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("(int64_t)mako_crc64_ecma({s})"));
                         }
                         "tar_write_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_tar_write_file({p}, {n}, {d})"),
                             );
                         }
                         "tar_first_name" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tn");
                             self.line(&format!("MakoString {tmp} = mako_tar_first_name({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mime_type" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("mt");
                             self.line(&format!("MakoString {tmp} = mako_mime_type_by_ext({p});"));
                             return ("MakoString".into(), tmp);
@@ -29587,7 +29662,7 @@ impl Codegen {
                         }
                         "bytes_buffer_write" => {
                             let (_, b) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             self.line(&format!("mako_bytes_buffer_write({b}, {s});"));
                             return ("void".into(), "/*void*/".into());
                         }
@@ -29621,9 +29696,9 @@ impl Codegen {
                             return ("double".into(), "mako_rand_float()".into());
                         }
                         "template_execute" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("te");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_template_execute({t}, {k}, {v});"
@@ -29639,8 +29714,8 @@ impl Codegen {
                         }
                         "tmpl_data_set" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_tmpl_data_set({d}, {k}, {v})"),
@@ -29648,8 +29723,8 @@ impl Codegen {
                         }
                         "tmpl_data_set_list" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_tmpl_data_set_list({d}, {k}, {v})"),
@@ -29657,7 +29732,7 @@ impl Codegen {
                         }
                         "tmpl_data_set_int" => {
                             let (_, d) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let (_, v) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -29665,7 +29740,7 @@ impl Codegen {
                             );
                         }
                         "tmpl_new" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_tmpl_new({s})"));
                         }
                         "tmpl_free" => {
@@ -29689,101 +29764,101 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tmpl_text" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("tt");
                             self.line(&format!("MakoString {tmp} = mako_tmpl_text({s}, {d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "tmpl_html" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("th");
                             self.line(&format!("MakoString {tmp} = mako_tmpl_html({s}, {d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "base32_encode" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("b32");
                             self.line(&format!("MakoString {tmp} = mako_base32_encode({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sha1" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("s1");
                             self.line(&format!("MakoString {tmp} = mako_sha1_hex({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "sha512" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("s512");
                             self.line(&format!("MakoString {tmp} = mako_sha512_hex({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "lookup_host" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("lh");
                             self.line(&format!("MakoString {tmp} = mako_lookup_host({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "dns_lookup_count" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_dns_lookup_count({h})"));
                         }
                         "dns_lookup_all" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("dla");
                             self.line(&format!("MakoString {tmp} = mako_dns_lookup_all({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "dns_naptr_lookup" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("dnn");
                             self.line(&format!("MakoString {tmp} = mako_dns_naptr_lookup({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "dns_srv_lookup" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("dns");
                             self.line(&format!("MakoString {tmp} = mako_dns_srv_lookup({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "dns_lookup_ipv4" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("dl4");
                             self.line(&format!("MakoString {tmp} = mako_dns_lookup_ipv4({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "dns_lookup_ipv6" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("dl6");
                             self.line(&format!("MakoString {tmp} = mako_dns_lookup_ipv6({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "parse_ip_ok" => {
-                            let (_, ip) = self.emit_expr(&args[0]);
+                            let ip = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_parse_ip_ok({ip})"));
                         }
                         "dns_ip_family" => {
-                            let (_, ip) = self.emit_expr(&args[0]);
+                            let ip = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_dns_ip_family({ip})"));
                         }
                         "dns_is_loopback" => {
-                            let (_, ip) = self.emit_expr(&args[0]);
+                            let ip = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_dns_is_loopback({ip})"));
                         }
                         "dns_is_private" => {
-                            let (_, ip) = self.emit_expr(&args[0]);
+                            let ip = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_dns_is_private({ip})"));
                         }
                         "dns_normalize_host" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("dnh");
                             self.line(&format!("MakoString {tmp} = mako_dns_normalize_host({h});"));
                             return ("MakoString".into(), tmp);
                         }
                         "dns_join_host_port" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("djhp");
                             self.line(&format!(
@@ -29792,13 +29867,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "dns_split_host" => {
-                            let (_, hp) = self.emit_expr(&args[0]);
+                            let hp = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("dsh");
                             self.line(&format!("MakoString {tmp} = mako_dns_split_host({hp});"));
                             return ("MakoString".into(), tmp);
                         }
                         "dns_split_port" => {
-                            let (_, hp) = self.emit_expr(&args[0]);
+                            let hp = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_dns_split_port({hp})"));
                         }
                         "signal_notify" => {
@@ -29809,11 +29884,11 @@ impl Codegen {
                             return ("int64_t".into(), "mako_signal_received()".into());
                         }
                         "signal_watch" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_signal_watch({n})"));
                         }
                         "signal_fired" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_signal_fired({n})"));
                         }
                         "signal_ignore" => {
@@ -29830,7 +29905,7 @@ impl Codegen {
                         }
                         "watch_add" => {
                             let (_, w) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("wad");
                             self.line(&format!("int64_t {tmp} = mako_watch_add({w}, {p});"));
                             return ("int64_t".into(), tmp);
@@ -29875,7 +29950,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_atomic_cas({p}, {o}, {n})"));
                         }
                         "utf8_valid" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_utf8_valid({s})"));
                         }
                         "utf8_rune_len" => {
@@ -29887,17 +29962,17 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_utf8_valid_rune({r})"));
                         }
                         "utf8_decode_rune" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_utf8_decode_rune({s}, {o})"));
                         }
                         "utf8_decode_size" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, o) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_utf8_decode_size({s}, {o})"));
                         }
                         "utf8_decode_last_rune" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_utf8_decode_last_rune({s})"));
                         }
                         "utf8_decode_last_size" => {
@@ -29910,7 +29985,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "utf8_full_rune" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_utf8_full_rune({s})"));
                         }
                         "utf8_rune_start" => {
@@ -30000,12 +30075,12 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_unicode_simple_fold({r})"));
                         }
                         "unicode_is" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let (_, r) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_unicode_is({p}, {r})"));
                         }
                         "filepath_walk" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("fw");
                             self.line(&format!("MakoStrArray {tmp} = mako_filepath_walk({p});"));
                             return ("MakoStrArray".into(), tmp);
@@ -30044,7 +30119,7 @@ impl Codegen {
                         }
                         "strings_index" => {
                             let (_, a) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_strings_index({a}, {v})"));
                         }
                         "strings_copy" => {
@@ -30074,7 +30149,7 @@ impl Codegen {
                         }
                         "list_push_str" => {
                             let (_, a) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("lps");
                             self.line(&format!(
                                 "MakoStrArray {tmp} = mako_list_push_str({a}, {v});"
@@ -30146,7 +30221,7 @@ impl Codegen {
                         "list_insert_str" => {
                             let (_, a) = self.emit_expr(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let v = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("lis");
                             self.line(&format!(
                                 "MakoStrArray {tmp} = mako_list_insert_str({a}, {i}, {v});"
@@ -30270,13 +30345,13 @@ impl Codegen {
                             return ("MakoIntArray".into(), tmp);
                         }
                         "embed_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ef");
                             self.line(&format!("MakoString {tmp} = mako_embed_file({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "filepath_walk_n" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let (_, d) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("fwn");
                             self.line(&format!(
@@ -30285,23 +30360,23 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "zip_write_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_zip_write_file({p}, {n}, {d})"),
                             );
                         }
                         "zip_first_name" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("zfn");
                             self.line(&format!("MakoString {tmp} = mako_zip_first_name({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "zip_read_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("zrf");
                             self.line(&format!("MakoString {tmp} = mako_zip_read_file({p}, {n});"));
                             return ("MakoString".into(), tmp);
@@ -30312,7 +30387,7 @@ impl Codegen {
                         "png_encode_gray" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
-                            let (_, px) = self.emit_expr(&args[2]);
+                            let px = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("png");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_png_encode_gray({w}, {h}, {px});"
@@ -30322,7 +30397,7 @@ impl Codegen {
                         "png_encode_rgb" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
-                            let (_, px) = self.emit_expr(&args[2]);
+                            let px = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("png");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_png_encode_rgb({w}, {h}, {px});"
@@ -30330,17 +30405,17 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "png_decode_gray" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pngd");
                             self.line(&format!("MakoString {tmp} = mako_png_decode_gray({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "png_width" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_png_width({s})"));
                         }
                         "png_height" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_png_height({s})"));
                         }
                         "maps_keys" => {
@@ -31098,7 +31173,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "reflect_type_of_string" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rts");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_reflect_type_of_string({v});"
@@ -31114,7 +31189,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "reflect_kind_of_string" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rks");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_reflect_kind_of_string({v});"
@@ -31130,7 +31205,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "reflect_value_string_str" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rvs");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_reflect_value_string_str({v});"
@@ -31138,19 +31213,19 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "reflect_len_string" => {
-                            let (_, v) = self.emit_expr(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_reflect_len_string({v})"));
                         }
                         "httptest_serve_once" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_httptest_serve_once({p}, {b})"),
                             );
                         }
                         "httptest_get" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("htg");
                             self.line(&format!("MakoString {tmp} = mako_httptest_get({u});"));
                             return ("MakoString".into(), tmp);
@@ -31159,7 +31234,7 @@ impl Codegen {
                             return ("int64_t".into(), "mako_httptest_status()".into());
                         }
                         "httptest_header" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("hth");
                             self.line(&format!("MakoString {tmp} = mako_httptest_header({n});"));
                             return ("MakoString".into(), tmp);
@@ -31171,28 +31246,28 @@ impl Codegen {
                             return ("int64_t".into(), "mako_argon2_available()".into());
                         }
                         "argon2id_hash" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("a2h");
                             self.line(&format!("MakoString {tmp} = mako_argon2id_hash({p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "argon2id_verify" => {
-                            let (_, h) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("a2v");
                             self.line(&format!("int64_t {tmp} = mako_argon2id_verify({h}, {p});"));
                             return ("int64_t".into(), tmp);
                         }
                         "bcrypt_hash" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let (_, c) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("bch");
                             self.line(&format!("MakoString {tmp} = mako_bcrypt_hash({p}, {c});"));
                             return ("MakoString".into(), tmp);
                         }
                         "bcrypt_verify" => {
-                            let (_, h) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("bcv");
                             self.line(&format!("int64_t {tmp} = mako_bcrypt_verify({h}, {p});"));
                             return ("int64_t".into(), tmp);
@@ -31224,13 +31299,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "mldsa_public_key" => {
-                            let (_, k) = self.emit_expr(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("mlp");
                             self.line(&format!("MakoString {tmp} = mako_mldsa_public_key({k});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mldsa_algorithm_name" => {
-                            let (_, k) = self.emit_expr(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("mlp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_mldsa_algorithm_name({k});"
@@ -31238,16 +31313,16 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "mldsa_sign" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("mls");
                             self.line(&format!("MakoString {tmp} = mako_mldsa_sign({k}, {m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mldsa_verify" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
-                            let (_, s) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("mlv");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_mldsa_verify({k}, {m}, {s});"
@@ -31255,8 +31330,8 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "mldsa_self_signed_cert" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let (_, d) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("mlc");
                             self.line(&format!(
@@ -31265,8 +31340,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "mldsa_verify_cert" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, ca) = self.emit_expr(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let ca = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("mlvc");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_mldsa_verify_cert({c}, {ca});"
@@ -31274,10 +31349,10 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "aes_gcm_seal" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
-                            let (_, a) = self.emit_expr(&args[3]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("ags");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_aes_gcm_seal({k}, {n}, {p}, {a});"
@@ -31285,10 +31360,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "aes_gcm_open" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, s) = self.emit_expr(&args[2]);
-                            let (_, a) = self.emit_expr(&args[3]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("ago");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_aes_gcm_open({k}, {n}, {s}, {a});"
@@ -31296,9 +31371,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "seal_at_rest" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
-                            let (_, a) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("sar");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_seal_at_rest({k}, {p}, {a});"
@@ -31306,9 +31381,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "open_at_rest" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
-                            let (_, a) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("oar");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_open_at_rest({k}, {s}, {a});"
@@ -31316,19 +31391,19 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "seal_file_at_rest" => {
-                            let (_, path) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
-                            let (_, a) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_seal_file_at_rest({path}, {k}, {p}, {a})"),
                             );
                         }
                         "open_file_at_rest" => {
-                            let (_, path) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, a) = self.emit_expr(&args[2]);
+                            let path = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("ofar");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_open_file_at_rest({path}, {k}, {a});"
@@ -31336,32 +31411,32 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "aes_ctr" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, iv) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let iv = self.emit_str_arg_borrow(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("actr");
                             self.line(&format!("MakoString {tmp} = mako_aes_ctr({k}, {iv}, {d});"));
                             return ("MakoString".into(), tmp);
                         }
                         "hmac_sha1" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("hs1");
                             self.line(&format!("MakoString {tmp} = mako_hmac_sha1_hex({k}, {m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "hmac_sha1_raw" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("hs1r");
                             self.line(&format!("MakoString {tmp} = mako_hmac_sha1_raw({k}, {m});"));
                             return ("MakoString".into(), tmp);
                         }
                         "chacha20_poly1305_seal" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
-                            let (_, a) = self.emit_expr(&args[3]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("ccs");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_chacha20_poly1305_seal({k}, {n}, {p}, {a});"
@@ -31369,10 +31444,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "chacha20_poly1305_open" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, s) = self.emit_expr(&args[2]);
-                            let (_, a) = self.emit_expr(&args[3]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[2]);
+                            let a = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("cco");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_chacha20_poly1305_open({k}, {n}, {s}, {a});"
@@ -31380,7 +31455,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "multipart_boundary" => {
-                            let (_, ct) = self.emit_expr(&args[0]);
+                            let ct = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("mpb");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_multipart_boundary({ct});"
@@ -31388,9 +31463,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "multipart_form_value" => {
-                            let (_, b) = self.emit_expr(&args[0]);
-                            let (_, bd) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
+                            let bd = self.emit_str_arg_borrow(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("mpv");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_multipart_form_value({b}, {bd}, {n});"
@@ -31398,9 +31473,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "multipart_file_name" => {
-                            let (_, b) = self.emit_expr(&args[0]);
-                            let (_, bd) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
+                            let bd = self.emit_str_arg_borrow(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("mpfn");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_multipart_file_name({b}, {bd}, {n});"
@@ -31408,9 +31483,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "multipart_file_content_type" => {
-                            let (_, b) = self.emit_expr(&args[0]);
-                            let (_, bd) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
+                            let bd = self.emit_str_arg_borrow(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("mpct");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_multipart_file_content_type({b}, {bd}, {n});"
@@ -31418,9 +31493,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "multipart_file_value" => {
-                            let (_, b) = self.emit_expr(&args[0]);
-                            let (_, bd) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
+                            let bd = self.emit_str_arg_borrow(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("mpfv");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_multipart_file_value({b}, {bd}, {n});"
@@ -31428,20 +31503,20 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "multipart_file_size" => {
-                            let (_, b) = self.emit_expr(&args[0]);
-                            let (_, bd) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
+                            let bd = self.emit_str_arg_borrow(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_multipart_file_size({b}, {bd}, {n})"),
                             );
                         }
                         "multipart_file_allowed" => {
-                            let (_, b) = self.emit_expr(&args[0]);
-                            let (_, bd) = self.emit_expr(&args[1]);
-                            let (_, n) = self.emit_expr(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[0]);
+                            let bd = self.emit_str_arg_borrow(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[2]);
                             let (_, max) = self.emit_expr(&args[3]);
-                            let (_, types) = self.emit_expr(&args[4]);
+                            let types = self.emit_str_arg_borrow(&args[4]);
                             return (
                                 "int64_t".into(),
                                 format!(
@@ -31450,8 +31525,8 @@ impl Codegen {
                             );
                         }
                         "regex_find_all" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             let (_, lim) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("rfa");
                             self.line(&format!(
@@ -31460,9 +31535,9 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "regex_replace" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_regex_replace({p}, {t}, {r});"
@@ -31470,9 +31545,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "regex_replace_all" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rra");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_regex_replace_all({p}, {t}, {r});"
@@ -31485,7 +31560,7 @@ impl Codegen {
                         "gif_encode_rgb" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
-                            let (_, px) = self.emit_expr(&args[2]);
+                            let px = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("gif");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_gif_encode_rgb({w}, {h}, {px});"
@@ -31493,23 +31568,23 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "gif_decode_rgb" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gifd");
                             self.line(&format!("MakoString {tmp} = mako_gif_decode_rgb({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "gif_width" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_gif_width({s})"));
                         }
                         "gif_height" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_gif_height({s})"));
                         }
                         "jpeg_encode_gray" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
-                            let (_, px) = self.emit_expr(&args[2]);
+                            let px = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("jpg");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_jpeg_encode_gray({w}, {h}, {px});"
@@ -31517,28 +31592,28 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "jpeg_decode_gray" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("jpgd");
                             self.line(&format!("MakoString {tmp} = mako_jpeg_decode_gray({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "jpeg_width" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_width({s})"));
                         }
                         "jpeg_height" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_height({s})"));
                         }
                         "reflect_struct_num_fields" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_reflect_struct_num_fields({s})"),
                             );
                         }
                         "reflect_struct_field_name" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("rsn");
                             self.line(&format!(
@@ -31547,7 +31622,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "reflect_struct_field_type" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("rst");
                             self.line(&format!(
@@ -31556,17 +31631,17 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "reflect_struct_has_field" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_reflect_struct_has_field({s}, {n})"),
                             );
                         }
                         "html_template_execute" => {
-                            let (_, tmpl) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let tmpl = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("hte");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_html_template_execute({tmpl}, {k}, {v});"
@@ -31574,13 +31649,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "gob_encode_string" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("ges");
                             self.line(&format!("MakoString {tmp} = mako_gob_encode_string({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "gob_decode_string" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gds");
                             self.line(&format!("MakoString {tmp} = mako_gob_decode_string({s});"));
                             return ("MakoString".into(), tmp);
@@ -31592,18 +31667,18 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "gob_decode_int" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_gob_decode_int({s})"));
                         }
                         "mail_parse_address" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("mpa");
                             self.line(&format!("MakoString {tmp} = mako_mail_parse_address({a});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mail_header_get" => {
-                            let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("mhg");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_mail_header_get({m}, {n});"
@@ -31611,72 +31686,72 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "mail_address_ok" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_mail_address_ok({a})"));
                         }
                         "slog_set_level" => {
-                            let (_, l) = self.emit_expr(&args[0]);
+                            let l = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_slog_set_level({l});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "slog_info" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_slog_info({m});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "slog_warn" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_slog_warn({m});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "slog_error" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_slog_error({m});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "slog_debug" => {
-                            let (_, m) = self.emit_expr(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_slog_debug({m});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "slog_with" => {
-                            let (_, l) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
-                            let (_, v) = self.emit_expr(&args[3]);
+                            let l = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
+                            let v = self.emit_str_arg_borrow(&args[3]);
                             self.line(&format!("mako_slog_with({l}, {m}, {k}, {v});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "slog_with2" => {
-                            let (_, l) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
-                            let (_, k1) = self.emit_expr(&args[2]);
-                            let (_, v1) = self.emit_expr(&args[3]);
-                            let (_, k2) = self.emit_expr(&args[4]);
-                            let (_, v2) = self.emit_expr(&args[5]);
+                            let l = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
+                            let k1 = self.emit_str_arg_borrow(&args[2]);
+                            let v1 = self.emit_str_arg_borrow(&args[3]);
+                            let k2 = self.emit_str_arg_borrow(&args[4]);
+                            let v2 = self.emit_str_arg_borrow(&args[5]);
                             self.line(&format!(
                                 "mako_slog_with2({l}, {m}, {k1}, {v1}, {k2}, {v2});"
                             ));
                             return ("void".into(), "/*void*/".into());
                         }
                         "slog_with3" => {
-                            let (_, l) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
-                            let (_, k1) = self.emit_expr(&args[2]);
-                            let (_, v1) = self.emit_expr(&args[3]);
-                            let (_, k2) = self.emit_expr(&args[4]);
-                            let (_, v2) = self.emit_expr(&args[5]);
-                            let (_, k3) = self.emit_expr(&args[6]);
-                            let (_, v3) = self.emit_expr(&args[7]);
+                            let l = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
+                            let k1 = self.emit_str_arg_borrow(&args[2]);
+                            let v1 = self.emit_str_arg_borrow(&args[3]);
+                            let k2 = self.emit_str_arg_borrow(&args[4]);
+                            let v2 = self.emit_str_arg_borrow(&args[5]);
+                            let k3 = self.emit_str_arg_borrow(&args[6]);
+                            let v3 = self.emit_str_arg_borrow(&args[7]);
                             self.line(&format!(
                                 "mako_slog_with3({l}, {m}, {k1}, {v1}, {k2}, {v2}, {k3}, {v3});"
                             ));
                             return ("void".into(), "/*void*/".into());
                         }
                         "slog_with_int" => {
-                            let (_, l) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
+                            let l = self.emit_str_arg_borrow(&args[0]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
                             let (_, v) = self.emit_expr(&args[3]);
                             self.line(&format!("mako_slog_with_int({l}, {m}, {k}, {v});"));
                             return ("void".into(), "/*void*/".into());
@@ -31690,12 +31765,12 @@ impl Codegen {
                             return ("int64_t".into(), "mako_slog_is_json()".into());
                         }
                         "slog_set_service" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             self.line(&format!("mako_slog_set_service({n});"));
                             return ("void".into(), "/*void*/".into());
                         }
                         "slog_set_output" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_slog_set_output({p})"));
                         }
                         "slog_flush" => {
@@ -31706,11 +31781,11 @@ impl Codegen {
                             return ("int64_t".into(), "mako_slog_get_level()".into());
                         }
                         "regex_valid" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_regex_valid({p})"));
                         }
                         "regex_quote_meta" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rqm");
                             self.line(&format!("MakoString {tmp} = mako_regex_quote_meta({s});"));
                             return ("MakoString".into(), tmp);
@@ -31722,13 +31797,13 @@ impl Codegen {
                         }
                         "zip_add" => {
                             let (_, z) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             return ("int64_t".into(), format!("mako_zip_add({z}, {n}, {d})"));
                         }
                         "zip_write_to" => {
                             let (_, z) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_zip_write_to({z}, {p})"));
                         }
                         "zip_close" => {
@@ -31737,38 +31812,38 @@ impl Codegen {
                             return ("void".into(), "/*void*/".into());
                         }
                         "zip_list" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("zl");
                             self.line(&format!("MakoStrArray {tmp} = mako_zip_list({p});"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "html_template_execute2" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, k1) = self.emit_expr(&args[1]);
-                            let (_, v1) = self.emit_expr(&args[2]);
-                            let (_, k2) = self.emit_expr(&args[3]);
-                            let (_, v2) = self.emit_expr(&args[4]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let k1 = self.emit_str_arg_borrow(&args[1]);
+                            let v1 = self.emit_str_arg_borrow(&args[2]);
+                            let k2 = self.emit_str_arg_borrow(&args[3]);
+                            let v2 = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("ht2");
                             self.line(&format!("MakoString {tmp} = mako_html_template_execute2({t}, {k1}, {v1}, {k2}, {v2});"));
                             return ("MakoString".into(), tmp);
                         }
                         "html_template_execute3" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, k1) = self.emit_expr(&args[1]);
-                            let (_, v1) = self.emit_expr(&args[2]);
-                            let (_, k2) = self.emit_expr(&args[3]);
-                            let (_, v2) = self.emit_expr(&args[4]);
-                            let (_, k3) = self.emit_expr(&args[5]);
-                            let (_, v3) = self.emit_expr(&args[6]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let k1 = self.emit_str_arg_borrow(&args[1]);
+                            let v1 = self.emit_str_arg_borrow(&args[2]);
+                            let k2 = self.emit_str_arg_borrow(&args[3]);
+                            let v2 = self.emit_str_arg_borrow(&args[4]);
+                            let k3 = self.emit_str_arg_borrow(&args[5]);
+                            let v3 = self.emit_str_arg_borrow(&args[6]);
                             let tmp = self.fresh("ht3");
                             self.line(&format!("MakoString {tmp} = mako_html_template_execute3({t}, {k1}, {v1}, {k2}, {v2}, {k3}, {v3});"));
                             return ("MakoString".into(), tmp);
                         }
                         "html_template_if" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let (_, cnd) = self.emit_expr(&args[2]);
-                            let (_, v) = self.emit_expr(&args[3]);
+                            let v = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("hti");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_html_template_if({t}, {k}, {cnd}, {v});"
@@ -31776,9 +31851,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "html_template_range" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, csv) = self.emit_expr(&args[2]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let csv = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("htr");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_html_template_range({t}, {k}, {csv});"
@@ -31786,9 +31861,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "html_template_with" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("htw");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_html_template_with({t}, {k}, {v});"
@@ -31802,7 +31877,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "gob_decode_map_ss" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gdm");
                             self.line(&format!("MakoMapSS *{tmp} = mako_gob_decode_map_ss({s});"));
                             return ("MakoMapSS*".into(), tmp);
@@ -31814,7 +31889,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "gob_decode_struct" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gds");
                             self.line(&format!(
                                 "MakoReflectValue *{tmp} = mako_gob_decode_struct({s});"
@@ -31840,15 +31915,15 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "binary_u16le" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_binary_u16le({s})"));
                         }
                         "binary_u32le" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_binary_u32le({s})"));
                         }
                         "binary_u64le" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_binary_u64le({s})"));
                         }
                         "binary_put_u16be" => {
@@ -31870,22 +31945,22 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "binary_u16be" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_binary_u16be({s})"));
                         }
                         "binary_u32be" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_binary_u32be({s})"));
                         }
                         "binary_u64be" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_binary_u64be({s})"));
                         }
                         "smtp_format_message" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
-                            let (_, s) = self.emit_expr(&args[2]);
-                            let (_, b) = self.emit_expr(&args[3]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("sm");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_smtp_format_message({f}, {t}, {s}, {b});"
@@ -31893,27 +31968,27 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "smtp_send_soft" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, m) = self.emit_expr(&args[2]);
+                            let m = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_smtp_send_soft({h}, {p}, {m})"),
                             );
                         }
                         "smtp_send_dialog" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, f) = self.emit_expr(&args[2]);
-                            let (_, t) = self.emit_expr(&args[3]);
-                            let (_, m) = self.emit_expr(&args[4]);
+                            let f = self.emit_str_arg_borrow(&args[2]);
+                            let t = self.emit_str_arg_borrow(&args[3]);
+                            let m = self.emit_str_arg_borrow(&args[4]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_smtp_send_dialog({h}, {p}, {f}, {t}, {m})"),
                             );
                         }
                         "reflect_value_new" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rv");
                             self.line(&format!(
                                 "MakoReflectValue *{tmp} = mako_reflect_value_new({s});"
@@ -31921,9 +31996,9 @@ impl Codegen {
                             return ("MakoReflectValue*".into(), tmp);
                         }
                         "reflect_value_from_2" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rv2");
                             self.line(&format!(
                                 "MakoReflectValue *{tmp} = mako_reflect_value_from_2({s}, {a}, {b});"
@@ -31931,7 +32006,7 @@ impl Codegen {
                             return ("MakoReflectValue*".into(), tmp);
                         }
                         "reflect_value_from_2_int" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, a) = self.emit_expr(&args[1]);
                             let (_, b) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("rvi");
@@ -31966,8 +32041,8 @@ impl Codegen {
                         }
                         "reflect_value_set" => {
                             let (_, v) = self.emit_expr(&args[0]);
-                            let (_, f) = self.emit_expr(&args[1]);
-                            let (_, val) = self.emit_expr(&args[2]);
+                            let f = self.emit_str_arg_borrow(&args[1]);
+                            let val = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_reflect_value_set({v}, {f}, {val})"),
@@ -31975,7 +32050,7 @@ impl Codegen {
                         }
                         "reflect_value_get" => {
                             let (_, v) = self.emit_expr(&args[0]);
-                            let (_, f) = self.emit_expr(&args[1]);
+                            let f = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rvg");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_reflect_value_get({v}, {f});"
@@ -32001,7 +32076,7 @@ impl Codegen {
                         "reflect_value_set_at" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
-                            let (_, val) = self.emit_expr(&args[2]);
+                            let val = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_reflect_value_set_at({v}, {i}, {val})"),
@@ -32018,7 +32093,7 @@ impl Codegen {
                         "jpeg_encode_gray_dct" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
-                            let (_, px) = self.emit_expr(&args[2]);
+                            let px = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("jdct");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_jpeg_encode_gray_dct({w}, {h}, {px});"
@@ -32026,13 +32101,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "jpeg_dct_dc" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_dct_dc({s})"));
                         }
                         "gif_encode_rgb_lzw" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
-                            let (_, px) = self.emit_expr(&args[2]);
+                            let px = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("glzw");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_gif_encode_rgb_lzw({w}, {h}, {px});"
@@ -32040,17 +32115,17 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "gif_decode_rgb_lzw" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gdlzw");
                             self.line(&format!("MakoString {tmp} = mako_gif_decode_rgb_lzw({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "html_template_nested" => {
-                            let (_, t) = self.emit_expr(&args[0]);
-                            let (_, ok) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[0]);
+                            let ok = self.emit_str_arg_borrow(&args[1]);
                             let (_, oc) = self.emit_expr(&args[2]);
-                            let (_, ik) = self.emit_expr(&args[3]);
-                            let (_, iv) = self.emit_expr(&args[4]);
+                            let ik = self.emit_str_arg_borrow(&args[3]);
+                            let iv = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("htn");
                             self.line(&format!("MakoString {tmp} = mako_html_template_nested({t}, {ok}, {oc}, {ik}, {iv});"));
                             return ("MakoString".into(), tmp);
@@ -32062,14 +32137,14 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "gob_decode_strs" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gds");
                             self.line(&format!("MakoStrArray {tmp} = mako_gob_decode_strs({s});"));
                             return ("MakoStrArray".into(), tmp);
                         }
                         "smtp_auth_plain" => {
-                            let (_, u) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sap");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_smtp_auth_plain({u}, {p});"
@@ -32077,13 +32152,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "smtp_send_auth" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, u) = self.emit_expr(&args[2]);
-                            let (_, pw) = self.emit_expr(&args[3]);
-                            let (_, f) = self.emit_expr(&args[4]);
-                            let (_, t) = self.emit_expr(&args[5]);
-                            let (_, m) = self.emit_expr(&args[6]);
+                            let u = self.emit_str_arg_borrow(&args[2]);
+                            let pw = self.emit_str_arg_borrow(&args[3]);
+                            let f = self.emit_str_arg_borrow(&args[4]);
+                            let t = self.emit_str_arg_borrow(&args[5]);
+                            let m = self.emit_str_arg_borrow(&args[6]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_smtp_send_auth({h}, {p}, {u}, {pw}, {f}, {t}, {m})"),
@@ -32111,7 +32186,7 @@ impl Codegen {
                         "jpeg_encode_gray_huff" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
-                            let (_, px) = self.emit_expr(&args[2]);
+                            let px = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("jhuff");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_jpeg_encode_gray_huff({w}, {h}, {px});"
@@ -32121,7 +32196,7 @@ impl Codegen {
                         "jpeg_encode_gray_baseline" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
-                            let (_, px) = self.emit_expr(&args[2]);
+                            let px = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("jbase");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_jpeg_encode_gray_baseline({w}, {h}, {px});"
@@ -32129,11 +32204,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "jpeg_is_baseline_huff" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_is_baseline_huff({s})"));
                         }
                         "jpeg_huff_block" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("jhb");
                             self.line(&format!("MakoString {tmp} = mako_jpeg_huff_block({s});"));
                             return ("MakoString".into(), tmp);
@@ -32141,7 +32216,7 @@ impl Codegen {
                         "jpeg_encode_gray_jfif" => {
                             let (_, w) = self.emit_expr(&args[0]);
                             let (_, h) = self.emit_expr(&args[1]);
-                            let (_, px) = self.emit_expr(&args[2]);
+                            let px = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("jjfif");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_jpeg_encode_gray_jfif({w}, {h}, {px});"
@@ -32149,168 +32224,168 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "jpeg_is_jfif" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_is_jfif({s})"));
                         }
                         "jpeg_has_sof0" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_has_sof0({s})"));
                         }
                         "jpeg_sof0_width" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_sof0_width({s})"));
                         }
                         "jpeg_sof0_height" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_sof0_height({s})"));
                         }
                         "jpeg_sof0_precision" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_sof0_precision({s})"));
                         }
                         "jpeg_sof0_components" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_sof0_components({s})"));
                         }
                         "jpeg_is_baseline_gray" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_is_baseline_gray({s})"));
                         }
                         "jpeg_jfif_major" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_jfif_major({s})"));
                         }
                         "jpeg_jfif_minor" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_jfif_minor({s})"));
                         }
                         "jpeg_sof0_sampling" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_sof0_sampling({s})"));
                         }
                         "jpeg_sof0_component_id" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_jpeg_sof0_component_id({s})"),
                             );
                         }
                         "jpeg_jfif_density_units" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_jpeg_jfif_density_units({s})"),
                             );
                         }
                         "jpeg_jfif_x_density" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_jfif_x_density({s})"));
                         }
                         "jpeg_jfif_y_density" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_jfif_y_density({s})"));
                         }
                         "jpeg_has_app7" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_has_app7({s})"));
                         }
                         "jpeg_sof0_quant_table" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_sof0_quant_table({s})"));
                         }
                         "jpeg_jfif_thumb_width" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_jfif_thumb_width({s})"));
                         }
                         "jpeg_jfif_thumb_height" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_jpeg_jfif_thumb_height({s})"),
                             );
                         }
                         "jpeg_is_mako_jfif" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_is_mako_jfif({s})"));
                         }
                         "jpeg_has_eoi" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_has_eoi({s})"));
                         }
                         "jpeg_sof0_matches_app7" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_jpeg_sof0_matches_app7({s})"),
                             );
                         }
                         "jpeg_is_mako_complete" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_is_mako_complete({s})"));
                         }
                         "jpeg_is_mako_raw" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_is_mako_raw({s})"));
                         }
                         "jpeg_jfif_app0_length" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_jfif_app0_length({s})"));
                         }
                         "jpeg_app7_payload_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_app7_payload_len({s})"));
                         }
                         "jpeg_has_app8" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_has_app8({s})"));
                         }
                         "jpeg_has_app9" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_has_app9({s})"));
                         }
                         "jpeg_is_mako_dct" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_is_mako_dct({s})"));
                         }
                         "jpeg_is_mako_huff" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_is_mako_huff({s})"));
                         }
                         "jpeg_app8_length" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_app8_length({s})"));
                         }
                         "jpeg_app9_length" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_app9_length({s})"));
                         }
                         "jpeg_roundtrip_ok" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_roundtrip_ok({s})"));
                         }
                         "jpeg_app7_length" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_app7_length({s})"));
                         }
                         "jpeg_has_soi" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_jpeg_has_soi({s})"));
                         }
                         "jpeg_app7_len_matches_payload" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_jpeg_app7_len_matches_payload({s})"),
                             );
                         }
                         "smtp_send_starttls" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, u) = self.emit_expr(&args[2]);
-                            let (_, pw) = self.emit_expr(&args[3]);
-                            let (_, f) = self.emit_expr(&args[4]);
-                            let (_, t) = self.emit_expr(&args[5]);
-                            let (_, m) = self.emit_expr(&args[6]);
+                            let u = self.emit_str_arg_borrow(&args[2]);
+                            let pw = self.emit_str_arg_borrow(&args[3]);
+                            let f = self.emit_str_arg_borrow(&args[4]);
+                            let t = self.emit_str_arg_borrow(&args[5]);
+                            let m = self.emit_str_arg_borrow(&args[6]);
                             return (
                                 "int64_t".into(),
                                 format!(
@@ -32327,7 +32402,7 @@ impl Codegen {
                         }
                         "mail_msg_set_from" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, f) = self.emit_expr(&args[1]);
+                            let f = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_mail_msg_set_from({m}, {f})"),
@@ -32335,22 +32410,22 @@ impl Codegen {
                         }
                         "mail_msg_add_to" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_mail_msg_add_to({m}, {a})"));
                         }
                         "mail_msg_add_cc" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_mail_msg_add_cc({m}, {a})"));
                         }
                         "mail_msg_add_bcc" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, a) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_mail_msg_add_bcc({m}, {a})"));
                         }
                         "mail_msg_set_subject" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_mail_msg_set_subject({m}, {s})"),
@@ -32358,7 +32433,7 @@ impl Codegen {
                         }
                         "mail_msg_set_text" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_mail_msg_set_text({m}, {t})"),
@@ -32366,7 +32441,7 @@ impl Codegen {
                         }
                         "mail_msg_set_html" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_mail_msg_set_html({m}, {t})"),
@@ -32374,8 +32449,8 @@ impl Codegen {
                         }
                         "mail_msg_add_header" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_mail_msg_add_header({m}, {n}, {v})"),
@@ -32383,9 +32458,9 @@ impl Codegen {
                         }
                         "mail_msg_attach" => {
                             let (_, m) = self.emit_expr(&args[0]);
-                            let (_, f) = self.emit_expr(&args[1]);
-                            let (_, ct) = self.emit_expr(&args[2]);
-                            let (_, d) = self.emit_expr(&args[3]);
+                            let f = self.emit_str_arg_borrow(&args[1]);
+                            let ct = self.emit_str_arg_borrow(&args[2]);
+                            let d = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_mail_msg_attach({m}, {f}, {ct}, {d})"),
@@ -32419,10 +32494,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "mail_simple" => {
-                            let (_, f) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
-                            let (_, s) = self.emit_expr(&args[2]);
-                            let (_, b) = self.emit_expr(&args[3]);
+                            let f = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("msim");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_mail_simple({f}, {t}, {s}, {b});"
@@ -32430,7 +32505,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "smtp_new" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_smtp_new({h}, {p})"));
                         }
@@ -32448,7 +32523,7 @@ impl Codegen {
                         }
                         "smtp_ehlo" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_smtp_ehlo({c}, {n})"));
                         }
                         "smtp_starttls" => {
@@ -32457,8 +32532,8 @@ impl Codegen {
                         }
                         "smtp_auth" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, u) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
+                            let u = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_smtp_do_auth_plain({c}, {u}, {p})"),
@@ -32466,17 +32541,17 @@ impl Codegen {
                         }
                         "smtp_mail_from" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, f) = self.emit_expr(&args[1]);
+                            let f = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_smtp_mail_from({c}, {f})"));
                         }
                         "smtp_rcpt_to" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_smtp_rcpt_to({c}, {t})"));
                         }
                         "smtp_data" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_smtp_data({c}, {m})"));
                         }
                         "smtp_quit" => {
@@ -32503,10 +32578,10 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_smtp_send_built({c}, {m})"));
                         }
                         "smtp_send_msg" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, u) = self.emit_expr(&args[2]);
-                            let (_, pw) = self.emit_expr(&args[3]);
+                            let u = self.emit_str_arg_borrow(&args[2]);
+                            let pw = self.emit_str_arg_borrow(&args[3]);
                             let (_, m) = self.emit_expr(&args[4]);
                             let (_, tls) = self.emit_expr(&args[5]);
                             return (
@@ -32545,7 +32620,7 @@ impl Codegen {
                             return ("int64_t".into(), "mako_smtp_mock_stop()".into());
                         }
                         "reflect_type_schema" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rts");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_reflect_type_schema({n});"
@@ -32553,7 +32628,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "reflect_value_of_type" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rvot");
                             self.line(&format!(
                                 "MakoReflectValue *{tmp} = mako_reflect_value_of_type({n});"
@@ -32579,8 +32654,8 @@ impl Codegen {
                             return ("MakoStrArray".into(), tmp);
                         }
                         "str_count" => {
-                            let (_, s) = self.emit_expr(&args[0]);
-                            let (_, sub) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let sub = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_str_count({s}, {sub})"));
                         }
 
@@ -32590,17 +32665,17 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_safe_add({a}, {b})"));
                         }
                         "dlopen_probe" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_dlopen_probe({p})"));
                         }
                         "plugin_open" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_plugin_open({p})"));
                         }
                         "plugin_call" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, o) = self.emit_expr(&args[1]);
-                            let (_, pl) = self.emit_expr(&args[2]);
+                            let o = self.emit_str_arg_borrow(&args[1]);
+                            let pl = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("plc");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_plugin_call({h}, {o}, {pl});"
@@ -32688,7 +32763,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_plugin_reload({h})"));
                         }
                         "plugin_find" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_plugin_find({n})"));
                         }
                         "plugin_manifest_artifact" | "plugin_manifest_lib_path" => {
@@ -32699,12 +32774,12 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "plugin_open_manifest" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_plugin_open_manifest({p})"));
                         }
                         "plugin_call1" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, o) = self.emit_expr(&args[1]);
+                            let o = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("plc1");
                             self.line(&format!("MakoString {tmp} = mako_plugin_call1({h}, {o});"));
                             return ("MakoString".into(), tmp);
@@ -32722,7 +32797,7 @@ impl Codegen {
                         }
                         "http_listen" => {
                             let (_, port) = self.emit_expr(&args[0]);
-                            let (_, body) = self.emit_expr(&args[1]);
+                            let body = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("hl");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_http_listen({port}, {body});"
@@ -32742,19 +32817,19 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "ws_accept_key" => {
-                            let (_, k) = self.emit_expr(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("wsak");
                             self.line(&format!("MakoString {tmp} = mako_ws_accept_key({k});"));
                             return ("MakoString".into(), tmp);
                         }
                         "ws_upgrade_request_ok" => {
-                            let (_, r) = self.emit_expr(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_ws_upgrade_request_ok({r})"));
                         }
                         "ws_client_request" => {
-                            let (_, h) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("wsreq");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_ws_client_request({h}, {p}, {k});"
@@ -32762,8 +32837,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "ws_client_accept_ok" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, r) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let r = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_ws_client_accept_ok({k}, {r})"),
@@ -32785,12 +32860,12 @@ impl Codegen {
                         }
                         "ws_send_text" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_ws_send_text_msg({f}, {m})"));
                         }
                         "ws_send_binary" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_ws_send_binary_msg({f}, {m})"),
@@ -32798,13 +32873,13 @@ impl Codegen {
                         }
                         "ws_send_ping" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_ws_send_ping_msg({f}, {m})"));
                         }
                         "ws_send_close" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, c) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_ws_send_close({f}, {c}, {r})"),
@@ -32815,10 +32890,10 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_ws_close({f})"));
                         }
                         "ws_client_connect" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, k) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_ws_client_connect({h}, {p}, {path}, {k})"),
@@ -32826,7 +32901,7 @@ impl Codegen {
                         }
                         "ws_client_send_text" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_ws_client_send_text({f}, {m})"),
@@ -32834,7 +32909,7 @@ impl Codegen {
                         }
                         "ws_client_send_binary" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_ws_client_send_binary({f}, {m})"),
@@ -32842,7 +32917,7 @@ impl Codegen {
                         }
                         "ws_client_send_ping" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_ws_client_send_ping({f}, {m})"),
@@ -32851,7 +32926,7 @@ impl Codegen {
                         "ws_client_send_close" => {
                             let (_, f) = self.emit_expr(&args[0]);
                             let (_, c) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_ws_client_send_close({f}, {c}, {r})"),
@@ -32868,7 +32943,7 @@ impl Codegen {
                         }
                         "ws_send_pong" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_ws_send_pong_msg({f}, {m})"));
                         }
                         "ws_last_close_code" => {
@@ -32885,9 +32960,9 @@ impl Codegen {
                         }
                         "wss_upgrade" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
-                            let (_, p) = self.emit_expr(&args[2]);
-                            let (_, k) = self.emit_expr(&args[3]);
+                            let h = self.emit_str_arg_borrow(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_wss_upgrade({c}, {h}, {p}, {k})"),
@@ -32895,43 +32970,43 @@ impl Codegen {
                         }
                         "wss_client_connect" => {
                             let (_, cli) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let h = self.emit_str_arg_borrow(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
-                            let (_, path) = self.emit_expr(&args[3]);
-                            let (_, k) = self.emit_expr(&args[4]);
+                            let path = self.emit_str_arg_borrow(&args[3]);
+                            let k = self.emit_str_arg_borrow(&args[4]);
                             return (
                                 "void*".into(),
                                 format!("mako_wss_client_connect({cli}, {h}, {p}, {path}, {k})"),
                             );
                         }
                         "wss_client_connect_insecure" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, k) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "void*".into(),
                                 format!("mako_wss_client_connect_insecure({h}, {p}, {path}, {k})"),
                             );
                         }
                         "wss_client_connect_ca" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, k) = self.emit_expr(&args[3]);
-                            let (_, ca) = self.emit_expr(&args[4]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[3]);
+                            let ca = self.emit_str_arg_borrow(&args[4]);
                             return (
                                 "void*".into(),
                                 format!("mako_wss_client_connect_ca({h}, {p}, {path}, {k}, {ca})"),
                             );
                         }
                         "wss_client_connect_headers" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, k) = self.emit_expr(&args[3]);
-                            let (_, ca) = self.emit_expr(&args[4]);
-                            let (_, extra) = self.emit_expr(&args[5]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[3]);
+                            let ca = self.emit_str_arg_borrow(&args[4]);
+                            let extra = self.emit_str_arg_borrow(&args[5]);
                             return (
                                 "void*".into(),
                                 format!(
@@ -32941,7 +33016,7 @@ impl Codegen {
                         }
                         "wss_client_send_text" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_wss_client_send_text({c}, {m})"),
@@ -32949,7 +33024,7 @@ impl Codegen {
                         }
                         "wss_client_send_binary" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_wss_client_send_binary({c}, {m})"),
@@ -32957,7 +33032,7 @@ impl Codegen {
                         }
                         "wss_client_send_ping" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_wss_client_send_ping({c}, {m})"),
@@ -32966,7 +33041,7 @@ impl Codegen {
                         "wss_client_send_close" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, code) = self.emit_expr(&args[1]);
-                            let (_, r) = self.emit_expr(&args[2]);
+                            let r = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_wss_client_send_close({c}, {code}, {r})"),
@@ -32991,7 +33066,7 @@ impl Codegen {
                         }
                         "wss_server_send_text" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_wss_server_send_text({c}, {m})"),
@@ -32999,7 +33074,7 @@ impl Codegen {
                         }
                         "wss_server_send_binary" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_wss_server_send_binary({c}, {m})"),
@@ -33086,7 +33161,7 @@ impl Codegen {
                         }
                         "gpu_buf_write" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_gpu_buf_write({h}, {m})"));
                         }
                         "gpu_buf_read" => {
@@ -33280,12 +33355,12 @@ impl Codegen {
                         }
                         "model_tensor_buf" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_model_tensor_buf({h}, {n})"));
                         }
                         "model_tensor_elems" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_model_tensor_elems({h}, {n})"),
@@ -33293,7 +33368,7 @@ impl Codegen {
                         }
                         "model_tensor_ndim" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_model_tensor_ndim({h}, {n})"),
@@ -33301,7 +33376,7 @@ impl Codegen {
                         }
                         "model_tensor_dim" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let (_, a) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -33310,7 +33385,7 @@ impl Codegen {
                         }
                         "model_set_f32" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let (_, v) = self.emit_expr(&args[2]);
                             let (_, d0) = self.emit_expr(&args[3]);
                             let (_, d1) = self.emit_expr(&args[4]);
@@ -33325,7 +33400,7 @@ impl Codegen {
                         }
                         "model_load_safetensors" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_model_load_safetensors({h}, {p})"),
@@ -33333,17 +33408,17 @@ impl Codegen {
                         }
                         "model_load_gguf" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_model_load_gguf({h}, {p})"));
                         }
                         "model_save" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_model_save({h}, {p})"));
                         }
                         "model_load" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_model_load({h}, {p})"));
                         }
                         "model_linear_f32" => {
@@ -33372,7 +33447,7 @@ impl Codegen {
                         }
                         "tok_set" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, tok) = self.emit_expr(&args[1]);
+                            let tok = self.emit_str_arg_borrow(&args[1]);
                             let (_, id) = self.emit_expr(&args[2]);
                             return ("int64_t".into(), format!("mako_tok_set({h}, {tok}, {id})"));
                         }
@@ -33382,7 +33457,7 @@ impl Codegen {
                         }
                         "tok_id" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, tok) = self.emit_expr(&args[1]);
+                            let tok = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_tok_id({h}, {tok})"));
                         }
                         "tok_token" => {
@@ -33394,17 +33469,17 @@ impl Codegen {
                         }
                         "tok_load_json" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_tok_load_json({h}, {p})"));
                         }
                         "tok_load_lines" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_tok_load_lines({h}, {p})"));
                         }
                         "tok_encode" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("toke");
                             self.line(&format!("MakoIntArray {tmp} = mako_tok_encode({h}, {s});"));
                             return ("MakoIntArray".into(), tmp);
@@ -33418,13 +33493,13 @@ impl Codegen {
                         }
                         "tok_load_merges" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, p) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_tok_load_merges({h}, {p})"));
                         }
                         "tok_load_bpe" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
-                            let (_, m) = self.emit_expr(&args[2]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_tok_load_bpe({h}, {v}, {m})"),
@@ -33432,7 +33507,7 @@ impl Codegen {
                         }
                         "tok_encode_bpe" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tokeb");
                             self.line(&format!(
                                 "MakoIntArray {tmp} = mako_tok_encode_bpe({h}, {s});"
@@ -33445,7 +33520,7 @@ impl Codegen {
                         }
                         "http_header" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("hh");
                             self.line(&format!("MakoString {tmp} = mako_http_header({c}, {n});"));
                             return ("MakoString".into(), tmp);
@@ -33512,8 +33587,8 @@ impl Codegen {
                         "http_respond_ct" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, st) = self.emit_expr(&args[1]);
-                            let (_, ct) = self.emit_expr(&args[2]);
-                            let (_, b) = self.emit_expr(&args[3]);
+                            let ct = self.emit_str_arg_borrow(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("hrc");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_http_respond_ct({c}, {st}, {ct}, {b});"
@@ -33523,7 +33598,7 @@ impl Codegen {
                         "http_respond_json" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, st) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("hrj");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_http_respond_json({c}, {st}, {b});"
@@ -33531,9 +33606,9 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_get_insecure" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tg");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_get_insecure({h}, {p}, {path});"
@@ -33547,7 +33622,7 @@ impl Codegen {
                             return ("int64_t".into(), "mako_tls_client_available()".into());
                         }
                         "tls_client_new" => {
-                            let (_, ca) = self.emit_expr(&args[0]);
+                            let ca = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("tcl");
                             self.line(&format!("void *{tmp} = mako_tls_client_new({ca});"));
                             return ("void*".into(), tmp);
@@ -33562,18 +33637,18 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_tls_client_free({c})"));
                         }
                         "tls_pool_open" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, ca) = self.emit_expr(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_tls_pool_open({h}, {p}, {ca})"),
                             );
                         }
                         "tls_pool_open_timeout" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, ca) = self.emit_expr(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[2]);
                             let (_, ms) = self.emit_expr(&args[3]);
                             return (
                                 "int64_t".into(),
@@ -33581,11 +33656,11 @@ impl Codegen {
                             );
                         }
                         "tls_pool_open_mtls" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, ca) = self.emit_expr(&args[2]);
-                            let (_, cert) = self.emit_expr(&args[3]);
-                            let (_, key) = self.emit_expr(&args[4]);
+                            let ca = self.emit_str_arg_borrow(&args[2]);
+                            let cert = self.emit_str_arg_borrow(&args[3]);
+                            let key = self.emit_str_arg_borrow(&args[4]);
                             let (_, ms) = self.emit_expr(&args[5]);
                             return (
                                 "int64_t".into(),
@@ -33595,11 +33670,11 @@ impl Codegen {
                             );
                         }
                         "tls_pool_open_mtls_full" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, ca) = self.emit_expr(&args[2]);
-                            let (_, cert) = self.emit_expr(&args[3]);
-                            let (_, key) = self.emit_expr(&args[4]);
+                            let ca = self.emit_str_arg_borrow(&args[2]);
+                            let cert = self.emit_str_arg_borrow(&args[3]);
+                            let key = self.emit_str_arg_borrow(&args[4]);
                             let (_, cms) = self.emit_expr(&args[5]);
                             let (_, ims) = self.emit_expr(&args[6]);
                             return (
@@ -33678,8 +33753,8 @@ impl Codegen {
                         }
                         "peer_table_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
                             let (_, a5) = self.emit_expr(&args[5]);
@@ -33741,8 +33816,8 @@ impl Codegen {
                         }
                         "peer_table_route_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_peer_table_route_add({a0}, {a1}, {a2})"),
@@ -33750,7 +33825,7 @@ impl Codegen {
                         }
                         "peer_table_route_lookup" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_peer_table_route_lookup({a0}, {a1})"),
@@ -33851,7 +33926,7 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            let (_, a3) = self.emit_expr(&args[3]);
+                            let a3 = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_sctp_send_ex({a0}, {a1}, {a2}, {a3})"),
@@ -33878,7 +33953,7 @@ impl Codegen {
                         }
                         "sctp_bindx_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -33887,7 +33962,7 @@ impl Codegen {
                         }
                         "sctp_bindx_rem" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -33895,7 +33970,7 @@ impl Codegen {
                             );
                         }
                         "sctp_connectx" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             return (
@@ -33917,7 +33992,7 @@ impl Codegen {
                         }
                         "sctp_set_primary" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -33940,8 +34015,8 @@ impl Codegen {
                         }
                         "diameter_tcm_set_origin" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_tcm_set_origin({a0}, {a1}, {a2})"),
@@ -33958,8 +34033,8 @@ impl Codegen {
                         }
                         "diameter_tcm_peer_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
                             let (_, a5) = self.emit_expr(&args[5]);
@@ -33967,8 +34042,8 @@ impl Codegen {
                         }
                         "diameter_tcm_route_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_tcm_route_add({a0}, {a1}, {a2})"),
@@ -33976,7 +34051,7 @@ impl Codegen {
                         }
                         "diameter_tcm_route_lookup" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_tcm_route_lookup({a0}, {a1})"),
@@ -34037,7 +34112,7 @@ impl Codegen {
                         "diameter_tcm_inject_in" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_tcm_inject_in({a0}, {a1}, {a2})"),
@@ -34055,7 +34130,7 @@ impl Codegen {
                         "diameter_tcm_handle_io" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_tcm_handle_io({a0}, {a1}, {a2})"),
@@ -34063,7 +34138,7 @@ impl Codegen {
                         }
                         "tls_pool_send" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_tls_pool_send({c}, {m})"));
                         }
                         "tls_pool_recv" => {
@@ -34089,7 +34164,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_sctp_listen({a0})"));
                         }
                         "sctp_listen_addr" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             return (
                                 "int64_t".into(),
@@ -34101,12 +34176,12 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_sctp_accept({a0})"));
                         }
                         "sctp_connect" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_sctp_connect({a0}, {a1})"));
                         }
                         "sctp_connect_timeout" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             return (
@@ -34133,12 +34208,12 @@ impl Codegen {
                         }
                         "sctp_write" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_sctp_write({a0}, {a1})"));
                         }
                         "sctp_write_all" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_sctp_write_all({a0}, {a1})"));
                         }
                         "sctp_read" => {
@@ -34170,7 +34245,7 @@ impl Codegen {
                         "sctp_send_stream" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_sctp_send_stream({a0}, {a1}, {a2})"),
@@ -34195,61 +34270,61 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_diameter_header_len()"));
                         }
                         "diameter_msg_len" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_msg_len({a0})"));
                         }
                         "diameter_msg_complete" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_msg_complete({a0})"),
                             );
                         }
                         "diameter_msg_needed" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_msg_needed({a0})"));
                         }
                         "diameter_first_message_len" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_first_message_len({a0})"),
                             );
                         }
                         "diameter_version" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_version({a0})"));
                         }
                         "diameter_flags" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_flags({a0})"));
                         }
                         "diameter_is_request" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_is_request({a0})"));
                         }
                         "diameter_is_answer" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_is_answer({a0})"));
                         }
                         "diameter_is_error" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_is_error({a0})"));
                         }
                         "diameter_cmd" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_cmd({a0})"));
                         }
                         "diameter_app_id" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_app_id({a0})"));
                         }
                         "diameter_hbh" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_hbh({a0})"));
                         }
                         "diameter_e2e" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_e2e({a0})"));
                         }
                         "diameter_header_build" => {
@@ -34269,13 +34344,13 @@ impl Codegen {
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
-                            let (_, a5) = self.emit_expr(&args[5]);
+                            let a5 = self.emit_str_arg_borrow(&args[5]);
                             let tmp = self.fresh("dx");
                             self.line(&format!("MakoString {tmp} = mako_diameter_msg_build({a0}, {a1}, {a2}, {a3}, {a4}, {a5});"));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_set_hbh" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
                             self.line(&format!(
@@ -34284,7 +34359,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_set_e2e" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
                             self.line(&format!(
@@ -34296,7 +34371,7 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            let (_, a3) = self.emit_expr(&args[3]);
+                            let a3 = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("dx");
                             self.line(&format!("MakoString {tmp} = mako_diameter_avp_encode({a0}, {a1}, {a2}, {a3});"));
                             return ("MakoString".into(), tmp);
@@ -34314,13 +34389,13 @@ impl Codegen {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
-                            let (_, a3) = self.emit_expr(&args[3]);
+                            let a3 = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("dx");
                             self.line(&format!("MakoString {tmp} = mako_diameter_avp_put_str({a0}, {a1}, {a2}, {a3});"));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_avp_at" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
                             self.line(&format!(
@@ -34329,7 +34404,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_avp_find" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("dx");
                             self.line(&format!(
@@ -34338,7 +34413,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_avp_find_vendor" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("dx");
@@ -34346,17 +34421,17 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_avp_u32" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_avp_u32({a0})"));
                         }
                         "diameter_avp_str" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("dx");
                             self.line(&format!("MakoString {tmp} = mako_diameter_avp_str({a0});"));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_result_code" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_diameter_result_code({a0})"));
                         }
                         "diameter_txn_key" => {
@@ -34378,7 +34453,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_session_key" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("dx");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_diameter_session_key({a0});"
@@ -34392,8 +34467,8 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_diameter_e2e_new()"));
                         }
                         "diameter_build_cer" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("dx");
@@ -34401,17 +34476,17 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_build_cea" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("dx");
                             self.line(&format!("MakoString {tmp} = mako_diameter_build_cea({a0}, {a1}, {a2}, {a3});"));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_build_dwr" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("dx");
@@ -34419,17 +34494,17 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_build_dwa" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("dx");
                             self.line(&format!("MakoString {tmp} = mako_diameter_build_dwa({a0}, {a1}, {a2}, {a3});"));
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_build_dpr" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
@@ -34438,9 +34513,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "diameter_build_dpa" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("dx");
                             self.line(&format!("MakoString {tmp} = mako_diameter_build_dpa({a0}, {a1}, {a2}, {a3});"));
@@ -34459,8 +34534,8 @@ impl Codegen {
                         }
                         "diameter_conn_set_origin" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_conn_set_origin({a0}, {a1}, {a2})"),
@@ -34480,7 +34555,7 @@ impl Codegen {
                         }
                         "diameter_conn_feed" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_conn_feed({a0}, {a1})"),
@@ -34501,7 +34576,7 @@ impl Codegen {
                         }
                         "diameter_conn_queue_out" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_conn_queue_out({a0}, {a1})"),
@@ -34537,7 +34612,7 @@ impl Codegen {
                         }
                         "diameter_conn_match" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_conn_match({a0}, {a1})"),
@@ -34554,14 +34629,14 @@ impl Codegen {
                         }
                         "diameter_conn_on_cea" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_conn_on_cea({a0}, {a1})"),
                             );
                         }
                         "diameter_pool_open" => {
-                            let (_, a0) = self.emit_expr(&args[0]);
+                            let a0 = self.emit_str_arg_borrow(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
@@ -34604,8 +34679,8 @@ impl Codegen {
                         }
                         "diameter_mgr_set_origin" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_mgr_set_origin({a0}, {a1}, {a2})"),
@@ -34622,8 +34697,8 @@ impl Codegen {
                         }
                         "diameter_peer_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
                             let (_, a5) = self.emit_expr(&args[5]);
@@ -34689,8 +34764,8 @@ impl Codegen {
                         }
                         "diameter_route_add" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_route_add({a0}, {a1}, {a2})"),
@@ -34706,7 +34781,7 @@ impl Codegen {
                         }
                         "diameter_route_lookup" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_route_lookup({a0}, {a1})"),
@@ -34723,7 +34798,7 @@ impl Codegen {
                         "diameter_mgr_handle_io" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_mgr_handle_io({a0}, {a1}, {a2})"),
@@ -34745,11 +34820,11 @@ impl Codegen {
                         }
                         "diameter_mgr_request" => {
                             let (_, a0) = self.emit_expr(&args[0]);
-                            let (_, a1) = self.emit_expr(&args[1]);
+                            let a1 = self.emit_str_arg_borrow(&args[1]);
                             let (_, a2) = self.emit_expr(&args[2]);
                             let (_, a3) = self.emit_expr(&args[3]);
                             let (_, a4) = self.emit_expr(&args[4]);
-                            let (_, a5) = self.emit_expr(&args[5]);
+                            let a5 = self.emit_str_arg_borrow(&args[5]);
                             return (
                                 "int64_t".into(),
                                 format!(
@@ -34773,28 +34848,28 @@ impl Codegen {
                         "diameter_mgr_inject_in" => {
                             let (_, a0) = self.emit_expr(&args[0]);
                             let (_, a1) = self.emit_expr(&args[1]);
-                            let (_, a2) = self.emit_expr(&args[2]);
+                            let a2 = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_diameter_mgr_inject_in({a0}, {a1}, {a2})"),
                             );
                         }
                         "wss_pool_open_ca" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, key) = self.emit_expr(&args[3]);
-                            let (_, ca) = self.emit_expr(&args[4]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let key = self.emit_str_arg_borrow(&args[3]);
+                            let ca = self.emit_str_arg_borrow(&args[4]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_wss_pool_open_ca({h}, {p}, {path}, {key}, {ca})"),
                             );
                         }
                         "wss_pool_open_insecure" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, key) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let key = self.emit_str_arg_borrow(&args[3]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_wss_pool_open_insecure({h}, {p}, {path}, {key})"),
@@ -34802,7 +34877,7 @@ impl Codegen {
                         }
                         "wss_pool_send" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_wss_pool_send({c}, {m})"));
                         }
                         "wss_pool_recv" => {
@@ -34823,7 +34898,7 @@ impl Codegen {
                         "tls_connect" => {
                             let (_, ctx) = self.emit_expr(&args[0]);
                             let (_, fd) = self.emit_expr(&args[1]);
-                            let (_, h) = self.emit_expr(&args[2]);
+                            let h = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tcon");
                             self.line(&format!(
                                 "void *{tmp} = mako_tls_connect({ctx}, {fd}, {h});"
@@ -34833,7 +34908,7 @@ impl Codegen {
                         "tls_connect_start" => {
                             let (_, ctx) = self.emit_expr(&args[0]);
                             let (_, fd) = self.emit_expr(&args[1]);
-                            let (_, h) = self.emit_expr(&args[2]);
+                            let h = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tcst");
                             self.line(&format!(
                                 "void *{tmp} = mako_tls_connect_start({ctx}, {fd}, {h});"
@@ -34853,15 +34928,15 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_server_new" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tsv");
                             self.line(&format!("void *{tmp} = mako_tls_server_new({c}, {k});"));
                             return ("void*".into(), tmp);
                         }
                         "tls_server_new_tls13" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tsv13");
                             self.line(&format!(
                                 "void *{tmp} = mako_tls_server_new_tls13({c}, {k});"
@@ -34869,9 +34944,9 @@ impl Codegen {
                             return ("void*".into(), tmp);
                         }
                         "tls_server_new_mtls" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, ca) = self.emit_expr(&args[2]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let ca = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tsvm");
                             self.line(&format!(
                                 "void *{tmp} = mako_tls_server_new_mtls({c}, {k}, {ca});"
@@ -34880,9 +34955,9 @@ impl Codegen {
                         }
                         "tls_server_sni_add" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
-                            let (_, c) = self.emit_expr(&args[2]);
-                            let (_, k) = self.emit_expr(&args[3]);
+                            let h = self.emit_str_arg_borrow(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("tssni");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_server_sni_add({s}, {h}, {c}, {k});"
@@ -34891,9 +34966,9 @@ impl Codegen {
                         }
                         "tls_server_sni_update" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
-                            let (_, c) = self.emit_expr(&args[2]);
-                            let (_, k) = self.emit_expr(&args[3]);
+                            let h = self.emit_str_arg_borrow(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("tssniu");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_server_sni_update({s}, {h}, {c}, {k});"
@@ -34902,7 +34977,7 @@ impl Codegen {
                         }
                         "tls_server_sni_remove" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            let (_, h) = self.emit_expr(&args[1]);
+                            let h = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("tssnir");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_server_sni_remove({s}, {h});"
@@ -34910,9 +34985,9 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_client_new_mtls" => {
-                            let (_, ca) = self.emit_expr(&args[0]);
-                            let (_, c) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[0]);
+                            let c = self.emit_str_arg_borrow(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tclm");
                             self.line(&format!(
                                 "void *{tmp} = mako_tls_client_new_mtls({ca}, {c}, {k});"
@@ -34935,7 +35010,7 @@ impl Codegen {
                         }
                         "scram_plus_client_final_bare" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("scbare");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_scram_plus_client_final_bare({c}, {n});"
@@ -34944,8 +35019,8 @@ impl Codegen {
                         }
                         "tls_server_reload" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            let (_, c) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
+                            let c = self.emit_str_arg_borrow(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("treload");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_server_reload({s}, {c}, {k});"
@@ -34953,9 +35028,9 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_make_self_signed" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, cn) = self.emit_expr(&args[2]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let cn = self.emit_str_arg_borrow(&args[2]);
                             let (_, d) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("tss");
                             self.line(&format!(
@@ -34964,9 +35039,9 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "tls_make_csr" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, cn) = self.emit_expr(&args[2]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let cn = self.emit_str_arg_borrow(&args[2]);
                             let (_, b) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("tcsr");
                             self.line(&format!(
@@ -34975,17 +35050,17 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "pem_count_blocks" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_pem_count_blocks({p})"));
                         }
                         "pem_has_block" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, l) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let l = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_pem_has_block({p}, {l})"));
                         }
                         "pem_extract_block" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, l) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let l = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("pemx");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_pem_extract_block({p}, {l});"
@@ -34993,7 +35068,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "pem_load_file" => {
-                            let (_, p) = self.emit_expr(&args[0]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("peml");
                             self.line(&format!("MakoString {tmp} = mako_pem_load_file({p});"));
                             return ("MakoString".into(), tmp);
@@ -35038,8 +35113,8 @@ impl Codegen {
                             return ("int64_t".into(), "mako_dtls_available()".into());
                         }
                         "dtls_ctx_new" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let (_, s) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("dctx");
                             self.line(&format!("void *{tmp} = mako_dtls_ctx_new({c}, {k}, {s});"));
@@ -35053,7 +35128,7 @@ impl Codegen {
                         "dtls_connect" => {
                             let (_, ctx) = self.emit_expr(&args[0]);
                             let (_, fd) = self.emit_expr(&args[1]);
-                            let (_, h) = self.emit_expr(&args[2]);
+                            let h = self.emit_str_arg_borrow(&args[2]);
                             let (_, p) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("dcon");
                             self.line(&format!(
@@ -35070,7 +35145,7 @@ impl Codegen {
                         }
                         "dtls_send" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("dsnd");
                             self.line(&format!("int64_t {tmp} = mako_dtls_send({c}, {d});"));
                             return ("int64_t".into(), tmp);
@@ -35130,7 +35205,7 @@ impl Codegen {
                         }
                         "tls_write_nb" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_tls_write_nb({c}, {d})"));
                         }
                         "tls_read" => {
@@ -35142,7 +35217,7 @@ impl Codegen {
                         }
                         "tls_write" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, d) = self.emit_expr(&args[1]);
+                            let d = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("twr");
                             self.line(&format!("int64_t {tmp} = mako_tls_write({c}, {d});"));
                             return ("int64_t".into(), tmp);
@@ -35164,10 +35239,10 @@ impl Codegen {
                             return ("int64_t".into(), "0".into());
                         }
                         "tls_get" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, ca) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("tgv");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_get({h}, {p}, {path}, {ca});"
@@ -35175,11 +35250,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_post" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
-                            let (_, ca) = self.emit_expr(&args[4]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
+                            let ca = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("tp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_post({h}, {p}, {path}, {body}, {ca});"
@@ -35187,9 +35262,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_handshake_ok" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, ca) = self.emit_expr(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tho");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_handshake_ok({h}, {p}, {ca});"
@@ -35197,9 +35272,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_handshake_version" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, ca) = self.emit_expr(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("thv");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_handshake_version({h}, {p}, {ca});"
@@ -35207,9 +35282,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_h2_settings_exchange" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, ca) = self.emit_expr(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("th2");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_h2_settings_exchange({h}, {p}, {ca});"
@@ -35217,10 +35292,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_h2_get" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, ca) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("th2g");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_h2_get({h}, {p}, {path}, {ca});"
@@ -35228,11 +35303,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_h2_post" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
-                            let (_, ca) = self.emit_expr(&args[4]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
+                            let ca = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("th2p");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_h2_post({h}, {p}, {path}, {body}, {ca});"
@@ -35240,10 +35315,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_h2_get_twice" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, ca) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("th2t");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_h2_get_twice({h}, {p}, {path}, {ca});"
@@ -35251,9 +35326,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_h2_mux" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, ca) = self.emit_expr(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("th2m");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_h2_mux({h}, {p}, {ca});"
@@ -35261,10 +35336,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_h2_window_get" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, ca) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("th2w");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_h2_window_get({h}, {p}, {path}, {ca});"
@@ -35283,9 +35358,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quiche_handshake" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, sni) = self.emit_expr(&args[2]);
+                            let sni = self.emit_str_arg_borrow(&args[2]);
                             let (_, ver) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("qhs");
                             self.line(&format!(
@@ -35294,10 +35369,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quiche_h3_get" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, sni) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let sni = self.emit_str_arg_borrow(&args[3]);
                             let (_, ver) = self.emit_expr(&args[4]);
                             let tmp = self.fresh("qh3");
                             self.line(&format!(
@@ -35306,11 +35381,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quiche_h3_post" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
-                            let (_, sni) = self.emit_expr(&args[4]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
+                            let sni = self.emit_str_arg_borrow(&args[4]);
                             let (_, ver) = self.emit_expr(&args[5]);
                             let tmp = self.fresh("qh3p");
                             self.line(&format!(
@@ -35319,11 +35394,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "quiche_h3_get_two" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path1) = self.emit_expr(&args[2]);
-                            let (_, path2) = self.emit_expr(&args[3]);
-                            let (_, sni) = self.emit_expr(&args[4]);
+                            let path1 = self.emit_str_arg_borrow(&args[2]);
+                            let path2 = self.emit_str_arg_borrow(&args[3]);
+                            let sni = self.emit_str_arg_borrow(&args[4]);
                             let (_, ver) = self.emit_expr(&args[5]);
                             let tmp = self.fresh("qh3m");
                             self.line(&format!(
@@ -35333,10 +35408,10 @@ impl Codegen {
                         }
                         "quiche_start_server" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
-                            let (_, root) = self.emit_expr(&args[3]);
-                            let (_, name) = self.emit_expr(&args[4]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
+                            let root = self.emit_str_arg_borrow(&args[3]);
+                            let name = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("qss");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_quiche_start_server({p}, {cert}, {key}, {root}, {name});"
@@ -35353,13 +35428,13 @@ impl Codegen {
                             return ("int64_t".into(), "mako_h3_server_available()".into());
                         }
                         "h3_server_new" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_h3_server_new({c}, {k})"));
                         }
                         "h3_server_bind" => {
                             let (_, h) = self.emit_expr(&args[0]);
-                            let (_, host) = self.emit_expr(&args[1]);
+                            let host = self.emit_str_arg_borrow(&args[1]);
                             let (_, p) = self.emit_expr(&args[2]);
                             return (
                                 "int64_t".into(),
@@ -35391,7 +35466,7 @@ impl Codegen {
                         "h3_stream_write" => {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
-                            let (_, d) = self.emit_expr(&args[2]);
+                            let d = self.emit_str_arg_borrow(&args[2]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_h3_stream_write({h}, {s}, {d})"),
@@ -35437,8 +35512,8 @@ impl Codegen {
                             let (_, h) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
                             let (_, st) = self.emit_expr(&args[2]);
-                            let (_, ct) = self.emit_expr(&args[3]);
-                            let (_, body) = self.emit_expr(&args[4]);
+                            let ct = self.emit_str_arg_borrow(&args[3]);
+                            let body = self.emit_str_arg_borrow(&args[4]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_h3_response({h}, {s}, {st}, {ct}, {body})"),
@@ -35449,10 +35524,10 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_h3_server_close({h})"));
                         }
                         "nghttp2_get" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, ca) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let ca = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("ngg");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_nghttp2_get({h}, {p}, {path}, {ca});"
@@ -35460,11 +35535,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "nghttp2_post" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
-                            let (_, ca) = self.emit_expr(&args[4]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
+                            let ca = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("ngp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_nghttp2_post({h}, {p}, {path}, {body}, {ca});"
@@ -35472,11 +35547,11 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "nghttp2_get_two" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path1) = self.emit_expr(&args[2]);
-                            let (_, path2) = self.emit_expr(&args[3]);
-                            let (_, ca) = self.emit_expr(&args[4]);
+                            let path1 = self.emit_str_arg_borrow(&args[2]);
+                            let path2 = self.emit_str_arg_borrow(&args[3]);
+                            let ca = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("ng2");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_nghttp2_get_two({h}, {p}, {path1}, {path2}, {ca});"
@@ -35484,12 +35559,12 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_grpc_unary" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, name) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let name = self.emit_str_arg_borrow(&args[3]);
                             let (_, id) = self.emit_expr(&args[4]);
-                            let (_, ca) = self.emit_expr(&args[5]);
+                            let ca = self.emit_str_arg_borrow(&args[5]);
                             let tmp = self.fresh("tgu");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_grpc_unary({h}, {p}, {path}, {name}, {id}, {ca});"
@@ -35497,14 +35572,14 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "tls_grpc_stream" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, n1) = self.emit_expr(&args[3]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let n1 = self.emit_str_arg_borrow(&args[3]);
                             let (_, i1) = self.emit_expr(&args[4]);
-                            let (_, n2) = self.emit_expr(&args[5]);
+                            let n2 = self.emit_str_arg_borrow(&args[5]);
                             let (_, i2) = self.emit_expr(&args[6]);
-                            let (_, ca) = self.emit_expr(&args[7]);
+                            let ca = self.emit_str_arg_borrow(&args[7]);
                             let tmp = self.fresh("tgs");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_tls_grpc_stream({h}, {p}, {path}, {n1}, {i1}, {n2}, {i2}, {ca});"
@@ -35559,8 +35634,8 @@ impl Codegen {
                             );
                         }
                         "sqlite_query_int" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_sqlite_query_int({p}, {q})"));
                         }
                         "sqlite_query_int_params" => {
@@ -35575,12 +35650,12 @@ impl Codegen {
                             );
                         }
                         "const_eq" | "crypto_eq" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_str_arg_borrow(&args[0]);
+                            let b = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_const_eq({a}, {b})"));
                         }
                         "secret_from_str" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("sec");
                             self.line(&format!("MakoSecret {tmp} = mako_secret_from_str({s});"));
                             return ("MakoSecret".into(), tmp);
@@ -35591,7 +35666,7 @@ impl Codegen {
                         }
                         "secret_eq_str" => {
                             let (_, s) = self.emit_expr(&args[0]);
-                            let (_, o) = self.emit_expr(&args[1]);
+                            let o = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_secret_eq_str({s}, {o})"));
                         }
                         "hkdf_sha256" => {
@@ -35611,8 +35686,8 @@ impl Codegen {
                             return ("void".into(), "/*void*/".into());
                         }
                         "http_header_ok" => {
-                            let (_, n) = self.emit_expr(&args[0]);
-                            let (_, v) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
+                            let v = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("(int64_t)mako_http_header_pair_ok({n}, {v})"),
@@ -35625,8 +35700,8 @@ impl Codegen {
                             return ("int64_t".into(), format!("{arr}.data[{idx}]"));
                         }
                         "sqlite_query_text" => {
-                            let (_, p) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let p = self.emit_str_arg_borrow(&args[0]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("sq");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_sqlite_query_text({p}, {q});"
@@ -35634,17 +35709,17 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "redis_ping" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("rp");
                             self.line(&format!("MakoString {tmp} = mako_redis_ping({h}, {p});"));
                             return ("MakoString".into(), tmp);
                         }
                         "redis_set" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
-                            let (_, v) = self.emit_expr(&args[3]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
+                            let v = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("rs");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_set({h}, {p}, {k}, {v});"
@@ -35652,9 +35727,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "redis_get" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rg");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_get({h}, {p}, {k});"
@@ -35662,9 +35737,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "redis_del" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rdl");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_del({h}, {p}, {k});"
@@ -35672,9 +35747,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "redis_exists" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rex");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_exists({h}, {p}, {k});"
@@ -35691,7 +35766,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_redis_mock_kv({p}, {n})"));
                         }
                         "pg_connect" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pg");
                             self.line(&format!("MakoPgConn {tmp} = mako_pg_connect({u});"));
                             return ("MakoPgConn".into(), tmp);
@@ -35706,31 +35781,31 @@ impl Codegen {
                         }
                         "pg_exec" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_pg_exec({c}, {s})"));
                         }
                         "pg_exec_row_count" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, s) = self.emit_expr(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
                             return (
                                 "int64_t".into(),
                                 format!("mako_pg_exec_row_count({c}, {s})"),
                             );
                         }
                         "pg_connect_url" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("pgu");
                             self.line(&format!("MakoString {tmp} = mako_pg_connect_url({u});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mysql_connect" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("my");
                             self.line(&format!("MakoMysqlConn {tmp} = mako_mysql_connect({u});"));
                             return ("MakoMysqlConn".into(), tmp);
                         }
                         "mysql_connect_url" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("myu");
                             self.line(&format!("MakoString {tmp} = mako_mysql_connect_url({u});"));
                             return ("MakoString".into(), tmp);
@@ -35744,23 +35819,23 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_mysql_close({c})"));
                         }
                         "mysql_is_mariadb" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_mysql_is_mariadb({u})"));
                         }
                         "mysql_driver_name" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("myd");
                             self.line(&format!("MakoString {tmp} = mako_mysql_driver_name({u});"));
                             return ("MakoString".into(), tmp);
                         }
                         "redis_connect" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rd");
                             self.line(&format!("MakoRedisConn {tmp} = mako_redis_connect({u});"));
                             return ("MakoRedisConn".into(), tmp);
                         }
                         "redis_connect_url" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("rdu");
                             self.line(&format!("MakoString {tmp} = mako_redis_connect_url({u});"));
                             return ("MakoString".into(), tmp);
@@ -35781,8 +35856,8 @@ impl Codegen {
                         }
                         "redis_conn_set" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rds");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_conn_set({c}, {k}, {v});"
@@ -35791,7 +35866,7 @@ impl Codegen {
                         }
                         "redis_conn_get" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rdg");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_conn_get({c}, {k});"
@@ -35800,7 +35875,7 @@ impl Codegen {
                         }
                         "redis_conn_del" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rdd");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_conn_del({c}, {k});"
@@ -35809,7 +35884,7 @@ impl Codegen {
                         }
                         "redis_conn_exists" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rde");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_conn_exists({c}, {k});"
@@ -35818,8 +35893,8 @@ impl Codegen {
                         }
                         "redis_conn_lpush" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
-                            let (_, v) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
+                            let v = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rdlp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_conn_lpush({c}, {k}, {v});"
@@ -35828,7 +35903,7 @@ impl Codegen {
                         }
                         "redis_conn_rpop" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rdrp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_conn_rpop({c}, {k});"
@@ -35837,7 +35912,7 @@ impl Codegen {
                         }
                         "redis_conn_llen" => {
                             let (_, c) = self.emit_expr(&args[0]);
-                            let (_, k) = self.emit_expr(&args[1]);
+                            let k = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("rdll");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_conn_llen({c}, {k});"
@@ -35845,10 +35920,10 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "redis_lpush" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
-                            let (_, v) = self.emit_expr(&args[3]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
+                            let v = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("rlp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_lpush({h}, {p}, {k}, {v});"
@@ -35856,9 +35931,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "redis_rpop" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rrp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_rpop({h}, {p}, {k});"
@@ -35866,9 +35941,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "redis_llen" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, k) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("rll");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_redis_llen({h}, {p}, {k});"
@@ -35876,14 +35951,14 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "mongo_connect_url" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("mgu");
                             self.line(&format!("MakoString {tmp} = mako_mongo_connect_url({u});"));
                             return ("MakoString".into(), tmp);
                         }
                         "mongo_find_one_request" => {
-                            let (_, c) = self.emit_expr(&args[0]);
-                            let (_, f) = self.emit_expr(&args[1]);
+                            let c = self.emit_str_arg_borrow(&args[0]);
+                            let f = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("mgf");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_mongo_find_one_request({c}, {f});"
@@ -35891,7 +35966,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "cassandra_connect_url" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("csu");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_cassandra_connect_url({u});"
@@ -35899,9 +35974,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "cassandra_select" => {
-                            let (_, k) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
-                            let (_, w) = self.emit_expr(&args[2]);
+                            let k = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
+                            let w = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("csq");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_cassandra_select({k}, {t}, {w});"
@@ -35909,7 +35984,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "clickhouse_connect_url" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("chu");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_clickhouse_connect_url({u});"
@@ -35917,9 +35992,9 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "clickhouse_select" => {
-                            let (_, d) = self.emit_expr(&args[0]);
-                            let (_, t) = self.emit_expr(&args[1]);
-                            let (_, s) = self.emit_expr(&args[2]);
+                            let d = self.emit_str_arg_borrow(&args[0]);
+                            let t = self.emit_str_arg_borrow(&args[1]);
+                            let s = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("chq");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_clickhouse_select({d}, {t}, {s});"
@@ -35927,7 +36002,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "elastic_connect_url" => {
-                            let (_, u) = self.emit_expr(&args[0]);
+                            let u = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("esu");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_elastic_connect_url({u});"
@@ -35935,8 +36010,8 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "elastic_search_request" => {
-                            let (_, i) = self.emit_expr(&args[0]);
-                            let (_, q) = self.emit_expr(&args[1]);
+                            let i = self.emit_str_arg_borrow(&args[0]);
+                            let q = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("esq");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_elastic_search_request({i}, {q});"
@@ -35944,7 +36019,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_encode_message" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("gre");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_grpc_encode_message({s});"
@@ -35952,13 +36027,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_message_len" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("grl");
                             self.line(&format!("int64_t {tmp} = mako_grpc_message_len({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "grpc_message_within_limit" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, m) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("gmw");
                             self.line(&format!(
@@ -35972,7 +36047,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "grpc_message_payload" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("grp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_grpc_message_payload({s});"
@@ -35980,7 +36055,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_unary_request" => {
-                            let (_, n) = self.emit_expr(&args[0]);
+                            let n = self.emit_str_arg_borrow(&args[0]);
                             let (_, i) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("gru");
                             self.line(&format!(
@@ -35989,13 +36064,13 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_unary_name" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("grun");
                             self.line(&format!("MakoString {tmp} = mako_grpc_unary_name({s});"));
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_unary_id" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("grui");
                             self.line(&format!("int64_t {tmp} = mako_grpc_unary_id({s});"));
                             return ("int64_t".into(), tmp);
@@ -36014,14 +36089,14 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_status_code" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("grsc");
                             self.line(&format!("int64_t {tmp} = mako_grpc_status_code({s});"));
                             return ("int64_t".into(), tmp);
                         }
                         "grpc_http2_unary" => {
                             let (_, st) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let (_, i) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("grhu");
                             self.line(&format!(
@@ -36030,7 +36105,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_http2_unary_payload" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("grhp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_grpc_http2_unary_payload({s});"
@@ -36039,7 +36114,7 @@ impl Codegen {
                         }
                         "grpc_http2_unary_response" => {
                             let (_, st) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let (_, i) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("ghr");
                             self.line(&format!(
@@ -36049,7 +36124,7 @@ impl Codegen {
                         }
                         "grpc_http2_unary_response_status" => {
                             let (_, st) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let (_, i) = self.emit_expr(&args[2]);
                             let (_, c) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("ghrs");
@@ -36059,7 +36134,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_http2_response_payload" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("grp");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_grpc_http2_response_payload({s});"
@@ -36067,7 +36142,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_http2_response_status" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("grs");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_grpc_http2_response_status({s});"
@@ -36076,7 +36151,7 @@ impl Codegen {
                         }
                         "grpc_http2_stream_data" => {
                             let (_, st) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let (_, i) = self.emit_expr(&args[2]);
                             let (_, e) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("ghsd");
@@ -36087,9 +36162,9 @@ impl Codegen {
                         }
                         "grpc_http2_stream_two" => {
                             let (_, st) = self.emit_expr(&args[0]);
-                            let (_, n1) = self.emit_expr(&args[1]);
+                            let n1 = self.emit_str_arg_borrow(&args[1]);
                             let (_, i1) = self.emit_expr(&args[2]);
-                            let (_, n2) = self.emit_expr(&args[3]);
+                            let n2 = self.emit_str_arg_borrow(&args[3]);
                             let (_, i2) = self.emit_expr(&args[4]);
                             let tmp = self.fresh("ghst");
                             self.line(&format!(
@@ -36098,7 +36173,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "grpc_http2_stream_data_count" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let (_, st) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("ghsc");
                             self.line(&format!(
@@ -36108,11 +36183,11 @@ impl Codegen {
                         }
                         "grpc_http2_client_stream_flow" => {
                             let (_, st) = self.emit_expr(&args[0]);
-                            let (_, n1) = self.emit_expr(&args[1]);
+                            let n1 = self.emit_str_arg_borrow(&args[1]);
                             let (_, i1) = self.emit_expr(&args[2]);
-                            let (_, n2) = self.emit_expr(&args[3]);
+                            let n2 = self.emit_str_arg_borrow(&args[3]);
                             let (_, i2) = self.emit_expr(&args[4]);
-                            let (_, reply) = self.emit_expr(&args[5]);
+                            let reply = self.emit_str_arg_borrow(&args[5]);
                             let (_, rid) = self.emit_expr(&args[6]);
                             let (_, status) = self.emit_expr(&args[7]);
                             let tmp = self.fresh("ghcsf");
@@ -36128,7 +36203,7 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "http_bind_addr" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let tmp = self.fresh("hba");
                             self.line(&format!("int64_t {tmp} = mako_http_bind_addr({h}, {p});"));
@@ -36161,7 +36236,7 @@ impl Codegen {
                         "http_respond" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, st) = self.emit_expr(&args[1]);
-                            let (_, b) = self.emit_expr(&args[2]);
+                            let b = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("hr");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_http_respond({c}, {st}, {b});"
@@ -36170,9 +36245,9 @@ impl Codegen {
                         }
                         "tls_serve" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("ts");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_serve({p}, {cert}, {key}, {body});"
@@ -36181,9 +36256,9 @@ impl Codegen {
                         }
                         "tls_serve_once" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("tso");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_serve_once({p}, {cert}, {key}, {body});"
@@ -36192,9 +36267,9 @@ impl Codegen {
                         }
                         "tls_serve_n" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
                             let (_, n) = self.emit_expr(&args[4]);
                             let tmp = self.fresh("tsn");
                             self.line(&format!(
@@ -36204,9 +36279,9 @@ impl Codegen {
                         }
                         "tls_serve_once_h2" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
                             let tmp = self.fresh("tsoh");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_serve_once_h2({p}, {cert}, {key}, {body});"
@@ -36215,9 +36290,9 @@ impl Codegen {
                         }
                         "tls_serve_h2_n" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
                             let (_, n) = self.emit_expr(&args[4]);
                             let tmp = self.fresh("tshn");
                             self.line(&format!(
@@ -36227,10 +36302,10 @@ impl Codegen {
                         }
                         "tls_serve_h2_routes" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
-                            let (_, root) = self.emit_expr(&args[3]);
-                            let (_, health) = self.emit_expr(&args[4]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
+                            let root = self.emit_str_arg_borrow(&args[3]);
+                            let health = self.emit_str_arg_borrow(&args[4]);
                             let (_, n) = self.emit_expr(&args[5]);
                             let tmp = self.fresh("tshr");
                             self.line(&format!(
@@ -36240,9 +36315,9 @@ impl Codegen {
                         }
                         "tls_serve_h2_wu" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
-                            let (_, body) = self.emit_expr(&args[3]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
+                            let body = self.emit_str_arg_borrow(&args[3]);
                             let (_, inc) = self.emit_expr(&args[4]);
                             let tmp = self.fresh("tshw");
                             self.line(&format!(
@@ -36252,8 +36327,8 @@ impl Codegen {
                         }
                         "tls_serve_grpc_once" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tsgo");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_serve_grpc_once({p}, {cert}, {key});"
@@ -36262,8 +36337,8 @@ impl Codegen {
                         }
                         "tls_serve_grpc_stream" => {
                             let (_, p) = self.emit_expr(&args[0]);
-                            let (_, cert) = self.emit_expr(&args[1]);
-                            let (_, key) = self.emit_expr(&args[2]);
+                            let cert = self.emit_str_arg_borrow(&args[1]);
+                            let key = self.emit_str_arg_borrow(&args[2]);
                             let tmp = self.fresh("tsgs");
                             self.line(&format!(
                                 "int64_t {tmp} = mako_tls_serve_grpc_stream({p}, {cert}, {key});"
@@ -36349,7 +36424,7 @@ impl Codegen {
                         }
                         "io_try_write" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, data) = self.emit_expr(&args[1]);
+                            let data = self.emit_str_arg_borrow(&args[1]);
                             return ("int64_t".into(), format!("mako_io_try_write({f}, {data})"));
                         }
                         "io_backoff_ms" => {
@@ -36375,12 +36450,12 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_tcp_accept_nb({f})"));
                         }
                         "tcp_connect" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_tcp_connect({h}, {p})"));
                         }
                         "tcp_connect_timeout" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let (_, t) = self.emit_expr(&args[2]);
                             return (
@@ -36397,7 +36472,7 @@ impl Codegen {
                             return ("int64_t".into(), "mako_tcp_get_he_delay_ms()".into());
                         }
                         "tcp_connect_nb" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             return ("int64_t".into(), format!("mako_tcp_connect_nb({h}, {p})"));
                         }
@@ -36414,7 +36489,7 @@ impl Codegen {
                             );
                         }
                         "tcp_pool_open" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let (_, m) = self.emit_expr(&args[2]);
                             let (_, ms) = self.emit_expr(&args[3]);
@@ -36485,7 +36560,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_tcp_reuseport({f})"));
                         }
                         "tcp_listen_reuseport" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
                             let (_, bl) = self.emit_expr(&args[2]);
                             return (
@@ -36498,11 +36573,11 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_tcp_accept4({f})"));
                         }
                         "http_forward" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, m) = self.emit_expr(&args[2]);
-                            let (_, path) = self.emit_expr(&args[3]);
-                            let (_, body) = self.emit_expr(&args[4]);
+                            let m = self.emit_str_arg_borrow(&args[2]);
+                            let path = self.emit_str_arg_borrow(&args[3]);
+                            let body = self.emit_str_arg_borrow(&args[4]);
                             let tmp = self.fresh("fwd");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http_forward({h}, {p}, {m}, {path}, {body});"
@@ -36510,12 +36585,12 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http_forward_full" => {
-                            let (_, h) = self.emit_expr(&args[0]);
+                            let h = self.emit_str_arg_borrow(&args[0]);
                             let (_, p) = self.emit_expr(&args[1]);
-                            let (_, m) = self.emit_expr(&args[2]);
-                            let (_, path) = self.emit_expr(&args[3]);
-                            let (_, headers) = self.emit_expr(&args[4]);
-                            let (_, body) = self.emit_expr(&args[5]);
+                            let m = self.emit_str_arg_borrow(&args[2]);
+                            let path = self.emit_str_arg_borrow(&args[3]);
+                            let headers = self.emit_str_arg_borrow(&args[4]);
+                            let body = self.emit_str_arg_borrow(&args[5]);
                             let (_, ms) = self.emit_expr(&args[6]);
                             let tmp = self.fresh("fwd_full");
                             self.line(&format!(
@@ -36525,11 +36600,11 @@ impl Codegen {
                         }
                         "http_forward_fd" => {
                             let (_, f) = self.emit_expr(&args[0]);
-                            let (_, m) = self.emit_expr(&args[1]);
-                            let (_, path) = self.emit_expr(&args[2]);
-                            let (_, host) = self.emit_expr(&args[3]);
-                            let (_, headers) = self.emit_expr(&args[4]);
-                            let (_, body) = self.emit_expr(&args[5]);
+                            let m = self.emit_str_arg_borrow(&args[1]);
+                            let path = self.emit_str_arg_borrow(&args[2]);
+                            let host = self.emit_str_arg_borrow(&args[3]);
+                            let headers = self.emit_str_arg_borrow(&args[4]);
+                            let body = self.emit_str_arg_borrow(&args[5]);
                             let (_, ms) = self.emit_expr(&args[6]);
                             let tmp = self.fresh("fwd_fd");
                             self.line(&format!(
@@ -36573,7 +36648,7 @@ impl Codegen {
                         "http_proxy_raw" => {
                             let (_, c) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
-                            let (_, req) = self.emit_expr(&args[2]);
+                            let req = self.emit_str_arg_borrow(&args[2]);
                             let (_, ms) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("proxy_raw");
                             self.line(&format!(
@@ -36597,7 +36672,7 @@ impl Codegen {
                             return ("int64_t".into(), format!("mako_proxy_io_bytes_read({r})"));
                         }
                         "http_parse" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("http_parsed");
                             self.line(&format!("MakoHttpParsed {tmp} = mako_http_parse({s});"));
                             return ("MakoHttpParsed".into(), tmp);
@@ -36651,7 +36726,7 @@ impl Codegen {
                         }
                         "http_parsed_header" => {
                             let (_, r) = self.emit_expr(&args[0]);
-                            let (_, n) = self.emit_expr(&args[1]);
+                            let n = self.emit_str_arg_borrow(&args[1]);
                             let tmp = self.fresh("phdr1");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http_parsed_header({r}, {n});"
@@ -36659,7 +36734,7 @@ impl Codegen {
                             return ("MakoString".into(), tmp);
                         }
                         "http_decode_chunked" => {
-                            let (_, s) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[0]);
                             let tmp = self.fresh("chunked");
                             self.line(&format!(
                                 "MakoString {tmp} = mako_http_decode_chunked({s});"
@@ -36685,6 +36760,10 @@ impl Codegen {
                                     let value = self.emit_str_arg_borrow(&converted[0]);
                                     return ("int64_t".into(), format!("mako_str_len({value})"));
                                 }
+                            }
+                            if matches!(&args[0], Expr::String(_)) {
+                                let value = self.emit_str_arg_borrow(&args[0]);
+                                return ("int64_t".into(), format!("mako_str_len({value})"));
                             }
                             let (ty, v) = self.emit_expr(&args[0]);
                             // Raw arrays: same struct layout, len is at same offset.
@@ -37577,6 +37656,17 @@ impl Codegen {
                         }
                         crate::ast::InterpPart::Expr(e, fmt) => {
                             let (ty, v) = self.emit_expr(e);
+                            let free_interp_str = ty == "MakoString"
+                                && !self.own_drop_live.contains(&v)
+                                && (self.expr_is_scope_drop_safe(e, &ty)
+                                    || self.expr_is_owned_print_temp(e));
+                            let v = if free_interp_str {
+                                let tmp = self.fresh("ifs");
+                                self.line(&format!("MakoString {tmp} = {v};"));
+                                tmp
+                            } else {
+                                v
+                            };
                             if let Some(spec) = fmt {
                                 let esc = escape_c(spec);
                                 let tb = self.fresh("tb");
@@ -37587,6 +37677,9 @@ impl Codegen {
                                     self.line(&format!(
                                         "mako_str_builder_write_str_spec({tb}, {v}, \"{esc}\");"
                                     ));
+                                    if free_interp_str {
+                                        self.line(&format!("mako_str_free({v});"));
+                                    }
                                 } else if ty == "double" {
                                     self.line(&format!(
                                         "mako_str_builder_write_f64_spec({tb}, {v}, \"{esc}\");"
@@ -37604,6 +37697,9 @@ impl Codegen {
                                 self.line(&format!("mako_str_free({ts});"));
                             } else if ty == "MakoString" {
                                 self.line(&format!("mako_sbstack_write(&{b}, {v});"));
+                                if free_interp_str {
+                                    self.line(&format!("mako_str_free({v});"));
+                                }
                             } else if ty == "int64_t" || ty == "bool" {
                                 self.line(&format!(
                                     "mako_sbstack_write_i64(&{b}, (int64_t)({v}));"
@@ -39190,6 +39286,9 @@ impl Codegen {
                     if ret_is_option {
                         self.line(&format!("if (!{tmp}.ok) {{"));
                         self.indent += 1;
+                        self.line(&format!(
+                            "if ({tmp}.err_kind == 0) {{ mako_str_free({tmp}.err); }} else {{ mako_str_free({tmp}.err_s0); mako_str_free({tmp}.err_s1); }}"
+                        ));
                         self.emit_try_early_return_cleanup();
                         self.line("return mako_none_int();");
                         self.indent -= 1;
@@ -45679,5 +45778,25 @@ fn main() {
                 && !body.contains("__batch"),
             "single-port actor loop must not heap-batch mail:\n{body}"
         );
+    }
+
+    #[test]
+    fn builtin_string_tables_are_sorted() {
+        for pair in Codegen::OWNED_STRING_BUILTINS.windows(2) {
+            assert!(
+                pair[0] < pair[1],
+                "OWNED_STRING_BUILTINS out of order: {:?} >= {:?}",
+                pair[0],
+                pair[1]
+            );
+        }
+        for pair in Codegen::BORROWED_STRING_BUILTINS.windows(2) {
+            assert!(
+                pair[0] < pair[1],
+                "BORROWED_STRING_BUILTINS out of order: {:?} >= {:?}",
+                pair[0],
+                pair[1]
+            );
+        }
     }
 }
