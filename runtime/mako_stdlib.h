@@ -26,6 +26,11 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
+#include <sys/uio.h>
+#include <sys/socket.h>
+#ifdef __linux__
+#include <sys/sendfile.h>
+#endif
 #ifndef MAP_ANONYMOUS
 #ifdef MAP_ANON
 #define MAP_ANONYMOUS MAP_ANON
@@ -1517,6 +1522,93 @@ static inline int64_t mako_mem_read_byte(int64_t addr, int64_t offset) {
 }
 static inline void mako_mem_write_byte(int64_t addr, int64_t offset, int64_t val) {
     *((uint8_t *)(uintptr_t)addr + offset) = (uint8_t)val;
+}
+
+/* ---- Scatter-gather I/O for zero-copy block transfers (SAN/iSCSI) ---- */
+static inline int64_t mako_writev(int64_t fd, MakoStrArray bufs) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)bufs; return -1;
+#else
+    size_t n = bufs.len;
+    struct iovec *iov = (struct iovec *)malloc(n * sizeof(struct iovec));
+    for (size_t i = 0; i < n; i++) {
+        iov[i].iov_base = bufs.data[i].data;
+        iov[i].iov_len = bufs.data[i].len;
+    }
+    return (int64_t)writev((int)fd, iov, (int)n);
+#endif
+}
+
+static inline int64_t mako_readv(int64_t fd, MakoIntArray sizes, int64_t out_addr) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)sizes; (void)out_addr; return -1;
+#else
+    size_t n = sizes.len;
+    struct iovec *iov = (struct iovec *)malloc(n * sizeof(struct iovec));
+    char **ptrs = (char **)malloc(n * sizeof(char *));
+    for (size_t i = 0; i < n; i++) {
+        ptrs[i] = (char *)malloc((size_t)sizes.data[i]);
+        iov[i].iov_base = ptrs[i];
+        iov[i].iov_len = (size_t)sizes.data[i];
+    }
+    ssize_t total = readv((int)fd, iov, (int)n);
+    /* Store buffer pointers at out_addr as int64 array for mem_read access */
+    int64_t *out = (int64_t *)(uintptr_t)out_addr;
+    for (size_t i = 0; i < n; i++) out[i] = (int64_t)(uintptr_t)ptrs[i];
+    return (int64_t)total;
+#endif
+}
+
+static inline int64_t mako_sendmsg(int64_t fd, MakoStrArray bufs, int64_t flags) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)bufs; (void)flags; return -1;
+#else
+    size_t n = bufs.len;
+    struct iovec *iov = (struct iovec *)malloc(n * sizeof(struct iovec));
+    for (size_t i = 0; i < n; i++) {
+        iov[i].iov_base = bufs.data[i].data;
+        iov[i].iov_len = bufs.data[i].len;
+    }
+    struct msghdr msg = {0};
+    msg.msg_iov = iov;
+    msg.msg_iovlen = n;
+    return (int64_t)sendmsg((int)fd, &msg, (int)flags);
+#endif
+}
+
+static inline int64_t mako_recvmsg(int64_t fd, MakoIntArray sizes, int64_t out_addr, int64_t flags) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)sizes; (void)out_addr; (void)flags; return -1;
+#else
+    size_t n = sizes.len;
+    struct iovec *iov = (struct iovec *)malloc(n * sizeof(struct iovec));
+    char **ptrs = (char **)malloc(n * sizeof(char *));
+    for (size_t i = 0; i < n; i++) {
+        ptrs[i] = (char *)malloc((size_t)sizes.data[i]);
+        iov[i].iov_base = ptrs[i];
+        iov[i].iov_len = (size_t)sizes.data[i];
+    }
+    struct msghdr msg = {0};
+    msg.msg_iov = iov;
+    msg.msg_iovlen = n;
+    ssize_t total = recvmsg((int)fd, &msg, (int)flags);
+    int64_t *out = (int64_t *)(uintptr_t)out_addr;
+    for (size_t i = 0; i < n; i++) out[i] = (int64_t)(uintptr_t)ptrs[i];
+    return (int64_t)total;
+#endif
+}
+
+static inline int64_t mako_sendfile(int64_t out_fd, int64_t in_fd, int64_t offset, int64_t count) {
+#if defined(__linux__)
+    off_t off = (off_t)offset;
+    return (int64_t)sendfile((int)out_fd, (int)in_fd, &off, (size_t)count);
+#elif defined(__APPLE__)
+    off_t len = (off_t)count;
+    int r = sendfile((int)in_fd, (int)out_fd, (off_t)offset, &len, NULL, 0);
+    return r == 0 ? (int64_t)len : -1;
+#else
+    (void)out_fd; (void)in_fd; (void)offset; (void)count; return -1;
+#endif
 }
 
 static inline MakoString mako_syscall_hostname(void) {

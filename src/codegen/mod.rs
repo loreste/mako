@@ -19921,6 +19921,13 @@ impl Codegen {
                             self.line(&format!("mako_{name}({});", cargs.join(", ")));
                             return ("void".into(), "/*void*/".into());
                         }
+                        "writev" | "sendmsg" | "sendfile" => {
+                            let mut cargs = Vec::new();
+                            for a in args { let (_, v) = self.emit_expr(a); cargs.push(v); }
+                            let tmp = self.fresh("sg");
+                            self.line(&format!("int64_t {tmp} = mako_{name}({});", cargs.join(", ")));
+                            return ("int64_t".into(), tmp);
+                        }
                         "now_ms" => {
                             let tmp = self.fresh("now");
                             self.line(&format!("int64_t {tmp} = mako_now_ms();"));

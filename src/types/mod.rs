@@ -1625,6 +1625,10 @@ impl TypeChecker {
         fns.insert("mem_write_i32".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)));
         fns.insert("mem_read_byte".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
         fns.insert("mem_write_byte".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)));
+        // Scatter-gather I/O for zero-copy block transfers (SAN/iSCSI)
+        fns.insert("writev".into(), Type::Fn(vec![Type::Int, Type::Array(Box::new(Type::String))], Box::new(Type::Int)));
+        fns.insert("sendmsg".into(), Type::Fn(vec![Type::Int, Type::Array(Box::new(Type::String)), Type::Int], Box::new(Type::Int)));
+        fns.insert("sendfile".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
         fns.insert(
             "syscall_hostname".into(),
             Type::Fn(vec![], Box::new(Type::String)),
