@@ -2855,6 +2855,19 @@ impl Codegen {
                 | "yaml_keys"
                 | "toml_keys"
                 | "avro_decode_array_long"
+                | "msgpack_decode_array_int"
+                | "cbor_decode_array_int"
+                | "list_take_int"
+                | "list_drop_int"
+                | "list_take_while_lt_int"
+                | "list_map_add_int"
+                | "list_map_mul_int"
+                | "list_filter_lt_int"
+                | "list_filter_gt_int"
+                | "list_zip_int"
+                | "maps_keys"
+                | "maps_values"
+                | "maps_clone"
                 | "sql_query_col_int"
                 | "sql_query_col_str"
         )
@@ -16968,7 +16981,16 @@ impl Codegen {
                 // Detect `s = append(s, v)` — append owns the realloc, skip reassign-free.
                 let is_self_append = if let Expr::Call { callee, args } = value {
                     if let Expr::Ident(fn_name) = callee.as_ref() {
-                        if fn_name == "append" && !args.is_empty() {
+                        if matches!(
+                            fn_name.as_str(),
+                            "append"
+                                | "list_push_int"
+                                | "list_push_str"
+                                | "queue_push_int"
+                                | "queue_push_str"
+                                | "heap_push_int"
+                        ) && !args.is_empty()
+                        {
                             if let Expr::Ident(arg0) = &args[0] {
                                 arg0 == name
                             } else {
@@ -27430,7 +27452,7 @@ impl Codegen {
                         | "list_map_mul_int"
                         | "list_filter_lt_int"
                         | "list_filter_gt_int" => {
-                            let (_, a) = self.emit_expr(&args[0]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
                             let (_, n) = self.emit_expr(&args[1]);
                             let fname = format!("mako_{name}");
                             let tmp = self.fresh("lcmb");
@@ -27438,8 +27460,8 @@ impl Codegen {
                             return ("MakoIntArray".into(), tmp);
                         }
                         "list_zip_int" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
+                            let a = self.emit_slice_arg_borrow(&args[0]);
+                            let b = self.emit_slice_arg_borrow(&args[1]);
                             let tmp = self.fresh("lzip");
                             self.line(&format!(
                                 "MakoIntArray {tmp} = mako_list_zip_int({a}, {b});"

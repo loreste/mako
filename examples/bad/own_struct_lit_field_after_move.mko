@@ -15,7 +15,8 @@ fn main() {
         text: "rows",
         detail: Detail{label: "disk"},
     }
-    let text = result.text
-    print(result.text)
-    print(text)
+    let detail = result.detail
+    let again = result.detail
+    print(detail.label)
+    print(again.label)
 }

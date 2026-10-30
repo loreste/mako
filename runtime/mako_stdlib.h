@@ -665,12 +665,10 @@ static inline MakoStrArray mako_list_new_str(void) {
     return mako_str_array_make(0, 8);
 }
 static inline MakoIntArray mako_list_push_int(MakoIntArray a, int64_t v) {
-    mako_slice_push(&a, v);
-    return a;
+    return mako_slice_append(a, v);
 }
 static inline MakoStrArray mako_list_push_str(MakoStrArray a, MakoString v) {
-    mako_str_array_push(&a, v);
-    return a;
+    return mako_str_array_append(a, v);
 }
 /* Pop last: drop_last returns shortened list; last_* peeks without remove. */
 static int64_t mako_list_popped_int_tls = 0;
