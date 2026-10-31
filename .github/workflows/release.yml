@@ -102,6 +102,7 @@ jobs:
             if ! cargo build --release --features llvm-backend 2>/dev/null; then
               echo "::warning::LLVM backend link failed (SDK TAPI compat); building without LLVM"
               cargo clean --release 2>/dev/null
+              unset MAKO_LLD_STATIC_DIR MAKO_LLD_INCLUDE_DIR LLVM_SYS_211_PREFIX
               cargo build --release
             fi
           else
