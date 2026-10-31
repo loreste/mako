@@ -97,7 +97,12 @@ jobs:
       - name: Cargo build --release
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
-            cargo build --release --features llvm-backend
+            # Try LLVM backend; fall back to C-only if bundled lld is
+            # incompatible with the runner's macOS SDK TAPI files.
+            if ! cargo build --release --features llvm-backend 2>/dev/null; then
+              echo "::warning::LLVM backend link failed (SDK TAPI compat); building without LLVM"
+              cargo build --release
+            fi
           else
             cargo build --release
           fi
