@@ -101,6 +101,7 @@ jobs:
             # incompatible with the runner's macOS SDK TAPI files.
             if ! cargo build --release --features llvm-backend 2>/dev/null; then
               echo "::warning::LLVM backend link failed (SDK TAPI compat); building without LLVM"
+              cargo clean --release 2>/dev/null
               cargo build --release
             fi
           else
