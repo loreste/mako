@@ -16097,13 +16097,13 @@ impl TypeChecker {
                     // Empty or all-literal arrays may inhabit []int / []int64 / []int32.
                     let inferred = match (&expected, init) {
                         (
-                            Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::Byte,
+                            Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::UInt64 | Type::UInt32 | Type::UInt16 | Type::Byte,
                             Expr::Int(_),
                         ) => expected.clone(),
                         (Type::Array(inner) | Type::RawArray(inner), Expr::Array(elems))
                             if matches!(
                                 inner.as_ref(),
-                                Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::Byte
+                                Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::UInt64 | Type::UInt32 | Type::UInt16 | Type::Byte
                             ) && elems.iter().all(|e| matches!(e, Expr::Int(_))) =>
                         {
                             expected.clone()

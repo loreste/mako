@@ -18588,6 +18588,16 @@ impl Codegen {
                                 format!("mako_to_uint64_from_signed({as_i})"),
                             );
                         }
+                        "u16" | "uint16" => {
+                            let (ty, v) = self.emit_expr(&args[0]);
+                            let as_i = if ty == "double" { format!("(int64_t)({v})") } else { v };
+                            return ("int64_t".into(), format!("(int64_t)(uint16_t)({as_i})"));
+                        }
+                        "u32" | "uint32" => {
+                            let (ty, v) = self.emit_expr(&args[0]);
+                            let as_i = if ty == "double" { format!("(int64_t)({v})") } else { v };
+                            return ("int64_t".into(), format!("(int64_t)(uint32_t)({as_i})"));
+                        }
                         "float" | "float64" => {
                             let (ty, v) = self.emit_expr(&args[0]);
                             if ty == "double" {
