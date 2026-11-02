@@ -1627,26 +1627,92 @@ impl TypeChecker {
         }
         // Process control: process_fork/exec/waitpid/pipe/dup2/setsid
         fns.insert("process_fork".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("process_setsid".into(), Type::Fn(vec![], Box::new(Type::Int)));
-        fns.insert("process_exec".into(), Type::Fn(vec![Type::String, Type::Array(Box::new(Type::String))], Box::new(Type::Int)));
-        fns.insert("process_wait".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("process_pipe".into(), Type::Fn(vec![Type::Array(Box::new(Type::Int))], Box::new(Type::Int)));
-        fns.insert("process_dup2".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "process_setsid".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "process_exec".into(),
+            Type::Fn(
+                vec![Type::String, Type::Array(Box::new(Type::String))],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "process_wait".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "process_pipe".into(),
+            Type::Fn(vec![Type::Array(Box::new(Type::Int))], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "process_dup2".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
         // Hypervisor / low-level VM primitives
-        fns.insert("ioctl".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("mmap_anon".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("munmap".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("mprotect".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("mem_read_i64".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("mem_write_i64".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)));
-        fns.insert("mem_read_i32".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("mem_write_i32".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)));
-        fns.insert("mem_read_byte".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
-        fns.insert("mem_write_byte".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)));
+        fns.insert(
+            "ioctl".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mmap_anon".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "munmap".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mprotect".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_read_i64".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_i64".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_i32".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_i32".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_byte".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_byte".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
         // Scatter-gather I/O for zero-copy block transfers (SAN/iSCSI)
-        fns.insert("writev".into(), Type::Fn(vec![Type::Int, Type::Array(Box::new(Type::String))], Box::new(Type::Int)));
-        fns.insert("sendmsg".into(), Type::Fn(vec![Type::Int, Type::Array(Box::new(Type::String)), Type::Int], Box::new(Type::Int)));
-        fns.insert("sendfile".into(), Type::Fn(vec![Type::Int, Type::Int, Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "writev".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Array(Box::new(Type::String))],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "sendmsg".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Array(Box::new(Type::String)), Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "sendfile".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
         fns.insert(
             "syscall_hostname".into(),
             Type::Fn(vec![], Box::new(Type::String)),
@@ -2353,15 +2419,54 @@ impl TypeChecker {
         );
 
         // SIMD f32 + bit manipulation (codec hot paths)
-        fns.insert("simd_f32x4_dot".into(), Type::Fn(vec![Type::Float,Type::Float,Type::Float,Type::Float,Type::Float,Type::Float,Type::Float,Type::Float], Box::new(Type::Float)));
-        fns.insert("simd_f32x4_hadd".into(), Type::Fn(vec![Type::Float,Type::Float,Type::Float,Type::Float], Box::new(Type::Float)));
-        fns.insert("simd_fma".into(), Type::Fn(vec![Type::Float,Type::Float,Type::Float], Box::new(Type::Float)));
+        fns.insert(
+            "simd_f32x4_dot".into(),
+            Type::Fn(
+                vec![
+                    Type::Float,
+                    Type::Float,
+                    Type::Float,
+                    Type::Float,
+                    Type::Float,
+                    Type::Float,
+                    Type::Float,
+                    Type::Float,
+                ],
+                Box::new(Type::Float),
+            ),
+        );
+        fns.insert(
+            "simd_f32x4_hadd".into(),
+            Type::Fn(
+                vec![Type::Float, Type::Float, Type::Float, Type::Float],
+                Box::new(Type::Float),
+            ),
+        );
+        fns.insert(
+            "simd_fma".into(),
+            Type::Fn(
+                vec![Type::Float, Type::Float, Type::Float],
+                Box::new(Type::Float),
+            ),
+        );
         fns.insert("clz".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
         fns.insert("ctz".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("popcount".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("bswap64".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("bswap32".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
-        fns.insert("rotl64".into(), Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)));
+        fns.insert(
+            "popcount".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bswap64".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bswap32".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rotl64".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
 
         fns.insert(
             "lsm_new".into(),
@@ -6113,7 +6218,13 @@ impl TypeChecker {
         );
         fns.insert(
             "actor_recv_batch".into(),
-            Type::Fn(vec![Type::Chan(Box::new(Type::Int)), Type::Array(Box::new(Type::Int))], Box::new(Type::Int)),
+            Type::Fn(
+                vec![
+                    Type::Chan(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Int),
+            ),
         );
         fns.insert(
             "actor_stop".into(),
@@ -15539,14 +15650,24 @@ impl TypeChecker {
                     let resolved_args = resolved_args?;
                     // Check if this is a generic struct or enum instantiation.
                     if let Some(tmpl) = self.generic_structs.get(other).cloned() {
-                        self.check_type_arg_bounds(other, &tmpl.type_params, &tmpl.type_bounds, &resolved_args)?;
+                        self.check_type_arg_bounds(
+                            other,
+                            &tmpl.type_params,
+                            &tmpl.type_bounds,
+                            &resolved_args,
+                        )?;
                         let tags: Vec<String> =
                             resolved_args.iter().map(|t| t.mono_tag()).collect();
                         let mono_name = format!("{other}__{}", tags.join("__"));
                         return Ok(Type::Named(mono_name));
                     }
                     if let Some(tmpl) = self.generic_enums.get(other).cloned() {
-                        self.check_type_arg_bounds(other, &tmpl.type_params, &tmpl.type_bounds, &resolved_args)?;
+                        self.check_type_arg_bounds(
+                            other,
+                            &tmpl.type_params,
+                            &tmpl.type_bounds,
+                            &resolved_args,
+                        )?;
                         let tags: Vec<String> =
                             resolved_args.iter().map(|t| t.mono_tag()).collect();
                         let mono_name = format!("{other}__{}", tags.join("__"));
@@ -15563,7 +15684,9 @@ impl TypeChecker {
             }
             TypeExpr::Array(inner) => Ok(Type::Array(Box::new(self.resolve_type(inner)?))),
             TypeExpr::RawArray(inner) => Ok(Type::RawArray(Box::new(self.resolve_type(inner)?))),
-            TypeExpr::FixedArray(inner, n) => Ok(Type::FixedArray(Box::new(self.resolve_type(inner)?), *n)),
+            TypeExpr::FixedArray(inner, n) => {
+                Ok(Type::FixedArray(Box::new(self.resolve_type(inner)?), *n))
+            }
             TypeExpr::Fn(params, ret) => {
                 let params: Result<Vec<_>, _> =
                     params.iter().map(|p| self.resolve_type(p)).collect();
@@ -16107,14 +16230,37 @@ impl TypeChecker {
                     // Empty or all-literal arrays may inhabit []int / []int64 / []int32.
                     let inferred = match (&expected, init) {
                         (
-                            Type::Int | Type::Int64 | Type::Int32 | Type::Int16 | Type::Int8 | Type::UInt64 | Type::UInt32 | Type::UInt16 | Type::Byte,
+                            Type::Int
+                            | Type::Int64
+                            | Type::Int32
+                            | Type::Int16
+                            | Type::Int8
+                            | Type::UInt64
+                            | Type::UInt32
+                            | Type::UInt16
+                            | Type::Byte,
                             Expr::Int(_),
                         ) => expected.clone(),
+                        (Type::Float32, Expr::Float(_)) => Type::Float32,
                         (Type::Array(inner) | Type::RawArray(inner), Expr::Array(elems))
                             if matches!(
                                 inner.as_ref(),
-                                Type::Int | Type::Int64 | Type::Int32 | Type::Int16 | Type::Int8 | Type::UInt64 | Type::UInt32 | Type::UInt16 | Type::Byte
+                                Type::Int
+                                    | Type::Int64
+                                    | Type::Int32
+                                    | Type::Int16
+                                    | Type::Int8
+                                    | Type::UInt64
+                                    | Type::UInt32
+                                    | Type::UInt16
+                                    | Type::Byte
                             ) && elems.iter().all(|e| matches!(e, Expr::Int(_))) =>
+                        {
+                            expected.clone()
+                        }
+                        (Type::Array(inner) | Type::RawArray(inner), Expr::Array(elems))
+                            if matches!(inner.as_ref(), Type::Float32)
+                                && elems.iter().all(|e| matches!(e, Expr::Float(_))) =>
                         {
                             expected.clone()
                         }
@@ -16547,12 +16693,18 @@ impl TypeChecker {
                             Type::Int
                                 | Type::Int64
                                 | Type::Int32
+                                | Type::Int16
                                 | Type::Int8
                                 | Type::UInt64
+                                | Type::UInt32
+                                | Type::UInt16
                                 | Type::Byte
                         ) =>
                     {
                         self.current_ret.clone()
+                    }
+                    Some(Expr::Float(_)) if matches!(self.current_ret, Type::Float32) => {
+                        Type::Float32
                     }
                     Some(e) => {
                         if self.arena_depth > 0 {
@@ -17307,11 +17459,15 @@ impl TypeChecker {
             | Type::Int
             | Type::Int64
             | Type::Int32
+            | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::UInt32
+            | Type::UInt16
             | Type::Byte
             | Type::Bool
             | Type::Float
+            | Type::Float32
             | Type::Uuid => false,
             Type::Struct { fields, .. } => fields.iter().any(|(_, ft)| self.type_is_owning(ft)),
             Type::Enum { variants, .. } => variants
@@ -17370,7 +17526,9 @@ impl TypeChecker {
     }
 
     fn note_unique_field_move(&mut self, expr: &Expr, ty: &Type) -> Result<(), TypeError> {
-        if is_copy_type(ty) {
+        // Strings are RC-shared: reading a struct's string field clones (bumps RC)
+        // rather than moving it out of a unique struct owner.
+        if is_copy_type(ty) || *ty == Type::String {
             return Ok(());
         }
         let Expr::Field { base, field } = expr else {
@@ -17554,14 +17712,22 @@ impl TypeChecker {
                             Ok(Type::Int64)
                         } else if lt == Type::Int32 && rt == Type::Int32 {
                             Ok(Type::Int32)
+                        } else if lt == Type::Int16 && rt == Type::Int16 {
+                            Ok(Type::Int16)
                         } else if lt == Type::Int8 && rt == Type::Int8 {
                             Ok(Type::Int8)
                         } else if lt == Type::UInt64 && rt == Type::UInt64 {
                             Ok(Type::UInt64)
+                        } else if lt == Type::UInt32 && rt == Type::UInt32 {
+                            Ok(Type::UInt32)
+                        } else if lt == Type::UInt16 && rt == Type::UInt16 {
+                            Ok(Type::UInt16)
                         } else if lt == Type::Byte && rt == Type::Byte {
                             Ok(Type::Byte)
                         } else if lt == Type::Float && rt == Type::Float {
                             Ok(Type::Float)
+                        } else if lt == Type::Float32 && rt == Type::Float32 {
+                            Ok(Type::Float32)
                         } else if *op == BinOp::Add && lt == Type::String && rt == Type::String {
                             if self.no_alloc_fn {
                                 return Err(TypeError::new(
@@ -17619,10 +17785,14 @@ impl TypeChecker {
                         if (lt == Type::Int && rt == Type::Int)
                             || (lt == Type::Int64 && rt == Type::Int64)
                             || (lt == Type::Int32 && rt == Type::Int32)
+                            || (lt == Type::Int16 && rt == Type::Int16)
                             || (lt == Type::Int8 && rt == Type::Int8)
                             || (lt == Type::UInt64 && rt == Type::UInt64)
+                            || (lt == Type::UInt32 && rt == Type::UInt32)
+                            || (lt == Type::UInt16 && rt == Type::UInt16)
                             || (lt == Type::Byte && rt == Type::Byte)
                             || (lt == Type::Float && rt == Type::Float)
+                            || (lt == Type::Float32 && rt == Type::Float32)
                             || (lt == Type::String && rt == Type::String)
                         {
                             Ok(Type::Bool)
@@ -17660,10 +17830,16 @@ impl TypeChecker {
                             Ok(Type::Int64)
                         } else if lt == Type::Int32 && rt == Type::Int32 {
                             Ok(Type::Int32)
+                        } else if lt == Type::Int16 && rt == Type::Int16 {
+                            Ok(Type::Int16)
                         } else if lt == Type::Int8 && rt == Type::Int8 {
                             Ok(Type::Int8)
                         } else if lt == Type::UInt64 && rt == Type::UInt64 {
                             Ok(Type::UInt64)
+                        } else if lt == Type::UInt32 && rt == Type::UInt32 {
+                            Ok(Type::UInt32)
+                        } else if lt == Type::UInt16 && rt == Type::UInt16 {
+                            Ok(Type::UInt16)
                         } else if lt == Type::Byte && rt == Type::Byte {
                             Ok(Type::Byte)
                         } else if is_int_family(&lt) && is_int_family(&rt) && lt != rt {
@@ -17698,10 +17874,14 @@ impl TypeChecker {
                             Type::Int
                                 | Type::Int64
                                 | Type::Int32
+                                | Type::Int16
                                 | Type::Int8
                                 | Type::UInt64
+                                | Type::UInt32
+                                | Type::UInt16
                                 | Type::Byte
                                 | Type::Float
+                                | Type::Float32
                         ) =>
                     {
                         Ok(t)
@@ -17713,8 +17893,11 @@ impl TypeChecker {
                             Type::Int
                                 | Type::Int64
                                 | Type::Int32
+                                | Type::Int16
                                 | Type::Int8
                                 | Type::UInt64
+                                | Type::UInt32
+                                | Type::UInt16
                                 | Type::Byte
                         ) =>
                     {
@@ -17772,10 +17955,15 @@ impl TypeChecker {
                     Type::Int
                     | Type::Int64
                     | Type::Int32
+                    | Type::Int16
                     | Type::Int8
+                    | Type::UInt64
+                    | Type::UInt32
+                    | Type::UInt16
                     | Type::Byte
                     | Type::Bool
                     | Type::Float
+                    | Type::Float32
                     | Type::String => Ok(Type::Chan(Box::new(et))),
                     Type::Named(n)
                         if n != "ShareInt"
@@ -17816,18 +18004,34 @@ impl TypeChecker {
                     // #[no_alloc]: reject heap-allocating calls.
                     if self.no_alloc_fn {
                         let alloc_fns = [
-                            "append", "make", "str_builder", "builder_string",
-                            "str_repeat", "str_replace", "str_split", "str_fields",
-                            "str_to_lower", "str_to_upper", "str_trim", "str_trim_space",
-                            "str_trim_left", "str_trim_right", "int_to_string",
-                            "format_int", "format_float", "fmt_sprintf",
-                            "json_encode", "json_decode",
-                            "chan_open", "cmap_new",
+                            "append",
+                            "make",
+                            "str_builder",
+                            "builder_string",
+                            "str_repeat",
+                            "str_replace",
+                            "str_split",
+                            "str_fields",
+                            "str_to_lower",
+                            "str_to_upper",
+                            "str_trim",
+                            "str_trim_space",
+                            "str_trim_left",
+                            "str_trim_right",
+                            "int_to_string",
+                            "format_int",
+                            "format_float",
+                            "fmt_sprintf",
+                            "json_encode",
+                            "json_decode",
+                            "chan_open",
+                            "cmap_new",
                         ];
                         if alloc_fns.contains(&name.as_str()) {
                             return Err(TypeError::new(format!(
                                 "`{name}` allocates and cannot be called in a #[no_alloc] function"
-                            )).hint("use arena-allocated alternatives or pre-allocated buffers"));
+                            ))
+                            .hint("use arena-allocated alternatives or pre-allocated buffers"));
                         }
                         // String concat via + also allocates — caught separately below.
                     }
@@ -18355,7 +18559,8 @@ impl TypeChecker {
                                 return Ok(Type::Int16);
                             }
                             return Err(TypeError::new(format!(
-                                "cannot convert {} to i16", t.display()
+                                "cannot convert {} to i16",
+                                t.display()
                             )));
                         }
                         "f32" | "float32" if args.len() == 1 => {
@@ -18364,7 +18569,8 @@ impl TypeChecker {
                                 return Ok(Type::Float32);
                             }
                             return Err(TypeError::new(format!(
-                                "cannot convert {} to f32", t.display()
+                                "cannot convert {} to f32",
+                                t.display()
                             )));
                         }
                         "u16" | "uint16" if args.len() == 1 => {
@@ -19189,7 +19395,8 @@ impl TypeChecker {
                         let Some(iface) = self.interfaces.iter().find(|i| i.name == *iname) else {
                             return Err(TypeError::new(format!("unknown interface `{iname}`")));
                         };
-                        let Some((_, params, ret, _)) = iface.methods.iter().find(|(n, _, _, _)| n == m)
+                        let Some((_, params, ret, _)) =
+                            iface.methods.iter().find(|(n, _, _, _)| n == m)
                         else {
                             return Err(TypeError::new(format!(
                                 "interface `{iname}` has no method `{m}`"
@@ -19233,17 +19440,31 @@ impl TypeChecker {
                                     let base = &tname[..pos];
                                     let tags: Vec<&str> = tname[pos + 2..].split("__").collect();
                                     let generic_key = format!("{base}_{m}");
-                                    if let Some(tmpl) = self.generic_fns.get(&generic_key).cloned() {
+                                    if let Some(tmpl) = self.generic_fns.get(&generic_key).cloned()
+                                    {
                                         let mut subst = HashMap::new();
                                         for (tp, tag) in tmpl.type_params.iter().zip(tags.iter()) {
                                             subst.insert(tp.clone(), self.type_from_mono_tag(tag));
                                         }
                                         let mono_name = format!("{tname}_{m}");
                                         if !self.mono_generated.contains(&mono_name) {
-                                            let mono = crate::types::specialize_fn(&tmpl, &mono_name, &subst);
-                                            let params: Result<Vec<_>, _> = mono.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
-                                            let ret_ty = mono.ret.as_ref().map(|r| self.resolve_type(r)).unwrap_or(Ok(Type::Void))?;
-                                            self.fns.insert(mono_name.clone(), Type::Fn(params?, Box::new(ret_ty)));
+                                            let mono = crate::types::specialize_fn(
+                                                &tmpl, &mono_name, &subst,
+                                            );
+                                            let params: Result<Vec<_>, _> = mono
+                                                .params
+                                                .iter()
+                                                .map(|p| self.resolve_type(&p.ty))
+                                                .collect();
+                                            let ret_ty = mono
+                                                .ret
+                                                .as_ref()
+                                                .map(|r| self.resolve_type(r))
+                                                .unwrap_or(Ok(Type::Void))?;
+                                            self.fns.insert(
+                                                mono_name.clone(),
+                                                Type::Fn(params?, Box::new(ret_ty)),
+                                            );
                                             self.mono_generated.insert(mono_name.clone());
                                             self.mono_fns.push(mono.clone());
                                             self.check_fn(&mono)?;
@@ -19606,8 +19827,10 @@ impl TypeChecker {
                         expected.clone()
                     } else if matches!(fexpr, Expr::String(_)) && *expected == Type::String {
                         Type::String
-                    } else if matches!(fexpr, Expr::Float(_)) && *expected == Type::Float {
-                        Type::Float
+                    } else if matches!(fexpr, Expr::Float(_))
+                        && matches!(expected, Type::Float | Type::Float32)
+                    {
+                        expected.clone()
                     } else if matches!(fexpr, Expr::Bool(_)) && *expected == Type::Bool {
                         Type::Bool
                     } else {
@@ -19669,8 +19892,10 @@ impl TypeChecker {
                         expected.clone()
                     } else if matches!(vexpr, Expr::String(_)) && *expected == Type::String {
                         Type::String
-                    } else if matches!(vexpr, Expr::Float(_)) && *expected == Type::Float {
-                        Type::Float
+                    } else if matches!(vexpr, Expr::Float(_))
+                        && matches!(expected, Type::Float | Type::Float32)
+                    {
+                        expected.clone()
                     } else if matches!(vexpr, Expr::Bool(_)) && *expected == Type::Bool {
                         Type::Bool
                     } else {
@@ -19817,10 +20042,15 @@ impl TypeChecker {
                             Type::Int
                             | Type::Int64
                             | Type::Int32
+                            | Type::Int16
                             | Type::Int8
+                            | Type::UInt64
+                            | Type::UInt32
+                            | Type::UInt16
                             | Type::Byte
                             | Type::Bool
                             | Type::Float
+                            | Type::Float32
                             | Type::String => Ok(Type::Chan(elem)),
                             Type::Named(n)
                                 if n != "ShareInt"
@@ -19926,10 +20156,15 @@ impl TypeChecker {
                             Type::Int
                             | Type::Int64
                             | Type::Int32
+                            | Type::Int16
                             | Type::Int8
+                            | Type::UInt64
+                            | Type::UInt32
+                            | Type::UInt16
                             | Type::Byte
                             | Type::String
                             | Type::Float
+                            | Type::Float32
                             | Type::Bool
                             | Type::Struct { .. }
                             | Type::Enum { .. }
@@ -20605,11 +20840,18 @@ impl TypeChecker {
     /// Handles both primitive tags and monomorphized struct names.
     fn tag_to_type_expr(&mut self, tag: &str) -> TypeExpr {
         match tag {
-            "int" | "int64" => TypeExpr::Named("int".into()),
-            "float" | "float64" => TypeExpr::Named("float".into()),
+            "int" | "int64" | "i64" => TypeExpr::Named("int".into()),
+            "int32" | "i32" => TypeExpr::Named("int32".into()),
+            "int16" | "i16" => TypeExpr::Named("int16".into()),
+            "int8" | "i8" => TypeExpr::Named("int8".into()),
+            "uint64" | "u64" => TypeExpr::Named("uint64".into()),
+            "uint32" | "u32" => TypeExpr::Named("uint32".into()),
+            "uint16" | "u16" => TypeExpr::Named("uint16".into()),
+            "float" | "float64" | "f64" => TypeExpr::Named("float".into()),
+            "float32" | "f32" => TypeExpr::Named("float32".into()),
             "bool" => TypeExpr::Named("bool".into()),
             "string" => TypeExpr::Named("string".into()),
-            "byte" => TypeExpr::Named("byte".into()),
+            "byte" | "uint8" | "u8" => TypeExpr::Named("byte".into()),
             other => {
                 // If this looks like a monomorphized generic struct (contains __),
                 // try to instantiate it first so it's available as a type.
@@ -20745,13 +20987,23 @@ impl TypeChecker {
             Type::Named(n) => n.clone(),
             _ => return,
         };
-        let Some(iface) = self.interfaces.iter().find(|i| i.name == iface_name).cloned() else {
+        let Some(iface) = self
+            .interfaces
+            .iter()
+            .find(|i| i.name == iface_name)
+            .cloned()
+        else {
             return;
         };
         // Also collect parent interface defaults.
         let mut all_methods = iface.methods.clone();
         for parent_name in &iface.parents {
-            if let Some(parent) = self.interfaces.iter().find(|d| d.name == *parent_name).cloned() {
+            if let Some(parent) = self
+                .interfaces
+                .iter()
+                .find(|d| d.name == *parent_name)
+                .cloned()
+            {
                 for m in &parent.methods {
                     if !all_methods.iter().any(|(n, _, _, _)| n == &m.0) {
                         all_methods.push(m.clone());
@@ -20788,17 +21040,20 @@ impl TypeChecker {
                 body: body.clone(),
                 exported: false,
                 is_const: false,
-                is_live: false, no_alloc: false,
+                is_live: false,
+                no_alloc: false,
                 stability: crate::ast::ApiStability::Unspecified,
                 contracts: vec![],
                 source_file: None,
             };
             if let Ok(resolved_ret) = self.resolve_type(ret) {
-                let resolved_params: Vec<Type> = std::iter::once(Ok(Type::Named(type_name.clone())))
-                    .chain(params.iter().map(|t| self.resolve_type(t)))
-                    .collect::<Result<Vec<_>, _>>()
-                    .unwrap_or_default();
-                self.fns.insert(impl_name, Type::Fn(resolved_params, Box::new(resolved_ret)));
+                let resolved_params: Vec<Type> =
+                    std::iter::once(Ok(Type::Named(type_name.clone())))
+                        .chain(params.iter().map(|t| self.resolve_type(t)))
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap_or_default();
+                self.fns
+                    .insert(impl_name, Type::Fn(resolved_params, Box::new(resolved_ret)));
             }
             self.default_method_fns.push(syn_fn);
         }
@@ -20808,14 +21063,16 @@ impl TypeChecker {
     fn type_from_mono_tag(&self, tag: &str) -> Type {
         match tag {
             "int" => Type::Int,
-            "int64" => Type::Int64,
-            "int32" => Type::Int32,
-            "int8" => Type::Int8,
-            "uint64" => Type::UInt64,
+            "int64" | "i64" => Type::Int64,
+            "int32" | "i32" => Type::Int32,
+            "int16" | "i16" => Type::Int16,
+            "int8" | "i8" => Type::Int8,
+            "uint64" | "u64" => Type::UInt64,
             "uint32" | "u32" => Type::UInt32,
             "uint16" | "u16" => Type::UInt16,
-            "byte" => Type::Byte,
-            "float" => Type::Float,
+            "byte" | "uint8" | "u8" => Type::Byte,
+            "float" | "float64" | "f64" => Type::Float,
+            "float32" | "f32" => Type::Float32,
             "bool" => Type::Bool,
             "string" => Type::String,
             "void" => Type::Void,
@@ -21078,7 +21335,12 @@ impl TypeChecker {
     /// - **Go-style implicit:** `Concrete_method` from `on Concrete { fn method… }` / free `fn Concrete_method`
     /// No-self-only interfaces are implemented by any concrete (unit dyn).
     fn implements_iface(&self, concrete: &Type, iface_name: &str) -> bool {
-        let Some(iface) = self.interfaces.iter().find(|i| i.name == iface_name).cloned() else {
+        let Some(iface) = self
+            .interfaces
+            .iter()
+            .find(|i| i.name == iface_name)
+            .cloned()
+        else {
             return false;
         };
         // Also check parent interface satisfaction.
@@ -21439,11 +21701,15 @@ impl TypeChecker {
             Type::Int
             | Type::Int64
             | Type::Int32
+            | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::UInt32
+            | Type::UInt16
             | Type::Byte
             | Type::String
-            | Type::Float => {
+            | Type::Float
+            | Type::Float32 => {
                 return Err(TypeError::new("this match is not exhaustive")
                     .hint("add a `_` arm to cover remaining values"));
             }
@@ -21645,11 +21911,15 @@ impl TypeChecker {
             Type::Int
             | Type::Int64
             | Type::Int32
+            | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::UInt32
+            | Type::UInt16
             | Type::Byte
             | Type::Bool
             | Type::Float
+            | Type::Float32
             | Type::String => true,
             Type::Named(name) => name == "ShareInt" || self.structs_named(name),
             Type::Struct { name, .. } => self.structs_named(name),
@@ -22165,10 +22435,15 @@ impl TypeChecker {
             Type::Int
             | Type::Int64
             | Type::Int32
+            | Type::Int16
             | Type::Int8
+            | Type::UInt64
+            | Type::UInt32
+            | Type::UInt16
             | Type::Byte
             | Type::Bool
             | Type::Float
+            | Type::Float32
             | Type::String => true,
             // Slices/maps with sendable elements are POD leaves (atomic RC + COW).
             Type::Array(inner) | Type::RawArray(inner) => self.is_pod_leaf_ty(inner, depth + 1),
@@ -22223,10 +22498,15 @@ impl TypeChecker {
             Type::Int
             | Type::Int64
             | Type::Int32
+            | Type::Int16
             | Type::Int8
+            | Type::UInt64
+            | Type::UInt32
+            | Type::UInt16
             | Type::Byte
             | Type::Bool
             | Type::Float
+            | Type::Float32
             | Type::String => true,
             Type::Named(n)
                 if n != "ShareInt"
@@ -22257,10 +22537,15 @@ impl TypeChecker {
             Type::Int
             | Type::Int64
             | Type::Int32
+            | Type::Int16
             | Type::Int8
+            | Type::UInt64
+            | Type::UInt32
+            | Type::UInt16
             | Type::Byte
             | Type::Bool
             | Type::Float
+            | Type::Float32
             | Type::String => true,
             Type::Named(n) => self.is_reflectable_struct(n),
             Type::Struct { name: sn, .. } => self.is_reflectable_struct(sn),
@@ -22271,7 +22556,16 @@ impl TypeChecker {
                 // Reflect maps with string or int keys and reflectable values.
                 matches!(
                     k.as_ref(),
-                    Type::String | Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::Byte
+                    Type::String
+                        | Type::Int
+                        | Type::Int64
+                        | Type::Int32
+                        | Type::Int16
+                        | Type::Int8
+                        | Type::UInt64
+                        | Type::UInt32
+                        | Type::UInt16
+                        | Type::Byte
                 ) && self.is_reflectable_ty(v)
             }
             Type::Tuple(elems) => elems.iter().all(|e| self.is_reflectable_ty(e)),
@@ -22280,16 +22574,23 @@ impl TypeChecker {
     }
 
     fn is_actor_payload(&self, ty: &Type, depth: usize) -> bool {
-        if depth > 16 { return false; }
+        if depth > 16 {
+            return false;
+        }
         match ty {
             Type::String | Type::Chan(_) => true,
             Type::Array(elem) => self.is_actor_payload(elem, depth + 1),
-            Type::Struct { fields, .. } => fields.iter().all(|(_, field)| self.is_actor_payload(field, depth + 1)),
+            Type::Struct { fields, .. } => fields
+                .iter()
+                .all(|(_, field)| self.is_actor_payload(field, depth + 1)),
             Type::Named(name) => self.types.get(name).is_some_and(|resolved| {
                 resolved != ty && self.is_actor_payload(resolved, depth + 1)
             }),
-            Type::Enum { variants, .. } => variants.iter().all(|(_, fields)|
-                fields.iter().all(|field| is_copy_type(field) || *field == Type::String)),
+            Type::Enum { variants, .. } => variants.iter().all(|(_, fields)| {
+                fields
+                    .iter()
+                    .all(|field| is_copy_type(field) || *field == Type::String)
+            }),
             _ => is_copy_type(ty),
         }
     }
@@ -22597,35 +22898,51 @@ fn is_opaque_handle(t: &Type) -> bool {
 fn is_int_family(t: &Type) -> bool {
     matches!(
         t,
-        Type::Int | Type::Int64 | Type::Int32 | Type::Int16 | Type::Int8 | Type::UInt64 | Type::UInt32 | Type::UInt16 | Type::Byte
+        Type::Int
+            | Type::Int64
+            | Type::Int32
+            | Type::Int16
+            | Type::Int8
+            | Type::UInt64
+            | Type::UInt32
+            | Type::UInt16
+            | Type::Byte
     )
 }
 
-/// Integer kinds that may be inhabited by untyped int literals (excl. uint64 for now).
+/// Scalar POD types that can be copied freely without move tracking.
 fn is_copy_type(t: &Type) -> bool {
     matches!(
         t,
         Type::Int
             | Type::Int64
             | Type::Int32
+            | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::UInt32
+            | Type::UInt16
             | Type::Byte
             | Type::Bool
             | Type::Float
+            | Type::Float32
             // Uuid/ULID: 16-byte POD — free to copy, kick, re-read (hot path).
             | Type::Uuid
-            // Strings are RC-shared: field read clones (bumps RC), not moves.
-            // Without this, reading stmt.table twice is a move error — breaks
-            // every real-world SQL dispatcher that reads parsed fields multiple times.
-            | Type::String
     )
 }
 
 fn is_literal_int_kind(t: &Type) -> bool {
     matches!(
         t,
-        Type::Int | Type::Int64 | Type::Int32 | Type::Int16 | Type::Int8 | Type::UInt64 | Type::UInt32 | Type::UInt16 | Type::Byte
+        Type::Int
+            | Type::Int64
+            | Type::Int32
+            | Type::Int16
+            | Type::Int8
+            | Type::UInt64
+            | Type::UInt32
+            | Type::UInt16
+            | Type::Byte
     )
 }
 
@@ -23407,7 +23724,9 @@ pub fn subst_type_expr(t: &TypeExpr, subst: &HashMap<String, Type>) -> TypeExpr 
         }
         TypeExpr::Array(inner) => TypeExpr::Array(Box::new(subst_type_expr(inner, subst))),
         TypeExpr::RawArray(inner) => TypeExpr::RawArray(Box::new(subst_type_expr(inner, subst))),
-        TypeExpr::FixedArray(inner, n) => TypeExpr::FixedArray(Box::new(subst_type_expr(inner, subst)), *n),
+        TypeExpr::FixedArray(inner, n) => {
+            TypeExpr::FixedArray(Box::new(subst_type_expr(inner, subst)), *n)
+        }
         TypeExpr::Map(k, v) => TypeExpr::Map(
             Box::new(subst_type_expr(k, subst)),
             Box::new(subst_type_expr(v, subst)),

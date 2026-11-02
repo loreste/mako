@@ -1,11 +1,17 @@
 #ifndef MAKO_UNICODE17_H
 #define MAKO_UNICODE17_H
 
+#ifndef MAKO_UNICODE17
+#define MAKO_UNICODE17 1
+#endif
+
 #include "mako_rt.h"
 
 #if !MAKO_UNICODE17
 #error "mako_unicode17.h requires MAKO_UNICODE17=1"
 #endif
+
+#include "mako_unicode17_data.h"
 
 typedef struct {
     uint32_t *data;

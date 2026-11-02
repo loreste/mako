@@ -8,7 +8,6 @@
  *   {{with .key}}…{{end}}
  *   {{define "name"}}…{{end}}
  *   {{template "name"}}
- *   {{/* comment *\/}}
  *   {{printf "%s" .key}}  limited: %s and one arg
  *   {{len .key}} {{upper .key}} {{lower .key}} {{html .key}}
  *
@@ -19,6 +18,7 @@
 #define MAKO_TEMPLATE_H
 
 #include "mako_rt.h"
+#include "mako_std.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

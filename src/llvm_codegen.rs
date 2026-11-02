@@ -1833,9 +1833,17 @@ fn llvm_emit_struct_clone<'ctx>(
             .into(),
             t if t.channel_clone_fn().is_some() => {
                 let ptr_ty = context.ptr_type(Default::default());
-                let clone = external_function(module, t.channel_clone_fn().unwrap(), ptr_ty.fn_type(&[ptr_ty.into()], false));
-                builder.build_call(clone, &[loaded.into()], "clone.channel").map_err(builder_error)?
-                    .try_as_basic_value().basic().ok_or_else(|| LlvmError::new("channel clone returned void"))?
+                let clone = external_function(
+                    module,
+                    t.channel_clone_fn().unwrap(),
+                    ptr_ty.fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(clone, &[loaded.into()], "clone.channel")
+                    .map_err(builder_error)?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| LlvmError::new("channel clone returned void"))?
             }
             Type::ShareInt => {
                 let ptr_ty = context.ptr_type(Default::default());
@@ -1925,7 +1933,10 @@ fn llvm_emit_struct_clone<'ctx>(
                     .basic()
                     .ok_or_else(|| LlvmError::new("struct slice clone returned void"))?
             }
-            Type::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) || vk.channel_ownership_kind() != 0 => {
+            Type::PtrSlice(vk)
+                if matches!(vk, native_ir::MapValKind::OwnedOpaque(_))
+                    || vk.channel_ownership_kind() != 0 =>
+            {
                 let ptr_ty = context.ptr_type(Default::default());
                 let i64_ty = context.i64_type();
                 let vkind: u64 = match vk {
@@ -2121,10 +2132,18 @@ fn llvm_emit_struct_drop<'ctx>(
                     .map_err(builder_error)?;
             }
             t if t.channel_drop_fn().is_some() => {
-                let loaded = builder.build_load(llvm_type(context, *field_ty), gep, "drop.channel").map_err(builder_error)?;
+                let loaded = builder
+                    .build_load(llvm_type(context, *field_ty), gep, "drop.channel")
+                    .map_err(builder_error)?;
                 let ptr_ty = context.ptr_type(Default::default());
-                let drop = external_function(module, t.channel_drop_fn().unwrap(), context.void_type().fn_type(&[ptr_ty.into()], false));
-                builder.build_call(drop, &[loaded.into()], "drop.channel.call").map_err(builder_error)?;
+                let drop = external_function(
+                    module,
+                    t.channel_drop_fn().unwrap(),
+                    context.void_type().fn_type(&[ptr_ty.into()], false),
+                );
+                builder
+                    .build_call(drop, &[loaded.into()], "drop.channel.call")
+                    .map_err(builder_error)?;
             }
             Type::ShareInt => {
                 let loaded = builder
@@ -2220,7 +2239,10 @@ fn llvm_emit_struct_drop<'ctx>(
                     )
                     .map_err(builder_error)?;
             }
-            Type::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) || vk.channel_ownership_kind() != 0 => {
+            Type::PtrSlice(vk)
+                if matches!(vk, native_ir::MapValKind::OwnedOpaque(_))
+                    || vk.channel_ownership_kind() != 0 =>
+            {
                 let loaded = builder
                     .build_load(llvm_type(context, *field_ty), gep, "drop.ptr_slice_typed")
                     .map_err(builder_error)?;

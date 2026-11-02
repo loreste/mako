@@ -513,11 +513,7 @@ impl Type {
     fn is_shared_handle(self) -> bool {
         matches!(
             self,
-            Type::Opaque
-            | Type::Builder
-            | Type::Arena
-            | Type::Nursery
-            | Type::Task
+            Type::Opaque | Type::Builder | Type::Arena | Type::Nursery | Type::Task
         )
     }
 
@@ -963,23 +959,55 @@ fn lambda_drop_helper(name: String, captures: &[(String, Type)]) -> Function {
     let mut next = 1;
     let mut instructions = Vec::new();
     for (i, (_, ty)) in captures.iter().enumerate() {
-        if !matches!(ty, Type::Str | Type::Struct(_) | Type::FnPtr) { continue; }
+        if !matches!(ty, Type::Str | Type::Struct(_) | Type::FnPtr) {
+            continue;
+        }
         let index = Value(next);
         let value = Value(next + 1);
         next += 2;
-        instructions.push(Inst::ConstInt { out: index, value: i as i64, ty: Type::I64 });
-        instructions.push(Inst::Call { out: Some(value), function: "mako_native_pack_get".into(), args: vec![pack, index], ret: Some(*ty) });
+        instructions.push(Inst::ConstInt {
+            out: index,
+            value: i as i64,
+            ty: Type::I64,
+        });
+        instructions.push(Inst::Call {
+            out: Some(value),
+            function: "mako_native_pack_get".into(),
+            args: vec![pack, index],
+            ret: Some(*ty),
+        });
         instructions.push(match ty {
             Type::Str => Inst::DropString { value },
-            Type::Struct(id) => Inst::DropStruct { value, struct_id: *id },
-            Type::FnPtr => Inst::Call { out: None, function: "mako_native_fn_release".into(), args: vec![value], ret: None },
+            Type::Struct(id) => Inst::DropStruct {
+                value,
+                struct_id: *id,
+            },
+            Type::FnPtr => Inst::Call {
+                out: None,
+                function: "mako_native_fn_release".into(),
+                args: vec![value],
+                ret: None,
+            },
             _ => unreachable!(),
         });
     }
-    instructions.push(Inst::Call { out: None, function: "mako_native_pack_free".into(), args: vec![pack], ret: None });
-    Function { name, params: vec![("pack".into(), pack, Type::I64)], ret: None,
-        blocks: vec![BasicBlock { instructions, terminator: Some(Terminator::Return(None)) }],
-        entry: BlockId(0), next_value: next }
+    instructions.push(Inst::Call {
+        out: None,
+        function: "mako_native_pack_free".into(),
+        args: vec![pack],
+        ret: None,
+    });
+    Function {
+        name,
+        params: vec![("pack".into(), pack, Type::I64)],
+        ret: None,
+        blocks: vec![BasicBlock {
+            instructions,
+            terminator: Some(Terminator::Return(None)),
+        }],
+        entry: BlockId(0),
+        next_value: next,
+    }
 }
 
 /// Registry of aggregate layouts. Named structs are resolved up front;
@@ -1304,10 +1332,13 @@ fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
                 || name == "int64"
                 || name == "int32"
                 || name == "int16"
+                || name == "i16"
                 || name == "int8"
                 || name == "uint64"
                 || name == "uint32"
+                || name == "u32"
                 || name == "uint16"
+                || name == "u16"
                 || name == "uint8"
                 || name == "byte"
                 || name == "rune" =>
@@ -1315,7 +1346,11 @@ fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
             Ok(Type::I64)
         }
         TypeExpr::Named(name) if name == "bool" => Ok(Type::I1),
-        TypeExpr::Named(name) if name == "float" || name == "float64" => Ok(Type::F64),
+        TypeExpr::Named(name)
+            if name == "float" || name == "float64" || name == "float32" || name == "f32" =>
+        {
+            Ok(Type::F64)
+        }
         // string_view is a non-owning string view; native IR models it as Str
         // (immortal/static high-bit already covers literal views).
         TypeExpr::Named(name) if name == "string" || name == "string_view" => Ok(Type::Str),
@@ -2027,11 +2062,18 @@ fn type_expr_for_tag(tag: &str) -> TypeExpr {
 fn type_expr_mono_tag(ty: &TypeExpr) -> String {
     match ty {
         TypeExpr::Named(n) => match n.as_str() {
-            "int" | "int64" => "int".into(),
-            "float" | "float64" => "float".into(),
+            "int" | "int64" | "i64" => "int".into(),
+            "int32" | "i32" => "int32".into(),
+            "int16" | "i16" => "int16".into(),
+            "int8" | "i8" => "int8".into(),
+            "uint64" | "u64" => "uint64".into(),
+            "uint32" | "u32" => "uint32".into(),
+            "uint16" | "u16" => "uint16".into(),
+            "float" | "float64" | "f64" => "float".into(),
+            "float32" | "f32" => "float32".into(),
             "bool" => "bool".into(),
             "string" => "string".into(),
-            "byte" | "uint8" => "byte".into(),
+            "byte" | "uint8" | "u8" => "byte".into(),
             other => other.to_string(),
         },
         TypeExpr::Generic(name, args) => {
@@ -2773,7 +2815,8 @@ pub fn lower_with_tests(program: &Program, test_fns: &[String]) -> Result<Module
             },
             exported: false,
             is_const: false,
-            is_live: false, no_alloc: false,
+            is_live: false,
+            no_alloc: false,
             stability: crate::ast::ApiStability::Unspecified,
             contracts: vec![],
             source_file: None,
@@ -5641,7 +5684,8 @@ impl<'a> FunctionLowerer<'a> {
             body: body_block,
             exported: false,
             is_const: false,
-            is_live: false, no_alloc: false,
+            is_live: false,
+            no_alloc: false,
             stability: crate::ast::ApiStability::Unspecified,
             contracts: vec![],
             source_file: None,
@@ -5738,11 +5782,21 @@ impl<'a> FunctionLowerer<'a> {
         });
         if has_env {
             let drop_name = format!("{name}_drop_env");
-            self.kick_stubs.as_deref_mut().ok_or_else(|| IrError::new("native IR: missing closure cleanup collector"))?
+            self.kick_stubs
+                .as_deref_mut()
+                .ok_or_else(|| IrError::new("native IR: missing closure cleanup collector"))?
                 .push(lambda_drop_helper(drop_name.clone(), &captures));
             let drop_addr = self.value();
-            self.emit(Inst::FuncAddr { out: drop_addr, function: drop_name });
-            self.emit(Inst::Call { out: None, function: "mako_native_fn_set_drop".into(), args: vec![out, drop_addr], ret: None });
+            self.emit(Inst::FuncAddr {
+                out: drop_addr,
+                function: drop_name,
+            });
+            self.emit(Inst::Call {
+                out: None,
+                function: "mako_native_fn_set_drop".into(),
+                args: vec![out, drop_addr],
+                ret: None,
+            });
         }
         Ok((out, Type::FnPtr, true))
     }
@@ -6075,8 +6129,11 @@ impl<'a> FunctionLowerer<'a> {
             }
             // By-value fn params: move fat-fn out of the local so the source is bare.
             if ty == Type::FnPtr || params[i] == Type::FnPtr {
-                let owns_local = matches!(arg, Expr::Ident(name) if self.heap_owned.get(name) == Some(&true));
-                if !owned && !owns_local { v = self.emit_clone(v, Type::FnPtr); }
+                let owns_local =
+                    matches!(arg, Expr::Ident(name) if self.heap_owned.get(name) == Some(&true));
+                if !owned && !owns_local {
+                    v = self.emit_clone(v, Type::FnPtr);
+                }
                 self.move_fnptr_local(arg);
             }
             if ty.is_consumable_header() {
@@ -6116,7 +6173,10 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![pack, idx, v],
                 ret: None,
             });
-            if owned && ty.is_heap() && !ty.is_consumable_header() && !matches!(ty, Type::Struct(_) | Type::FnPtr)
+            if owned
+                && ty.is_heap()
+                && !ty.is_consumable_header()
+                && !matches!(ty, Type::Struct(_) | Type::FnPtr)
             {
                 // Pack holds a borrow of the pointer for the join lifetime.
                 // Heap temps (struct lits, etc.) are stored in a stack local so
@@ -9143,10 +9203,13 @@ impl<'a> FunctionLowerer<'a> {
                         | "int64"
                         | "int32"
                         | "int16"
+                        | "i16"
                         | "int8"
                         | "uint64"
                         | "uint32"
+                        | "u32"
                         | "uint16"
+                        | "u16"
                         | "uint8"
                         | "byte"
                         | "rune"
@@ -9173,6 +9236,35 @@ impl<'a> FunctionLowerer<'a> {
                                         ty: Type::I64,
                                     });
                                     // Sign-extend from i8: (x ^ 0x80) - 0x80
+                                    let xored = self.value();
+                                    self.emit(Inst::Binary {
+                                        out: xored,
+                                        op: BinOp::BitXor,
+                                        left: masked,
+                                        right: sign,
+                                        ty: Type::I64,
+                                    });
+                                    let se = self.value();
+                                    self.emit(Inst::Binary {
+                                        out: se,
+                                        op: BinOp::Sub,
+                                        left: xored,
+                                        right: sign,
+                                        ty: Type::I64,
+                                    });
+                                    se
+                                }
+                                "int16" | "i16" => {
+                                    let m = self.const_int(0xffff, Type::I64);
+                                    let sign = self.const_int(0x8000, Type::I64);
+                                    let masked = self.value();
+                                    self.emit(Inst::Binary {
+                                        out: masked,
+                                        op: BinOp::BitAnd,
+                                        left: v,
+                                        right: m,
+                                        ty: Type::I64,
+                                    });
                                     let xored = self.value();
                                     self.emit(Inst::Binary {
                                         out: xored,
@@ -9232,6 +9324,30 @@ impl<'a> FunctionLowerer<'a> {
                                     });
                                     out
                                 }
+                                "uint16" | "u16" => {
+                                    let m = self.const_int(0xffff, Type::I64);
+                                    let out = self.value();
+                                    self.emit(Inst::Binary {
+                                        out,
+                                        op: BinOp::BitAnd,
+                                        left: v,
+                                        right: m,
+                                        ty: Type::I64,
+                                    });
+                                    out
+                                }
+                                "uint32" | "u32" => {
+                                    let m = self.const_int(0xffff_ffff, Type::I64);
+                                    let out = self.value();
+                                    self.emit(Inst::Binary {
+                                        out,
+                                        op: BinOp::BitAnd,
+                                        left: v,
+                                        right: m,
+                                        ty: Type::I64,
+                                    });
+                                    out
+                                }
                                 _ => v, // int/int64/uint64/rune: full width
                             };
                             return Ok((out, Type::I64, false));
@@ -9253,7 +9369,9 @@ impl<'a> FunctionLowerer<'a> {
                         }
                     }
                 }
-                if (function == "float" || function == "float64") && args.len() == 1 {
+                if matches!(function.as_str(), "float" | "float64" | "float32" | "f32")
+                    && args.len() == 1
+                {
                     let (v, ty, owned) = self.lower_expr(&args[0])?;
                     if owned {
                         return Err(IrError::new("native IR: float cast of owned value"));
@@ -32884,7 +33002,10 @@ impl<'a> FunctionLowerer<'a> {
     /// one level deep so `map[WrapOpt{o: Some(1)}]` matches equal keys.
     fn struct_key_meta(&mut self, sid: u32) -> (Value, Value, Value, Value, Value) {
         let nfields = self.structs.field_count(sid) as i64;
-        debug_assert!(nfields <= 62, "struct_key_meta called with >62 field struct");
+        debug_assert!(
+            nfields <= 62,
+            "struct_key_meta called with >62 field struct"
+        );
         let mut str_mask: i64 = 0;
         let mut nest_mask: i64 = 0;
         let mut nest_nf_pack: i64 = 0;
@@ -32936,7 +33057,9 @@ impl<'a> FunctionLowerer<'a> {
             | MapValKind::StructKeyOwnedOpaque(_, OpaqueKind::Interface) => (7, None),
             MapValKind::OwnedOpaque(OpaqueKind::HttpRequest)
             | MapValKind::StructKeyOwnedOpaque(_, OpaqueKind::HttpRequest) => (8, None),
-            channel if channel.channel_ownership_kind() != 0 => (channel.channel_ownership_kind(), None),
+            channel if channel.channel_ownership_kind() != 0 => {
+                (channel.channel_ownership_kind(), None)
+            }
             _ => (0, None),
         };
         let kind = self.const_int(drop_kind, Type::I64);
@@ -33578,10 +33701,7 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![value],
                 ret: Some(ty),
             }),
-            Type::Arena
-            | Type::Nursery
-            | Type::Opaque
-            | Type::Task => {
+            Type::Arena | Type::Nursery | Type::Opaque | Type::Task => {
                 // Handles are not deep-cloned; share the pointer (caller owns).
                 return value;
             }
@@ -33613,7 +33733,9 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![value],
                 ret: Some(ty),
             }),
-            Type::PtrSlice(vk) if matches!(vk, MapValKind::OwnedOpaque(_)) || vk.channel_ownership_kind() != 0 => {
+            Type::PtrSlice(vk)
+                if matches!(vk, MapValKind::OwnedOpaque(_)) || vk.channel_ownership_kind() != 0 =>
+            {
                 let (vkind, vnf, vsm, vnm, vnfp, vnsp) = self.struct_map_value_meta(vk);
                 self.emit(Inst::Call {
                     out: Some(out),

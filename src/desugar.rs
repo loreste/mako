@@ -233,7 +233,10 @@ fn expand_on(on: OnDef) -> Vec<Item> {
     } else {
         TypeExpr::Generic(
             on.ty.clone(),
-            on.type_params.iter().map(|t| TypeExpr::Named(t.clone())).collect(),
+            on.type_params
+                .iter()
+                .map(|t| TypeExpr::Named(t.clone()))
+                .collect(),
         )
     };
     for mut method in on.methods {
@@ -308,7 +311,8 @@ fn expand_json_derive(
         },
         exported: s.exported,
         is_const: false,
-        is_live: false, no_alloc: false,
+        is_live: false,
+        no_alloc: false,
         stability: crate::ast::ApiStability::Unspecified,
         contracts: vec![],
         source_file: None,
@@ -342,7 +346,8 @@ fn expand_json_derive(
             },
             exported: s.exported,
             is_const: false,
-            is_live: false, no_alloc: false,
+            is_live: false,
+            no_alloc: false,
             stability: crate::ast::ApiStability::Unspecified,
             contracts: vec![],
             source_file: None,
@@ -1059,7 +1064,7 @@ fn rewrite_return_in_expr(expr: &mut Expr) {
             }
         }
         // A closure has its own return target, outside the receive handler.
-        Expr::Lambda { .. } => {},
+        Expr::Lambda { .. } => {}
         Expr::Call { callee, args } => {
             rewrite_return_in_expr(callee);
             for a in args {
@@ -1472,19 +1477,40 @@ fn close_mailbox(name: &str) -> Stmt {
 fn actor_send_body(name: &str, mailbox: Expr, message: Expr, nonblocking: bool) -> Vec<Stmt> {
     vec![
         Stmt::Let {
-            name: "__sent".into(), mutable: false, ownership: Ownership::None, ty: None,
+            name: "__sent".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
             init: Expr::Call {
-                callee: Box::new(Expr::Ident(if nonblocking { "actor_try_send" } else { "actor_send" }.into())),
+                callee: Box::new(Expr::Ident(
+                    if nonblocking {
+                        "actor_try_send"
+                    } else {
+                        "actor_send"
+                    }
+                    .into(),
+                )),
                 args: vec![mailbox, message.clone()],
             },
         },
         Stmt::If {
             init: None,
-            cond: Expr::Binary { op: BinOp::Eq, left: Box::new(Expr::Ident("__sent".into())),
-                right: Box::new(if nonblocking { Expr::Int(0) } else { Expr::Bool(false) }) },
-            then_block: Block { stmts: vec![Stmt::Expr(Expr::Call {
-                callee: Box::new(Expr::Ident(format!("{name}_drop_message"))), args: vec![message],
-            })], source_lines: Box::default() },
+            cond: Expr::Binary {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Ident("__sent".into())),
+                right: Box::new(if nonblocking {
+                    Expr::Int(0)
+                } else {
+                    Expr::Bool(false)
+                }),
+            },
+            then_block: Block {
+                stmts: vec![Stmt::Expr(Expr::Call {
+                    callee: Box::new(Expr::Ident(format!("{name}_drop_message"))),
+                    args: vec![message],
+                })],
+                source_lines: Box::default(),
+            },
             else_block: None,
         },
         Stmt::Return(Some(Expr::Ident("__sent".into()))),
@@ -1495,29 +1521,65 @@ fn actor_drop_message(name: &str, envelopes: &[(i64, String)]) -> Item {
     let mut body = Vec::new();
     if !envelopes.is_empty() {
         let mut drops = vec![Stmt::Let {
-            name: "__drop_tag".into(), mutable: false, ownership: Ownership::None, ty: None,
-            init: Expr::Call { callee: Box::new(Expr::Ident("actor_msg_tag".into())),
-                args: vec![Expr::Ident("__msg".into())] },
+            name: "__drop_tag".into(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: Expr::Call {
+                callee: Box::new(Expr::Ident("actor_msg_tag".into())),
+                args: vec![Expr::Ident("__msg".into())],
+            },
         }];
         for (tag, env) in envelopes {
             drops.push(Stmt::If {
                 init: None,
-                cond: Expr::Binary { op: BinOp::Eq, left: Box::new(Expr::Ident("__drop_tag".into())), right: Box::new(Expr::Int(*tag)) },
-                then_block: Block { stmts: vec![Stmt::Let {
-                    name: "__dropped_env".into(), mutable: false, ownership: Ownership::None,
-                    ty: Some(TypeExpr::Named(env.clone())),
-                    init: Expr::Call { callee: Box::new(Expr::Ident("actor_unbox_payload".into())), args: vec![Expr::Ident("__msg".into())] },
-                }], source_lines: Box::default() }, else_block: None,
+                cond: Expr::Binary {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Ident("__drop_tag".into())),
+                    right: Box::new(Expr::Int(*tag)),
+                },
+                then_block: Block {
+                    stmts: vec![Stmt::Let {
+                        name: "__dropped_env".into(),
+                        mutable: false,
+                        ownership: Ownership::None,
+                        ty: Some(TypeExpr::Named(env.clone())),
+                        init: Expr::Call {
+                            callee: Box::new(Expr::Ident("actor_unbox_payload".into())),
+                            args: vec![Expr::Ident("__msg".into())],
+                        },
+                    }],
+                    source_lines: Box::default(),
+                },
+                else_block: None,
             });
         }
         body.push(Stmt::If {
             init: None,
-            cond: Expr::Binary { op: BinOp::Gt, left: Box::new(Expr::Ident("__msg".into())), right: Box::new(Expr::Int(0)) },
-            then_block: Block { stmts: drops, source_lines: Box::default() }, else_block: None,
+            cond: Expr::Binary {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Ident("__msg".into())),
+                right: Box::new(Expr::Int(0)),
+            },
+            then_block: Block {
+                stmts: drops,
+                source_lines: Box::default(),
+            },
+            else_block: None,
         });
     }
     body.push(Stmt::Return(None));
-    actor_fn(format!("{name}_drop_message"), vec![Param { name: "__msg".into(), ty: TypeExpr::Named("int".into()), mutable: false, variadic: false }], None, body)
+    actor_fn(
+        format!("{name}_drop_message"),
+        vec![Param {
+            name: "__msg".into(),
+            ty: TypeExpr::Named("int".into()),
+            mutable: false,
+            variadic: false,
+        }],
+        None,
+        body,
+    )
 }
 
 fn mailbox_drain_named(mbox: &str, envelopes: &[(i64, String)]) -> Vec<Stmt> {
@@ -1577,9 +1639,11 @@ fn mailbox_drain_named(mbox: &str, envelopes: &[(i64, String)]) -> Vec<Stmt> {
     for (tag, env_name) in envelopes {
         drain_stmts.push(Stmt::If {
             init: None,
-            cond: actor_binary(BinOp::And,
+            cond: actor_binary(
+                BinOp::And,
                 actor_binary(BinOp::Gt, Expr::Ident(dm.clone()), Expr::Int(0)),
-                actor_binary(BinOp::Eq, Expr::Ident(dtag.clone()), Expr::Int(*tag))),
+                actor_binary(BinOp::Eq, Expr::Ident(dtag.clone()), Expr::Int(*tag)),
+            ),
             then_block: Block {
                 stmts: vec![Stmt::Let {
                     name: denv.clone(),
@@ -1668,7 +1732,8 @@ fn actor_fn(name: String, params: Vec<Param>, ret: Option<TypeExpr>, stmts: Vec<
         },
         exported: false,
         is_const: false,
-        is_live: false, no_alloc: false,
+        is_live: false,
+        no_alloc: false,
         stability: crate::ast::ApiStability::Unspecified,
         contracts: vec![],
         source_file: None,
@@ -1790,9 +1855,15 @@ fn expand_actor_ports(
                 },
             ],
             Some(TypeExpr::Named("bool".into())),
-            actor_send_body(name, Expr::Field {
-                base: Box::new(Expr::Ident("__h".into())), field: p.clone(),
-            }, Expr::Ident("__msg".into()), false),
+            actor_send_body(
+                name,
+                Expr::Field {
+                    base: Box::new(Expr::Ident("__h".into())),
+                    field: p.clone(),
+                },
+                Expr::Ident("__msg".into()),
+                false,
+            ),
         ));
     }
     for arm in &actor.receives {
@@ -1955,8 +2026,13 @@ fn expand_actor_ports(
     let mut while_body: Vec<Stmt> = Vec::new();
     for p in port_order {
         let got = format!("__got_{p}");
-        while_body.push(Stmt::Let { name: got.clone(), mutable: false, ownership: Ownership::None,
-            ty: None, init: actor_batch_call("actor_try_recv", vec![Expr::Ident(p.clone())]) });
+        while_body.push(Stmt::Let {
+            name: got.clone(),
+            mutable: false,
+            ownership: Ownership::None,
+            ty: None,
+            init: actor_batch_call("actor_try_recv", vec![Expr::Ident(p.clone())]),
+        });
         let mut then_stmts = vec![Stmt::Let {
             name: "__m".into(),
             mutable: false,
@@ -2275,10 +2351,14 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
                 }],
                 Expr::Call {
                     callee: Box::new(Expr::Ident("actor_pack".into())),
-                    args: vec![Expr::Int(tag),
+                    args: vec![
+                        Expr::Int(tag),
                         if matches!(pty, TypeExpr::Named(n) if n == "bool") {
                             Expr::Int(0) // Boolean constructor emits explicit 0/1 branches.
-                        } else { Expr::Ident(pname.clone()) }],
+                        } else {
+                            Expr::Ident(pname.clone())
+                        },
+                    ],
                 },
             )
         } else {
@@ -2311,17 +2391,24 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
             },
             exported: false,
             is_const: false,
-            is_live: false, no_alloc: false,
+            is_live: false,
+            no_alloc: false,
             stability: crate::ast::ApiStability::Unspecified,
             contracts: vec![],
             source_file: None,
         }));
     }
 
-    let mut all_envelopes: Vec<(i64, String)> = actor.receives.iter().enumerate()
+    let mut all_envelopes: Vec<(i64, String)> = actor
+        .receives
+        .iter()
+        .enumerate()
         .filter(|(_, arm)| arm_needs_envelope(arm))
-        .map(|(i, arm)| ((i + 1) as i64, format!("{name}_{}_Env", arm.message))).collect();
-    if has_ctor { all_envelopes.push((CTOR_TAG, ctor_env_name.clone())); }
+        .map(|(i, arm)| ((i + 1) as i64, format!("{name}_{}_Env", arm.message)))
+        .collect();
+    if has_ctor {
+        all_envelopes.push((CTOR_TAG, ctor_env_name.clone()));
+    }
     items.push(actor_drop_message(name, &all_envelopes));
 
     let mut port_order: Vec<String> = Vec::new();
@@ -2406,7 +2493,8 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
         exported: false,
         is_const: false,
-        is_live: false, no_alloc: false,
+        is_live: false,
+        no_alloc: false,
         stability: crate::ast::ApiStability::Unspecified,
         contracts: vec![],
         source_file: None,
@@ -2462,7 +2550,8 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
         exported: false,
         is_const: false,
-        is_live: false, no_alloc: false,
+        is_live: false,
+        no_alloc: false,
         stability: crate::ast::ApiStability::Unspecified,
         contracts: vec![],
         source_file: None,
@@ -2489,12 +2578,18 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         ],
         ret: Some(TypeExpr::Named("bool".into())),
         body: Block {
-            stmts: actor_send_body(name, Expr::Ident("__mbox".into()), Expr::Ident("__tag".into()), false),
+            stmts: actor_send_body(
+                name,
+                Expr::Ident("__mbox".into()),
+                Expr::Ident("__tag".into()),
+                false,
+            ),
             source_lines: Box::default(),
         },
         exported: false,
         is_const: false,
-        is_live: false, no_alloc: false,
+        is_live: false,
+        no_alloc: false,
         stability: crate::ast::ApiStability::Unspecified,
         contracts: vec![],
         source_file: None,
@@ -2510,10 +2605,30 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         }
     }
 
-    items.push(actor_fn(format!("{name}_try_send"), vec![
-        Param { name: "__mbox".into(), ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]), mutable: false, variadic: false },
-        Param { name: "__msg".into(), ty: TypeExpr::Named("int".into()), mutable: false, variadic: false },
-    ], Some(TypeExpr::Named("int".into())), actor_send_body(name, Expr::Ident("__mbox".into()), Expr::Ident("__msg".into()), true)));
+    items.push(actor_fn(
+        format!("{name}_try_send"),
+        vec![
+            Param {
+                name: "__mbox".into(),
+                ty: TypeExpr::Generic("chan".into(), vec![TypeExpr::Named("int".into())]),
+                mutable: false,
+                variadic: false,
+            },
+            Param {
+                name: "__msg".into(),
+                ty: TypeExpr::Named("int".into()),
+                mutable: false,
+                variadic: false,
+            },
+        ],
+        Some(TypeExpr::Named("int".into())),
+        actor_send_body(
+            name,
+            Expr::Ident("__mbox".into()),
+            Expr::Ident("__msg".into()),
+            true,
+        ),
+    ));
 
     // Session_loop(mbox) — message dispatch (+ optional state)
     let mut loop_stmts: Vec<Stmt> = vec![Stmt::Let {
@@ -2820,7 +2935,8 @@ fn expand_actor(actor: ActorDef) -> Vec<Item> {
         },
         exported: false,
         is_const: false,
-        is_live: false, no_alloc: false,
+        is_live: false,
+        no_alloc: false,
         stability: crate::ast::ApiStability::Unspecified,
         contracts: vec![],
         source_file: None,
@@ -2900,15 +3016,24 @@ fn lower_fixed_array_ty(ty: &mut TypeExpr) {
         }
         TypeExpr::Array(inner) | TypeExpr::RawArray(inner) => lower_fixed_array_ty(inner),
         TypeExpr::Generic(_, args) => {
-            for a in args { lower_fixed_array_ty(a); }
+            for a in args {
+                lower_fixed_array_ty(a);
+            }
         }
-        TypeExpr::Map(k, v) => { lower_fixed_array_ty(k); lower_fixed_array_ty(v); }
+        TypeExpr::Map(k, v) => {
+            lower_fixed_array_ty(k);
+            lower_fixed_array_ty(v);
+        }
         TypeExpr::Fn(params, ret) => {
-            for p in params { lower_fixed_array_ty(p); }
+            for p in params {
+                lower_fixed_array_ty(p);
+            }
             lower_fixed_array_ty(ret);
         }
         TypeExpr::Tuple(elems) => {
-            for e in elems { lower_fixed_array_ty(e); }
+            for e in elems {
+                lower_fixed_array_ty(e);
+            }
         }
         TypeExpr::Named(_) => {}
     }
@@ -2923,14 +3048,24 @@ fn lower_fixed_arrays_block(block: &mut Block) {
 fn lower_fixed_arrays_stmt(stmt: &mut Stmt) {
     match stmt {
         Stmt::Let { ty, .. } => {
-            if let Some(t) = ty { lower_fixed_array_ty(t); }
+            if let Some(t) = ty {
+                lower_fixed_array_ty(t);
+            }
         }
-        Stmt::If { then_block, else_block, .. } => {
+        Stmt::If {
+            then_block,
+            else_block,
+            ..
+        } => {
             lower_fixed_arrays_block(then_block);
-            if let Some(eb) = else_block { lower_fixed_arrays_block(eb); }
+            if let Some(eb) = else_block {
+                lower_fixed_arrays_block(eb);
+            }
         }
-        Stmt::While { body, .. } | Stmt::For { body, .. }
-        | Stmt::Defer { body } | Stmt::Unsafe { body } => {
+        Stmt::While { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Defer { body }
+        | Stmt::Unsafe { body } => {
             lower_fixed_arrays_block(body);
         }
         _ => {}

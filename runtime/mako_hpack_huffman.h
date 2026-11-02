@@ -2,6 +2,7 @@
 #ifndef MAKO_HPACK_HUFFMAN_H
 #define MAKO_HPACK_HUFFMAN_H
 
+#include "mako_rt.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>

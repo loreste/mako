@@ -7,6 +7,9 @@
 #ifndef MAKO_RT_H
 #include "mako_rt.h"
 #endif
+#ifndef MAKO_STD_H
+#include "mako_std.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {

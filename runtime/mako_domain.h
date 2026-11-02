@@ -5,6 +5,8 @@
 #define MAKO_DOMAIN_H
 
 #include "mako_dio.h"
+#include "mako_trace.h"
+#include "mako_http.h"
 #include <math.h>
 
 #ifdef __cplusplus

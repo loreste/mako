@@ -1917,7 +1917,8 @@ fn emit_struct_clone(
                 fb.inst_results(call)[0]
             }
             t if t.channel_clone_fn().is_some() => {
-                let call = call_runtime_fn(fb, module, t.channel_clone_fn().unwrap(), &[loaded], true)?;
+                let call =
+                    call_runtime_fn(fb, module, t.channel_clone_fn().unwrap(), &[loaded], true)?;
                 fb.inst_results(call)[0]
             }
             IrType::ShareInt => {
@@ -1990,7 +1991,10 @@ fn emit_struct_clone(
                 )?;
                 fb.inst_results(call)[0]
             }
-            IrType::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) || vk.channel_ownership_kind() != 0 => {
+            IrType::PtrSlice(vk)
+                if matches!(vk, native_ir::MapValKind::OwnedOpaque(_))
+                    || vk.channel_ownership_kind() != 0 =>
+            {
                 let vkind: i64 = match vk {
                     native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::Interface) => 7,
                     native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::HttpRequest) => 8,
@@ -2150,7 +2154,10 @@ fn emit_struct_drop(
                     false,
                 )?;
             }
-            IrType::PtrSlice(vk) if matches!(vk, native_ir::MapValKind::OwnedOpaque(_)) || vk.channel_ownership_kind() != 0 => {
+            IrType::PtrSlice(vk)
+                if matches!(vk, native_ir::MapValKind::OwnedOpaque(_))
+                    || vk.channel_ownership_kind() != 0 =>
+            {
                 let vkind: i64 = match vk {
                     native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::Interface) => 7,
                     native_ir::MapValKind::OwnedOpaque(native_ir::OpaqueKind::HttpRequest) => 8,
@@ -5625,7 +5632,8 @@ mod tests {
             body,
             exported: false,
             is_const: false,
-            is_live: false, no_alloc: false,
+            is_live: false,
+            no_alloc: false,
             stability: ApiStability::Unspecified,
             contracts: vec![],
             source_file: None,
@@ -5682,7 +5690,8 @@ mod tests {
             },
             exported: false,
             is_const: false,
-            is_live: false, no_alloc: false,
+            is_live: false,
+            no_alloc: false,
             stability: ApiStability::Unspecified,
             contracts: vec![],
             source_file: None,

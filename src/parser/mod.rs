@@ -256,7 +256,10 @@ impl Parser {
         };
         // `thread_local let name: type = init`
         if matches!(self.peek_kind(), TokenKind::Ident(ref s) if s == "thread_local")
-            && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::Let))
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokenKind::Let)
+            )
         {
             self.bump(); // thread_local
             self.bump(); // let
@@ -864,7 +867,12 @@ impl Parser {
             }
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(InterfaceDef { name, parents, assoc_types, methods })
+        Ok(InterfaceDef {
+            name,
+            parents,
+            assoc_types,
+            methods,
+        })
     }
 
     fn parse_extern_c(&mut self) -> Result<ExternCDef, ParseError> {
@@ -1348,7 +1356,10 @@ impl Parser {
             if matches!(self.peek_kind(), TokenKind::Semicolon) {
                 self.bump();
                 let size = match self.peek_kind().clone() {
-                    TokenKind::Int(n) => { self.bump(); n as usize }
+                    TokenKind::Int(n) => {
+                        self.bump();
+                        n as usize
+                    }
                     _ => return Err(self.err("expected integer size for fixed array".into())),
                 };
                 self.expect(TokenKind::RBracket)?;
@@ -3656,11 +3667,18 @@ fn incdec_binop(kind: &TokenKind) -> Option<BinOp> {
 fn type_expr_mono_tag(t: &TypeExpr) -> String {
     match t {
         TypeExpr::Named(n) => match n.as_str() {
-            "int" | "int64" => "int".into(),
-            "float" | "float64" => "float".into(),
+            "int" | "int64" | "i64" => "int".into(),
+            "int32" | "i32" => "int32".into(),
+            "int16" | "i16" => "int16".into(),
+            "int8" | "i8" => "int8".into(),
+            "uint64" | "u64" => "uint64".into(),
+            "uint32" | "u32" => "uint32".into(),
+            "uint16" | "u16" => "uint16".into(),
+            "float" | "float64" | "f64" => "float".into(),
+            "float32" | "f32" => "float32".into(),
             "bool" => "bool".into(),
             "string" => "string".into(),
-            "byte" => "byte".into(),
+            "byte" | "uint8" | "u8" => "byte".into(),
             other => other.to_string(),
         },
         TypeExpr::Array(inner) => format!("arr_{}", type_expr_mono_tag(inner)),

@@ -2,6 +2,7 @@
 #ifndef MAKO_WS_H
 #define MAKO_WS_H
 
+#include "mako_net.h"
 #include "mako_http.h"
 #include <stdint.h>
 #include <errno.h>

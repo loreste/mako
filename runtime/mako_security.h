@@ -1,6 +1,10 @@
 /* Mako security helpers — secrets, constant-time compare, header validation.
  * Included from mako_rt.h / mako_http.h / mako_std.h as needed.
  */
+#ifndef MAKO_RT_H
+#include "mako_rt.h"
+#endif
+
 #ifndef MAKO_SECURITY_H
 #define MAKO_SECURITY_H
 

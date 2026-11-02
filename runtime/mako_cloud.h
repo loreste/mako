@@ -5,6 +5,7 @@
 #define MAKO_CLOUD_H
 
 #include "mako_rt.h"
+#include "mako_std.h"
 #include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>

@@ -47,13 +47,19 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
 
     // Generic monomorphizations: if `show` is reachable, `show__Dog` is too.
     // Struct method pattern: `Wrapper_show[T]` monomorphizes to `Wrapper__Dog_show`.
-    let generic_templates: Vec<&FnDef> = program.items.iter().filter_map(|item| match item {
-        Item::Fn(f) if !f.type_params.is_empty() && reachable_fns.contains(&f.name) => Some(f),
-        _ => None,
-    }).collect();
+    let generic_templates: Vec<&FnDef> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Fn(f) if !f.type_params.is_empty() && reachable_fns.contains(&f.name) => Some(f),
+            _ => None,
+        })
+        .collect();
     for item in &program.items {
         if let Item::Fn(f) = item {
-            if reachable_fns.contains(&f.name) { continue; }
+            if reachable_fns.contains(&f.name) {
+                continue;
+            }
             for tmpl in &generic_templates {
                 // Regular: show__Dog matches show__*
                 if f.name.starts_with(&format!("{}__", tmpl.name)) {
@@ -116,10 +122,14 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
     // MakoIntArray).  Fixed-point loop handles arbitrary nesting depth.
     {
         let struct_fields: std::collections::HashMap<&str, &[(String, TypeExpr, Option<Expr>)]> =
-            program.items.iter().filter_map(|item| match item {
-                Item::Struct(s) => Some((s.name.as_str(), s.fields.as_slice())),
-                _ => None,
-            }).collect();
+            program
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Struct(s) => Some((s.name.as_str(), s.fields.as_slice())),
+                    _ => None,
+                })
+                .collect();
         loop {
             let mut added = false;
             let snapshot: Vec<String> = reachable_types.iter().cloned().collect();
@@ -147,18 +157,22 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
     // keep all `Dog_*` / `Wrapper__Dog_*` fns and BFS-walk their bodies so
     // transitive deps (e.g. methods called from default bodies) survive.
     {
-        let type_prefixes: Vec<String> = program.items.iter().filter_map(|item| match item {
-            Item::Struct(s) if reachable_types.contains(&s.name) => {
-                Some(format!("{}_", s.name))
-            }
-            Item::Enum(e) if reachable_types.contains(&e.name) => {
-                Some(format!("{}_", e.name))
-            }
-            _ => None,
-        }).collect();
+        let type_prefixes: Vec<String> = program
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Struct(s) if reachable_types.contains(&s.name) => {
+                    Some(format!("{}_", s.name))
+                }
+                Item::Enum(e) if reachable_types.contains(&e.name) => Some(format!("{}_", e.name)),
+                _ => None,
+            })
+            .collect();
         for item in &program.items {
             if let Item::Fn(f) = item {
-                if reachable_fns.contains(&f.name) { continue; }
+                if reachable_fns.contains(&f.name) {
+                    continue;
+                }
                 if type_prefixes.iter().any(|p| f.name.starts_with(p)) {
                     reachable_fns.insert(f.name.clone());
                     collect_fn_refs(f, &mut queue, &mut reachable_types);
@@ -166,19 +180,25 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
             }
         }
         while let Some(name) = queue.pop() {
-            if !reachable_fns.insert(name.clone()) { continue; }
+            if !reachable_fns.insert(name.clone()) {
+                continue;
+            }
             if let Some(f) = fn_map.get(&name) {
                 collect_fn_refs(f, &mut queue, &mut reachable_types);
             }
         }
     }
 
-    let declared_types: HashSet<&str> = program.items.iter().filter_map(|item| match item {
-        Item::Struct(s) => Some(s.name.as_str()),
-        Item::Enum(e) => Some(e.name.as_str()),
-        Item::On(on) => Some(on.ty.as_str()),
-        _ => None,
-    }).collect();
+    let declared_types: HashSet<&str> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(s) => Some(s.name.as_str()),
+            Item::Enum(e) => Some(e.name.as_str()),
+            Item::On(on) => Some(on.ty.as_str()),
+            _ => None,
+        })
+        .collect();
 
     // Collect method names (bare names like "describe", "push") so we can
     // keep all `Type_method` implementations when the method is called.
@@ -1116,8 +1136,14 @@ fn main() { let item = lib__Named_Type { value: 42 }; print_int(item.describe())
         let tokens = Lexer::new(source).tokenize().expect("lex");
         let program = Parser::new(tokens).parse().expect("parse");
         let kept = eliminate(&program, &["main".into()]);
-        assert!(kept.items.iter().any(|item| matches!(item, Item::Fn(f) if f.name == "lib__Named_Type_describe")));
-        assert!(!kept.items.iter().any(|item| matches!(item, Item::Fn(f) if f.name == "Unrelated_helper_describe")));
+        assert!(kept
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Fn(f) if f.name == "lib__Named_Type_describe")));
+        assert!(!kept
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Fn(f) if f.name == "Unrelated_helper_describe")));
     }
 
     #[test]

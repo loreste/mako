@@ -2,6 +2,7 @@
 #ifndef MAKO_TLS_H
 #define MAKO_TLS_H
 
+#include "mako_std.h"
 #include "mako_http.h"
 #include <signal.h>
 

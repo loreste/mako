@@ -285,7 +285,7 @@ static inline void mako_sip_view_clear(void) {
 
 /* Locate nth header value as contiguous first-line slice (after ':' LWS, before CRLF).
  * Folded continuations are NOT included (use sip_header_n for full owned fold).
- * Returns 1 and sets *out_p/*out_n; 0 if missing. Zero malloc. */
+ * Returns 1 and sets *out_p / *out_n; 0 if missing. Zero malloc. */
 static inline int mako_sip_header_locate_n(
     MakoString msg, MakoString name, int64_t idx, const char **out_p, size_t *out_n
 ) {

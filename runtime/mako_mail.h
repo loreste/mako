@@ -10,6 +10,7 @@
 #define MAKO_MAIL_H
 
 #include "mako_rt.h"
+#include "mako_std.h"
 #include "mako_net.h"
 #include <stdio.h>
 #include <stdlib.h>

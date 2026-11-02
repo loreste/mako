@@ -1012,7 +1012,11 @@ pub fn run_doc(path: &Path, out_dir: &Path) -> Result<(), ()> {
                     });
                     md.push_str("\n```\n\n");
                 }
-                Item::Actor(_) | Item::ExternC(_) | Item::On(_) | Item::Package { .. } | Item::ThreadLocal { .. } => {}
+                Item::Actor(_)
+                | Item::ExternC(_)
+                | Item::On(_)
+                | Item::Package { .. }
+                | Item::ThreadLocal { .. } => {}
             }
         }
         let out = out_dir.join(format!("{stem}.md"));

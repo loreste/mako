@@ -903,13 +903,26 @@ impl Codegen {
             TypeExpr::Named(n)
                 if matches!(
                     n.as_str(),
-                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "int16" | "i16"
+                    "int"
+                        | "int64"
+                        | "int32"
+                        | "int8"
+                        | "byte"
+                        | "uint64"
+                        | "uint32"
+                        | "u32"
+                        | "uint16"
+                        | "u16"
+                        | "int16"
+                        | "i16"
                 ) =>
             {
                 "i".to_string()
             }
             TypeExpr::Named(n) if n == "string" => "s".to_string(),
-            TypeExpr::Named(n) if n == "float" || n == "float64" => "f".to_string(),
+            TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "float32" | "f32") => {
+                "f".to_string()
+            }
             TypeExpr::Named(n) if n == "bool" => "b".to_string(),
             TypeExpr::Named(n) if self.structs.contains_key(n) || self.enums.contains_key(n) => {
                 format!("k:{n}")
@@ -927,7 +940,18 @@ impl Codegen {
             TypeExpr::Named(n)
                 if matches!(
                     n.as_str(),
-                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "int16" | "i16"
+                    "int"
+                        | "int64"
+                        | "int32"
+                        | "int8"
+                        | "byte"
+                        | "uint64"
+                        | "uint32"
+                        | "u32"
+                        | "uint16"
+                        | "u16"
+                        | "int16"
+                        | "i16"
                 ) =>
             {
                 if named_key {
@@ -944,7 +968,7 @@ impl Codegen {
                     "string".into()
                 }
             }
-            TypeExpr::Named(n) if n == "float" || n == "float64" => {
+            TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "float32" | "f32") => {
                 if named_key {
                     "f".into()
                 } else {
@@ -975,13 +999,28 @@ impl Codegen {
                     TypeExpr::Named(n)
                         if matches!(
                             n.as_str(),
-                            "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "int16" | "i16"
+                            "int"
+                                | "int64"
+                                | "int32"
+                                | "int8"
+                                | "byte"
+                                | "uint64"
+                                | "uint32"
+                                | "u32"
+                                | "uint16"
+                                | "u16"
+                                | "int16"
+                                | "i16"
                         ) =>
                     {
                         "int".into()
                     }
                     TypeExpr::Named(n) if n == "string" => "string".into(),
-                    TypeExpr::Named(n) if n == "float" || n == "float64" => "float".into(),
+                    TypeExpr::Named(n)
+                        if matches!(n.as_str(), "float" | "float64" | "float32" | "f32") =>
+                    {
+                        "float".into()
+                    }
                     TypeExpr::Named(n) if n == "bool" => "bool".into(),
                     TypeExpr::Named(n)
                         if self.structs.contains_key(n) || self.enums.contains_key(n) =>
@@ -1042,18 +1081,35 @@ impl Codegen {
     fn value_payload_kind(ty: &TypeExpr) -> &'static str {
         match ty {
             TypeExpr::Named(t) if t == "string" => "string",
-            TypeExpr::Named(t) if t == "float" || t == "float64" => "float",
+            TypeExpr::Named(t) if matches!(t.as_str(), "float" | "float64" | "float32" | "f32") => {
+                "float"
+            }
             TypeExpr::Generic(n, _) if n == "Option" => "option",
             TypeExpr::Generic(n, _) if n == "Result" => "result",
             TypeExpr::Generic(n, args) if n == "chan" && !args.is_empty() => {
                 match &args[0] {
                     TypeExpr::Named(t) if t == "string" => "chan_string",
-                    TypeExpr::Named(t) if t == "float" || t == "float64" => "chan_float",
+                    TypeExpr::Named(t)
+                        if matches!(t.as_str(), "float" | "float64" | "float32" | "f32") =>
+                    {
+                        "chan_float"
+                    }
                     TypeExpr::Named(t) if t == "bool" => "chan_bool",
                     TypeExpr::Named(t)
                         if matches!(
                             t.as_str(),
-                            "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "int16" | "i16"
+                            "int"
+                                | "int64"
+                                | "int32"
+                                | "int8"
+                                | "byte"
+                                | "uint64"
+                                | "uint32"
+                                | "u32"
+                                | "uint16"
+                                | "u16"
+                                | "int16"
+                                | "i16"
                         ) =>
                     {
                         "chan_int"
@@ -1066,11 +1122,27 @@ impl Codegen {
             }
             TypeExpr::Array(inner) => match inner.as_ref() {
                 TypeExpr::Named(n) if n == "string" => "slice_str",
-                TypeExpr::Named(n) if n == "float" || n == "float64" => "slice_float",
+                TypeExpr::Named(n)
+                    if matches!(n.as_str(), "float" | "float64" | "float32" | "f32") =>
+                {
+                    "slice_float"
+                }
                 TypeExpr::Named(n)
                     if matches!(
                         n.as_str(),
-                        "int" | "int64" | "int32" | "int8" | "byte" | "bool" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "int16" | "i16"
+                        "int"
+                            | "int64"
+                            | "int32"
+                            | "int8"
+                            | "byte"
+                            | "bool"
+                            | "uint64"
+                            | "uint32"
+                            | "u32"
+                            | "uint16"
+                            | "u16"
+                            | "int16"
+                            | "i16"
                     ) =>
                 {
                     "slice"
@@ -3736,9 +3808,11 @@ impl Codegen {
             Expr::Method { .. } | Expr::Try(_) => Self::own_free_fn(c_ty).is_some(),
             // Transient call/method result field extraction produces an owned value.
             Expr::Field { base, .. } => {
-                matches!(base.as_ref(), Expr::Call { .. } | Expr::Method { .. } | Expr::Try(_))
-                    && (Self::own_free_fn(c_ty).is_some()
-                        || !self.struct_own_field_frees(c_ty).is_empty())
+                matches!(
+                    base.as_ref(),
+                    Expr::Call { .. } | Expr::Method { .. } | Expr::Try(_)
+                ) && (Self::own_free_fn(c_ty).is_some()
+                    || !self.struct_own_field_frees(c_ty).is_empty())
             }
             _ => false,
         }
@@ -4351,9 +4425,14 @@ impl Codegen {
         self.own_drop_live.insert(mangled.to_string());
         self.scope_drop_safe.insert(mangled.to_string());
         for scope in self.own_drop_scopes.iter() {
-            if scope.iter().any(|(n, _)| n == mangled) { return; }
+            if scope.iter().any(|(n, _)| n == mangled) {
+                return;
+            }
         }
-        let idx = self.own_bind_scope.get(mangled).copied()
+        let idx = self
+            .own_bind_scope
+            .get(mangled)
+            .copied()
             .unwrap_or_else(|| self.own_drop_scopes.len().saturating_sub(1));
         if let Some(scope) = self.own_drop_scopes.get_mut(idx) {
             scope.push((mangled.to_string(), ff));
@@ -4870,8 +4949,11 @@ impl Codegen {
                 );
                 let is_rc_array = matches!(
                     fty.as_str(),
-                    "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
-                        | "MakoFloatArray" | "MakoBoolArray"
+                    "MakoIntArray"
+                        | "MakoByteArray"
+                        | "MakoStrArray"
+                        | "MakoFloatArray"
+                        | "MakoBoolArray"
                 ) || fty.starts_with("MakoArr_");
                 if is_rc_array {
                     // Different pointer: full free of the old array.
@@ -4983,8 +5065,11 @@ impl Codegen {
             );
             let is_rc_array = matches!(
                 fty.as_str(),
-                "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
-                    | "MakoFloatArray" | "MakoBoolArray"
+                "MakoIntArray"
+                    | "MakoByteArray"
+                    | "MakoStrArray"
+                    | "MakoFloatArray"
+                    | "MakoBoolArray"
             ) || fty.starts_with("MakoArr_");
             if is_rc_array {
                 self.emit_line(format_args!(
@@ -5270,9 +5355,9 @@ impl Codegen {
             // Arm transfer clones a passthrough and moves or clones every other
             // string, so the result temp owns a reference of its own.
             Expr::IfExpr { .. } | Expr::Match { .. } => true,
-            Expr::Method { receiver, method, .. } => {
-                self.method_returns_owned_string(receiver, method)
-            }
+            Expr::Method {
+                receiver, method, ..
+            } => self.method_returns_owned_string(receiver, method),
             Expr::String(_) | Expr::StringInterp(_) | Expr::Slice { .. } => true,
             Expr::Binary { op: BinOp::Add, .. } => true,
             _ => false,
@@ -5322,9 +5407,9 @@ impl Codegen {
                 Expr::Ident(name) => self.string_call_produces_owner(name, args),
                 _ => false,
             },
-            Expr::Method { receiver, method, .. } => {
-                self.method_returns_owned_string(receiver, method)
-            }
+            Expr::Method {
+                receiver, method, ..
+            } => self.method_returns_owned_string(receiver, method),
             _ => false,
         }
     }
@@ -5434,9 +5519,7 @@ impl Codegen {
     /// A mutable capture's cell is seeded with its own clone before the helper
     /// runs, so it counts even though the helper frame does not own the cell.
     fn string_dest_needs_release(&self, mn: &str, cond_own: bool) -> bool {
-        cond_own
-            || self.own_drop_live.contains(mn)
-            || self.helper_mut_string_captures.contains(mn)
+        cond_own || self.own_drop_live.contains(mn) || self.helper_mut_string_captures.contains(mn)
     }
 
     /// Replace the string in a local. A mutable capture lives in `*cell`,
@@ -5516,6 +5599,11 @@ impl Codegen {
     /// Shared, indexed, and other borrowed sources still clone. Cloning a
     /// unique owner's field aliases storage with the parent destructor.
     fn prepare_owned_field_move(&mut self, value: &Expr, c_ty: &str, val: &str) -> Option<String> {
+        // Strings are RC-shared: reading a struct's string field clones (bumps RC)
+        // via mako_str_clone rather than moving and zeroing the source field.
+        if c_ty == "MakoString" {
+            return None;
+        }
         if Self::own_free_fn(c_ty).is_none() && self.struct_own_field_frees(c_ty).is_empty() {
             return None;
         }
@@ -6420,11 +6508,16 @@ impl Codegen {
                             "bool" => "bool",
                             "string" => "MakoString",
                             _ => "int64_t",
-                        }.to_string(),
+                        }
+                        .to_string(),
                         _ => "int64_t".to_string(),
                     };
                     let (_, val) = self.emit_expr(init);
-                    let _ = writeln!(self.out, "static _Thread_local {c_ty} {} = {val};", mangle(name));
+                    let _ = writeln!(
+                        self.out,
+                        "static _Thread_local {c_ty} {} = {val};",
+                        mangle(name)
+                    );
                 }
                 Item::ExternC(_) => {}
                 Item::Const(c) => {
@@ -7355,32 +7448,68 @@ impl Codegen {
             let _ = writeln!(self.out, "}};");
             // Array of interface fat pointers: []Renderer → MakoArr_iface_Renderer
             let arr_c = format!("MakoArr_iface_{iname}");
-            let _ = writeln!(self.out, "typedef struct {{ {iface_c} *data; size_t len; size_t cap; }} {arr_c};");
-            let _ = writeln!(self.out, "static inline {arr_c} mako_arr_iface_{iname}_make(int64_t len, int64_t cap) {{");
-            let _ = writeln!(self.out, "    if (len < 0) len = 0; if (cap < len) cap = len;");
-            let _ = writeln!(self.out, "    if (len == 0 && cap == 0) {{ {arr_c} a = {{NULL, 0, 0}}; return a; }}");
+            let _ = writeln!(
+                self.out,
+                "typedef struct {{ {iface_c} *data; size_t len; size_t cap; }} {arr_c};"
+            );
+            let _ = writeln!(
+                self.out,
+                "static inline {arr_c} mako_arr_iface_{iname}_make(int64_t len, int64_t cap) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    if (len < 0) len = 0; if (cap < len) cap = len;"
+            );
+            let _ = writeln!(
+                self.out,
+                "    if (len == 0 && cap == 0) {{ {arr_c} a = {{NULL, 0, 0}}; return a; }}"
+            );
             let _ = writeln!(self.out, "    {iface_c} *d = ({iface_c} *)mako_rc_calloc((size_t)(cap ? cap : 1) * sizeof({iface_c}));");
-            let _ = writeln!(self.out, "    {arr_c} a = {{d, (size_t)len, (size_t)cap}}; return a;");
+            let _ = writeln!(
+                self.out,
+                "    {arr_c} a = {{d, (size_t)len, (size_t)cap}}; return a;"
+            );
             let _ = writeln!(self.out, "}}");
             let _ = writeln!(self.out, "static inline void mako_arr_iface_{iname}_free({arr_c} a) {{ if (a.cap > 0 && a.data) mako_rc_release(a.data); }}");
             let _ = writeln!(self.out, "static inline int64_t mako_arr_iface_{iname}_len({arr_c} a) {{ return (int64_t)a.len; }}");
-            let _ = writeln!(self.out, "static inline {iface_c} mako_arr_iface_{iname}_get({arr_c} a, int64_t i) {{");
+            let _ = writeln!(
+                self.out,
+                "static inline {iface_c} mako_arr_iface_{iname}_get({arr_c} a, int64_t i) {{"
+            );
             let _ = writeln!(self.out, "    if (i < 0 || (size_t)i >= a.len) mako_abort(\"iface array index out of bounds\");");
             let _ = writeln!(self.out, "    return a.data[i];");
             let _ = writeln!(self.out, "}}");
-            let _ = writeln!(self.out, "static inline {arr_c} mako_arr_iface_{iname}_append({arr_c} s, {iface_c} v) {{");
-            let _ = writeln!(self.out, "    if (s.len + 1 > s.cap || mako_rc_shared(s.data)) {{");
+            let _ = writeln!(
+                self.out,
+                "static inline {arr_c} mako_arr_iface_{iname}_append({arr_c} s, {iface_c} v) {{"
+            );
+            let _ = writeln!(
+                self.out,
+                "    if (s.len + 1 > s.cap || mako_rc_shared(s.data)) {{"
+            );
             let _ = writeln!(self.out, "        size_t ncap = s.cap ? s.cap * 2 : 1;");
             let _ = writeln!(self.out, "        if (ncap < s.len + 1) ncap = s.len + 1;");
-            let _ = writeln!(self.out, "        {iface_c} *nd = ({iface_c} *)mako_rc_alloc(ncap * sizeof({iface_c}));");
-            let _ = writeln!(self.out, "        if (s.len) memcpy(nd, s.data, s.len * sizeof({iface_c}));");
+            let _ = writeln!(
+                self.out,
+                "        {iface_c} *nd = ({iface_c} *)mako_rc_alloc(ncap * sizeof({iface_c}));"
+            );
+            let _ = writeln!(
+                self.out,
+                "        if (s.len) memcpy(nd, s.data, s.len * sizeof({iface_c}));"
+            );
             let _ = writeln!(self.out, "        s.data = nd; s.cap = ncap;");
             let _ = writeln!(self.out, "    }}");
             let _ = writeln!(self.out, "    s.data[s.len++] = v; return s;");
             let _ = writeln!(self.out, "}}");
             let _ = writeln!(self.out, "static inline {arr_c} mako_arr_iface_{iname}_of(const {iface_c} *vals, size_t n) {{");
-            let _ = writeln!(self.out, "    {arr_c} a = mako_arr_iface_{iname}_make((int64_t)n, (int64_t)n);");
-            let _ = writeln!(self.out, "    if (n) memcpy(a.data, vals, n * sizeof({iface_c}));");
+            let _ = writeln!(
+                self.out,
+                "    {arr_c} a = mako_arr_iface_{iname}_make((int64_t)n, (int64_t)n);"
+            );
+            let _ = writeln!(
+                self.out,
+                "    if (n) memcpy(a.data, vals, n * sizeof({iface_c}));"
+            );
             let _ = writeln!(self.out, "    return a;");
             let _ = writeln!(self.out, "}}");
             let _ = writeln!(self.out);
@@ -13667,7 +13796,11 @@ impl Codegen {
                 "{elem} *{p} = mako_arr_{sn}_get_ptr({addr}, {idx});"
             ));
         }
-        let sid = self.struct_elem_ptr_scope_stack.last().copied().unwrap_or(0);
+        let sid = self
+            .struct_elem_ptr_scope_stack
+            .last()
+            .copied()
+            .unwrap_or(0);
         self.struct_elem_ptr_cache.insert(key, (p.clone(), sid));
         p
     }
@@ -13822,8 +13955,9 @@ impl Codegen {
         }
         match t {
             TypeExpr::Named(n) => match n.as_str() {
-                "int" | "int64" | "int32" | "int8" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "int16" | "i16" | "byte" => "int64_t".into(),
-                "float" | "float64" => "double".into(),
+                "int" | "int64" | "int32" | "int8" | "uint64" | "uint32" | "u32" | "uint16"
+                | "u16" | "int16" | "i16" | "byte" => "int64_t".into(),
+                "float" | "float64" | "float32" | "f32" => "double".into(),
                 "bool" => "bool".into(),
                 "string" => "MakoString".into(),
                 "string_view" => "MakoString".into(),
@@ -13898,7 +14032,7 @@ impl Codegen {
             TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "string") => {
                 "MakoStrArray".into()
             }
-            TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "float" || n == "float64") => {
+            TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "float32" | "f32")) => {
                 "MakoFloatArray".into()
             }
             TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "bool") => {
@@ -16550,12 +16684,7 @@ impl Codegen {
                     {
                         // Field/index GET is a shallow header copy. Binding it
                         // without cloning aliases the container.
-                        // Exception: field of a ptr-passed param can be moved
-                        // (zero source fields) instead of cloned, since the
-                        // param's destructor will see zeroed fields and skip free.
                         (self.clone_own_val(&ty, &val), true)
-                    } else if let Some(moved) = self.prepare_owned_field_move(init, &ty, &val) {
-                        (moved, true)
                     } else {
                         (val, false)
                     }
@@ -17233,7 +17362,11 @@ impl Codegen {
                     // buffer — force into scope cleanup. Only for actual
                     // append calls; skip inside arenas (bulk free).
                     if is_self_append && self.current_arena.is_none() {
-                        let drop_cty = self.locals.get(name).cloned().unwrap_or_else(|| slice_cty.clone());
+                        let drop_cty = self
+                            .locals
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| slice_cty.clone());
                         self.force_own_drop(&mn, &drop_cty);
                     }
                     // Propagate opaque array element type through append reassign.
@@ -18366,6 +18499,23 @@ impl Codegen {
                         BinOp::Ge => ">=",
                         _ => unreachable!(),
                     };
+                    let left_owned =
+                        self.expr_is_owned_print_temp(left) && !self.own_drop_live.contains(&lv);
+                    let right_owned =
+                        self.expr_is_owned_print_temp(right) && !self.own_drop_live.contains(&rv);
+                    if left_owned || right_owned {
+                        let tmp = self.fresh("scmp");
+                        self.emit_line(format_args!(
+                            "bool {tmp} = (mako_str_compare({lv}, {rv}) {c_op} 0);"
+                        ));
+                        if left_owned {
+                            self.emit_line(format_args!("mako_str_free({lv});"));
+                        }
+                        if right_owned {
+                            self.emit_line(format_args!("mako_str_free({rv});"));
+                        }
+                        return ("bool".into(), tmp);
+                    }
                     return (
                         "bool".into(),
                         format!("(mako_str_compare({lv}, {rv}) {c_op} 0)"),
@@ -18390,7 +18540,7 @@ impl Codegen {
                     };
                 }
                 if *op == BinOp::BitClear {
-                    let ty = if lt == "double" {
+                    let ty = if lt == "double" || lt == "float" {
                         "int64_t"
                     } else {
                         lt.as_str()
@@ -18407,7 +18557,7 @@ impl Codegen {
                     | BinOp::And
                     | BinOp::Or => "bool",
                     _ => {
-                        if lt == "double" {
+                        if lt == "double" || lt == "float" {
                             "double"
                         } else {
                             "int64_t"
@@ -18533,7 +18683,7 @@ impl Codegen {
                                 "bool" => {
                                     self.emit_line(format_args!("mako_print_bool({v});"));
                                 }
-                                "double" => {
+                                "double" | "float" => {
                                     self.emit_line(format_args!("mako_print_float({v});"));
                                 }
                                 _ => {
@@ -18564,14 +18714,14 @@ impl Codegen {
                         }
                         "int64" | "int32" | "int" | "byte" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            if ty == "double" {
+                            if ty == "double" || ty == "float" {
                                 return ("int64_t".into(), format!("(int64_t)({v})"));
                             }
                             return ("int64_t".into(), v);
                         }
                         "int8" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            let as_i = if ty == "double" {
+                            let as_i = if ty == "double" || ty == "float" {
                                 format!("(int64_t)({v})")
                             } else {
                                 v
@@ -18580,7 +18730,7 @@ impl Codegen {
                         }
                         "uint64" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            let as_i = if ty == "double" {
+                            let as_i = if ty == "double" || ty == "float" {
                                 format!("(int64_t)({v})")
                             } else {
                                 v
@@ -18592,22 +18742,34 @@ impl Codegen {
                         }
                         "u16" | "uint16" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            let as_i = if ty == "double" || ty == "float" { format!("(int64_t)({v})") } else { v };
+                            let as_i = if ty == "double" || ty == "float" {
+                                format!("(int64_t)({v})")
+                            } else {
+                                v
+                            };
                             return ("int64_t".into(), format!("(int64_t)(uint16_t)({as_i})"));
                         }
                         "u32" | "uint32" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            let as_i = if ty == "double" || ty == "float" { format!("(int64_t)({v})") } else { v };
+                            let as_i = if ty == "double" || ty == "float" {
+                                format!("(int64_t)({v})")
+                            } else {
+                                v
+                            };
                             return ("int64_t".into(), format!("(int64_t)(uint32_t)({as_i})"));
                         }
                         "i16" | "int16" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            let as_i = if ty == "double" || ty == "float" { format!("(int64_t)({v})") } else { v };
+                            let as_i = if ty == "double" || ty == "float" {
+                                format!("(int64_t)({v})")
+                            } else {
+                                v
+                            };
                             return ("int64_t".into(), format!("(int64_t)(int16_t)({as_i})"));
                         }
                         "f32" | "float32" => {
                             let (_, v) = self.emit_expr(&args[0]);
-                            return ("float".into(), format!("(float)({v})"));
+                            return ("double".into(), format!("(double)(float)({v})"));
                         }
                         "float" | "float64" => {
                             let (ty, v) = self.emit_expr(&args[0]);
@@ -20077,39 +20239,66 @@ impl Codegen {
                             self.line(&format!("int64_t {tmp} = mako_setsid();"));
                             return ("int64_t".into(), tmp);
                         }
-                        "ioctl" | "mmap_anon" | "munmap" | "mprotect"
-                        | "mem_read_i64" | "mem_read_i32" | "mem_read_byte" => {
+                        "ioctl" | "mmap_anon" | "munmap" | "mprotect" | "mem_read_i64"
+                        | "mem_read_i32" | "mem_read_byte" => {
                             let mut cargs = Vec::new();
-                            for a in args { let (_, v) = self.emit_expr(a); cargs.push(v); }
+                            for a in args {
+                                let (_, v) = self.emit_expr(a);
+                                cargs.push(v);
+                            }
                             let tmp = self.fresh("vm");
-                            self.line(&format!("int64_t {tmp} = mako_{name}({});", cargs.join(", ")));
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_{name}({});",
+                                cargs.join(", ")
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "mem_write_i64" | "mem_write_i32" | "mem_write_byte" => {
                             let mut cargs = Vec::new();
-                            for a in args { let (_, v) = self.emit_expr(a); cargs.push(v); }
+                            for a in args {
+                                let (_, v) = self.emit_expr(a);
+                                cargs.push(v);
+                            }
                             self.line(&format!("mako_{name}({});", cargs.join(", ")));
                             return ("void".into(), "/*void*/".into());
                         }
                         "writev" | "sendmsg" | "sendfile" => {
                             let mut cargs = Vec::new();
-                            for a in args { let (_, v) = self.emit_expr(a); cargs.push(v); }
+                            for a in args {
+                                let (_, v) = self.emit_expr(a);
+                                cargs.push(v);
+                            }
                             let tmp = self.fresh("sg");
-                            self.line(&format!("int64_t {tmp} = mako_{name}({});", cargs.join(", ")));
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_{name}({});",
+                                cargs.join(", ")
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "simd_f32x4_dot" | "simd_f32x4_hadd" | "simd_fma" => {
                             let mut cargs = Vec::new();
-                            for a in args { let (_, v) = self.emit_expr(a); cargs.push(v); }
+                            for a in args {
+                                let (_, v) = self.emit_expr(a);
+                                cargs.push(v);
+                            }
                             let tmp = self.fresh("sf");
-                            self.line(&format!("double {tmp} = mako_{name}({});", cargs.join(", ")));
+                            self.line(&format!(
+                                "double {tmp} = mako_{name}({});",
+                                cargs.join(", ")
+                            ));
                             return ("double".into(), tmp);
                         }
                         "clz" | "ctz" | "popcount" | "bswap64" | "bswap32" | "rotl64" => {
                             let mut cargs = Vec::new();
-                            for a in args { let (_, v) = self.emit_expr(a); cargs.push(v); }
+                            for a in args {
+                                let (_, v) = self.emit_expr(a);
+                                cargs.push(v);
+                            }
                             let tmp = self.fresh("bm");
-                            self.line(&format!("int64_t {tmp} = mako_{name}({});", cargs.join(", ")));
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_{name}({});",
+                                cargs.join(", ")
+                            ));
                             return ("int64_t".into(), tmp);
                         }
                         "now_ms" => {
@@ -20730,7 +20919,9 @@ impl Codegen {
                             let (_, c) = self.emit_expr(&args[1]);
                             let (_, o) = self.emit_expr(&args[2]);
                             let tmp = self.fresh("prc");
-                            self.line(&format!("MakoString {tmp} = mako_pread_cached({f}, {c}, {o});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_pread_cached({f}, {c}, {o});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "pread_line" => {
@@ -20739,7 +20930,9 @@ impl Codegen {
                             let (_, o) = self.emit_expr(&args[2]);
                             let (_, ln) = self.emit_expr(&args[3]);
                             let tmp = self.fresh("prl");
-                            self.line(&format!("MakoString {tmp} = mako_pread_line({f}, {sz}, {o}, {ln});"));
+                            self.line(&format!(
+                                "MakoString {tmp} = mako_pread_line({f}, {sz}, {o}, {ln});"
+                            ));
                             return ("MakoString".into(), tmp);
                         }
                         "pwrite" => {
@@ -38737,7 +38930,7 @@ impl Codegen {
                 let is_float = matches!(
                     ty,
                     TypeExpr::Array(inner) | TypeExpr::RawArray(inner)
-                        if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "float" || n == "float64")
+                        if matches!(inner.as_ref(), TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "float32" | "f32"))
                 );
                 let is_bool = matches!(
                     ty,
@@ -39613,19 +39806,35 @@ impl Codegen {
                                         ));
                                         self.line(&format!("*{boxn} = mako_str_clone({v});"));
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
-                                    } else if matches!(aty.as_str(),
-                                        "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
-                                        | "MakoFloatArray" | "MakoBoolArray")
-                                        || aty.starts_with("MakoArr_")
-                                        || matches!(pty,
-                                        "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
-                                        | "MakoFloatArray" | "MakoBoolArray")
+                                    } else if matches!(
+                                        aty.as_str(),
+                                        "MakoIntArray"
+                                            | "MakoByteArray"
+                                            | "MakoStrArray"
+                                            | "MakoFloatArray"
+                                            | "MakoBoolArray"
+                                    ) || aty.starts_with("MakoArr_")
+                                        || matches!(
+                                            pty,
+                                            "MakoIntArray"
+                                                | "MakoByteArray"
+                                                | "MakoStrArray"
+                                                | "MakoFloatArray"
+                                                | "MakoBoolArray"
+                                        )
                                         || pty.starts_with("MakoArr_")
                                     {
                                         // Array: heap-box + O(1) RC clone for crew task.
-                                        let arr_ty = if aty.starts_with("Mako") { &aty } else { pty };
-                                        let clone_fn = Self::own_clone_fn(arr_ty)
-                                            .unwrap_or_else(|| format!("{arr_ty}_clone", arr_ty = arr_ty.replace("MakoArr_", "mako_arr_")));
+                                        let arr_ty =
+                                            if aty.starts_with("Mako") { &aty } else { pty };
+                                        let clone_fn =
+                                            Self::own_clone_fn(arr_ty).unwrap_or_else(|| {
+                                                format!(
+                                                    "{arr_ty}_clone",
+                                                    arr_ty =
+                                                        arr_ty.replace("MakoArr_", "mako_arr_")
+                                                )
+                                            });
                                         let boxn = self.fresh("abox");
                                         self.line(&format!(
                                             "{arr_ty} *{boxn} = ({arr_ty}*)malloc(sizeof({arr_ty}));"
@@ -42230,10 +42439,14 @@ impl Codegen {
                     "double {local} = mako_bits_to_f64((int64_t)a[{i}]);\n"
                 ));
                 call_args.push(local);
-            } else if matches!(ty.as_str(),
-                "MakoIntArray" | "MakoByteArray" | "MakoStrArray"
-                | "MakoFloatArray" | "MakoBoolArray")
-                || ty.starts_with("MakoArr_")
+            } else if matches!(
+                ty.as_str(),
+                "MakoIntArray"
+                    | "MakoByteArray"
+                    | "MakoStrArray"
+                    | "MakoFloatArray"
+                    | "MakoBoolArray"
+            ) || ty.starts_with("MakoArr_")
             {
                 unpack.push_str(&format!(
                     "{ty} {local} = *({ty}*)a[{i}]; free((void*)a[{i}]);\n"
@@ -43198,7 +43411,18 @@ fn chan_map_val_tag(elem: &TypeExpr, structs: &HashMap<String, StructInfo>) -> S
         TypeExpr::Named(n)
             if matches!(
                 n.as_str(),
-                "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "int16" | "i16"
+                "int"
+                    | "int64"
+                    | "int32"
+                    | "int8"
+                    | "byte"
+                    | "uint64"
+                    | "uint32"
+                    | "u32"
+                    | "uint16"
+                    | "u16"
+                    | "int16"
+                    | "i16"
             ) =>
         {
             "chan_int".into()
@@ -43232,7 +43456,18 @@ fn map_tuple_val_tag(
             TypeExpr::Named(n)
                 if matches!(
                     n.as_str(),
-                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "int16" | "i16"
+                    "int"
+                        | "int64"
+                        | "int32"
+                        | "int8"
+                        | "byte"
+                        | "uint64"
+                        | "uint32"
+                        | "u32"
+                        | "uint16"
+                        | "u16"
+                        | "int16"
+                        | "i16"
                 ) =>
             {
                 "int".into()
@@ -43298,7 +43533,18 @@ fn bag_map_val_tag(
         TypeExpr::Named(n)
             if matches!(
                 n.as_str(),
-                "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "int16" | "i16"
+                "int"
+                    | "int64"
+                    | "int32"
+                    | "int8"
+                    | "byte"
+                    | "uint64"
+                    | "uint32"
+                    | "u32"
+                    | "uint16"
+                    | "u16"
+                    | "int16"
+                    | "i16"
             ) =>
         {
             format!("{pref}_int")
@@ -43315,7 +43561,18 @@ fn bag_map_val_tag(
             TypeExpr::Named(n)
                 if matches!(
                     n.as_str(),
-                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "int16" | "i16"
+                    "int"
+                        | "int64"
+                        | "int32"
+                        | "int8"
+                        | "byte"
+                        | "uint64"
+                        | "uint32"
+                        | "u32"
+                        | "uint16"
+                        | "u16"
+                        | "int16"
+                        | "i16"
                 ) =>
             {
                 format!("{pref}_arr_int")
@@ -45651,10 +45908,7 @@ fn main() {
                     if let Some(name) = sp_ident_at(body, i) {
                         let decl = is_sp_decl(body, i);
                         if decl {
-                            stack
-                                .last_mut()
-                                .expect("C scope")
-                                .insert(name.clone());
+                            stack.last_mut().expect("C scope").insert(name.clone());
                         } else {
                             let live = stack.iter().any(|s| s.contains(&name));
                             assert!(
@@ -45683,7 +45937,9 @@ fn main() {
             }
         }
         let rest = &body[i + PFX.len()..];
-        let n = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+        let n = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
         if n == 0 {
             return None;
         }
@@ -45884,5 +46140,76 @@ fn main() {
                 pair[1]
             );
         }
+    }
+
+    #[test]
+    fn repeated_struct_string_field_assign_and_struct_lit_clones_not_zeros() {
+        let source = r#"
+struct Stmt {
+    table: string
+}
+struct Copy {
+    table: string
+}
+fn dispatch(t: string) -> Copy {
+    let stmt = Stmt { table: t }
+    let mut name = ""
+    name = stmt.table
+    let c = Copy { table: stmt.table }
+    print(stmt.table)
+    print(name)
+    return c
+}
+fn main() {
+    let c = dispatch("users")
+    print(c.table)
+}
+"#;
+        let generated = emit_src(source);
+        let body = fn_body(&generated, "dispatch(");
+        assert!(
+            !body.contains("memset(&stmt.table, 0"),
+            "string field reads/stores must retain via mako_str_clone rather than zeroing stmt.table:\n{body}"
+        );
+        assert!(
+            body.contains("mako_str_clone(stmt.table)"),
+            "expected mako_str_clone(stmt.table) on assign/struct-lit store:\n{body}"
+        );
+    }
+
+    #[test]
+    fn narrow_numeric_types_typecheck_and_emit_arithmetic() {
+        let source = r#"
+struct Metrics {
+    port: u16
+    seq: u32
+    delta: i16
+    ratio: f32
+}
+fn compute(a: u16, b: u32, c: i16, d: f32) -> f32 {
+    let x: u16 = a + u16(1)
+    let y: u32 = b + u32(2)
+    let z: i16 = -c + i16(3)
+    let w: f32 = d + f32(1.5)
+    let m = Metrics { port: x, seq: y, delta: z, ratio: w }
+    if m.port > u16(0) && m.seq > u32(0) && m.delta < i16(100) && m.ratio > f32(0.0) {
+        return m.ratio
+    }
+    return 0.0
+}
+fn main() {
+    print(compute(u16(80), u32(10), i16(5), f32(2.5)))
+}
+"#;
+        let generated = emit_src(source);
+        let body = fn_body(&generated, "compute(");
+        assert!(
+            generated.contains("double compute("),
+            "f32 return type must lower to C double in signature:\n{generated}"
+        );
+        assert!(
+            body.contains("double w = (d + (double)(float)(1.5));"),
+            "f32 addition must emit floating-point arithmetic, not integer wrap_add:\n{body}"
+        );
     }
 }

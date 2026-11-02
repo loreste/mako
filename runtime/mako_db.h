@@ -3,6 +3,7 @@
 #define MAKO_DB_H
 
 #include "mako_rt.h"
+#include "mako_std.h"
 #if !defined(_WIN32)
 #include <sys/socket.h>
 #include <netinet/in.h>

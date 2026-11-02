@@ -40,7 +40,7 @@ use crate::tooling::{find_nearest_manifest_dir, parse_manifest_deps, resolve_dep
 use crate::types::{TypeChecker, TypeError};
 
 /// Bump when fingerprint inputs or cache layout change (invalidates all caches).
-pub const COMPILER_CACHE_VERSION: &str = "mako-incr-7";
+pub const COMPILER_CACHE_VERSION: &str = "mako-incr-8";
 
 #[derive(Clone, Debug)]
 pub struct IncrOptions {
@@ -151,10 +151,16 @@ pub fn cache_artifact(root: &Path, sub: &str, fp: &str, ext: &str) -> Result<Pat
 }
 
 fn ensure_dirs(root: &Path) -> Result<(), String> {
+    let meta = root.join("meta.txt");
+    if meta.exists() {
+        let cur = fs::read_to_string(&meta).unwrap_or_default();
+        if cur.trim() != COMPILER_CACHE_VERSION {
+            let _ = fs::remove_dir_all(root);
+        }
+    }
     for sub in ["typecheck", "c", "obj"] {
         fs::create_dir_all(root.join(sub)).map_err(|e| format!("mkdir cache: {e}"))?;
     }
-    let meta = root.join("meta.txt");
     if !meta.exists() {
         atomic_write(&meta, format!("{COMPILER_CACHE_VERSION}\n").as_bytes())?;
     }
@@ -263,7 +269,17 @@ fn collect_dep_files(manifest_dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), 
 /// Fingerprint of all sources that affect typecheck (incl. bodies — NLL/borrows).
 pub fn program_typecheck_fingerprint(entry: &Path) -> Result<String, String> {
     let files = collect_program_inputs(entry)?;
-    let mut parts: Vec<Vec<u8>> = vec![COMPILER_CACHE_VERSION.as_bytes().to_vec()];
+    let bin_mtime = std::env::current_exe()
+        .ok()
+        .and_then(|p| fs::metadata(p).ok())
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| format!("exe={}.{:09}", d.as_secs(), d.subsec_nanos()))
+        .unwrap_or_default();
+    let mut parts: Vec<Vec<u8>> = vec![
+        COMPILER_CACHE_VERSION.as_bytes().to_vec(),
+        bin_mtime.into_bytes(),
+    ];
     for f in &files {
         let b = fs::read(f).unwrap_or_default();
         parts.push(f.to_string_lossy().as_bytes().to_vec());
@@ -517,8 +533,16 @@ pub fn plan_object_units(
         "O0g"
     };
     let rt_fp = runtime_headers_fp(runtime_dir);
+    let bin_mtime = std::env::current_exe()
+        .ok()
+        .and_then(|p| fs::metadata(p).ok())
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| format!("exe={}.{:09}", d.as_secs(), d.subsec_nanos()))
+        .unwrap_or_default();
     let fp = fingerprint_bytes(&[
         COMPILER_CACHE_VERSION.as_bytes(),
+        bin_mtime.as_bytes(),
         opt.as_bytes(),
         opts.flags_fp.as_bytes(),
         rt_fp.as_bytes(),

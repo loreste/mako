@@ -16,6 +16,7 @@
 #define MAKO_HTTP_H
 
 #include "mako_rt.h"
+#include "mako_net.h"
 #include "mako_hpack_huffman.h"
 #include <errno.h>
 #include <string.h>
@@ -2987,7 +2988,7 @@ static inline int mako_http2_stream_find(int64_t sid);
 static inline int64_t mako_http2_conn_active_streams(void);
 
 /* Strip PADDED (flag 0x8) and PRIORITY (flag 0x20, HEADERS only) from a
- * frame payload, writing the header-block / DATA region into *out_data/*out_len.
+ * frame payload, writing the header-block / DATA region into *out_data / *out_len.
  * Returns 0 ok, -1 malformed (pad exceeds length, etc.). */
 static inline int mako_http2_payload_content(
     const unsigned char *payload, size_t len, int64_t flags, int is_headers,

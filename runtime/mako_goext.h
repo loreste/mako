@@ -8,6 +8,8 @@
 
 #include "mako_rt.h"
 #include "mako_stdlib.h"
+#include "mako_http.h"
+#include "mako_shutdown.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdatomic.h>

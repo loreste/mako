@@ -11,6 +11,7 @@
 #define MAKO_FMT_H
 
 #include "mako_rt.h"
+#include "mako_stdlib.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

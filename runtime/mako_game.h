@@ -4,6 +4,7 @@
 #define MAKO_GAME_H
 
 #include "mako_rt.h"
+#include "mako_net.h"
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
