@@ -27,6 +27,10 @@ pub enum Type {
     Int8,
     /// Always 64-bit unsigned (`uint64_t`); stored as uint64_t / int64_t bit pattern.
     UInt64,
+    /// Unsigned 32-bit (`uint32_t`); for protocol headers (HEP3, Diameter).
+    UInt32,
+    /// Unsigned 16-bit (`uint16_t`); for protocol headers, port numbers.
+    UInt16,
     /// Unsigned 8-bit (Go `byte`); element type of `[]byte`.
     Byte,
     Float,
@@ -112,6 +116,8 @@ impl Type {
             Type::Int32 => "int32".into(),
             Type::Int8 => "int8".into(),
             Type::UInt64 => "uint64".into(),
+            Type::UInt32 => "uint32".into(),
+            Type::UInt16 => "uint16".into(),
             Type::Byte => "byte".into(),
             Type::Float => "float".into(),
             Type::Bool => "bool".into(),
@@ -169,6 +175,8 @@ impl Type {
             Type::Int32 => "int32".into(),
             Type::Int8 => "int8".into(),
             Type::UInt64 => "uint64".into(),
+            Type::UInt32 => "uint32".into(),
+            Type::UInt16 => "uint16".into(),
             Type::Byte => "byte".into(),
             Type::Float => "float".into(),
             Type::Bool => "bool".into(),
@@ -15427,6 +15435,8 @@ impl TypeChecker {
                 "int32" => Ok(Type::Int32),
                 "int8" => Ok(Type::Int8),
                 "uint64" => Ok(Type::UInt64),
+                "uint32" | "u32" => Ok(Type::UInt32),
+                "uint16" | "u16" => Ok(Type::UInt16),
                 "byte" => Ok(Type::Byte),
                 "float" | "float64" => Ok(Type::Float),
                 "bool" => Ok(Type::Bool),
@@ -18329,6 +18339,26 @@ impl TypeChecker {
                                 t.display()
                             )));
                         }
+                        "u16" | "uint16" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float {
+                                return Ok(Type::UInt16);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to u16",
+                                t.display()
+                            )));
+                        }
+                        "u32" | "uint32" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float {
+                                return Ok(Type::UInt32);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to u32",
+                                t.display()
+                            )));
+                        }
                         "byte" if args.len() == 1 => {
                             if let Ok(v) = try_fold_const(&args[0]) {
                                 if v < 0 || v > 255 {
@@ -20754,6 +20784,8 @@ impl TypeChecker {
             "int32" => Type::Int32,
             "int8" => Type::Int8,
             "uint64" => Type::UInt64,
+            "uint32" | "u32" => Type::UInt32,
+            "uint16" | "u16" => Type::UInt16,
             "byte" => Type::Byte,
             "float" => Type::Float,
             "bool" => Type::Bool,
@@ -22537,7 +22569,7 @@ fn is_opaque_handle(t: &Type) -> bool {
 fn is_int_family(t: &Type) -> bool {
     matches!(
         t,
-        Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::UInt64 | Type::Byte
+        Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::UInt64 | Type::UInt32 | Type::UInt16 | Type::Byte
     )
 }
 
@@ -22565,7 +22597,7 @@ fn is_copy_type(t: &Type) -> bool {
 fn is_literal_int_kind(t: &Type) -> bool {
     matches!(
         t,
-        Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::Byte
+        Type::Int | Type::Int64 | Type::Int32 | Type::Int8 | Type::UInt64 | Type::UInt32 | Type::UInt16 | Type::Byte
     )
 }
 
@@ -23373,6 +23405,8 @@ pub fn type_to_type_expr(t: &Type) -> TypeExpr {
         Type::Int32 => TypeExpr::Named("int32".into()),
         Type::Int8 => TypeExpr::Named("int8".into()),
         Type::UInt64 => TypeExpr::Named("uint64".into()),
+        Type::UInt32 => TypeExpr::Named("uint32".into()),
+        Type::UInt16 => TypeExpr::Named("uint16".into()),
         Type::Byte => TypeExpr::Named("byte".into()),
         Type::Float => TypeExpr::Named("float".into()),
         Type::Bool => TypeExpr::Named("bool".into()),

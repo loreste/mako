@@ -903,7 +903,7 @@ impl Codegen {
             TypeExpr::Named(n)
                 if matches!(
                     n.as_str(),
-                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16"
                 ) =>
             {
                 "i".to_string()
@@ -927,7 +927,7 @@ impl Codegen {
             TypeExpr::Named(n)
                 if matches!(
                     n.as_str(),
-                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16"
                 ) =>
             {
                 if named_key {
@@ -975,7 +975,7 @@ impl Codegen {
                     TypeExpr::Named(n)
                         if matches!(
                             n.as_str(),
-                            "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                            "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16"
                         ) =>
                     {
                         "int".into()
@@ -1053,7 +1053,7 @@ impl Codegen {
                     TypeExpr::Named(t)
                         if matches!(
                             t.as_str(),
-                            "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                            "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16"
                         ) =>
                     {
                         "chan_int"
@@ -1070,7 +1070,7 @@ impl Codegen {
                 TypeExpr::Named(n)
                     if matches!(
                         n.as_str(),
-                        "int" | "int64" | "int32" | "int8" | "byte" | "bool" | "uint64"
+                        "int" | "int64" | "int32" | "int8" | "byte" | "bool" | "uint64" | "uint32" | "u32" | "uint16" | "u16"
                     ) =>
                 {
                     "slice"
@@ -6407,11 +6407,16 @@ impl Codegen {
                 Item::ThreadLocal { name, ty, init } => {
                     let c_ty = match ty {
                         TypeExpr::Named(n) => match n.as_str() {
-                            "int" => "int64_t",
+                            "int" | "int64" => "int64_t",
+                            "int32" => "int32_t",
+                            "int8" => "int8_t",
+                            "uint64" => "uint64_t",
+                            "uint32" | "u32" => "uint32_t",
+                            "uint16" | "u16" => "uint16_t",
+                            "byte" => "uint8_t",
                             "float" => "double",
                             "bool" => "bool",
                             "string" => "MakoString",
-                            "byte" => "uint8_t",
                             _ => "int64_t",
                         }.to_string(),
                         _ => "int64_t".to_string(),
@@ -13815,7 +13820,7 @@ impl Codegen {
         }
         match t {
             TypeExpr::Named(n) => match n.as_str() {
-                "int" | "int64" | "int32" | "int8" | "uint64" | "byte" => "int64_t".into(),
+                "int" | "int64" | "int32" | "int8" | "uint64" | "uint32" | "u32" | "uint16" | "u16" | "byte" => "int64_t".into(),
                 "float" | "float64" => "double".into(),
                 "bool" => "bool".into(),
                 "string" => "MakoString".into(),
@@ -43172,7 +43177,7 @@ fn chan_map_val_tag(elem: &TypeExpr, structs: &HashMap<String, StructInfo>) -> S
         TypeExpr::Named(n)
             if matches!(
                 n.as_str(),
-                "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16"
             ) =>
         {
             "chan_int".into()
@@ -43206,7 +43211,7 @@ fn map_tuple_val_tag(
             TypeExpr::Named(n)
                 if matches!(
                     n.as_str(),
-                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16"
                 ) =>
             {
                 "int".into()
@@ -43272,7 +43277,7 @@ fn bag_map_val_tag(
         TypeExpr::Named(n)
             if matches!(
                 n.as_str(),
-                "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16"
             ) =>
         {
             format!("{pref}_int")
@@ -43289,7 +43294,7 @@ fn bag_map_val_tag(
             TypeExpr::Named(n)
                 if matches!(
                     n.as_str(),
-                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64"
+                    "int" | "int64" | "int32" | "int8" | "byte" | "uint64" | "uint32" | "u32" | "uint16" | "u16"
                 ) =>
             {
                 format!("{pref}_arr_int")
