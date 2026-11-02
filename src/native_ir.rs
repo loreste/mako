@@ -1328,26 +1328,45 @@ impl std::error::Error for IrError {}
 fn scalar_type(ty: &TypeExpr) -> Result<Type, IrError> {
     match ty {
         TypeExpr::Named(name)
-            if name == "int"
-                || name == "int64"
-                || name == "int32"
-                || name == "int16"
-                || name == "i16"
-                || name == "int8"
-                || name == "uint64"
-                || name == "uint32"
-                || name == "u32"
-                || name == "uint16"
-                || name == "u16"
-                || name == "uint8"
-                || name == "byte"
-                || name == "rune" =>
+            if matches!(
+                name.as_str(),
+                "int"
+                    | "int64"
+                    | "i64"
+                    | "isize"
+                    | "int32"
+                    | "i32"
+                    | "int16"
+                    | "i16"
+                    | "int8"
+                    | "i8"
+                    | "uint64"
+                    | "u64"
+                    | "usize"
+                    | "uintptr"
+                    | "i128"
+                    | "int128"
+                    | "u128"
+                    | "uint128"
+                    | "uint32"
+                    | "u32"
+                    | "uint16"
+                    | "u16"
+                    | "uint8"
+                    | "u8"
+                    | "byte"
+                    | "rune"
+                    | "char"
+            ) =>
         {
             Ok(Type::I64)
         }
         TypeExpr::Named(name) if name == "bool" => Ok(Type::I1),
         TypeExpr::Named(name)
-            if name == "float" || name == "float64" || name == "float32" || name == "f32" =>
+            if matches!(
+                name.as_str(),
+                "float" | "float64" | "f64" | "float32" | "f32"
+            ) =>
         {
             Ok(Type::F64)
         }
@@ -2062,11 +2081,13 @@ fn type_expr_for_tag(tag: &str) -> TypeExpr {
 fn type_expr_mono_tag(ty: &TypeExpr) -> String {
     match ty {
         TypeExpr::Named(n) => match n.as_str() {
-            "int" | "int64" | "i64" => "int".into(),
-            "int32" | "i32" => "int32".into(),
+            "int" | "int64" | "i64" | "isize" => "int".into(),
+            "int32" | "i32" | "rune" | "char" => "int32".into(),
             "int16" | "i16" => "int16".into(),
             "int8" | "i8" => "int8".into(),
-            "uint64" | "u64" => "uint64".into(),
+            "uint64" | "u64" | "usize" | "uintptr" => "uint64".into(),
+            "i128" | "int128" => "i128".into(),
+            "u128" | "uint128" => "u128".into(),
             "uint32" | "u32" => "uint32".into(),
             "uint16" | "u16" => "uint16".into(),
             "float" | "float64" | "f64" => "float".into(),
@@ -9201,18 +9222,31 @@ impl<'a> FunctionLowerer<'a> {
                     function.as_str(),
                     "int"
                         | "int64"
+                        | "i64"
+                        | "isize"
                         | "int32"
+                        | "i32"
                         | "int16"
                         | "i16"
                         | "int8"
+                        | "i8"
                         | "uint64"
+                        | "u64"
+                        | "usize"
+                        | "uintptr"
+                        | "i128"
+                        | "int128"
+                        | "u128"
+                        | "uint128"
                         | "uint32"
                         | "u32"
                         | "uint16"
                         | "u16"
                         | "uint8"
+                        | "u8"
                         | "byte"
                         | "rune"
+                        | "char"
                 ) && args.len() == 1
                 {
                     let (v, ty, owned) = self.lower_expr(&args[0])?;
@@ -9224,7 +9258,7 @@ impl<'a> FunctionLowerer<'a> {
                             // Truncate narrow destinations so print/arith match
                             // the C backend's intN_t narrowing.
                             let out = match function.as_str() {
-                                "int8" => {
+                                "int8" | "i8" => {
                                     let m = self.const_int(0xff, Type::I64);
                                     let sign = self.const_int(0x80, Type::I64);
                                     let masked = self.value();
@@ -9283,7 +9317,7 @@ impl<'a> FunctionLowerer<'a> {
                                     });
                                     se
                                 }
-                                "int32" => {
+                                "int32" | "i32" | "rune" | "char" => {
                                     let m = self.const_int(0xffff_ffff, Type::I64);
                                     let sign = self.const_int(0x8000_0000, Type::I64);
                                     let masked = self.value();
@@ -9312,7 +9346,7 @@ impl<'a> FunctionLowerer<'a> {
                                     });
                                     se
                                 }
-                                "byte" | "uint8" => {
+                                "byte" | "uint8" | "u8" => {
                                     let m = self.const_int(0xff, Type::I64);
                                     let out = self.value();
                                     self.emit(Inst::Binary {
@@ -9369,8 +9403,10 @@ impl<'a> FunctionLowerer<'a> {
                         }
                     }
                 }
-                if matches!(function.as_str(), "float" | "float64" | "float32" | "f32")
-                    && args.len() == 1
+                if matches!(
+                    function.as_str(),
+                    "float" | "float64" | "f64" | "float32" | "f32"
+                ) && args.len() == 1
                 {
                     let (v, ty, owned) = self.lower_expr(&args[0])?;
                     if owned {

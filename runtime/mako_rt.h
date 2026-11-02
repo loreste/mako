@@ -664,6 +664,99 @@ static inline void mako_print_int(int64_t n) {
 #endif
 }
 
+#if defined(__SIZEOF_INT128__)
+typedef __int128 mako_i128_t;
+typedef unsigned __int128 mako_u128_t;
+#else
+typedef int64_t mako_i128_t;
+typedef uint64_t mako_u128_t;
+#endif
+
+static inline void mako_print_u128(mako_u128_t v) {
+    char buf[44];
+    int pos = 43;
+    buf[pos] = '\n';
+    if (v == 0) {
+        buf[--pos] = '0';
+    } else {
+        while (v > 0) {
+            buf[--pos] = (char)('0' + (int)(v % 10));
+            v /= 10;
+        }
+    }
+#if !defined(_WIN32) && !defined(__wasi__)
+    (void)write(STDOUT_FILENO, buf + pos, (size_t)(44 - pos));
+#else
+    fwrite(buf + pos, 1, (size_t)(44 - pos), stdout);
+    fflush(stdout);
+#endif
+}
+
+static inline void mako_print_i128(mako_i128_t v) {
+    if (v < 0) {
+        char buf[45];
+        int pos = 44;
+        buf[pos] = '\n';
+        mako_u128_t mag = (mako_u128_t)(-(v + 1)) + 1u;
+        while (mag > 0) {
+            buf[--pos] = (char)('0' + (int)(mag % 10));
+            mag /= 10;
+        }
+        buf[--pos] = '-';
+#if !defined(_WIN32) && !defined(__wasi__)
+        (void)write(STDOUT_FILENO, buf + pos, (size_t)(45 - pos));
+#else
+        fwrite(buf + pos, 1, (size_t)(45 - pos), stdout);
+        fflush(stdout);
+#endif
+    } else {
+        mako_print_u128((mako_u128_t)v);
+    }
+}
+
+static inline mako_i128_t mako_i128_from_parts(int64_t hi, int64_t lo) {
+#if defined(__SIZEOF_INT128__)
+    return (mako_i128_t)(((mako_u128_t)(uint64_t)hi << 64) | (mako_u128_t)(uint64_t)lo);
+#else
+    (void)hi;
+    return (mako_i128_t)lo;
+#endif
+}
+
+static inline mako_u128_t mako_u128_from_parts(int64_t hi, int64_t lo) {
+#if defined(__SIZEOF_INT128__)
+    return ((mako_u128_t)(uint64_t)hi << 64) | (mako_u128_t)(uint64_t)lo;
+#else
+    (void)hi;
+    return (mako_u128_t)(uint64_t)lo;
+#endif
+}
+
+static inline int64_t mako_i128_hi(mako_i128_t x) {
+#if defined(__SIZEOF_INT128__)
+    return (int64_t)((mako_u128_t)x >> 64);
+#else
+    return x < 0 ? -1 : 0;
+#endif
+}
+
+static inline int64_t mako_i128_lo(mako_i128_t x) {
+    return (int64_t)(uint64_t)x;
+}
+
+static inline int64_t mako_u128_hi(mako_u128_t x) {
+#if defined(__SIZEOF_INT128__)
+    return (int64_t)(x >> 64);
+#else
+    (void)x;
+    return 0;
+#endif
+}
+
+static inline int64_t mako_u128_lo(mako_u128_t x) {
+    return (int64_t)(uint64_t)x;
+}
+
 static inline void mako_print_float(double n) {
 #if !defined(_WIN32) && !defined(__wasi__)
     char buf[32];

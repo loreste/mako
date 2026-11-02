@@ -27,6 +27,10 @@ pub enum Type {
     Int8,
     /// Always 64-bit unsigned (`uint64_t`); stored as uint64_t / int64_t bit pattern.
     UInt64,
+    /// Signed 128-bit (`__int128`); fixed-point decimal, crypto, UUID/IPv6 math.
+    Int128,
+    /// Unsigned 128-bit (`unsigned __int128`); UUID/IPv6, crypto, wide counters.
+    UInt128,
     /// Unsigned 32-bit (`uint32_t`); for protocol headers (HEP3, Diameter).
     UInt32,
     /// Unsigned 16-bit (`uint16_t`); for protocol headers, port numbers.
@@ -120,6 +124,8 @@ impl Type {
             Type::Int32 => "int32".into(),
             Type::Int8 => "int8".into(),
             Type::UInt64 => "uint64".into(),
+            Type::Int128 => "i128".into(),
+            Type::UInt128 => "u128".into(),
             Type::UInt32 => "uint32".into(),
             Type::UInt16 => "uint16".into(),
             Type::Int16 => "int16".into(),
@@ -181,6 +187,8 @@ impl Type {
             Type::Int32 => "int32".into(),
             Type::Int8 => "int8".into(),
             Type::UInt64 => "uint64".into(),
+            Type::Int128 => "i128".into(),
+            Type::UInt128 => "u128".into(),
             Type::UInt32 => "uint32".into(),
             Type::UInt16 => "uint16".into(),
             Type::Int16 => "int16".into(),
@@ -1676,11 +1684,43 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
         );
         fns.insert(
+            "mem_read_u64".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_u64".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
             "mem_read_i32".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
             "mem_write_i32".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_u32".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_u32".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_i16".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_i16".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_u16".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_u16".into(),
             Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
         );
         fns.insert(
@@ -1690,6 +1730,46 @@ impl TypeChecker {
         fns.insert(
             "mem_write_byte".into(),
             Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_f32".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "mem_write_f32".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Float], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_f64".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Float)),
+        );
+        fns.insert(
+            "mem_write_f64".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Float], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "i128_from_parts".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int128)),
+        );
+        fns.insert(
+            "u128_from_parts".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::UInt128)),
+        );
+        fns.insert(
+            "i128_hi".into(),
+            Type::Fn(vec![Type::Int128], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "i128_lo".into(),
+            Type::Fn(vec![Type::Int128], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "u128_hi".into(),
+            Type::Fn(vec![Type::UInt128], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "u128_lo".into(),
+            Type::Fn(vec![Type::UInt128], Box::new(Type::Int)),
         );
         // Scatter-gather I/O for zero-copy block transfers (SAN/iSCSI)
         fns.insert(
@@ -2449,10 +2529,79 @@ impl TypeChecker {
                 Box::new(Type::Float),
             ),
         );
+        fns.insert(
+            "simd_f32x4_add".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Float)),
+                    Type::Array(Box::new(Type::Float)),
+                ],
+                Box::new(Type::Array(Box::new(Type::Float))),
+            ),
+        );
+        fns.insert(
+            "simd_f32x4_sub".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Float)),
+                    Type::Array(Box::new(Type::Float)),
+                ],
+                Box::new(Type::Array(Box::new(Type::Float))),
+            ),
+        );
+        fns.insert(
+            "simd_f32x4_mul".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Float)),
+                    Type::Array(Box::new(Type::Float)),
+                ],
+                Box::new(Type::Array(Box::new(Type::Float))),
+            ),
+        );
+        fns.insert(
+            "simd_f32x4_scale".into(),
+            Type::Fn(
+                vec![Type::Array(Box::new(Type::Float)), Type::Float],
+                Box::new(Type::Array(Box::new(Type::Float))),
+            ),
+        );
+        fns.insert(
+            "simd_i32x4_add".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
+        fns.insert(
+            "simd_i16x8_add".into(),
+            Type::Fn(
+                vec![
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Array(Box::new(Type::Int))),
+            ),
+        );
         fns.insert("clz".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
         fns.insert("ctz".into(), Type::Fn(vec![Type::Int], Box::new(Type::Int)));
         fns.insert(
             "popcount".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "clz32".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ctz32".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "popcount32".into(),
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
@@ -2464,7 +2613,39 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int], Box::new(Type::Int)),
         );
         fns.insert(
+            "bswap16".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "htons".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ntohs".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "htonl".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ntohl".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
             "rotl64".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rotr64".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rotl32".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "rotr32".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
         );
 
@@ -15550,15 +15731,17 @@ impl TypeChecker {
                 "ZipWriter" => Ok(Type::Named("ZipWriter".into())),
                 "ReflectValue" => Ok(Type::Named("ReflectValue".into())),
                 "Uuid" | "uuid" => Ok(Type::Uuid),
-                "int64" => Ok(Type::Int64),
-                "int32" => Ok(Type::Int32),
-                "int8" => Ok(Type::Int8),
-                "uint64" => Ok(Type::UInt64),
+                "int64" | "i64" | "isize" => Ok(Type::Int64),
+                "int32" | "i32" | "rune" | "char" => Ok(Type::Int32),
+                "int8" | "i8" => Ok(Type::Int8),
+                "uint64" | "u64" | "usize" | "uintptr" => Ok(Type::UInt64),
+                "i128" | "int128" => Ok(Type::Int128),
+                "u128" | "uint128" => Ok(Type::UInt128),
                 "uint32" | "u32" => Ok(Type::UInt32),
                 "uint16" | "u16" => Ok(Type::UInt16),
                 "int16" | "i16" => Ok(Type::Int16),
-                "byte" => Ok(Type::Byte),
-                "float" | "float64" => Ok(Type::Float),
+                "byte" | "u8" | "uint8" => Ok(Type::Byte),
+                "float" | "float64" | "f64" => Ok(Type::Float),
                 "float32" | "f32" => Ok(Type::Float32),
                 "bool" => Ok(Type::Bool),
                 "string" => Ok(Type::String),
@@ -16236,6 +16419,8 @@ impl TypeChecker {
                             | Type::Int16
                             | Type::Int8
                             | Type::UInt64
+                            | Type::Int128
+                            | Type::UInt128
                             | Type::UInt32
                             | Type::UInt16
                             | Type::Byte,
@@ -16251,6 +16436,8 @@ impl TypeChecker {
                                     | Type::Int16
                                     | Type::Int8
                                     | Type::UInt64
+                                    | Type::Int128
+                                    | Type::UInt128
                                     | Type::UInt32
                                     | Type::UInt16
                                     | Type::Byte
@@ -16696,6 +16883,8 @@ impl TypeChecker {
                                 | Type::Int16
                                 | Type::Int8
                                 | Type::UInt64
+                                | Type::Int128
+                                | Type::UInt128
                                 | Type::UInt32
                                 | Type::UInt16
                                 | Type::Byte
@@ -17462,6 +17651,8 @@ impl TypeChecker {
             | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::Int128
+            | Type::UInt128
             | Type::UInt32
             | Type::UInt16
             | Type::Byte
@@ -17718,6 +17909,10 @@ impl TypeChecker {
                             Ok(Type::Int8)
                         } else if lt == Type::UInt64 && rt == Type::UInt64 {
                             Ok(Type::UInt64)
+                        } else if lt == Type::Int128 && rt == Type::Int128 {
+                            Ok(Type::Int128)
+                        } else if lt == Type::UInt128 && rt == Type::UInt128 {
+                            Ok(Type::UInt128)
                         } else if lt == Type::UInt32 && rt == Type::UInt32 {
                             Ok(Type::UInt32)
                         } else if lt == Type::UInt16 && rt == Type::UInt16 {
@@ -17788,6 +17983,8 @@ impl TypeChecker {
                             || (lt == Type::Int16 && rt == Type::Int16)
                             || (lt == Type::Int8 && rt == Type::Int8)
                             || (lt == Type::UInt64 && rt == Type::UInt64)
+                            || (lt == Type::Int128 && rt == Type::Int128)
+                            || (lt == Type::UInt128 && rt == Type::UInt128)
                             || (lt == Type::UInt32 && rt == Type::UInt32)
                             || (lt == Type::UInt16 && rt == Type::UInt16)
                             || (lt == Type::Byte && rt == Type::Byte)
@@ -17836,6 +18033,10 @@ impl TypeChecker {
                             Ok(Type::Int8)
                         } else if lt == Type::UInt64 && rt == Type::UInt64 {
                             Ok(Type::UInt64)
+                        } else if lt == Type::Int128 && rt == Type::Int128 {
+                            Ok(Type::Int128)
+                        } else if lt == Type::UInt128 && rt == Type::UInt128 {
+                            Ok(Type::UInt128)
                         } else if lt == Type::UInt32 && rt == Type::UInt32 {
                             Ok(Type::UInt32)
                         } else if lt == Type::UInt16 && rt == Type::UInt16 {
@@ -17877,6 +18078,8 @@ impl TypeChecker {
                                 | Type::Int16
                                 | Type::Int8
                                 | Type::UInt64
+                                | Type::Int128
+                                | Type::UInt128
                                 | Type::UInt32
                                 | Type::UInt16
                                 | Type::Byte
@@ -17896,6 +18099,8 @@ impl TypeChecker {
                                 | Type::Int16
                                 | Type::Int8
                                 | Type::UInt64
+                                | Type::Int128
+                                | Type::UInt128
                                 | Type::UInt32
                                 | Type::UInt16
                                 | Type::Byte
@@ -18499,7 +18704,70 @@ impl TypeChecker {
                             return Ok(Type::Void);
                         }
                         // Go-like conversions between integer kinds + string/[]byte
-                        "int64" if args.len() == 1 => {
+                        "sizeof_val" if args.len() == 1 => {
+                            let _ = self.check_expr(&args[0])?;
+                            return Ok(Type::Int);
+                        }
+                        "mem_write_i64"
+                        | "mem_write_u64"
+                        | "mem_write_i32"
+                        | "mem_write_u32"
+                        | "mem_write_i16"
+                        | "mem_write_u16"
+                        | "mem_write_byte"
+                            if args.len() == 3 =>
+                        {
+                            let a0 = self.check_expr(&args[0])?;
+                            let a1 = self.check_expr(&args[1])?;
+                            let a2 = self.check_expr(&args[2])?;
+                            if !is_int_family(&a0) || !is_int_family(&a1) || !is_int_family(&a2) {
+                                return Err(TypeError::new(format!(
+                                    "{name} expects integer arguments, got ({}, {}, {})",
+                                    a0.display(),
+                                    a1.display(),
+                                    a2.display()
+                                )));
+                            }
+                            return Ok(Type::Void);
+                        }
+                        "mem_write_f32" | "mem_write_f64" if args.len() == 3 => {
+                            let a0 = self.check_expr(&args[0])?;
+                            let a1 = self.check_expr(&args[1])?;
+                            let a2 = self.check_expr(&args[2])?;
+                            if !is_int_family(&a0)
+                                || !is_int_family(&a1)
+                                || !matches!(a2, Type::Float | Type::Float32)
+                            {
+                                return Err(TypeError::new(format!(
+                                    "{name} expects (int, int, float/f32), got ({}, {}, {})",
+                                    a0.display(),
+                                    a1.display(),
+                                    a2.display()
+                                )));
+                            }
+                            return Ok(Type::Void);
+                        }
+                        "i128" | "int128" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float || t == Type::Float32 {
+                                return Ok(Type::Int128);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to i128",
+                                t.display()
+                            )));
+                        }
+                        "u128" | "uint128" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            if is_int_family(&t) || t == Type::Float || t == Type::Float32 {
+                                return Ok(Type::UInt128);
+                            }
+                            return Err(TypeError::new(format!(
+                                "cannot convert {} to u128",
+                                t.display()
+                            )));
+                        }
+                        "int64" | "i64" | "isize" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             if is_int_family(&t) || t == Type::Float || t == Type::Float32 {
                                 return Ok(Type::Int64);
@@ -18509,7 +18777,7 @@ impl TypeChecker {
                                 t.display()
                             )));
                         }
-                        "int32" if args.len() == 1 => {
+                        "int32" | "i32" | "rune" | "char" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             if is_int_family(&t) || t == Type::Float || t == Type::Float32 {
                                 return Ok(Type::Int32);
@@ -18519,7 +18787,7 @@ impl TypeChecker {
                                 t.display()
                             )));
                         }
-                        "int8" if args.len() == 1 => {
+                        "int8" | "i8" if args.len() == 1 => {
                             if let Ok(v) = try_fold_const(&args[0]) {
                                 if v < -128 || v > 127 {
                                     return Err(TypeError::new(format!(
@@ -18536,7 +18804,7 @@ impl TypeChecker {
                                 t.display()
                             )));
                         }
-                        "uint64" if args.len() == 1 => {
+                        "uint64" | "u64" | "usize" | "uintptr" if args.len() == 1 => {
                             if let Ok(v) = try_fold_const(&args[0]) {
                                 if v < 0 {
                                     return Err(TypeError::new(format!(
@@ -18593,7 +18861,7 @@ impl TypeChecker {
                                 t.display()
                             )));
                         }
-                        "byte" if args.len() == 1 => {
+                        "byte" | "u8" | "uint8" if args.len() == 1 => {
                             if let Ok(v) = try_fold_const(&args[0]) {
                                 if v < 0 || v > 255 {
                                     return Err(TypeError::new(format!(
@@ -18620,7 +18888,7 @@ impl TypeChecker {
                                 t.display()
                             )));
                         }
-                        "float" | "float64" if args.len() == 1 => {
+                        "float" | "float64" | "f64" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             if is_int_family(&t) || t == Type::Float || t == Type::Float32 {
                                 return Ok(Type::Float);
@@ -20840,11 +21108,13 @@ impl TypeChecker {
     /// Handles both primitive tags and monomorphized struct names.
     fn tag_to_type_expr(&mut self, tag: &str) -> TypeExpr {
         match tag {
-            "int" | "int64" | "i64" => TypeExpr::Named("int".into()),
-            "int32" | "i32" => TypeExpr::Named("int32".into()),
+            "int" | "int64" | "i64" | "isize" => TypeExpr::Named("int".into()),
+            "int32" | "i32" | "rune" | "char" => TypeExpr::Named("int32".into()),
             "int16" | "i16" => TypeExpr::Named("int16".into()),
             "int8" | "i8" => TypeExpr::Named("int8".into()),
-            "uint64" | "u64" => TypeExpr::Named("uint64".into()),
+            "uint64" | "u64" | "usize" | "uintptr" => TypeExpr::Named("uint64".into()),
+            "i128" | "int128" => TypeExpr::Named("i128".into()),
+            "u128" | "uint128" => TypeExpr::Named("u128".into()),
             "uint32" | "u32" => TypeExpr::Named("uint32".into()),
             "uint16" | "u16" => TypeExpr::Named("uint16".into()),
             "float" | "float64" | "f64" => TypeExpr::Named("float".into()),
@@ -21063,11 +21333,13 @@ impl TypeChecker {
     fn type_from_mono_tag(&self, tag: &str) -> Type {
         match tag {
             "int" => Type::Int,
-            "int64" | "i64" => Type::Int64,
-            "int32" | "i32" => Type::Int32,
+            "int64" | "i64" | "isize" => Type::Int64,
+            "int32" | "i32" | "rune" | "char" => Type::Int32,
             "int16" | "i16" => Type::Int16,
             "int8" | "i8" => Type::Int8,
-            "uint64" | "u64" => Type::UInt64,
+            "uint64" | "u64" | "usize" | "uintptr" => Type::UInt64,
+            "i128" | "int128" => Type::Int128,
+            "u128" | "uint128" => Type::UInt128,
             "uint32" | "u32" => Type::UInt32,
             "uint16" | "u16" => Type::UInt16,
             "byte" | "uint8" | "u8" => Type::Byte,
@@ -21704,6 +21976,8 @@ impl TypeChecker {
             | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::Int128
+            | Type::UInt128
             | Type::UInt32
             | Type::UInt16
             | Type::Byte
@@ -21914,6 +22188,8 @@ impl TypeChecker {
             | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::Int128
+            | Type::UInt128
             | Type::UInt32
             | Type::UInt16
             | Type::Byte
@@ -22438,6 +22714,8 @@ impl TypeChecker {
             | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::Int128
+            | Type::UInt128
             | Type::UInt32
             | Type::UInt16
             | Type::Byte
@@ -22904,6 +23182,8 @@ fn is_int_family(t: &Type) -> bool {
             | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::Int128
+            | Type::UInt128
             | Type::UInt32
             | Type::UInt16
             | Type::Byte
@@ -22920,6 +23200,8 @@ fn is_copy_type(t: &Type) -> bool {
             | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::Int128
+            | Type::UInt128
             | Type::UInt32
             | Type::UInt16
             | Type::Byte
@@ -22940,6 +23222,8 @@ fn is_literal_int_kind(t: &Type) -> bool {
             | Type::Int16
             | Type::Int8
             | Type::UInt64
+            | Type::Int128
+            | Type::UInt128
             | Type::UInt32
             | Type::UInt16
             | Type::Byte
@@ -23752,6 +24036,8 @@ pub fn type_to_type_expr(t: &Type) -> TypeExpr {
         Type::Int32 => TypeExpr::Named("int32".into()),
         Type::Int8 => TypeExpr::Named("int8".into()),
         Type::UInt64 => TypeExpr::Named("uint64".into()),
+        Type::Int128 => TypeExpr::Named("i128".into()),
+        Type::UInt128 => TypeExpr::Named("u128".into()),
         Type::UInt32 => TypeExpr::Named("uint32".into()),
         Type::UInt16 => TypeExpr::Named("uint16".into()),
         Type::Int16 => TypeExpr::Named("int16".into()),

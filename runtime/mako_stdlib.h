@@ -39,6 +39,8 @@ int sendfile(int fd, int s, off_t offset, off_t *len, struct sf_hdtr *hdtr, int 
 #ifndef MAP_ANONYMOUS
 #ifdef MAP_ANON
 #define MAP_ANONYMOUS MAP_ANON
+#elif defined(__APPLE__)
+#define MAP_ANONYMOUS 0x1000
 #else
 #define MAP_ANONYMOUS 0x20
 #endif
@@ -1536,17 +1538,53 @@ static inline int64_t mako_mem_read_i64(int64_t addr, int64_t offset) {
 static inline void mako_mem_write_i64(int64_t addr, int64_t offset, int64_t val) {
     *(int64_t *)((char *)(uintptr_t)addr + offset) = val;
 }
+static inline int64_t mako_mem_read_u64(int64_t addr, int64_t offset) {
+    return (int64_t)*(uint64_t *)((char *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_u64(int64_t addr, int64_t offset, int64_t val) {
+    *(uint64_t *)((char *)(uintptr_t)addr + offset) = (uint64_t)val;
+}
 static inline int64_t mako_mem_read_i32(int64_t addr, int64_t offset) {
     return (int64_t)*(int32_t *)((char *)(uintptr_t)addr + offset);
 }
 static inline void mako_mem_write_i32(int64_t addr, int64_t offset, int64_t val) {
     *(int32_t *)((char *)(uintptr_t)addr + offset) = (int32_t)val;
 }
+static inline int64_t mako_mem_read_u32(int64_t addr, int64_t offset) {
+    return (int64_t)*(uint32_t *)((char *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_u32(int64_t addr, int64_t offset, int64_t val) {
+    *(uint32_t *)((char *)(uintptr_t)addr + offset) = (uint32_t)val;
+}
+static inline int64_t mako_mem_read_i16(int64_t addr, int64_t offset) {
+    return (int64_t)*(int16_t *)((char *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_i16(int64_t addr, int64_t offset, int64_t val) {
+    *(int16_t *)((char *)(uintptr_t)addr + offset) = (int16_t)val;
+}
+static inline int64_t mako_mem_read_u16(int64_t addr, int64_t offset) {
+    return (int64_t)*(uint16_t *)((char *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_u16(int64_t addr, int64_t offset, int64_t val) {
+    *(uint16_t *)((char *)(uintptr_t)addr + offset) = (uint16_t)val;
+}
 static inline int64_t mako_mem_read_byte(int64_t addr, int64_t offset) {
     return (int64_t)*((uint8_t *)(uintptr_t)addr + offset);
 }
 static inline void mako_mem_write_byte(int64_t addr, int64_t offset, int64_t val) {
     *((uint8_t *)(uintptr_t)addr + offset) = (uint8_t)val;
+}
+static inline double mako_mem_read_f32(int64_t addr, int64_t offset) {
+    return (double)*(float *)((char *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_f32(int64_t addr, int64_t offset, double val) {
+    *(float *)((char *)(uintptr_t)addr + offset) = (float)val;
+}
+static inline double mako_mem_read_f64(int64_t addr, int64_t offset) {
+    return *(double *)((char *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_f64(int64_t addr, int64_t offset, double val) {
+    *(double *)((char *)(uintptr_t)addr + offset) = val;
 }
 
 /* ---- Scatter-gather I/O for zero-copy block transfers (SAN/iSCSI) ---- */

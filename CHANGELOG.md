@@ -17,6 +17,12 @@
 
 ### Systems programming
 
+- Short/long fixed-width and systems scalar aliases (`u8`/`uint8`/`byte`, `i8`/`int8`, `i16`/`int16`, `u16`/`uint16`, `i32`/`int32`/`rune`/`char`, `u32`/`uint32`, `i64`/`int64`/`isize`, `u64`/`uint64`/`usize`/`uintptr`, `f32`/`float32`, `f64`/`float64`/`float`) and matching cast builtins across typechecking, monomorphization, C codegen, and native IR.
+- 128-bit integers (`i128`/`int128`, `u128`/`uint128`): native `__int128` / `unsigned __int128` arithmetic, comparisons, bitwise operations, `print` support, casts, and `i128_from_parts`/`u128_from_parts`/`i128_hi`/`i128_lo`/`u128_hi`/`u128_lo`.
+- True hardware byte-width fields in `#[packed]` structs (`uint8_t`, `int8_t`, `uint16_t`, `int16_t`, `uint32_t`, `int32_t`, `uint64_t`, `int64_t`, `mako_i128_t`, `mako_u128_t`, `float`, `double`) and `sizeof_val(x) -> int` builtin.
+- Raw memory typed accessors: `mem_read_u64`/`mem_write_u64`, `mem_read_u32`/`mem_write_u32`, `mem_read_i16`/`mem_write_i16`, `mem_read_u16`/`mem_write_u16`, `mem_read_f32`/`mem_write_f32`, `mem_read_f64`/`mem_write_f64`.
+- Endian & 32/64-bit bit manipulation: `bswap16`, `htons`, `ntohs`, `htonl`, `ntohl`, `rotr64`, `rotl32`, `rotr32`, `clz32`, `ctz32`, `popcount32` (plus shift-by-0 UB guard in `rotl64`).
+- 4-lane SIMD vector operations: `simd_f32x4_add`, `simd_f32x4_sub`, `simd_f32x4_mul`, `simd_f32x4_scale`, `simd_i32x4_add`, `simd_i16x8_add`.
 - Thread-local storage: `thread_local let counter: int = 0` — emits C11 `_Thread_local`.
 - Packed structs: `#[packed] struct PageHeader { ... }` — `__attribute__((packed))` for wire protocols and on-disk layouts.
 - Process control: `process_fork`, `process_exec`, `process_wait`, `process_pipe`, `process_dup2`, `process_setsid` — container runtimes and database backends.

@@ -1846,12 +1846,6 @@ static inline int64_t mako_simd_sum_i64_4(int64_t a0, int64_t a1, int64_t a2, in
 /* ---- SIMD f32 vector ops (codec hot paths: DCT, quantization, FFT) ----
  * Written so compilers auto-vectorize to NEON/SSE at -O2.
  * 4-wide element ops map to float32x4 / __m128 naturally. */
-static inline void mako_simd_f32x4_mul(
-    double *out, const double *a, const double *b
-) {
-    out[0]=a[0]*b[0]; out[1]=a[1]*b[1]; out[2]=a[2]*b[2]; out[3]=a[3]*b[3];
-}
-
 static inline double mako_simd_f32x4_dot(
     double a0, double a1, double a2, double a3,
     double b0, double b1, double b2, double b3
@@ -1861,6 +1855,65 @@ static inline double mako_simd_f32x4_dot(
 
 static inline double mako_simd_f32x4_hadd(double a0, double a1, double a2, double a3) {
     return a0 + a1 + a2 + a3;
+}
+
+static inline MakoFloatArray mako_simd_f32x4_add(MakoFloatArray a, MakoFloatArray b) {
+    size_t n = a.len < b.len ? (size_t)a.len : (size_t)b.len;
+    MakoFloatArray out = mako_float_array_make((int64_t)n, (int64_t)(n > 0 ? n : 4));
+    for (size_t i = 0; i < n; i++) {
+        out.data[i] = (double)((float)a.data[i] + (float)b.data[i]);
+    }
+    return out;
+}
+
+static inline MakoFloatArray mako_simd_f32x4_sub(MakoFloatArray a, MakoFloatArray b) {
+    size_t n = a.len < b.len ? (size_t)a.len : (size_t)b.len;
+    MakoFloatArray out = mako_float_array_make((int64_t)n, (int64_t)(n > 0 ? n : 4));
+    for (size_t i = 0; i < n; i++) {
+        out.data[i] = (double)((float)a.data[i] - (float)b.data[i]);
+    }
+    return out;
+}
+
+static inline MakoFloatArray mako_simd_f32x4_mul(MakoFloatArray a, MakoFloatArray b) {
+    size_t n = a.len < b.len ? (size_t)a.len : (size_t)b.len;
+    MakoFloatArray out = mako_float_array_make((int64_t)n, (int64_t)(n > 0 ? n : 4));
+    for (size_t i = 0; i < n; i++) {
+        out.data[i] = (double)((float)a.data[i] * (float)b.data[i]);
+    }
+    return out;
+}
+
+static inline MakoFloatArray mako_simd_f32x4_scale(MakoFloatArray a, double s) {
+    size_t n = (size_t)a.len;
+    MakoFloatArray out = mako_float_array_make((int64_t)n, (int64_t)(n > 0 ? n : 4));
+    float sf = (float)s;
+    for (size_t i = 0; i < n; i++) {
+        out.data[i] = (double)((float)a.data[i] * sf);
+    }
+    return out;
+}
+
+static inline MakoIntArray mako_simd_i32x4_add(MakoIntArray a, MakoIntArray b) {
+    size_t n = a.len < b.len ? (size_t)a.len : (size_t)b.len;
+    MakoIntArray out = mako_int_array_make((int64_t)n, (int64_t)(n > 0 ? n : 4));
+    for (size_t i = 0; i < n; i++) {
+        int32_t av = (int32_t)a.data[i];
+        int32_t bv = (int32_t)b.data[i];
+        out.data[i] = (int64_t)(int32_t)((uint32_t)av + (uint32_t)bv);
+    }
+    return out;
+}
+
+static inline MakoIntArray mako_simd_i16x8_add(MakoIntArray a, MakoIntArray b) {
+    size_t n = a.len < b.len ? (size_t)a.len : (size_t)b.len;
+    MakoIntArray out = mako_int_array_make((int64_t)n, (int64_t)(n > 0 ? n : 8));
+    for (size_t i = 0; i < n; i++) {
+        int16_t av = (int16_t)a.data[i];
+        int16_t bv = (int16_t)b.data[i];
+        out.data[i] = (int64_t)(int16_t)((uint16_t)av + (uint16_t)bv);
+    }
+    return out;
 }
 
 /* Fused multiply-add: a * b + c (single rounding on FMA-capable HW) */
@@ -1884,16 +1937,67 @@ static inline int64_t mako_ctz(int64_t x) {
 static inline int64_t mako_popcount(int64_t x) {
     return (int64_t)__builtin_popcountll((unsigned long long)x);
 }
+static inline int64_t mako_clz32(int64_t x) {
+    uint32_t v = (uint32_t)x;
+    if (v == 0) return 32;
+    return (int64_t)__builtin_clz(v);
+}
+static inline int64_t mako_ctz32(int64_t x) {
+    uint32_t v = (uint32_t)x;
+    if (v == 0) return 32;
+    return (int64_t)__builtin_ctz(v);
+}
+static inline int64_t mako_popcount32(int64_t x) {
+    return (int64_t)__builtin_popcount((uint32_t)x);
+}
 static inline int64_t mako_bswap64(int64_t x) {
     return (int64_t)__builtin_bswap64((uint64_t)x);
 }
 static inline int64_t mako_bswap32(int64_t x) {
     return (int64_t)__builtin_bswap32((uint32_t)x);
 }
+static inline int64_t mako_bswap16(int64_t x) {
+    return (int64_t)__builtin_bswap16((uint16_t)x);
+}
+static inline int64_t mako_htons(int64_t x) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    return (int64_t)__builtin_bswap16((uint16_t)x);
+#else
+    return (int64_t)(uint16_t)x;
+#endif
+}
+static inline int64_t mako_ntohs(int64_t x) {
+    return mako_htons(x);
+}
+static inline int64_t mako_htonl(int64_t x) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    return (int64_t)__builtin_bswap32((uint32_t)x);
+#else
+    return (int64_t)(uint32_t)x;
+#endif
+}
+static inline int64_t mako_ntohl(int64_t x) {
+    return mako_htonl(x);
+}
 static inline int64_t mako_rotl64(int64_t x, int64_t n) {
     uint64_t v = (uint64_t)x;
-    n &= 63;
-    return (int64_t)((v << n) | (v >> (64 - n)));
+    unsigned int s = (unsigned int)n & 63u;
+    return s == 0 ? (int64_t)v : (int64_t)((v << s) | (v >> (64u - s)));
+}
+static inline int64_t mako_rotr64(int64_t x, int64_t n) {
+    uint64_t v = (uint64_t)x;
+    unsigned int s = (unsigned int)n & 63u;
+    return s == 0 ? (int64_t)v : (int64_t)((v >> s) | (v << (64u - s)));
+}
+static inline int64_t mako_rotl32(int64_t x, int64_t n) {
+    uint32_t v = (uint32_t)x;
+    unsigned int s = (unsigned int)n & 31u;
+    return s == 0 ? (int64_t)v : (int64_t)(uint32_t)((v << s) | (v >> (32u - s)));
+}
+static inline int64_t mako_rotr32(int64_t x, int64_t n) {
+    uint32_t v = (uint32_t)x;
+    unsigned int s = (unsigned int)n & 31u;
+    return s == 0 ? (int64_t)v : (int64_t)(uint32_t)((v >> s) | (v << (32u - s)));
 }
 
 /* ---- Multiplayer rollback ring ---- */

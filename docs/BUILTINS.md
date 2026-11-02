@@ -3429,3 +3429,78 @@ Rules:
 |----------|-----------|-------------|
 | `crew_drain` | `crew_drain(timeout_ms: int) -> int` | Drain all crew tasks with timeout |
 | `evloop_shutdown` | `evloop_shutdown(el: EvLoop) -> int` | Close event-loop backend and free |
+
+---
+
+## 78. Systems Primitives, Fixed-Width Scalars, 128-bit Integers & 4-Lane SIMD
+
+### Scalar Types & Casts
+
+All fixed-width and systems scalar aliases are supported as type annotations and cast builtins:
+
+| Canonical / Short | Long / Systems Aliases | Cast Builtins |
+|-------------------|------------------------|---------------|
+| `u8` / `byte` | `uint8` | `u8(x)`, `uint8(x)`, `byte(x)` |
+| `i8` | `int8` | `i8(x)`, `int8(x)` |
+| `i16` | `int16` | `i16(x)`, `int16(x)` |
+| `u16` | `uint16` | `u16(x)`, `uint16(x)` |
+| `i32` | `int32`, `rune`, `char` | `i32(x)`, `int32(x)`, `rune(x)`, `char(x)` |
+| `u32` | `uint32` | `u32(x)`, `uint32(x)` |
+| `i64` / `int` | `int64`, `isize` | `i64(x)`, `int64(x)`, `int(x)`, `isize(x)` |
+| `u64` | `uint64`, `usize`, `uintptr` | `u64(x)`, `uint64(x)`, `usize(x)`, `uintptr(x)` |
+| `i128` | `int128` | `i128(x)`, `int128(x)` |
+| `u128` | `uint128` | `u128(x)`, `uint128(x)` |
+| `f32` | `float32` | `f32(x)`, `float32(x)` |
+| `f64` / `float` | `float64` | `f64(x)`, `float64(x)`, `float(x)` |
+
+In `#[packed]` structs, fixed-width scalar fields emit exact hardware byte widths (`uint8_t`, `int8_t`, `uint16_t`, `int16_t`, `uint32_t`, `int32_t`, `uint64_t`, `int64_t`, `mako_i128_t`, `mako_u128_t`, `float`, `double`).
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `sizeof_val` | `sizeof_val(x: T) -> int` | Exact byte size of value `x` (`sizeof(x)` in C) |
+| `i128_from_parts` | `i128_from_parts(hi: int, lo: int) -> i128` | Construct 128-bit signed integer from `(hi << 64) \| uint64(lo)` |
+| `u128_from_parts` | `u128_from_parts(hi: int, lo: int) -> u128` | Construct 128-bit unsigned integer from `(hi << 64) \| uint64(lo)` |
+| `i128_hi` / `i128_lo` | `(x: i128) -> int` | Extract high / low 64-bit halves of `i128` |
+| `u128_hi` / `u128_lo` | `(x: u128) -> int` | Extract high / low 64-bit halves of `u128` |
+
+### Raw Memory Read / Write
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `mem_read_i64` / `mem_write_i64` | `(addr: int, off: int) -> int` / `(addr, off, val) -> void` | 64-bit signed raw memory access |
+| `mem_read_u64` / `mem_write_u64` | `(addr: int, off: int) -> u64` / `(addr, off, val: u64) -> void` | 64-bit unsigned raw memory access |
+| `mem_read_i32` / `mem_write_i32` | `(addr: int, off: int) -> int` / `(addr, off, val) -> void` | 32-bit signed raw memory access |
+| `mem_read_u32` / `mem_write_u32` | `(addr: int, off: int) -> u32` / `(addr, off, val: u32) -> void` | 32-bit unsigned raw memory access |
+| `mem_read_i16` / `mem_write_i16` | `(addr: int, off: int) -> i16` / `(addr, off, val: i16) -> void` | 16-bit signed raw memory access |
+| `mem_read_u16` / `mem_write_u16` | `(addr: int, off: int) -> u16` / `(addr, off, val: u16) -> void` | 16-bit unsigned raw memory access |
+| `mem_read_byte` / `mem_write_byte` | `(addr: int, off: int) -> int` / `(addr, off, val) -> void` | 8-bit unsigned raw memory access |
+| `mem_read_f32` / `mem_write_f32` | `(addr: int, off: int) -> f32` / `(addr, off, val: f32) -> void` | 32-bit IEEE-754 float raw memory access |
+| `mem_read_f64` / `mem_write_f64` | `(addr: int, off: int) -> f64` / `(addr, off, val: f64) -> void` | 64-bit IEEE-754 float raw memory access |
+
+### Bit Manipulation & Endian Conversion
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `clz` / `ctz` / `popcount` | `(x: int) -> int` | 64-bit leading zeros, trailing zeros, population count |
+| `clz32` / `ctz32` / `popcount32` | `(x: int) -> int` | 32-bit leading zeros, trailing zeros, population count |
+| `rotl64` / `rotr64` | `(x: int, k: int) -> int` | 64-bit rotate left / right (safe for `k = 0`) |
+| `rotl32` / `rotr32` | `(x: int, k: int) -> int` | 32-bit rotate left / right (zero-extended 32-bit result) |
+| `bswap64` / `bswap32` / `bswap16` | `(x: int) -> int` | 64-bit, 32-bit, and 16-bit byte swap |
+| `htons` / `ntohs` | `(x: int) -> int` | Host ↔ network 16-bit byte order |
+| `htonl` / `ntohl` | `(x: int) -> int` | Host ↔ network 32-bit byte order |
+
+### 4-Lane SIMD Vector Operations
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `simd_f32x4_dot` | `(a: []float, b: []float) -> float` | 4-lane unrolled dot product |
+| `simd_f32x4_hadd` | `(a: []float) -> float` | 4-lane horizontal sum |
+| `simd_fma` | `(a: float, b: float, c: float) -> float` | Hardware fused multiply-add (`fma(a, b, c)`) |
+| `simd_f32x4_add` | `(a: []float, b: []float) -> []float` | Element-wise vector addition `a[i] + b[i]` |
+| `simd_f32x4_sub` | `(a: []float, b: []float) -> []float` | Element-wise vector subtraction `a[i] - b[i]` |
+| `simd_f32x4_mul` | `(a: []float, b: []float) -> []float` | Element-wise vector multiplication `a[i] * b[i]` |
+| `simd_f32x4_scale` | `(a: []float, s: float) -> []float` | Scalar-vector multiplication `a[i] * s` |
+| `simd_i32x4_add` | `(a: []int, b: []int) -> []int` | 32-bit lane-wrapped integer vector addition |
+| `simd_i16x8_add` | `(a: []int, b: []int) -> []int` | 16-bit lane-wrapped integer vector addition |
+
+Tests: `systems_primitives_test.mko`.

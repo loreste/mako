@@ -920,7 +920,7 @@ impl Codegen {
                 "i".to_string()
             }
             TypeExpr::Named(n) if n == "string" => "s".to_string(),
-            TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "float32" | "f32") => {
+            TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "f64" | "float32" | "f32") => {
                 "f".to_string()
             }
             TypeExpr::Named(n) if n == "bool" => "b".to_string(),
@@ -968,7 +968,7 @@ impl Codegen {
                     "string".into()
                 }
             }
-            TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "float32" | "f32") => {
+            TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "f64" | "float32" | "f32") => {
                 if named_key {
                     "f".into()
                 } else {
@@ -1017,7 +1017,7 @@ impl Codegen {
                     }
                     TypeExpr::Named(n) if n == "string" => "string".into(),
                     TypeExpr::Named(n)
-                        if matches!(n.as_str(), "float" | "float64" | "float32" | "f32") =>
+                        if matches!(n.as_str(), "float" | "float64" | "f64" | "float32" | "f32") =>
                     {
                         "float".into()
                     }
@@ -1081,7 +1081,7 @@ impl Codegen {
     fn value_payload_kind(ty: &TypeExpr) -> &'static str {
         match ty {
             TypeExpr::Named(t) if t == "string" => "string",
-            TypeExpr::Named(t) if matches!(t.as_str(), "float" | "float64" | "float32" | "f32") => {
+            TypeExpr::Named(t) if matches!(t.as_str(), "float" | "float64" | "f64" | "float32" | "f32") => {
                 "float"
             }
             TypeExpr::Generic(n, _) if n == "Option" => "option",
@@ -1090,7 +1090,7 @@ impl Codegen {
                 match &args[0] {
                     TypeExpr::Named(t) if t == "string" => "chan_string",
                     TypeExpr::Named(t)
-                        if matches!(t.as_str(), "float" | "float64" | "float32" | "f32") =>
+                        if matches!(t.as_str(), "float" | "float64" | "f64" | "float32" | "f32") =>
                     {
                         "chan_float"
                     }
@@ -2942,6 +2942,12 @@ impl Codegen {
                 | "maps_clone"
                 | "sql_query_col_int"
                 | "sql_query_col_str"
+                | "simd_f32x4_add"
+                | "simd_f32x4_sub"
+                | "simd_f32x4_mul"
+                | "simd_f32x4_scale"
+                | "simd_i32x4_add"
+                | "simd_i16x8_add"
         )
     }
 
@@ -7840,8 +7846,30 @@ impl Codegen {
         let c_name = info.c_name.clone();
         let packed = s.derives.iter().any(|d| d == "packed");
         let _ = writeln!(self.out, "typedef struct {c_name} {{");
-        for (fname, fty) in &info.fields {
-            let _ = writeln!(self.out, "    {fty} {fname};");
+        for (i, (fname, fty)) in info.fields.iter().enumerate() {
+            let emitted_ty = if packed {
+                match info.field_types.get(i).map(|(_, t)| t) {
+                    Some(TypeExpr::Named(n)) => match n.as_str() {
+                        "byte" | "u8" | "uint8" => "uint8_t",
+                        "int8" | "i8" => "int8_t",
+                        "u16" | "uint16" => "uint16_t",
+                        "i16" | "int16" => "int16_t",
+                        "u32" | "uint32" => "uint32_t",
+                        "i32" | "int32" | "rune" | "char" => "int32_t",
+                        "u64" | "uint64" | "usize" | "uintptr" => "uint64_t",
+                        "i64" | "int64" | "int" | "isize" => "int64_t",
+                        "i128" | "int128" => "mako_i128_t",
+                        "u128" | "uint128" => "mako_u128_t",
+                        "f32" | "float32" => "float",
+                        "f64" | "float64" | "float" => "double",
+                        _ => fty.as_str(),
+                    },
+                    _ => fty.as_str(),
+                }
+            } else {
+                fty.as_str()
+            };
+            let _ = writeln!(self.out, "    {emitted_ty} {fname};");
         }
         if packed {
             let _ = writeln!(self.out, "}} __attribute__((packed)) {c_name};");
@@ -13955,9 +13983,12 @@ impl Codegen {
         }
         match t {
             TypeExpr::Named(n) => match n.as_str() {
-                "int" | "int64" | "int32" | "int8" | "uint64" | "uint32" | "u32" | "uint16"
-                | "u16" | "int16" | "i16" | "byte" => "int64_t".into(),
-                "float" | "float64" | "float32" | "f32" => "double".into(),
+                "int" | "int64" | "i64" | "isize" | "int32" | "i32" | "rune" | "char"
+                | "int8" | "i8" | "uint64" | "u64" | "usize" | "uintptr" | "uint32" | "u32"
+                | "uint16" | "u16" | "int16" | "i16" | "byte" | "u8" | "uint8" => "int64_t".into(),
+                "i128" | "int128" => "mako_i128_t".into(),
+                "u128" | "uint128" => "mako_u128_t".into(),
+                "float" | "float64" | "f64" | "float32" | "f32" => "double".into(),
                 "bool" => "bool".into(),
                 "string" => "MakoString".into(),
                 "string_view" => "MakoString".into(),
@@ -14026,13 +14057,13 @@ impl Codegen {
                 }
                 _ => "int64_t".into(),
             },
-            TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "byte") => {
+            TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if matches!(n.as_str(), "byte" | "u8" | "uint8")) => {
                 "MakoByteArray".into()
             }
             TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "string") => {
                 "MakoStrArray".into()
             }
-            TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "float32" | "f32")) => {
+            TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "f64" | "float32" | "f32")) => {
                 "MakoFloatArray".into()
             }
             TypeExpr::Array(inner) if matches!(inner.as_ref(), TypeExpr::Named(n) if n == "bool") => {
@@ -18559,6 +18590,8 @@ impl Codegen {
                     _ => {
                         if lt == "double" || lt == "float" {
                             "double"
+                        } else if lt == "mako_i128_t" || lt == "mako_u128_t" {
+                            lt.as_str()
                         } else {
                             "int64_t"
                         }
@@ -18686,6 +18719,12 @@ impl Codegen {
                                 "double" | "float" => {
                                     self.emit_line(format_args!("mako_print_float({v});"));
                                 }
+                                "mako_i128_t" => {
+                                    self.emit_line(format_args!("mako_print_i128({v});"));
+                                }
+                                "mako_u128_t" => {
+                                    self.emit_line(format_args!("mako_print_u128({v});"));
+                                }
                                 _ => {
                                     self.emit_line(format_args!("mako_print_int((int64_t){v});"));
                                 }
@@ -18712,25 +18751,95 @@ impl Codegen {
                             self.emit_line(format_args!("mako_print_float({v});"));
                             return ("void".into(), "/*void*/".into());
                         }
-                        "int64" | "int32" | "int" | "byte" => {
+                        "sizeof_val" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("(int64_t)sizeof({v})"));
+                        }
+                        "i128" | "int128" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            return ("mako_i128_t".into(), format!("(mako_i128_t)({v})"));
+                        }
+                        "u128" | "uint128" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            return ("mako_u128_t".into(), format!("(mako_u128_t)({v})"));
+                        }
+                        "i128_from_parts" => {
+                            let (_, hi) = self.emit_expr(&args[0]);
+                            let (_, lo) = self.emit_expr(&args[1]);
+                            return (
+                                "mako_i128_t".into(),
+                                format!("mako_i128_from_parts({hi}, {lo})"),
+                            );
+                        }
+                        "u128_from_parts" => {
+                            let (_, hi) = self.emit_expr(&args[0]);
+                            let (_, lo) = self.emit_expr(&args[1]);
+                            return (
+                                "mako_u128_t".into(),
+                                format!("mako_u128_from_parts({hi}, {lo})"),
+                            );
+                        }
+                        "i128_hi" | "i128_lo" | "u128_hi" | "u128_lo" => {
+                            let (_, v) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_{name}({v})"));
+                        }
+                        "int64" | "i64" | "isize" | "int" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            if ty == "double" || ty == "float" {
+                            if ty == "double"
+                                || ty == "float"
+                                || ty == "mako_i128_t"
+                                || ty == "mako_u128_t"
+                            {
                                 return ("int64_t".into(), format!("(int64_t)({v})"));
                             }
                             return ("int64_t".into(), v);
                         }
-                        "int8" => {
+                        "int32" | "i32" | "rune" | "char" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            let as_i = if ty == "double" || ty == "float" {
+                            let as_i = if ty == "double"
+                                || ty == "float"
+                                || ty == "mako_i128_t"
+                                || ty == "mako_u128_t"
+                            {
+                                format!("(int64_t)({v})")
+                            } else {
+                                v
+                            };
+                            return ("int64_t".into(), format!("(int64_t)(int32_t)({as_i})"));
+                        }
+                        "byte" | "u8" | "uint8" => {
+                            let (ty, v) = self.emit_expr(&args[0]);
+                            let as_i = if ty == "double"
+                                || ty == "float"
+                                || ty == "mako_i128_t"
+                                || ty == "mako_u128_t"
+                            {
+                                format!("(int64_t)({v})")
+                            } else {
+                                v
+                            };
+                            return ("int64_t".into(), format!("(int64_t)(uint8_t)({as_i})"));
+                        }
+                        "int8" | "i8" => {
+                            let (ty, v) = self.emit_expr(&args[0]);
+                            let as_i = if ty == "double"
+                                || ty == "float"
+                                || ty == "mako_i128_t"
+                                || ty == "mako_u128_t"
+                            {
                                 format!("(int64_t)({v})")
                             } else {
                                 v
                             };
                             return ("int64_t".into(), format!("mako_to_int8({as_i})"));
                         }
-                        "uint64" => {
+                        "uint64" | "u64" | "usize" | "uintptr" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            let as_i = if ty == "double" || ty == "float" {
+                            let as_i = if ty == "double"
+                                || ty == "float"
+                                || ty == "mako_i128_t"
+                                || ty == "mako_u128_t"
+                            {
                                 format!("(int64_t)({v})")
                             } else {
                                 v
@@ -18742,7 +18851,11 @@ impl Codegen {
                         }
                         "u16" | "uint16" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            let as_i = if ty == "double" || ty == "float" {
+                            let as_i = if ty == "double"
+                                || ty == "float"
+                                || ty == "mako_i128_t"
+                                || ty == "mako_u128_t"
+                            {
                                 format!("(int64_t)({v})")
                             } else {
                                 v
@@ -18751,7 +18864,11 @@ impl Codegen {
                         }
                         "u32" | "uint32" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            let as_i = if ty == "double" || ty == "float" {
+                            let as_i = if ty == "double"
+                                || ty == "float"
+                                || ty == "mako_i128_t"
+                                || ty == "mako_u128_t"
+                            {
                                 format!("(int64_t)({v})")
                             } else {
                                 v
@@ -18760,7 +18877,11 @@ impl Codegen {
                         }
                         "i16" | "int16" => {
                             let (ty, v) = self.emit_expr(&args[0]);
-                            let as_i = if ty == "double" || ty == "float" {
+                            let as_i = if ty == "double"
+                                || ty == "float"
+                                || ty == "mako_i128_t"
+                                || ty == "mako_u128_t"
+                            {
                                 format!("(int64_t)({v})")
                             } else {
                                 v
@@ -18771,7 +18892,7 @@ impl Codegen {
                             let (_, v) = self.emit_expr(&args[0]);
                             return ("double".into(), format!("(double)(float)({v})"));
                         }
-                        "float" | "float64" => {
+                        "float" | "float64" | "f64" => {
                             let (ty, v) = self.emit_expr(&args[0]);
                             if ty == "double" {
                                 return ("double".into(), v);
@@ -20240,7 +20361,8 @@ impl Codegen {
                             return ("int64_t".into(), tmp);
                         }
                         "ioctl" | "mmap_anon" | "munmap" | "mprotect" | "mem_read_i64"
-                        | "mem_read_i32" | "mem_read_byte" => {
+                        | "mem_read_u64" | "mem_read_i32" | "mem_read_u32" | "mem_read_i16"
+                        | "mem_read_u16" | "mem_read_byte" => {
                             let mut cargs = Vec::new();
                             for a in args {
                                 let (_, v) = self.emit_expr(a);
@@ -20253,7 +20375,22 @@ impl Codegen {
                             ));
                             return ("int64_t".into(), tmp);
                         }
-                        "mem_write_i64" | "mem_write_i32" | "mem_write_byte" => {
+                        "mem_read_f32" | "mem_read_f64" => {
+                            let mut cargs = Vec::new();
+                            for a in args {
+                                let (_, v) = self.emit_expr(a);
+                                cargs.push(v);
+                            }
+                            let tmp = self.fresh("vmf");
+                            self.line(&format!(
+                                "double {tmp} = mako_{name}({});",
+                                cargs.join(", ")
+                            ));
+                            return ("double".into(), tmp);
+                        }
+                        "mem_write_i64" | "mem_write_u64" | "mem_write_i32" | "mem_write_u32"
+                        | "mem_write_i16" | "mem_write_u16" | "mem_write_byte"
+                        | "mem_write_f32" | "mem_write_f64" => {
                             let mut cargs = Vec::new();
                             for a in args {
                                 let (_, v) = self.emit_expr(a);
@@ -20288,7 +20425,32 @@ impl Codegen {
                             ));
                             return ("double".into(), tmp);
                         }
-                        "clz" | "ctz" | "popcount" | "bswap64" | "bswap32" | "rotl64" => {
+                        "simd_f32x4_add" | "simd_f32x4_sub" | "simd_f32x4_mul" => {
+                            let a = self.emit_slice_arg_borrow(&args[0]);
+                            let b = self.emit_slice_arg_borrow(&args[1]);
+                            let tmp = self.fresh("sfv");
+                            self.line(&format!("MakoFloatArray {tmp} = mako_{name}({a}, {b});"));
+                            return ("MakoFloatArray".into(), tmp);
+                        }
+                        "simd_f32x4_scale" => {
+                            let a = self.emit_slice_arg_borrow(&args[0]);
+                            let (_, s) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sfs");
+                            self.line(&format!(
+                                "MakoFloatArray {tmp} = mako_simd_f32x4_scale({a}, {s});"
+                            ));
+                            return ("MakoFloatArray".into(), tmp);
+                        }
+                        "simd_i32x4_add" | "simd_i16x8_add" => {
+                            let a = self.emit_slice_arg_borrow(&args[0]);
+                            let b = self.emit_slice_arg_borrow(&args[1]);
+                            let tmp = self.fresh("siv");
+                            self.line(&format!("MakoIntArray {tmp} = mako_{name}({a}, {b});"));
+                            return ("MakoIntArray".into(), tmp);
+                        }
+                        "clz" | "ctz" | "popcount" | "clz32" | "ctz32" | "popcount32"
+                        | "bswap64" | "bswap32" | "bswap16" | "htons" | "ntohs" | "htonl"
+                        | "ntohl" | "rotl64" | "rotr64" | "rotl32" | "rotr32" => {
                             let mut cargs = Vec::new();
                             for a in args {
                                 let (_, v) = self.emit_expr(a);
@@ -46210,6 +46372,73 @@ fn main() {
         assert!(
             body.contains("double w = (d + (double)(float)(1.5));"),
             "f32 addition must emit floating-point arithmetic, not integer wrap_add:\n{body}"
+        );
+    }
+
+    #[test]
+    fn systems_primitives_emit_packed_i128_mem_and_simd() {
+        let source = r#"
+#[packed]
+struct WireHdr {
+    magic: u8,
+    flags: i8,
+    len: u16,
+    delta: i16,
+    seq: u32,
+    code: i32,
+    ts: u64,
+    offset: i64,
+    rate: f32,
+    weight: f64,
+}
+fn check_primitives(ptr: int, a: []float, b: []float) -> int {
+    let hdr = WireHdr {
+        magic: u8(1),
+        flags: i8(-1),
+        len: u16(10),
+        delta: i16(-2),
+        seq: u32(100),
+        code: i32(-5),
+        ts: u64(999),
+        offset: i64(-999),
+        rate: f32(1.5),
+        weight: f64(2.5),
+    }
+    let big: i128 = i128_from_parts(1, 2) + i128(3)
+    mem_write_u64(ptr, 0, u64(42))
+    let v = mem_read_u64(ptr, 0)
+    let added = simd_f32x4_add(a, b)
+    let rot = rotr64(bswap16(int(v)), 4) + popcount32(15) + i128_lo(big) + len(added)
+    return sizeof_val(hdr) + rot
+}
+fn main() {
+    print(check_primitives(0, [1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]))
+}
+"#;
+        let generated = emit_src(source);
+        assert!(
+            generated.contains("uint8_t magic;")
+                && generated.contains("int8_t flags;")
+                && generated.contains("uint16_t len;")
+                && generated.contains("int16_t delta;")
+                && generated.contains("uint32_t seq;")
+                && generated.contains("int32_t code;")
+                && generated.contains("uint64_t ts;")
+                && generated.contains("int64_t offset;")
+                && generated.contains("float rate;")
+                && generated.contains("double weight;")
+                && generated.contains("__attribute__((packed)) WireHdr;"),
+            "#[packed] struct must emit exact hardware fixed-width C field types:\n{generated}"
+        );
+        let body = fn_body(&generated, "check_primitives(");
+        assert!(
+            body.contains("mako_i128_t big =")
+                && body.contains("mako_mem_write_u64(")
+                && body.contains("mako_mem_read_u64(")
+                && body.contains("mako_simd_f32x4_add(")
+                && body.contains("mako_float_array_free(added);")
+                && body.contains("(int64_t)sizeof(hdr)"),
+            "expected i128, mem_read/write_u64, simd_f32x4_add + drop, and sizeof(hdr):\n{body}"
         );
     }
 }

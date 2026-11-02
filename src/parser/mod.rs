@@ -3667,11 +3667,13 @@ fn incdec_binop(kind: &TokenKind) -> Option<BinOp> {
 fn type_expr_mono_tag(t: &TypeExpr) -> String {
     match t {
         TypeExpr::Named(n) => match n.as_str() {
-            "int" | "int64" | "i64" => "int".into(),
-            "int32" | "i32" => "int32".into(),
+            "int" | "int64" | "i64" | "isize" => "int".into(),
+            "int32" | "i32" | "rune" | "char" => "int32".into(),
             "int16" | "i16" => "int16".into(),
             "int8" | "i8" => "int8".into(),
-            "uint64" | "u64" => "uint64".into(),
+            "uint64" | "u64" | "usize" | "uintptr" => "uint64".into(),
+            "i128" | "int128" => "i128".into(),
+            "u128" | "uint128" => "u128".into(),
             "uint32" | "u32" => "uint32".into(),
             "uint16" | "u16" => "uint16".into(),
             "float" | "float64" | "f64" => "float".into(),

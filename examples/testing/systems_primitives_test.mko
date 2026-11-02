@@ -1,0 +1,179 @@
+pack main
+
+#[packed]
+struct WireHeader {
+    magic: u8,
+    flags: i8,
+    len: u16,
+    delta: i16,
+    seq: u32,
+    code: i32,
+    ts: u64,
+    offset: i64,
+    rate: f32,
+    weight: f64,
+}
+
+fn TestScalarAliasesAndCasts() {
+    let a: u8 = u8(255)
+    let b: uint8 = uint8(a)
+    let c: byte = byte(b)
+    assert_eq(int(c), 255)
+
+    let d: i8 = i8(-42)
+    let e: int8 = int8(d)
+    assert_eq(int(e), -42)
+
+    let f: i16 = i16(-30000)
+    let g: int16 = int16(f)
+    assert_eq(int(g), -30000)
+
+    let h: u16 = u16(60000)
+    let i: uint16 = uint16(h)
+    assert_eq(int(i), 60000)
+
+    let j: i32 = i32(-2000000000)
+    let k: int32 = int32(j)
+    let r: rune = rune(65)
+    let ch: char = char(r)
+    assert_eq(int(k), -2000000000)
+    assert_eq(int(ch), 65)
+
+    let l: u32 = u32(4000000000)
+    let m: uint32 = uint32(l)
+    assert_eq(int(m), 4000000000)
+
+    let n: i64 = i64(-9000000000000)
+    let o: int64 = int64(n)
+    let p: isize = isize(o)
+    assert_eq(int(p), -9000000000000)
+
+    let q: u64 = u64(9000000000000)
+    let s: uint64 = uint64(q)
+    let u: usize = usize(s)
+    let up: uintptr = uintptr(u)
+    assert_eq(int(up), 9000000000000)
+
+    let x: f32 = f32(1.5)
+    let y: float32 = float32(x)
+    let z: f64 = f64(y)
+    let w: float64 = float64(z)
+    assert(w > 1.49 && w < 1.51)
+}
+
+fn TestI128AndU128ArithmeticAndParts() {
+    let a: i128 = i128_from_parts(1, 10)
+    let b: i128 = i128_from_parts(2, 25)
+    let sum: i128 = a + b
+    assert_eq(i128_hi(sum), 3)
+    assert_eq(i128_lo(sum), 35)
+    assert(sum > a)
+    assert_eq(int(i128(42)), 42)
+
+    let ua: u128 = u128_from_parts(5, 100)
+    let ub: u128 = u128_from_parts(2, 40)
+    let diff: u128 = ua - ub
+    assert_eq(u128_hi(diff), 3)
+    assert_eq(u128_lo(diff), 60)
+    assert_eq(int(u128(99)), 99)
+}
+
+fn TestPackedStructTrueHardwareLayoutAndSizeofVal() {
+    let hdr = WireHeader {
+        magic: u8(0x7F),
+        flags: i8(-1),
+        len: u16(1024),
+        delta: i16(-12),
+        seq: u32(999999),
+        code: i32(-7),
+        ts: u64(123456789),
+        offset: i64(-987654321),
+        rate: f32(2.5),
+        weight: f64(8.25),
+    }
+    // 1 + 1 + 2 + 2 + 4 + 4 + 8 + 8 + 4 + 8 = 42 bytes
+    assert_eq(sizeof_val(hdr), 42)
+    assert_eq(int(hdr.magic), 127)
+    assert_eq(int(hdr.flags), -1)
+    assert_eq(int(hdr.len), 1024)
+    assert_eq(int(hdr.delta), -12)
+    assert_eq(int(hdr.seq), 999999)
+    assert_eq(int(hdr.code), -7)
+    assert_eq(int(hdr.ts), 123456789)
+    assert_eq(int(hdr.offset), -987654321)
+}
+
+fn TestRawMemoryTypedReadsAndWrites() {
+    let ptr = mmap_anon(64)
+    assert(ptr != 0)
+
+    mem_write_u64(ptr, 0, u64(9876543210))
+    assert_eq(int(mem_read_u64(ptr, 0)), 9876543210)
+
+    mem_write_u32(ptr, 8, u32(3000000000))
+    assert_eq(int(mem_read_u32(ptr, 8)), 3000000000)
+
+    mem_write_i16(ptr, 12, i16(-12345))
+    assert_eq(int(mem_read_i16(ptr, 12)), -12345)
+
+    mem_write_u16(ptr, 14, u16(54321))
+    assert_eq(int(mem_read_u16(ptr, 14)), 54321)
+
+    mem_write_f32(ptr, 16, f32(3.25))
+    let rf32 = mem_read_f32(ptr, 16)
+    assert(rf32 > 3.24 && rf32 < 3.26)
+
+    mem_write_f64(ptr, 24, f64(6.125))
+    let rf64 = mem_read_f64(ptr, 24)
+    assert(rf64 > 6.124 && rf64 < 6.126)
+
+    assert_eq(munmap(ptr, 64), 0)
+}
+
+fn TestEndianAndBitManipulationBuiltins() {
+    assert_eq(bswap16(0x1234), 0x3412)
+    assert_eq(ntohs(htons(0x1234)), 0x1234)
+    assert_eq(ntohl(htonl(0x12345678)), 0x12345678)
+
+    assert_eq(rotl64(1, 0), 1)
+    assert_eq(rotr64(rotl64(0x123456789ABCDEF0, 13), 13), 0x123456789ABCDEF0)
+    assert_eq(rotr32(rotl32(0x12345678, 7), 7), 0x12345678)
+
+    assert_eq(clz32(0), 32)
+    assert_eq(clz32(1), 31)
+    assert_eq(ctz32(0), 32)
+    assert_eq(ctz32(8), 3)
+    assert_eq(popcount32(0xF0F0), 8)
+}
+
+fn TestSimd4LaneBuiltins() {
+    let a = [1.0, 2.0, 3.0, 4.0, 5.0]
+    let b = [10.0, 20.0, 30.0, 40.0, 50.0]
+
+    let added = simd_f32x4_add(a, b)
+    assert_eq(len(added), 5)
+    assert(added[0] > 10.9 && added[0] < 11.1)
+    assert(added[4] > 54.9 && added[4] < 55.1)
+
+    let subbed = simd_f32x4_sub(b, a)
+    assert(subbed[0] > 8.9 && subbed[0] < 9.1)
+    assert(subbed[4] > 44.9 && subbed[4] < 45.1)
+
+    let mulled = simd_f32x4_mul(a, b)
+    assert(mulled[0] > 9.9 && mulled[0] < 10.1)
+    assert(mulled[4] > 249.9 && mulled[4] < 250.1)
+
+    let scaled = simd_f32x4_scale(a, 2.0)
+    assert(scaled[0] > 1.9 && scaled[0] < 2.1)
+    assert(scaled[4] > 9.9 && scaled[4] < 10.1)
+
+    let ia = [1, 2, 3, 4, 5]
+    let ib = [100, 200, 300, 400, 500]
+    let isum = simd_i32x4_add(ia, ib)
+    assert_eq(isum[0], 101)
+    assert_eq(isum[4], 505)
+
+    let s16 = simd_i16x8_add(ia, ib)
+    assert_eq(s16[0], 101)
+    assert_eq(s16[4], 505)
+}
