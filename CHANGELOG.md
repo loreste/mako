@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.1
+
+### Bug fixes
+
+- Fix `if let` inside deeply nested blocks (crew, while, if, defer, unsafe) triggering "internal: if let was not desugared".
+- Fix `if let` init variable cleanup emitted outside its C scope, causing undeclared identifier errors on the C backend.
+- Fix native backend `error_trace` showing `<unknown>` instead of the source filename in error chains.
+- Add `main()` to `add.mko`, `add_test.mko`, and `go_style_test.mko` so they run standalone.
+
 ## 0.7.0
 
 ### Generics parity

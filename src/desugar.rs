@@ -219,7 +219,44 @@ fn desugar_if_let_stmt(stmt: Stmt) -> Stmt {
                 body,
             }
         }
+        Stmt::Defer { mut body } => {
+            desugar_if_let_block(&mut body);
+            Stmt::Defer { body }
+        }
+        Stmt::Unsafe { mut body } => {
+            desugar_if_let_block(&mut body);
+            Stmt::Unsafe { body }
+        }
+        Stmt::Crew { name, policy, mut body } => {
+            desugar_if_let_block(&mut body);
+            Stmt::Crew { name, policy, body }
+        }
+        Stmt::Let { name, mutable, ownership, ty, mut init } => {
+            desugar_if_let_expr(&mut init);
+            Stmt::Let { name, mutable, ownership, ty, init }
+        }
+        Stmt::Expr(mut e) => {
+            desugar_if_let_expr(&mut e);
+            Stmt::Expr(e)
+        }
+        Stmt::Return(Some(mut e)) => {
+            desugar_if_let_expr(&mut e);
+            Stmt::Return(Some(e))
+        }
         other => other,
+    }
+}
+
+fn desugar_if_let_expr(expr: &mut Expr) {
+    match expr {
+        Expr::Block(b) => desugar_if_let_block(b),
+        Expr::Call { args, callee } => {
+            desugar_if_let_expr(callee);
+            for a in args { desugar_if_let_expr(a); }
+        }
+        Expr::Kick { expr: inner, .. } => desugar_if_let_expr(inner),
+        Expr::Lambda { body, .. } => desugar_if_let_expr(body),
+        _ => {}
     }
 }
 

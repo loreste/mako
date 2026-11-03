@@ -18,3 +18,10 @@ fn TestAddTable() {
 fn TestMul() {
     assert_eq(mul(3, 4), 12)
 }
+
+fn main() {
+    TestAdd()
+    TestAddTable()
+    TestMul()
+    print("PASS")
+}

@@ -50,3 +50,13 @@ func TestGoSharedParamType() {
 func TestGoFuncKeyword() {
     assert_eq(1 + 1, 2)
 }
+
+func main() {
+    TestGoShortDecl()
+    TestGoVar()
+    TestGoReceiver()
+    TestGoMultiReturn()
+    TestGoSharedParamType()
+    TestGoFuncKeyword()
+    print("PASS")
+}

@@ -17956,7 +17956,7 @@ impl Codegen {
                 if let Some(init) = init {
                     self.line("{");
                     self.indent += 1;
-                    self.push_elem_ptr_scope();
+                    self.push_share_scope();
                     self.emit_stmt(init);
                 }
                 let (_, c) = self.emit_expr(cond);
@@ -17997,7 +17997,7 @@ impl Codegen {
                 }
                 self.line("}");
                 if init.is_some() {
-                    self.pop_elem_ptr_scope();
+                    self.pop_share_scope();
                     self.indent -= 1;
                     self.line("}");
                 }

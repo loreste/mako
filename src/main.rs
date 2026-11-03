@@ -4139,11 +4139,22 @@ fn build_incremental(
         dce::warn_shadowed_variables(&program);
     }
     // Dead code elimination: remove unreachable functions before codegen.
-    let program = if std::env::var_os("MAKO_NO_DCE").is_none() {
+    let mut program = if std::env::var_os("MAKO_NO_DCE").is_none() {
         dce::eliminate(&program, &["main".into(), "mako_main".into()])
     } else {
         program
     };
+    // Propagate source filename to each item so error_trace / native IR
+    // can embed it in diagnostics and error chains.
+    let src_name = file.display().to_string();
+    for item in &mut program.items {
+        match item {
+            ast::Item::Fn(f) if f.source_file.is_none() => {
+                f.source_file = Some(src_name.clone());
+            }
+            _ => {}
+        }
+    }
     let frontend_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     let backend = if matches!(backend, BackendCli::Native | BackendCli::Llvm) {
