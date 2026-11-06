@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.1
+## 0.7.2
 
 ### Systems programming, native backend parity & Go 1.21–1.23 ergonomics
 
