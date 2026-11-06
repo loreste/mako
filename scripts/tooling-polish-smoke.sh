@@ -61,6 +61,10 @@ test -f "$TMP/api/examples.md"
 test -f "$TMP/api/search-index.json"
 
 echo "tooling-smoke: test"
-"$MAKO" test examples/testing/tooling_quality_test.mko
+if [[ "$(uname -s)" == *MINGW* || "$(uname -s)" == *MSYS* || "$(uname -s)" == *NT* ]]; then
+  "$MAKO" test examples/testing/tooling_quality_test.mko --backend c
+else
+  "$MAKO" test examples/testing/tooling_quality_test.mko
+fi
 
 echo "tooling-smoke: ok"
