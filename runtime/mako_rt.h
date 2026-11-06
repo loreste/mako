@@ -53,6 +53,7 @@
 #include <sys/resource.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#include <sched.h>
 #endif
 #if defined(__APPLE__)
 #include <mach/mach.h>
@@ -228,9 +229,9 @@ static inline int mako_rc_release_last(void *data) {
 }
 static inline int mako_rc_release(void *data) {
     if (!data) return 0;
-    uint32_t *plain_rc = (uint32_t *)((char *)data - MAKO_RC_HEADER);
-    if (MAKO_LIKELY(*plain_rc == 1)) {
-        *plain_rc = 0;
+    _Atomic uint32_t *rc = mako_rc_of(data);
+    if (MAKO_LIKELY(atomic_load_explicit(rc, memory_order_acquire) == 1)) {
+        atomic_store_explicit(rc, 0, memory_order_relaxed);
         if (MAKO_UNLIKELY(mako_leak_check_enabled)) {
             uint32_t sz = *(uint32_t *)((char *)data - 4);
             atomic_fetch_add_explicit(&mako_rc_free_count, 1, memory_order_relaxed);
