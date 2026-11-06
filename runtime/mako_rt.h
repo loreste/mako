@@ -266,7 +266,7 @@ static inline int mako_rc_release(void *data) {
 }
 static inline int mako_rc_shared(void *data) {
     if (!data) return 0;
-    return *(const uint32_t *)((const char *)data - MAKO_RC_HEADER) > 1;
+    return atomic_load_explicit(mako_rc_of(data), memory_order_acquire) > 1;
 }
 
 /* Anti-ICF: prevent function merging. Clang has optnone; GCC uses optimize("O0"). */
@@ -6306,7 +6306,11 @@ static inline void mako_chan_lock(MakoChan *c) {
                 memory_order_acquire, memory_order_relaxed)) {
             return;
         }
+#ifdef _WIN32
+        SwitchToThread();
+#else
         sched_yield();
+#endif
     }
 }
 
