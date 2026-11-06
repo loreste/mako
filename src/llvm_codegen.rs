@@ -178,9 +178,14 @@ pub fn compile_ir(ir: &native_ir::Module) -> Result<Vec<u8>, LlvmError> {
             Some(ty) => llvm_type(&context, ty).fn_type(&params, false),
             None => context.void_type().fn_type(&params, false),
         };
+        let linkage = if function.name == "main" {
+            None
+        } else {
+            Some(inkwell::module::Linkage::Internal)
+        };
         functions.insert(
             function.name.clone(),
-            module.add_function(&function.name, function_type, None),
+            module.add_function(&function.name, function_type, linkage),
         );
     }
     let pointer = context.ptr_type(Default::default());
@@ -501,8 +506,28 @@ fn emit_instruction<'ctx>(
                 "mako_native_error_propagate_at_ptr" => "mako_llvm_error_propagate_at",
                 function => function,
             };
-            // Hot map[int]int path: inline open-addressing probe (avoids 200k
-            // external calls on the map bench). Rehash still calls runtime.
+            // Hot map[int]int path: inline open-addressing make/set/get/drop.
+            if function == "mako_native_map_ii_make_ptr" && args.len() == 1 {
+                if let Some(outv) = out {
+                    let made = emit_map_ii_make_inline(
+                        context,
+                        module,
+                        builder,
+                        values[&args[0]].into_int_value(),
+                        &value_name(*outv),
+                    )?;
+                    values.insert(*outv, made.into());
+                }
+                return Ok(());
+            }
+            if function == "mako_native_map_ii_drop_ptr" && args.len() == 1 {
+                return emit_map_ii_drop_inline(
+                    context,
+                    module,
+                    builder,
+                    values[&args[0]].into_pointer_value(),
+                );
+            }
             if function == "mako_native_map_ii_set_ptr" && args.len() == 3 {
                 return emit_map_ii_set_inline(
                     context,
@@ -1078,7 +1103,8 @@ fn emit_instruction<'ctx>(
             values.insert(*out, s);
         }
         Inst::SliceMake { out, len, cap } => {
-            let capacity = cap.map(|value| values[&value]).unwrap_or(values[len]);
+            let len_val = values[len].into_int_value();
+            let capacity = cap.map(|value| values[&value]).unwrap_or(values[len]).into_int_value();
             let function_type = context.void_type().fn_type(
                 &[
                     context.ptr_type(Default::default()).into(),
@@ -1087,17 +1113,30 @@ fn emit_instruction<'ctx>(
                 ],
                 false,
             );
-            let result = call_slice_return(
+            let raw = call_slice_return(
                 context,
                 module,
                 builder,
                 slice_result_slots[out],
                 "mako_native_int_slice_make",
                 function_type,
-                &[values[len].into(), capacity.into()],
+                &[len_val.into(), capacity.into()],
                 &value_name(*out),
-            )?;
-            values.insert(*out, result);
+            )?
+            .into_struct_value();
+            let one = context.i64_type().const_int(1, false);
+            let s1 = builder
+                .build_insert_value(raw, len_val, 1, "slice.make.len")
+                .map_err(builder_error)?
+                .into_struct_value();
+            let s2 = builder
+                .build_insert_value(s1, capacity, 2, "slice.make.cap")
+                .map_err(builder_error)?
+                .into_struct_value();
+            let s3 = builder
+                .build_insert_value(s2, one, 3, "slice.make.owned")
+                .map_err(builder_error)?;
+            values.insert(*out, s3.as_basic_value_enum());
         }
         Inst::SliceLiteral { out, elements } => {
             let count = context.i64_type().const_int(elements.len() as u64, false);
@@ -1428,7 +1467,8 @@ fn emit_instruction<'ctx>(
         }
         // []string value ABI (MakoNativeStrSliceValue), parallel to []int.
         Inst::StrSliceMake { out, len, cap } => {
-            let capacity = cap.map(|v| values[&v]).unwrap_or(values[len]);
+            let len_val = values[len].into_int_value();
+            let capacity = cap.map(|v| values[&v]).unwrap_or(values[len]).into_int_value();
             let slot = slice_result_slots[out];
             let function_type = context.void_type().fn_type(
                 &[
@@ -1442,14 +1482,27 @@ fn emit_instruction<'ctx>(
             builder
                 .build_call(
                     f,
-                    &[slot.into(), values[len].into(), capacity.into()],
+                    &[slot.into(), len_val.into(), capacity.into()],
                     "strslice.make",
                 )
                 .map_err(builder_error)?;
             let loaded = builder
                 .build_load(llvm_type(context, Type::StrSlice), slot, &value_name(*out))
+                .map_err(builder_error)?
+                .into_struct_value();
+            let one = context.i64_type().const_int(1, false);
+            let s1 = builder
+                .build_insert_value(loaded, len_val, 1, "strslice.make.len")
+                .map_err(builder_error)?
+                .into_struct_value();
+            let s2 = builder
+                .build_insert_value(s1, capacity, 2, "strslice.make.cap")
+                .map_err(builder_error)?
+                .into_struct_value();
+            let s3 = builder
+                .build_insert_value(s2, one, 3, "strslice.make.owned")
                 .map_err(builder_error)?;
-            values.insert(*out, loaded);
+            values.insert(*out, s3.as_basic_value_enum());
         }
         Inst::StrSliceLiteral { out, elements } => {
             let string_ty = llvm_type(context, Type::Str);
@@ -2637,6 +2690,9 @@ fn emit_str_slice_append_inline<'ctx>(
     let (data, len, cap, owned) = slice_fields(builder, slice)?;
     let zero = context.i64_type().const_zero();
     let one = context.i64_type().const_int(1, false);
+    let new_len = builder
+        .build_int_add(len, one, "strappend.len")
+        .map_err(builder_error)?;
     let owned_nz = builder
         .build_int_compare(IntPredicate::NE, owned, zero, "strslice.owned")
         .map_err(builder_error)?;
@@ -2661,36 +2717,10 @@ fn emit_str_slice_append_inline<'ctx>(
             .build_gep(string_ty, data, &[len], "strappend.ptr")
             .map_err(builder_error)?
     };
-    // Immortal/static strings (high bit of len): share the value without a
-    // runtime call — the append-literal hot path (string_slice bench).
-    // When the element is a constant with the high bit set, LLVM folds the
-    // branch away and this becomes a plain store.
     let cloned = emit_string_clone_or_share(context, module, builder, element, "strappend.clone")?;
     builder
         .build_store(elem_ptr, cloned)
         .map_err(builder_error)?;
-    let new_len = builder
-        .build_int_add(len, one, "strappend.len")
-        .map_err(builder_error)?;
-    // Keep the updated header in registers on the fast path; phi at merge
-    // instead of store/load through the result slot (hot loop traffic).
-    let mut fast_hdr = slice_ty.into_struct_type().get_undef();
-    fast_hdr = builder
-        .build_insert_value(fast_hdr, data, 0, "strappend.data")
-        .map_err(builder_error)?
-        .into_struct_value();
-    fast_hdr = builder
-        .build_insert_value(fast_hdr, new_len, 1, "strappend.newlen")
-        .map_err(builder_error)?
-        .into_struct_value();
-    fast_hdr = builder
-        .build_insert_value(fast_hdr, cap, 2, "strappend.cap")
-        .map_err(builder_error)?
-        .into_struct_value();
-    fast_hdr = builder
-        .build_insert_value(fast_hdr, owned, 3, "strappend.owned")
-        .map_err(builder_error)?
-        .into_struct_value();
     let fast_end = builder.get_insert_block().unwrap();
     builder
         .build_unconditional_branch(merge_bb)
@@ -2720,15 +2750,52 @@ fn emit_str_slice_append_inline<'ctx>(
         .build_load(slice_ty, result_slot, &format!("{name}.slow.hdr"))
         .map_err(builder_error)?
         .into_struct_value();
+    let slow_data = builder
+        .build_extract_value(slow_hdr, 0, "strappend.slow.data")
+        .map_err(builder_error)?;
+    let slow_cap_raw = builder
+        .build_extract_value(slow_hdr, 2, "strappend.slow.cap.raw")
+        .map_err(builder_error)?
+        .into_int_value();
+    let slow_cap_gt = builder
+        .build_int_compare(IntPredicate::UGT, slow_cap_raw, cap, "strappend.cap.gt")
+        .map_err(builder_error)?;
+    let slow_cap = builder
+        .build_select(slow_cap_gt, slow_cap_raw, cap, "strappend.slow.cap")
+        .map_err(builder_error)?;
     let slow_end = builder.get_insert_block().unwrap();
     builder
         .build_unconditional_branch(merge_bb)
         .map_err(builder_error)?;
 
     builder.position_at_end(merge_bb);
-    let phi = builder.build_phi(slice_ty, name).map_err(builder_error)?;
-    phi.add_incoming(&[(&fast_hdr, fast_end), (&slow_hdr, slow_end)]);
-    Ok(phi.as_basic_value())
+    let ptr_ty = context.ptr_type(Default::default());
+    let data_phi = builder
+        .build_phi(ptr_ty, &format!("{name}.data"))
+        .map_err(builder_error)?;
+    data_phi.add_incoming(&[(&data, fast_end), (&slow_data, slow_end)]);
+    let cap_phi = builder
+        .build_phi(context.i64_type(), &format!("{name}.cap"))
+        .map_err(builder_error)?;
+    cap_phi.add_incoming(&[(&cap, fast_end), (&slow_cap, slow_end)]);
+    let mut merged = slice_ty.into_struct_type().get_undef();
+    merged = builder
+        .build_insert_value(merged, data_phi.as_basic_value(), 0, "strappend.m.data")
+        .map_err(builder_error)?
+        .into_struct_value();
+    merged = builder
+        .build_insert_value(merged, new_len, 1, "strappend.m.len")
+        .map_err(builder_error)?
+        .into_struct_value();
+    merged = builder
+        .build_insert_value(merged, cap_phi.as_basic_value(), 2, "strappend.m.cap")
+        .map_err(builder_error)?
+        .into_struct_value();
+    merged = builder
+        .build_insert_value(merged, one, 3, name)
+        .map_err(builder_error)?
+        .into_struct_value();
+    Ok(merged.into())
 }
 
 fn emit_int_slice_append_inline<'ctx>(
@@ -2747,6 +2814,9 @@ fn emit_int_slice_append_inline<'ctx>(
     let (data, len, cap, owned) = slice_fields(builder, slice)?;
     let zero = context.i64_type().const_zero();
     let one = context.i64_type().const_int(1, false);
+    let new_len = builder
+        .build_int_add(len, one, "append.len")
+        .map_err(builder_error)?;
     let owned_nz = builder
         .build_int_compare(IntPredicate::NE, owned, zero, "slice.owned")
         .map_err(builder_error)?;
@@ -2763,7 +2833,7 @@ fn emit_int_slice_append_inline<'ctx>(
         .build_conditional_branch(fast, fast_bb, slow_bb)
         .map_err(builder_error)?;
 
-    // Fast: data[len] = element; return {data, len+1, cap, owned}
+    // Fast: data[len] = element
     builder.position_at_end(fast_bb);
     let elem_ptr = unsafe {
         builder
@@ -2773,30 +2843,7 @@ fn emit_int_slice_append_inline<'ctx>(
     builder
         .build_store(elem_ptr, element)
         .map_err(builder_error)?;
-    let new_len = builder
-        .build_int_add(len, one, "append.len")
-        .map_err(builder_error)?;
-    let slice_ty = llvm_type(context, Type::IntSlice).into_struct_type();
-    let mut hdr = slice_ty.get_undef();
-    hdr = builder
-        .build_insert_value(hdr, data, 0, "append.data")
-        .map_err(builder_error)?
-        .into_struct_value();
-    hdr = builder
-        .build_insert_value(hdr, new_len, 1, "append.newlen")
-        .map_err(builder_error)?
-        .into_struct_value();
-    hdr = builder
-        .build_insert_value(hdr, cap, 2, "append.cap")
-        .map_err(builder_error)?
-        .into_struct_value();
-    hdr = builder
-        .build_insert_value(hdr, owned, 3, "append.owned")
-        .map_err(builder_error)?
-        .into_struct_value();
-    builder
-        .build_store(result_slot, hdr)
-        .map_err(builder_error)?;
+    let fast_end = builder.get_insert_block().unwrap();
     builder
         .build_unconditional_branch(merge_bb)
         .map_err(builder_error)?;
@@ -2816,7 +2863,7 @@ fn emit_int_slice_append_inline<'ctx>(
     );
     let mut args = slice_parts(builder, slice)?;
     args.push(element.into());
-    let _ = call_slice_return(
+    let slow_hdr = call_slice_return(
         context,
         module,
         builder,
@@ -2825,15 +2872,55 @@ fn emit_int_slice_append_inline<'ctx>(
         function_type,
         &args,
         &format!("{name}.slow"),
-    )?;
+    )?
+    .into_struct_value();
+    let slow_data = builder
+        .build_extract_value(slow_hdr, 0, "append.slow.data")
+        .map_err(builder_error)?;
+    let slow_cap_raw = builder
+        .build_extract_value(slow_hdr, 2, "append.slow.cap.raw")
+        .map_err(builder_error)?
+        .into_int_value();
+    let slow_cap_gt = builder
+        .build_int_compare(IntPredicate::UGT, slow_cap_raw, cap, "append.cap.gt")
+        .map_err(builder_error)?;
+    let slow_cap = builder
+        .build_select(slow_cap_gt, slow_cap_raw, cap, "append.slow.cap")
+        .map_err(builder_error)?;
+    let slow_end = builder.get_insert_block().unwrap();
     builder
         .build_unconditional_branch(merge_bb)
         .map_err(builder_error)?;
 
     builder.position_at_end(merge_bb);
-    builder
-        .build_load(llvm_type(context, Type::IntSlice), result_slot, name)
-        .map_err(builder_error)
+    let ptr_ty = context.ptr_type(Default::default());
+    let data_phi = builder
+        .build_phi(ptr_ty, &format!("{name}.data"))
+        .map_err(builder_error)?;
+    data_phi.add_incoming(&[(&data, fast_end), (&slow_data, slow_end)]);
+    let cap_phi = builder
+        .build_phi(context.i64_type(), &format!("{name}.cap"))
+        .map_err(builder_error)?;
+    cap_phi.add_incoming(&[(&cap, fast_end), (&slow_cap, slow_end)]);
+    let slice_ty = llvm_type(context, Type::IntSlice).into_struct_type();
+    let mut merged = slice_ty.get_undef();
+    merged = builder
+        .build_insert_value(merged, data_phi.as_basic_value(), 0, "append.m.data")
+        .map_err(builder_error)?
+        .into_struct_value();
+    merged = builder
+        .build_insert_value(merged, new_len, 1, "append.m.len")
+        .map_err(builder_error)?
+        .into_struct_value();
+    merged = builder
+        .build_insert_value(merged, cap_phi.as_basic_value(), 2, "append.m.cap")
+        .map_err(builder_error)?
+        .into_struct_value();
+    merged = builder
+        .build_insert_value(merged, one, 3, name)
+        .map_err(builder_error)?
+        .into_struct_value();
+    Ok(merged.into())
 }
 
 fn pack_string<'ctx>(
@@ -3138,6 +3225,207 @@ fn emit_map_ii_set_inline<'ctx>(
     Ok(())
 }
 
+fn noalias_alloc_fn<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    name: &str,
+    ty: inkwell::types::FunctionType<'ctx>,
+) -> FunctionValue<'ctx> {
+    if let Some(f) = module.get_function(name) {
+        return f;
+    }
+    let f = module.add_function(name, ty, None);
+    let kind_id = inkwell::attributes::Attribute::get_named_enum_kind_id("noalias");
+    if kind_id != 0 {
+        let attr = context.create_enum_attribute(kind_id, 0);
+        f.add_attribute(inkwell::attributes::AttributeLoc::Return, attr);
+    }
+    f
+}
+
+fn emit_map_ii_make_inline<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    hint: IntValue<'ctx>,
+    name: &str,
+) -> Result<PointerValue<'ctx>, LlvmError> {
+    let parent = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .ok_or_else(|| LlvmError::new("map make: no insert block"))?;
+    let i64t = context.i64_type();
+    let i8t = context.i8_type();
+    let ptr_ty = context.ptr_type(Default::default());
+    let zero = i64t.const_zero();
+    let one = i64t.const_int(1, false);
+    let eight = i64t.const_int(8, false);
+    let sixteen = i64t.const_int(16, false);
+
+    let pos = builder
+        .build_int_compare(IntPredicate::SGT, hint, zero, "m.hint.pos")
+        .map_err(builder_error)?;
+    let h2 = builder
+        .build_left_shift(hint, one, "m.hint2")
+        .map_err(builder_error)?;
+    let need0 = builder
+        .build_select(pos, h2, eight, "m.need0")
+        .map_err(builder_error)?
+        .into_int_value();
+    let gt16 = builder
+        .build_int_compare(IntPredicate::UGT, need0, sixteen, "m.gt16")
+        .map_err(builder_error)?;
+    let need = builder
+        .build_select(gt16, need0, sixteen, "m.need")
+        .map_err(builder_error)?
+        .into_int_value();
+
+    let entry = builder.get_insert_block().unwrap();
+    let cap_bb = context.append_basic_block(parent, "map.make.cap");
+    let alloc_bb = context.append_basic_block(parent, "map.make.alloc");
+    builder
+        .build_unconditional_branch(cap_bb)
+        .map_err(builder_error)?;
+    builder.position_at_end(cap_bb);
+    let cap_phi = builder.build_phi(i64t, "m.cap.cur").map_err(builder_error)?;
+    cap_phi.add_incoming(&[(&sixteen, entry)]);
+    let cap = cap_phi.as_basic_value().into_int_value();
+    let more = builder
+        .build_int_compare(IntPredicate::ULT, cap, need, "m.cap.more")
+        .map_err(builder_error)?;
+    let cap2 = builder
+        .build_left_shift(cap, one, "m.cap.next")
+        .map_err(builder_error)?;
+    cap_phi.add_incoming(&[(&cap2, cap_bb)]);
+    builder
+        .build_conditional_branch(more, cap_bb, alloc_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(alloc_bb);
+    let calloc_fn = noalias_alloc_fn(
+        context,
+        module,
+        "calloc",
+        ptr_ty.fn_type(&[i64t.into(), i64t.into()], false),
+    );
+    let malloc_fn = noalias_alloc_fn(
+        context,
+        module,
+        "malloc",
+        ptr_ty.fn_type(&[i64t.into()], false),
+    );
+    let hdr = builder
+        .build_call(
+            calloc_fn,
+            &[one.into(), i64t.const_int(48, false).into()],
+            name,
+        )
+        .map_err(builder_error)?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmError::new("calloc returned void"))?
+        .into_pointer_value();
+    let bytes8 = builder
+        .build_left_shift(cap, i64t.const_int(3, false), "m.bytes8")
+        .map_err(builder_error)?;
+    let keys = builder
+        .build_call(malloc_fn, &[bytes8.into()], "m.keys.alloc")
+        .map_err(builder_error)?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmError::new("malloc returned void"))?
+        .into_pointer_value();
+    let vals = builder
+        .build_call(malloc_fn, &[bytes8.into()], "m.vals.alloc")
+        .map_err(builder_error)?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmError::new("malloc returned void"))?
+        .into_pointer_value();
+    let state = builder
+        .build_call(calloc_fn, &[cap.into(), one.into()], "m.state.alloc")
+        .map_err(builder_error)?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmError::new("calloc returned void"))?
+        .into_pointer_value();
+    let lenp = builder
+        .build_call(calloc_fn, &[one.into(), eight.into()], "m.lenp.alloc")
+        .map_err(builder_error)?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmError::new("calloc returned void"))?
+        .into_pointer_value();
+
+    let store_ptr = |off: u64, val: PointerValue<'ctx>| -> Result<(), LlvmError> {
+        let p = unsafe {
+            builder
+                .build_gep(i8t, hdr, &[i64t.const_int(off, false)], "m.hdr.f")
+                .map_err(builder_error)?
+        };
+        builder.build_store(p, val).map_err(builder_error)?;
+        Ok(())
+    };
+    store_ptr(MAP_II_OFF_KEYS, keys)?;
+    store_ptr(MAP_II_OFF_VALS, vals)?;
+    store_ptr(MAP_II_OFF_STATE, state)?;
+    let cap_p = unsafe {
+        builder
+            .build_gep(i8t, hdr, &[i64t.const_int(MAP_II_OFF_CAP, false)], "m.hdr.cap")
+            .map_err(builder_error)?
+    };
+    builder.build_store(cap_p, cap).map_err(builder_error)?;
+    store_ptr(MAP_II_OFF_LENP, lenp)?;
+    Ok(hdr)
+}
+
+fn emit_map_ii_drop_inline<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    builder: &Builder<'ctx>,
+    map: PointerValue<'ctx>,
+) -> Result<(), LlvmError> {
+    let parent = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .ok_or_else(|| LlvmError::new("map drop: no insert block"))?;
+    let ptr_ty = context.ptr_type(Default::default());
+    let i64t = context.i64_type();
+    let is_null = builder
+        .build_int_compare(
+            IntPredicate::EQ,
+            builder
+                .build_ptr_to_int(map, i64t, "m.drop.i")
+                .map_err(builder_error)?,
+            i64t.const_zero(),
+            "m.drop.null",
+        )
+        .map_err(builder_error)?;
+    let drop_bb = context.append_basic_block(parent, "map.drop.body");
+    let done_bb = context.append_basic_block(parent, "map.drop.done");
+    builder
+        .build_conditional_branch(is_null, done_bb, drop_bb)
+        .map_err(builder_error)?;
+
+    builder.position_at_end(drop_bb);
+    let (state, keys, vals, len_p, _cap) = map_ii_load_ptrs(context, builder, map)?;
+    let free_fn = external_function(
+        module,
+        "free",
+        context.void_type().fn_type(&[ptr_ty.into()], false),
+    );
+    for p in [keys, vals, state, len_p, map] {
+        builder
+            .build_call(free_fn, &[p.into()], "")
+            .map_err(builder_error)?;
+    }
+    builder
+        .build_unconditional_branch(done_bb)
+        .map_err(builder_error)?;
+    builder.position_at_end(done_bb);
+    Ok(())
+}
+
 /// Inline `map[int]int` get — hand-C probe (FULL+key hit / EMPTY miss / else next).
 fn emit_map_ii_get_inline<'ctx>(
     context: &'ctx Context,
@@ -3163,10 +3451,10 @@ fn emit_map_ii_get_inline<'ctx>(
         .build_and(key, mask, "g.i0")
         .map_err(builder_error)?;
 
-    // Hand-C get: empty → 0; full+same key → val; else probe (covers tomb).
     let entry = builder.get_insert_block().unwrap();
     let loop_bb = context.append_basic_block(parent, "map.get.loop");
-    let full_bb = context.append_basic_block(parent, "map.get.full");
+    let check_key = context.append_basic_block(parent, "map.get.ck");
+    let not_full_bb = context.append_basic_block(parent, "map.get.notfull");
     let next_bb = context.append_basic_block(parent, "map.get.next");
     let hit_bb = context.append_basic_block(parent, "map.get.hit");
     let miss_bb = context.append_basic_block(parent, "map.get.miss");
@@ -3177,11 +3465,8 @@ fn emit_map_ii_get_inline<'ctx>(
         .map_err(builder_error)?;
     builder.position_at_end(loop_bb);
     let i_phi = builder.build_phi(i64t, "g.i").map_err(builder_error)?;
-    let left_phi = builder.build_phi(i64t, "g.left").map_err(builder_error)?;
     i_phi.add_incoming(&[(&start, entry)]);
-    left_phi.add_incoming(&[(&cap, entry)]);
     let i = i_phi.as_basic_value().into_int_value();
-    let left = left_phi.as_basic_value().into_int_value();
 
     let st = builder
         .build_load(
@@ -3195,15 +3480,6 @@ fn emit_map_ii_get_inline<'ctx>(
         )
         .map_err(builder_error)?
         .into_int_value();
-    let is_empty = builder
-        .build_int_compare(IntPredicate::EQ, st, i8t.const_zero(), "g.empty")
-        .map_err(builder_error)?;
-    builder
-        .build_conditional_branch(is_empty, miss_bb, full_bb)
-        .map_err(builder_error)?;
-
-    builder.position_at_end(full_bb);
-    // full or tomb: only FULL+match hits (hand-C has no tomb; same for no-delete)
     let is_full = builder
         .build_int_compare(
             IntPredicate::EQ,
@@ -3212,10 +3488,10 @@ fn emit_map_ii_get_inline<'ctx>(
             "g.isfull",
         )
         .map_err(builder_error)?;
-    let check_key = context.append_basic_block(parent, "map.get.ck");
     builder
-        .build_conditional_branch(is_full, check_key, next_bb)
+        .build_conditional_branch(is_full, check_key, not_full_bb)
         .map_err(builder_error)?;
+
     builder.position_at_end(check_key);
     let ek = builder
         .build_load(
@@ -3236,6 +3512,14 @@ fn emit_map_ii_get_inline<'ctx>(
         .build_conditional_branch(same, hit_bb, next_bb)
         .map_err(builder_error)?;
 
+    builder.position_at_end(not_full_bb);
+    let is_empty = builder
+        .build_int_compare(IntPredicate::EQ, st, i8t.const_zero(), "g.empty")
+        .map_err(builder_error)?;
+    builder
+        .build_conditional_branch(is_empty, miss_bb, next_bb)
+        .map_err(builder_error)?;
+
     builder.position_at_end(hit_bb);
     let hit_val = builder
         .build_load(
@@ -3254,17 +3538,6 @@ fn emit_map_ii_get_inline<'ctx>(
         .map_err(builder_error)?;
 
     builder.position_at_end(next_bb);
-    let left1 = builder
-        .build_int_sub(left, one, "g.left1")
-        .map_err(builder_error)?;
-    let exhausted = builder
-        .build_int_compare(IntPredicate::EQ, left1, zero, "g.exh")
-        .map_err(builder_error)?;
-    let cont = context.append_basic_block(parent, "map.get.cont");
-    builder
-        .build_conditional_branch(exhausted, miss_bb, cont)
-        .map_err(builder_error)?;
-    builder.position_at_end(cont);
     let next_i = builder
         .build_and(
             builder
@@ -3274,8 +3547,7 @@ fn emit_map_ii_get_inline<'ctx>(
             "g.inext",
         )
         .map_err(builder_error)?;
-    i_phi.add_incoming(&[(&next_i, cont)]);
-    left_phi.add_incoming(&[(&left1, cont)]);
+    i_phi.add_incoming(&[(&next_i, next_bb)]);
     builder
         .build_unconditional_branch(loop_bb)
         .map_err(builder_error)?;

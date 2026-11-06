@@ -373,7 +373,15 @@ int64_t mako_native_print_raw_ptr(MakoNativeString *s) {
 
 // ---- channels (int) ---------------------------------------------------------
 
+extern void *(*mako_native_chan_clone_hook)(void *);
+extern void (*mako_native_chan_drop_hook)(void *);
+
+MakoChan *mako_native_chan_clone(MakoChan *c);
+void mako_native_chan_drop(MakoChan *c);
+
 MakoChan *mako_native_chan_new(int64_t capacity) {
+    mako_native_chan_clone_hook = (void *(*)(void *))mako_native_chan_clone;
+    mako_native_chan_drop_hook = (void (*)(void *))mako_native_chan_drop;
     return mako_chan_new(capacity);
 }
 
@@ -487,6 +495,10 @@ typedef struct {
     int64_t owned;
 } MakoNativeIntSlice;
 MakoNativeIntSlice *mako_native_int_slice_make_ptr(size_t len, size_t cap);
+
+int64_t mako_native_actor_recv(MakoChan *c) {
+    return mako_actor_recv(c);
+}
 
 int64_t mako_native_actor_recv_batch(MakoChan *c, MakoNativeIntSlice *dst) {
     if (!dst) return 0;
@@ -773,149 +785,7 @@ MakoNativeString *mako_native_http2_empty_settings(void) {
     return bridge_take_str(mako_http2_empty_settings());
 }
 
-// ---- ptr slice ([]struct) ---------------------------------------------------
-
-typedef struct {
-    void **data;
-    size_t len;
-    size_t cap;
-    int64_t owned;
-} MakoNativePtrSlice;
-
-MakoNativePtrSlice *mako_native_ptr_slice_make(int64_t len, int64_t cap) {
-    if (cap < len) cap = len;
-    if (cap < 0) cap = 0;
-    MakoNativePtrSlice *s = (MakoNativePtrSlice *)calloc(1, sizeof(*s));
-    if (!s) abort();
-    if (cap > 0) {
-        s->data = (void **)calloc((size_t)cap, sizeof(void *));
-        if (!s->data) abort();
-    }
-    s->len = (size_t)len;
-    s->cap = (size_t)cap;
-    s->owned = 1;
-    return s;
-}
-
-int64_t mako_native_ptr_slice_len(const MakoNativePtrSlice *s) {
-    return s ? (int64_t)s->len : 0;
-}
-
-void *mako_native_ptr_slice_get(const MakoNativePtrSlice *s, int64_t i) {
-    if (!s || i < 0 || (size_t)i >= s->len) abort();
-    return s->data[i];
-}
-
-void mako_native_ptr_slice_set(MakoNativePtrSlice *s, int64_t i, void *elem) {
-    if (!s || i < 0 || (size_t)i >= s->len) abort();
-    s->data[i] = elem;
-}
-
-MakoNativePtrSlice *mako_native_ptr_slice_append(MakoNativePtrSlice *s, void *elem) {
-    if (!s) abort();
-    if (s->owned && s->len < s->cap) {
-        s->data[s->len++] = elem;
-        return s;
-    }
-    size_t ncap = s->cap ? s->cap * 2 : 4;
-    if (ncap < s->len + 1) ncap = s->len + 1;
-    MakoNativePtrSlice *out = mako_native_ptr_slice_make((int64_t)s->len + 1, (int64_t)ncap);
-    for (size_t i = 0; i < s->len; ++i) out->data[i] = s->data[i];
-    out->data[s->len] = elem;
-    // Steal elements from s; clear so drop doesn't free them.
-    if (s->owned) {
-        free(s->data);
-        s->data = NULL;
-        s->len = s->cap = 0;
-        free(s);
-    }
-    return out;
-}
-
-void mako_native_ptr_slice_drop(MakoNativePtrSlice *s) {
-    /* Shell-only drop: free the pointer array + header, not the elements.
-     *
-     * Elements may be:
-     * - shared handles (chan/opaque/task) that must not be free()'d
-     * - nested slice/map headers that need typed drops (IR emits those first
-     *   when required; free(header) alone would leak their data arrays)
-     * - struct blocks owned by StructSlice — those use
-     *   mako_native_ptr_slice_drop_free_elems instead.
-     *
-     * Blind free(elem) here corrupted channels stored in []chan[T] /
-     * [][]chan[T] and double-freed with mako_native_chan_drop. */
-    if (!s) return;
-    if (s->owned && s->data) {
-        free(s->data);
-    }
-    free(s);
-}
-
-void mako_native_ptr_slice_drop_free_elems(MakoNativePtrSlice *s) {
-    /* Drop for []Struct / pointer arrays of flat calloc blocks. */
-    if (!s) return;
-    if (s->owned && s->data) {
-        for (size_t i = 0; i < s->len; ++i) free(s->data[i]);
-        free(s->data);
-    }
-    free(s);
-}
-
-MakoNativePtrSlice *mako_native_ptr_slice_clone(const MakoNativePtrSlice *s) {
-    if (!s) return NULL;
-    MakoNativePtrSlice *out = mako_native_ptr_slice_make((int64_t)s->len, (int64_t)s->len);
-    // Shallow: elements must already be independently owned clones (IR clones
-    // each struct before append/set). For clone of the slice, deep-copy bytes
-    // is not possible without layout — duplicate pointers only when unowned
-    // views; for owned, allocate fresh copies of each block is unknown size.
-    // Contract: IR always deep-clones elements before storing; clone of slice
-    // re-clones by reusing same pointers only if we treat elements as shared.
-    // Safer: for Point-like (caller must not mutate), share pointers + bump not
-    // available. Deep clone: not supported at C level; IR emits element clones.
-    for (size_t i = 0; i < s->len; ++i) out->data[i] = s->data[i];
-    // Mark as unowned view so drop doesn't free shared elements? No — that
-    // double-frees on drop of both. For clone, IR uses StructClone per element.
-    // This helper is only used when IR passes pre-cloned element pointers.
-    return out;
-}
-
-/* Deep clone pointer-slice of POD heap blocks (elem_bytes each). */
-MakoNativePtrSlice *mako_native_ptr_slice_clone_deep(const MakoNativePtrSlice *s, int64_t elem_bytes) {
-    if (!s) return NULL;
-    if (elem_bytes <= 0) elem_bytes = 8;
-    MakoNativePtrSlice *out = mako_native_ptr_slice_make((int64_t)s->len, (int64_t)s->len);
-    for (size_t i = 0; i < s->len; ++i) {
-        void *e = s->data[i];
-        if (!e) { out->data[i] = NULL; continue; }
-        void *c = calloc(1, (size_t)elem_bytes);
-        if (!c) abort();
-        memcpy(c, e, (size_t)elem_bytes);
-        out->data[i] = c;
-    }
-    return out;
-}
-
-/* Subslice of pointer array [low:high); non-owning view of the backing array. */
-MakoNativePtrSlice *mako_native_ptr_slice_slice(
-    const MakoNativePtrSlice *s, int64_t low, int64_t high, int64_t max
-) {
-    if (!s) return mako_native_ptr_slice_make(0, 0);
-    int64_t n = (int64_t)s->len;
-    if (low < 0) low = 0;
-    if (high < 0 || high > n) high = n;
-    if (low > high) low = high;
-    int64_t cap = max >= 0 && max <= (int64_t)s->cap
-        ? max - low
-        : (int64_t)s->cap - low;
-    if (cap < high - low) cap = high - low;
-    MakoNativePtrSlice *out = (MakoNativePtrSlice *)calloc(1, sizeof(*out));
-    if (!out) abort();
-    out->data = s->data ? s->data + low : NULL;
-    out->len = (size_t)(high - low);
-    out->cap = (size_t)cap;
-    out->owned = 0;
-    return out;
-}
+// ---- ptr slice ([]struct): moved to native_runtime.c -----------------------
 
 // ---- select N ---------------------------------------------------------------
 
@@ -2121,17 +1991,6 @@ MakoNativeString *mako_native_str_to_lower_ptr(MakoNativeString *s) {
 MakoNativeString *mako_native_str_to_upper_ptr(MakoNativeString *s) {
     return bridge_take_str(mako_str_to_upper(bridge_borrow_str(s)));
 }
-MakoNativeString *mako_native_str_repeat_ptr(MakoNativeString *s, int64_t n) {
-    return bridge_take_str(mako_str_repeat(bridge_borrow_str(s), n));
-}
-
-/* Value-ABI entry for LLVM (string-by-value + i64), matching write_file/read_file. */
-MakoNativeString mako_native_str_repeat(MakoNativeString s, int64_t n) {
-    MakoNativeString *p = mako_native_str_repeat_ptr(&s, n);
-    MakoNativeString out = *p;
-    free(p);
-    return out;
-}
 MakoNativeString *mako_native_str_replace_ptr(MakoNativeString *s, MakoNativeString *oldv,
                                              MakoNativeString *newv) {
     return bridge_take_str(mako_str_replace(bridge_borrow_str(s), bridge_borrow_str(oldv),
@@ -2249,47 +2108,7 @@ int64_t mako_native_http2_conn_new(void) {
     return c ? (int64_t)(intptr_t)c : -1;
 }
 
-typedef void (*MakoNativeIfaceDrop)(void *);
-
-/* Interface fat pointer with the concrete value's compiler-generated drop. */
-typedef struct {
-    int64_t tag;
-    void *data;
-    MakoNativeIfaceDrop drop;
-    _Atomic size_t refs;
-} MakoNativeIface;
-
-void *mako_native_iface_box(int64_t tag, void *data, MakoNativeIfaceDrop drop) {
-    MakoNativeIface *b = (MakoNativeIface *)malloc(sizeof(MakoNativeIface));
-    if (!b) abort();
-    b->tag = tag;
-    b->data = data; /* takes ownership of struct heap block */
-    b->drop = drop;
-    atomic_init(&b->refs, 1);
-    return b;
-}
-
-void *mako_native_iface_clone(void *box) {
-    MakoNativeIface *b = (MakoNativeIface *)box;
-    if (b) atomic_fetch_add_explicit(&b->refs, 1, memory_order_relaxed);
-    return box;
-}
-
-int64_t mako_native_iface_tag(void *box) {
-    return box ? ((MakoNativeIface *)box)->tag : 0;
-}
-
-void *mako_native_iface_data(void *box) {
-    return box ? ((MakoNativeIface *)box)->data : NULL;
-}
-
-void mako_native_iface_drop(void *box) {
-    MakoNativeIface *b = (MakoNativeIface *)box;
-    if (!b) return;
-    if (atomic_fetch_sub_explicit(&b->refs, 1, memory_order_acq_rel) != 1) return;
-    if (b->drop) b->drop(b->data);
-    free(box);
-}
+/* Interface fat pointer helpers moved to native_runtime.c */
 
 int64_t mako_native_http2_conn_use(int64_t c) {
     return mako_http2_conn_use((MakoHttp2Conn *)(intptr_t)c);
@@ -9170,18 +8989,6 @@ typedef struct {
     MakoNativeString *body;
 } MakoNativeHttpRequest;
 
-static MakoNativeHttpRequest *mako_native_http_request_clone(
-    const MakoNativeHttpRequest *src
-) {
-    if (!src) return NULL;
-    MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)calloc(1, sizeof(*box));
-    if (!box) abort();
-    box->method = mako_native_string_clone_ptr(src->method);
-    box->path = mako_native_string_clone_ptr(src->path);
-    box->body = mako_native_string_clone_ptr(src->body);
-    return box;
-}
-
 int64_t mako_native_http_request_parse_ptr(MakoNativeString *raw) {
     MakoHttpRequest r = mako_http_request_parse(bridge_borrow_str(raw));
     MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)calloc(1, sizeof(*box));
@@ -9190,49 +8997,6 @@ int64_t mako_native_http_request_parse_ptr(MakoNativeString *raw) {
     box->path = bridge_take_str(mako_http_request_path(r));
     box->body = bridge_take_str(mako_http_request_body(r));
     return (int64_t)(intptr_t)box;
-}
-int64_t mako_native_http_request_clone_ptr(int64_t h) {
-    return (int64_t)(intptr_t)mako_native_http_request_clone(
-        (MakoNativeHttpRequest *)(intptr_t)h
-    );
-}
-int64_t mako_native_http_request_eq_ptr(int64_t a, int64_t b) {
-    MakoNativeHttpRequest *left = (MakoNativeHttpRequest *)(intptr_t)a;
-    MakoNativeHttpRequest *right = (MakoNativeHttpRequest *)(intptr_t)b;
-    if (left == right) return 1;
-    if (!left || !right) return 0;
-    return mako_str_eq(
-               bridge_borrow_str(left->method), bridge_borrow_str(right->method)
-           ) &&
-           mako_str_eq(
-               bridge_borrow_str(left->path), bridge_borrow_str(right->path)
-           ) &&
-           mako_str_eq(
-               bridge_borrow_str(left->body), bridge_borrow_str(right->body)
-           );
-}
-void mako_native_http_request_drop_ptr(int64_t h) {
-    MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)(intptr_t)h;
-    if (!box) return;
-    mako_native_string_drop_ptr(box->method);
-    mako_native_string_drop_ptr(box->path);
-    mako_native_string_drop_ptr(box->body);
-    free(box);
-}
-MakoNativeString *mako_native_http_request_method_ptr(int64_t h) {
-    MakoNativeHttpRequest *b = (MakoNativeHttpRequest *)(intptr_t)h;
-    if (!b || !b->method) return mako_native_string_literal_ptr("", 0);
-    return mako_native_string_clone_ptr(b->method);
-}
-MakoNativeString *mako_native_http_request_path_ptr(int64_t h) {
-    MakoNativeHttpRequest *b = (MakoNativeHttpRequest *)(intptr_t)h;
-    if (!b || !b->path) return mako_native_string_literal_ptr("", 0);
-    return mako_native_string_clone_ptr(b->path);
-}
-MakoNativeString *mako_native_http_request_body_ptr(int64_t h) {
-    MakoNativeHttpRequest *b = (MakoNativeHttpRequest *)(intptr_t)h;
-    if (!b || !b->body) return mako_native_string_literal_ptr("", 0);
-    return mako_native_string_clone_ptr(b->body);
 }
 
 int64_t mako_native_nursery_drain(void *n, int64_t timeout_ms) {
@@ -11641,3 +11405,879 @@ MakoNativeString *mako_native_llm_https_post_ptr(MakoNativeString *url, MakoNati
         bridge_borrow_str(url), bridge_borrow_str(auth),
         bridge_borrow_str(body), timeout_ms, max_resp));
 }
+
+/* ---- Track 1–5 Systems, 128-bit, SIMD, Intrinsics & Slice Ergonomics Bridge ---- */
+
+static __thread mako_u128_t mako_native_u128_ring[4096];
+static __thread uint32_t mako_native_u128_idx = 0;
+
+static inline int64_t mako_native_u128_box_val(mako_u128_t v) {
+    uint32_t slot = (mako_native_u128_idx++) & 4095u;
+    mako_native_u128_ring[slot] = v;
+    return (int64_t)(uintptr_t)&mako_native_u128_ring[slot];
+}
+
+static inline int mako_native_is_u128_ptr(int64_t v) {
+    uintptr_t p = (uintptr_t)v;
+    uintptr_t lo = (uintptr_t)&mako_native_u128_ring[0];
+    uintptr_t hi = (uintptr_t)&mako_native_u128_ring[4096];
+    return p >= lo && p < hi && ((p - lo) % sizeof(mako_u128_t) == 0);
+}
+
+static inline mako_u128_t mako_native_u128_unbox_val(int64_t v) {
+    if (mako_native_is_u128_ptr(v)) {
+        return *(const mako_u128_t *)(uintptr_t)v;
+    }
+    return (mako_u128_t)(uint64_t)v;
+}
+
+static inline mako_i128_t mako_native_i128_unbox_val(int64_t v) {
+    if (mako_native_is_u128_ptr(v)) {
+        return (mako_i128_t)(*(const mako_u128_t *)(uintptr_t)v);
+    }
+    return (mako_i128_t)v;
+}
+
+int64_t mako_native_i128_box(int64_t v) {
+    if (mako_native_is_u128_ptr(v)) return v;
+    return mako_native_u128_box_val((mako_u128_t)(mako_i128_t)v);
+}
+
+int64_t mako_native_u128_box(int64_t v) {
+    if (mako_native_is_u128_ptr(v)) return v;
+    return mako_native_u128_box_val((mako_u128_t)(uint64_t)v);
+}
+
+int64_t mako_native_u128_from_parts(int64_t hi, int64_t lo) {
+    return mako_native_u128_box_val(mako_u128_from_parts((uint64_t)hi, (uint64_t)lo));
+}
+
+int64_t mako_native_i128_from_parts(int64_t hi, int64_t lo) {
+    return mako_native_u128_box_val((mako_u128_t)mako_i128_from_parts(hi, (uint64_t)lo));
+}
+
+int64_t mako_native_u128_hi(int64_t x) {
+    return (int64_t)mako_u128_hi(mako_native_u128_unbox_val(x));
+}
+
+int64_t mako_native_u128_lo(int64_t x) {
+    return (int64_t)mako_u128_lo(mako_native_u128_unbox_val(x));
+}
+
+int64_t mako_native_i128_hi(int64_t x) {
+    return mako_i128_hi(mako_native_i128_unbox_val(x));
+}
+
+int64_t mako_native_i128_lo(int64_t x) {
+    return (int64_t)mako_i128_lo(mako_native_i128_unbox_val(x));
+}
+
+int64_t mako_native_u128_add(int64_t a, int64_t b) {
+    return mako_native_u128_box_val(mako_u128_add(mako_native_u128_unbox_val(a), mako_native_u128_unbox_val(b)));
+}
+
+int64_t mako_native_u128_sub(int64_t a, int64_t b) {
+    return mako_native_u128_box_val(mako_u128_sub(mako_native_u128_unbox_val(a), mako_native_u128_unbox_val(b)));
+}
+
+int64_t mako_native_u128_mul(int64_t a, int64_t b) {
+    return mako_native_u128_box_val(mako_u128_mul(mako_native_u128_unbox_val(a), mako_native_u128_unbox_val(b)));
+}
+
+int64_t mako_native_u128_div(int64_t a, int64_t b) {
+    return mako_native_u128_box_val(mako_u128_div(mako_native_u128_unbox_val(a), mako_native_u128_unbox_val(b)));
+}
+
+int64_t mako_native_u128_rem(int64_t a, int64_t b) {
+    return mako_native_u128_box_val(mako_u128_rem(mako_native_u128_unbox_val(a), mako_native_u128_unbox_val(b)));
+}
+
+int64_t mako_native_u128_shl(int64_t a, int64_t bits) {
+    return mako_native_u128_box_val(mako_u128_shl(mako_native_u128_unbox_val(a), bits));
+}
+
+int64_t mako_native_u128_shr(int64_t a, int64_t bits) {
+    return mako_native_u128_box_val(mako_u128_shr(mako_native_u128_unbox_val(a), bits));
+}
+
+int64_t mako_native_u128_eq(int64_t a, int64_t b) {
+    return mako_u128_eq(mako_native_u128_unbox_val(a), mako_native_u128_unbox_val(b));
+}
+
+int64_t mako_native_u128_cmp(int64_t a, int64_t b) {
+    return mako_u128_cmp(mako_native_u128_unbox_val(a), mako_native_u128_unbox_val(b));
+}
+
+MakoNativeString *mako_native_u128_to_hex_ptr(int64_t a) {
+    return bridge_take_str(mako_u128_to_hex(mako_native_u128_unbox_val(a)));
+}
+
+int64_t mako_native_i128_add(int64_t a, int64_t b) {
+    return mako_native_u128_box_val((mako_u128_t)mako_i128_add(mako_native_i128_unbox_val(a), mako_native_i128_unbox_val(b)));
+}
+
+int64_t mako_native_i128_sub(int64_t a, int64_t b) {
+    return mako_native_u128_box_val((mako_u128_t)mako_i128_sub(mako_native_i128_unbox_val(a), mako_native_i128_unbox_val(b)));
+}
+
+int64_t mako_native_i128_mul(int64_t a, int64_t b) {
+    return mako_native_u128_box_val((mako_u128_t)mako_i128_mul(mako_native_i128_unbox_val(a), mako_native_i128_unbox_val(b)));
+}
+
+int64_t mako_native_i128_div(int64_t a, int64_t b) {
+    return mako_native_u128_box_val((mako_u128_t)mako_i128_div(mako_native_i128_unbox_val(a), mako_native_i128_unbox_val(b)));
+}
+
+int64_t mako_native_i128_rem(int64_t a, int64_t b) {
+    mako_i128_t va = mako_native_i128_unbox_val(a);
+    mako_i128_t vb = mako_native_i128_unbox_val(b);
+    return mako_native_u128_box_val((mako_u128_t)(vb == 0 ? 0 : (va % vb)));
+}
+
+int64_t mako_native_i128_shl(int64_t a, int64_t b) {
+    mako_i128_t va = mako_native_i128_unbox_val(a);
+    int64_t sh = (int64_t)mako_native_i128_unbox_val(b);
+    if (sh <= 0) return mako_native_u128_box_val((mako_u128_t)va);
+    if (sh >= 128) return mako_native_u128_box_val(0);
+    return mako_native_u128_box_val(((mako_u128_t)va) << sh);
+}
+
+int64_t mako_native_i128_shr(int64_t a, int64_t b) {
+    mako_i128_t va = mako_native_i128_unbox_val(a);
+    int64_t sh = (int64_t)mako_native_i128_unbox_val(b);
+    if (sh <= 0) return mako_native_u128_box_val((mako_u128_t)va);
+    if (sh >= 128) return mako_native_u128_box_val((mako_u128_t)(va < 0 ? -1 : 0));
+    return mako_native_u128_box_val((mako_u128_t)(va >> sh));
+}
+
+int64_t mako_native_i128_bitand(int64_t a, int64_t b) {
+    return mako_native_u128_box_val(mako_native_u128_unbox_val(a) & mako_native_u128_unbox_val(b));
+}
+
+int64_t mako_native_i128_bitor(int64_t a, int64_t b) {
+    return mako_native_u128_box_val(mako_native_u128_unbox_val(a) | mako_native_u128_unbox_val(b));
+}
+
+int64_t mako_native_i128_bitxor(int64_t a, int64_t b) {
+    return mako_native_u128_box_val(mako_native_u128_unbox_val(a) ^ mako_native_u128_unbox_val(b));
+}
+
+int64_t mako_native_i128_cmp(int64_t a, int64_t b) {
+    return mako_i128_cmp(mako_native_i128_unbox_val(a), mako_native_i128_unbox_val(b));
+}
+
+int64_t mako_native_i128_eq(int64_t a, int64_t b) {
+    return mako_native_u128_unbox_val(a) == mako_native_u128_unbox_val(b) ? 1 : 0;
+}
+
+/* Raw memory typed & endian-explicit access */
+int64_t mako_native_mem_read_u8(int64_t ptr, int64_t off) { return mako_mem_read_u8(ptr, off); }
+int64_t mako_native_mem_read_i8(int64_t ptr, int64_t off) { return mako_mem_read_i8(ptr, off); }
+int64_t mako_native_mem_read_u16(int64_t ptr, int64_t off) { return mako_mem_read_u16(ptr, off); }
+int64_t mako_native_mem_read_i16(int64_t ptr, int64_t off) { return mako_mem_read_i16(ptr, off); }
+int64_t mako_native_mem_read_u32(int64_t ptr, int64_t off) { return mako_mem_read_u32(ptr, off); }
+int64_t mako_native_mem_read_i32(int64_t ptr, int64_t off) { return mako_mem_read_i32(ptr, off); }
+int64_t mako_native_mem_read_u64(int64_t ptr, int64_t off) { return mako_mem_read_u64(ptr, off); }
+int64_t mako_native_mem_read_i64(int64_t ptr, int64_t off) { return mako_mem_read_i64(ptr, off); }
+double  mako_native_mem_read_f32(int64_t ptr, int64_t off) { return mako_mem_read_f32(ptr, off); }
+double  mako_native_mem_read_f64(int64_t ptr, int64_t off) { return mako_mem_read_f64(ptr, off); }
+
+int64_t mako_native_mem_write_u8(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_u8(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_i8(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_i8(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_u16(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_u16(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_i16(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_i16(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_u32(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_u32(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_i32(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_i32(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_u64(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_u64(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_i64(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_i64(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_f32(int64_t ptr, int64_t off, double v) { mako_mem_write_f32(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_f64(int64_t ptr, int64_t off, double v) { mako_mem_write_f64(ptr, off, v); return 0; }
+
+int64_t mako_native_mem_read_u16_le(int64_t ptr, int64_t off) { return mako_mem_read_u16_le(ptr, off); }
+int64_t mako_native_mem_read_u16_be(int64_t ptr, int64_t off) { return mako_mem_read_u16_be(ptr, off); }
+int64_t mako_native_mem_read_u32_le(int64_t ptr, int64_t off) { return mako_mem_read_u32_le(ptr, off); }
+int64_t mako_native_mem_read_u32_be(int64_t ptr, int64_t off) { return mako_mem_read_u32_be(ptr, off); }
+int64_t mako_native_mem_read_u64_le(int64_t ptr, int64_t off) { return mako_mem_read_u64_le(ptr, off); }
+int64_t mako_native_mem_read_u64_be(int64_t ptr, int64_t off) { return mako_mem_read_u64_be(ptr, off); }
+
+int64_t mako_native_mem_write_u16_le(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_u16_le(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_u16_be(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_u16_be(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_u32_le(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_u32_le(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_u32_be(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_u32_be(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_u64_le(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_u64_le(ptr, off, v); return 0; }
+int64_t mako_native_mem_write_u64_be(int64_t ptr, int64_t off, int64_t v) { mako_mem_write_u64_be(ptr, off, v); return 0; }
+
+int64_t mako_native_mem_zero(int64_t ptr, int64_t len) { mako_mem_zero(ptr, len); return 0; }
+int64_t mako_native_mem_copy(int64_t dst, int64_t src, int64_t len) { mako_mem_copy(dst, src, len); return 0; }
+int64_t mako_native_mem_cmp(int64_t a, int64_t b, int64_t len) { return mako_mem_cmp(a, b, len); }
+
+/* Raw hardware atomics */
+int64_t mako_native_mem_atomic_load_i64(int64_t ptr, int64_t off) { return mako_mem_atomic_load_i64(ptr, off); }
+int64_t mako_native_mem_atomic_store_i64(int64_t ptr, int64_t off, int64_t v) { mako_mem_atomic_store_i64(ptr, off, v); return 0; }
+int64_t mako_native_mem_atomic_add_i64(int64_t ptr, int64_t off, int64_t d) { return mako_mem_atomic_add_i64(ptr, off, d); }
+int64_t mako_native_mem_atomic_sub_i64(int64_t ptr, int64_t off, int64_t d) { return mako_mem_atomic_sub_i64(ptr, off, d); }
+int64_t mako_native_mem_atomic_exchange_i64(int64_t ptr, int64_t off, int64_t v) { return mako_mem_atomic_exchange_i64(ptr, off, v); }
+int64_t mako_native_mem_atomic_cas_i64(int64_t ptr, int64_t off, int64_t exp, int64_t des) { return mako_mem_atomic_cas_i64(ptr, off, exp, des); }
+int64_t mako_native_memory_fence(void) { mako_memory_fence(); return 0; }
+
+/* Positional & Scatter-Gather I/O, VM, Shared Memory, Unix Sockets, Subprocesses */
+int64_t mako_native_pread_raw(int64_t fd, int64_t buf, int64_t count, int64_t off) { return mako_pread_raw(fd, buf, count, off); }
+int64_t mako_native_pwrite_raw(int64_t fd, int64_t buf, int64_t count, int64_t off) { return mako_pwrite_raw(fd, buf, count, off); }
+
+int64_t mako_native_writev_raw_ptr(int64_t fd, MakoNativeIntSlice *ptrs, MakoNativeIntSlice *lens) {
+    MakoIntArray p = { ptrs ? ptrs->data : NULL, ptrs ? ptrs->len : 0, 0 };
+    MakoIntArray l = { lens ? lens->data : NULL, lens ? lens->len : 0, 0 };
+    return mako_writev_raw(fd, p, l);
+}
+
+int64_t mako_native_readv_raw_ptr(int64_t fd, MakoNativeIntSlice *ptrs, MakoNativeIntSlice *lens) {
+    MakoIntArray p = { ptrs ? ptrs->data : NULL, ptrs ? ptrs->len : 0, 0 };
+    MakoIntArray l = { lens ? lens->data : NULL, lens ? lens->len : 0, 0 };
+    return mako_readv_raw(fd, p, l);
+}
+
+int64_t mako_native_pwritev_raw_ptr(int64_t fd, MakoNativeIntSlice *ptrs, MakoNativeIntSlice *lens, int64_t off) {
+    MakoIntArray p = { ptrs ? ptrs->data : NULL, ptrs ? ptrs->len : 0, 0 };
+    MakoIntArray l = { lens ? lens->data : NULL, lens ? lens->len : 0, 0 };
+    return mako_pwritev_raw(fd, p, l, off);
+}
+
+int64_t mako_native_preadv_raw_ptr(int64_t fd, MakoNativeIntSlice *ptrs, MakoNativeIntSlice *lens, int64_t off) {
+    MakoIntArray p = { ptrs ? ptrs->data : NULL, ptrs ? ptrs->len : 0, 0 };
+    MakoIntArray l = { lens ? lens->data : NULL, lens ? lens->len : 0, 0 };
+    return mako_preadv_raw(fd, p, l, off);
+}
+
+int64_t mako_native_madvise(int64_t addr, int64_t len, int64_t advice) { return mako_madvise(addr, len, advice); }
+int64_t mako_native_msync(int64_t addr, int64_t len, int64_t flags) { return mako_msync(addr, len, flags); }
+int64_t mako_native_flock(int64_t fd, int64_t op) { return mako_flock(fd, op); }
+int64_t mako_native_poll_fd(int64_t fd, int64_t events, int64_t timeout_ms) { return mako_poll_fd(fd, events, timeout_ms); }
+int64_t mako_native_mmap_anon(int64_t len) { return mako_mmap_anon(len); }
+int64_t mako_native_munmap(int64_t addr, int64_t len) { return mako_munmap(addr, len); }
+int64_t mako_native_mprotect_raw(int64_t addr, int64_t len, int64_t prot) { return mako_mprotect_raw(addr, len, prot); }
+int64_t mako_native_ioctl(int64_t fd, int64_t req, int64_t arg) { return mako_ioctl(fd, req, arg); }
+
+int64_t mako_native_shm_open_raw_ptr(MakoNativeString *name, int64_t size) {
+    return mako_shm_open_raw(bridge_borrow_str(name), size);
+}
+
+int64_t mako_native_shm_unlink_raw_ptr(MakoNativeString *name) {
+    return mako_shm_unlink_raw(bridge_borrow_str(name));
+}
+
+int64_t mako_native_proc_spawn_piped_ptr(MakoNativeString *cmd) {
+    return mako_proc_spawn_piped(bridge_borrow_str(cmd));
+}
+
+int64_t mako_native_proc_write_stdin_ptr(int64_t h, MakoNativeString *data) {
+    return mako_proc_write_stdin(h, bridge_borrow_str(data));
+}
+
+int64_t mako_native_proc_close_stdin(int64_t h) {
+    return mako_proc_close_stdin(h);
+}
+
+MakoNativeString *mako_native_proc_read_stdout_ptr(int64_t h, int64_t max_bytes) {
+    return bridge_take_str(mako_proc_read_stdout(h, max_bytes));
+}
+
+int64_t mako_native_proc_wait_nb(int64_t h) {
+    return mako_proc_wait_nb(h);
+}
+
+int64_t mako_native_proc_exit_code(int64_t h) {
+    return mako_proc_exit_code(h);
+}
+
+int64_t mako_native_proc_kill(int64_t h, int64_t sig) {
+    return mako_proc_kill(h, sig);
+}
+
+int64_t mako_native_proc_close(int64_t h) {
+    return mako_proc_close(h);
+}
+
+/* Single-instruction hardware intrinsics */
+int64_t mako_native_bswap16(int64_t x) { return mako_bswap16(x); }
+int64_t mako_native_bswap32(int64_t x) { return mako_bswap32(x); }
+int64_t mako_native_bswap64(int64_t x) { return mako_bswap64(x); }
+int64_t mako_native_hton16(int64_t x)  { return mako_hton16(x); }
+int64_t mako_native_hton32(int64_t x)  { return mako_hton32(x); }
+int64_t mako_native_hton64(int64_t x)  { return mako_hton64(x); }
+int64_t mako_native_ntoh16(int64_t x)  { return mako_ntoh16(x); }
+int64_t mako_native_ntoh32(int64_t x)  { return mako_ntoh32(x); }
+int64_t mako_native_ntoh64(int64_t x)  { return mako_ntoh64(x); }
+int64_t mako_native_htons(int64_t x)   { return mako_htons(x); }
+int64_t mako_native_ntohs(int64_t x)   { return mako_ntohs(x); }
+int64_t mako_native_htonl(int64_t x)   { return mako_htonl(x); }
+int64_t mako_native_ntohl(int64_t x)   { return mako_ntohl(x); }
+int64_t mako_native_rotl64(int64_t x, int64_t r) { return mako_rotl64(x, r); }
+int64_t mako_native_rotr64(int64_t x, int64_t r) { return mako_rotr64(x, r); }
+int64_t mako_native_rotl32(int64_t x, int64_t r) { return mako_rotl32(x, r); }
+int64_t mako_native_rotr32(int64_t x, int64_t r) { return mako_rotr32(x, r); }
+int64_t mako_native_popcount32(int64_t x) { return mako_popcount32(x); }
+int64_t mako_native_clz32(int64_t x)      { return mako_clz32(x); }
+int64_t mako_native_ctz32(int64_t x)      { return mako_ctz32(x); }
+int64_t mako_native_bit_clz64(int64_t x)  { return mako_bit_clz64(x); }
+int64_t mako_native_bit_ctz64(int64_t x)  { return mako_bit_ctz64(x); }
+int64_t mako_native_bit_popcnt64(int64_t x) { return mako_bit_popcnt64(x); }
+int64_t mako_native_bit_ffs64(int64_t x)  { return mako_bit_ffs64(x); }
+int64_t mako_native_bit_rotl64(int64_t x, int64_t k) { return mako_bit_rotl64(x, k); }
+int64_t mako_native_bit_rotr64(int64_t x, int64_t k) { return mako_bit_rotr64(x, k); }
+int64_t mako_native_wrapping_add(int64_t a, int64_t b) { return mako_wrapping_add(a, b); }
+int64_t mako_native_wrapping_sub(int64_t a, int64_t b) { return mako_wrapping_sub(a, b); }
+int64_t mako_native_wrapping_mul(int64_t a, int64_t b) { return mako_wrapping_mul(a, b); }
+int64_t mako_native_saturating_add(int64_t a, int64_t b) { return mako_saturating_add(a, b); }
+int64_t mako_native_saturating_sub(int64_t a, int64_t b) { return mako_saturating_sub(a, b); }
+
+/* SIMD 4-lane & 8-lane vector helpers for native slices */
+static inline MakoNativeFloatSlice *bridge_take_float_array(MakoFloatArray arr) {
+    MakoNativeFloatSlice *out = mako_native_float_slice_make_ptr((int64_t)arr.len, (int64_t)(arr.len ? arr.len : 1));
+    if (arr.data && arr.len > 0) {
+        memcpy(out->data, arr.data, (size_t)arr.len * sizeof(double));
+    }
+    out->len = (size_t)arr.len;
+    if (arr.cap && arr.data) mako_rc_release(arr.data);
+    return out;
+}
+
+static inline MakoNativeIntSlice *bridge_take_int_array(MakoIntArray arr) {
+    MakoNativeIntSlice *out = mako_native_int_slice_make_ptr((int64_t)arr.len, (int64_t)(arr.len ? arr.len : 1));
+    if (arr.data && arr.len > 0) {
+        memcpy(out->data, arr.data, (size_t)arr.len * sizeof(int64_t));
+    }
+    out->len = (size_t)arr.len;
+    if (arr.cap && arr.data) mako_rc_release(arr.data);
+    return out;
+}
+
+MakoNativeFloatSlice *mako_native_simd_f32x4_add_ptr(MakoNativeFloatSlice *a, MakoNativeFloatSlice *b) {
+    MakoFloatArray va = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoFloatArray vb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return bridge_take_float_array(mako_simd_f32x4_add(va, vb));
+}
+
+MakoNativeFloatSlice *mako_native_simd_f32x4_sub_ptr(MakoNativeFloatSlice *a, MakoNativeFloatSlice *b) {
+    MakoFloatArray va = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoFloatArray vb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return bridge_take_float_array(mako_simd_f32x4_sub(va, vb));
+}
+
+MakoNativeFloatSlice *mako_native_simd_f32x4_mul_ptr(MakoNativeFloatSlice *a, MakoNativeFloatSlice *b) {
+    MakoFloatArray va = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoFloatArray vb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return bridge_take_float_array(mako_simd_f32x4_mul(va, vb));
+}
+
+MakoNativeFloatSlice *mako_native_simd_f32x4_scale_ptr(MakoNativeFloatSlice *a, double s) {
+    MakoFloatArray va = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    return bridge_take_float_array(mako_simd_f32x4_scale(va, s));
+}
+
+MakoNativeFloatSlice *mako_native_simd_f32x4_fma_ptr(MakoNativeFloatSlice *a, MakoNativeFloatSlice *b, MakoNativeFloatSlice *c) {
+    size_t n = a ? a->len : 0;
+    if (b && b->len < n) n = b->len;
+    if (c && c->len < n) n = c->len;
+    MakoNativeFloatSlice *out = mako_native_float_slice_make_ptr((int64_t)n, (int64_t)(n ? n : 1));
+    for (size_t i = 0; i < n; i++) {
+        out->data[i] = fma(a->data[i], b->data[i], c->data[i]);
+    }
+    out->len = n;
+    return out;
+}
+
+double mako_native_simd_f32x4_dot_ptr(MakoNativeFloatSlice *a, MakoNativeFloatSlice *b) {
+    size_t n = a ? a->len : 0;
+    if (b && b->len < n) n = b->len;
+    double sum = 0.0;
+    for (size_t i = 0; i < n; i++) sum += a->data[i] * b->data[i];
+    return sum;
+}
+
+double mako_native_simd_f32x4_hadd_ptr(MakoNativeFloatSlice *a) {
+    size_t n = a ? a->len : 0;
+    double sum = 0.0;
+    for (size_t i = 0; i < n; i++) sum += a->data[i];
+    return sum;
+}
+
+MakoNativeIntSlice *mako_native_simd_i32x4_add_ptr(MakoNativeIntSlice *a, MakoNativeIntSlice *b) {
+    MakoIntArray va = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoIntArray vb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return bridge_take_int_array(mako_simd_i32x4_add(va, vb));
+}
+
+MakoNativeIntSlice *mako_native_simd_i16x8_add_ptr(MakoNativeIntSlice *a, MakoNativeIntSlice *b) {
+    MakoIntArray va = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoIntArray vb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return bridge_take_int_array(mako_simd_i16x8_add(va, vb));
+}
+
+/* Go 1.21–1.23 slice clear & ergonomics helpers on MakoNative*Slice */
+int64_t mako_native_slice_clear_int_ptr(MakoNativeIntSlice *s) {
+    if (s && s->data && s->len > 0) memset(s->data, 0, s->len * sizeof(int64_t));
+    return 0;
+}
+
+int64_t mako_native_slice_clear_float_ptr(MakoNativeFloatSlice *s) {
+    if (s && s->data && s->len > 0) memset(s->data, 0, s->len * sizeof(double));
+    return 0;
+}
+
+int64_t mako_native_slice_clear_byte_ptr(MakoNativeByteSlice *s) {
+    if (s && s->data && s->len > 0) memset(s->data, 0, s->len);
+    return 0;
+}
+
+int64_t mako_native_slice_clear_str_ptr(MakoNativeStringSlice *s) {
+    if (!s || !s->data) return 0;
+    for (size_t i = 0; i < s->len; i++) {
+        if (s->data[i]) mako_native_string_drop_ptr(s->data[i]);
+        s->data[i] = mako_native_string_literal_ptr("", 0);
+    }
+    return 0;
+}
+
+int64_t mako_native_slice_bsearch_int_idx_ptr(MakoNativeIntSlice *s, int64_t target) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    bool found = false;
+    return mako_slice_bsearch_int(a, target, &found);
+}
+
+int64_t mako_native_slice_bsearch_int_found_ptr(MakoNativeIntSlice *s, int64_t target) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    bool found = false;
+    (void)mako_slice_bsearch_int(a, target, &found);
+    return found ? 1 : 0;
+}
+
+int64_t mako_native_slice_bsearch_float_idx_ptr(MakoNativeFloatSlice *s, double target) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    bool found = false;
+    return mako_slice_bsearch_float(a, target, &found);
+}
+
+int64_t mako_native_slice_bsearch_float_found_ptr(MakoNativeFloatSlice *s, double target) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    bool found = false;
+    (void)mako_slice_bsearch_float(a, target, &found);
+    return found ? 1 : 0;
+}
+
+int64_t mako_native_slice_bsearch_str_idx_ptr(MakoNativeStringSlice *s, MakoNativeString *target) {
+    int64_t lo = 0, hi = s ? (int64_t)s->len : 0;
+    MakoString t = bridge_borrow_str(target);
+    while (lo < hi) {
+        int64_t mid = lo + ((hi - lo) >> 1);
+        MakoString m = bridge_borrow_str(s->data[mid]);
+        if (mako_str_compare(m, t) < 0) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+int64_t mako_native_slice_bsearch_str_found_ptr(MakoNativeStringSlice *s, MakoNativeString *target) {
+    int64_t n = s ? (int64_t)s->len : 0;
+    int64_t idx = mako_native_slice_bsearch_str_idx_ptr(s, target);
+    if (idx < n && mako_str_eq(bridge_borrow_str(s->data[idx]), bridge_borrow_str(target))) {
+        return 1;
+    }
+    return 0;
+}
+
+MakoNativeIntSlice *mako_native_slice_compact_int_ptr(MakoNativeIntSlice *s) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return bridge_take_int_array(mako_slice_compact_int(a));
+}
+
+MakoNativeFloatSlice *mako_native_slice_compact_float_ptr(MakoNativeFloatSlice *s) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return bridge_take_float_array(mako_slice_compact_float(a));
+}
+
+MakoNativeStringSlice *mako_native_slice_compact_str_ptr(MakoNativeStringSlice *s) {
+    size_t n = s ? s->len : 0;
+    MakoNativeStringSlice *out = mako_native_string_slice_make_ptr((int64_t)n, (int64_t)(n ? n : 1));
+    size_t w = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (w == 0 || !mako_str_eq(bridge_borrow_str(s->data[i]), bridge_borrow_str(out->data[w - 1]))) {
+            out->data[w++] = mako_native_string_clone_ptr(s->data[i]);
+        }
+    }
+    out->len = w;
+    return out;
+}
+
+MakoNativeIntSlice *mako_native_slice_delete_int_ptr(MakoNativeIntSlice *s, int64_t i, int64_t j) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return bridge_take_int_array(mako_slice_delete_int(a, i, j));
+}
+
+MakoNativeFloatSlice *mako_native_slice_delete_float_ptr(MakoNativeFloatSlice *s, int64_t i, int64_t j) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return bridge_take_float_array(mako_slice_delete_float(a, i, j));
+}
+
+MakoNativeStringSlice *mako_native_slice_delete_str_ptr(MakoNativeStringSlice *s, int64_t i, int64_t j) {
+    int64_t n = s ? (int64_t)s->len : 0;
+    if (i < 0) i = 0;
+    if (j < i) j = i;
+    if (j > n) j = n;
+    int64_t keep = n - (j - i);
+    MakoNativeStringSlice *out = mako_native_string_slice_make_ptr(keep, keep > 0 ? keep : 1);
+    int64_t w = 0;
+    for (int64_t k = 0; k < i; k++) out->data[w++] = mako_native_string_clone_ptr(s->data[k]);
+    for (int64_t k = j; k < n; k++) out->data[w++] = mako_native_string_clone_ptr(s->data[k]);
+    out->len = (size_t)w;
+    return out;
+}
+
+MakoNativeIntSlice *mako_native_slice_insert_int_ptr(MakoNativeIntSlice *s, int64_t idx, int64_t val) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return bridge_take_int_array(mako_slice_insert_int(a, idx, val));
+}
+
+MakoNativeFloatSlice *mako_native_slice_insert_float_ptr(MakoNativeFloatSlice *s, int64_t idx, double val) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return bridge_take_float_array(mako_slice_insert_float(a, idx, val));
+}
+
+MakoNativeStringSlice *mako_native_slice_insert_str_ptr(MakoNativeStringSlice *s, int64_t idx, MakoNativeString *val) {
+    int64_t n = s ? (int64_t)s->len : 0;
+    if (idx < 0) idx = 0;
+    if (idx > n) idx = n;
+    MakoNativeStringSlice *out = mako_native_string_slice_make_ptr(n + 1, n + 1);
+    for (int64_t k = 0; k < idx; k++) out->data[k] = mako_native_string_clone_ptr(s->data[k]);
+    out->data[idx] = mako_native_string_clone_ptr(val);
+    for (int64_t k = idx; k < n; k++) out->data[k + 1] = mako_native_string_clone_ptr(s->data[k]);
+    out->len = (size_t)(n + 1);
+    return out;
+}
+
+MakoNativeIntSlice *mako_native_slice_grow_int_ptr(MakoNativeIntSlice *s, int64_t extra) {
+    size_t n = s ? s->len : 0;
+    size_t c = s ? s->cap : 0;
+    size_t need = n + (size_t)(extra > 0 ? extra : 0);
+    size_t new_cap = need > c ? need : (c ? c : 1);
+    MakoNativeIntSlice *out = mako_native_int_slice_make_ptr((int64_t)n, (int64_t)new_cap);
+    if (n > 0 && s->data) memcpy(out->data, s->data, n * sizeof(int64_t));
+    out->len = n;
+    return out;
+}
+
+MakoNativeFloatSlice *mako_native_slice_grow_float_ptr(MakoNativeFloatSlice *s, int64_t extra) {
+    size_t n = s ? s->len : 0;
+    size_t c = s ? s->cap : 0;
+    size_t need = n + (size_t)(extra > 0 ? extra : 0);
+    size_t new_cap = need > c ? need : (c ? c : 1);
+    MakoNativeFloatSlice *out = mako_native_float_slice_make_ptr((int64_t)n, (int64_t)new_cap);
+    if (n > 0 && s->data) memcpy(out->data, s->data, n * sizeof(double));
+    out->len = n;
+    return out;
+}
+
+MakoNativeByteSlice *mako_native_slice_grow_byte_ptr(MakoNativeByteSlice *s, int64_t extra) {
+    size_t n = s ? s->len : 0;
+    size_t c = s ? s->cap : 0;
+    size_t need = n + (size_t)(extra > 0 ? extra : 0);
+    size_t new_cap = need > c ? need : (c ? c : 1);
+    MakoNativeByteSlice *out = mako_native_byte_slice_make_ptr((int64_t)n, (int64_t)new_cap);
+    if (n > 0 && s->data) memcpy(out->data, s->data, n);
+    out->len = n;
+    return out;
+}
+
+MakoNativeStringSlice *mako_native_slice_grow_str_ptr(MakoNativeStringSlice *s, int64_t extra) {
+    size_t n = s ? s->len : 0;
+    size_t c = s ? s->cap : 0;
+    size_t need = n + (size_t)(extra > 0 ? extra : 0);
+    size_t new_cap = need > c ? need : (c ? c : 1);
+    MakoNativeStringSlice *out = mako_native_string_slice_make_ptr((int64_t)n, (int64_t)new_cap);
+    for (size_t i = 0; i < n; i++) out->data[i] = mako_native_string_clone_ptr(s->data[i]);
+    out->len = n;
+    return out;
+}
+
+MakoNativeIntSlice *mako_native_slice_clip_int_ptr(MakoNativeIntSlice *s) {
+    size_t n = s ? s->len : 0;
+    MakoNativeIntSlice *out = mako_native_int_slice_make_ptr((int64_t)n, (int64_t)(n ? n : 1));
+    if (n > 0 && s->data) memcpy(out->data, s->data, n * sizeof(int64_t));
+    out->len = n;
+    out->cap = n;
+    return out;
+}
+
+MakoNativeFloatSlice *mako_native_slice_clip_float_ptr(MakoNativeFloatSlice *s) {
+    size_t n = s ? s->len : 0;
+    MakoNativeFloatSlice *out = mako_native_float_slice_make_ptr((int64_t)n, (int64_t)(n ? n : 1));
+    if (n > 0 && s->data) memcpy(out->data, s->data, n * sizeof(double));
+    out->len = n;
+    out->cap = n;
+    return out;
+}
+
+MakoNativeByteSlice *mako_native_slice_clip_byte_ptr(MakoNativeByteSlice *s) {
+    size_t n = s ? s->len : 0;
+    MakoNativeByteSlice *out = mako_native_byte_slice_make_ptr((int64_t)n, (int64_t)(n ? n : 1));
+    if (n > 0 && s->data) memcpy(out->data, s->data, n);
+    out->len = n;
+    out->cap = n;
+    return out;
+}
+
+MakoNativeStringSlice *mako_native_slice_clip_str_ptr(MakoNativeStringSlice *s) {
+    size_t n = s ? s->len : 0;
+    MakoNativeStringSlice *out = mako_native_string_slice_make_ptr((int64_t)n, (int64_t)(n ? n : 1));
+    for (size_t i = 0; i < n; i++) out->data[i] = mako_native_string_clone_ptr(s->data[i]);
+    out->len = n;
+    out->cap = n;
+    return out;
+}
+
+/* =========================================================================
+ * Track 2: Poller & CPU Intrinsics (Native Bridge)
+ * ========================================================================= */
+int64_t mako_native_poller_new(void) { return mako_poller_new(); }
+int64_t mako_native_poller_add(int64_t p, int64_t fd, int64_t events, int64_t token) { return mako_poller_add(p, fd, events, token); }
+int64_t mako_native_poller_mod(int64_t p, int64_t fd, int64_t events, int64_t token) { return mako_poller_mod(p, fd, events, token); }
+int64_t mako_native_poller_del(int64_t p, int64_t fd) { return mako_poller_del(p, fd); }
+int64_t mako_native_poller_wait_ptr(int64_t p, MakoNativeIntSlice *out_tokens, MakoNativeIntSlice *out_events, int64_t max_events, int64_t timeout_ms) {
+    MakoIntArray t = { out_tokens ? out_tokens->data : NULL, out_tokens ? out_tokens->len : 0, 0 };
+    MakoIntArray e = { out_events ? out_events->data : NULL, out_events ? out_events->len : 0, 0 };
+    return mako_poller_wait(p, t, e, max_events, timeout_ms);
+}
+int64_t mako_native_poller_close(int64_t p) { return mako_poller_close(p); }
+int64_t mako_native_cpu_ticks(void) { return mako_cpu_ticks(); }
+int64_t mako_native_cpu_pause(void) { mako_cpu_pause(); return 0; }
+int64_t mako_native_prefetch_read(int64_t addr) { mako_prefetch_read(addr); return 0; }
+int64_t mako_native_prefetch_write(int64_t addr) { mako_prefetch_write(addr); return 0; }
+
+/* =========================================================================
+ * Track 3: Raw File-Backed mmap_file & Aligned Heap Allocation (Native Bridge)
+ * ========================================================================= */
+int64_t mako_native_mmap_file(int64_t fd, int64_t offset, int64_t size, int64_t prot, int64_t shared) {
+    return mako_mmap_file(fd, offset, size, prot, shared);
+}
+int64_t mako_native_alloc_aligned(int64_t size, int64_t align) { return mako_alloc_aligned(size, align); }
+int64_t mako_native_free_aligned(int64_t ptr) { mako_free_aligned(ptr); return 0; }
+
+/* =========================================================================
+ * Track 4: Go 1.21-1.23 slices Polymorphic Surface (Native Bridge)
+ * ========================================================================= */
+int64_t mako_native_slice_index_int_ptr(MakoNativeIntSlice *s, int64_t target) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return mako_slice_index_int(a, target);
+}
+int64_t mako_native_slice_index_float_ptr(MakoNativeFloatSlice *s, double target) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return mako_slice_index_float(a, target);
+}
+int64_t mako_native_slice_index_str_ptr(MakoNativeStringSlice *s, MakoNativeString *target) {
+    size_t n = s ? s->len : 0;
+    MakoString t = bridge_borrow_str(target);
+    for (size_t i = 0; i < n; i++) {
+        if (mako_str_eq(bridge_borrow_str(s->data[i]), t)) return (int64_t)i;
+    }
+    return -1;
+}
+int64_t mako_native_slice_index_byte_ptr(MakoNativeByteSlice *s, int64_t target) {
+    MakoByteArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return mako_slice_index_byte(a, (uint8_t)target);
+}
+
+int64_t mako_native_slice_contains_int_ptr(MakoNativeIntSlice *s, int64_t target) {
+    return mako_native_slice_index_int_ptr(s, target) >= 0 ? 1 : 0;
+}
+int64_t mako_native_slice_contains_float_ptr(MakoNativeFloatSlice *s, double target) {
+    return mako_native_slice_index_float_ptr(s, target) >= 0 ? 1 : 0;
+}
+int64_t mako_native_slice_contains_str_ptr(MakoNativeStringSlice *s, MakoNativeString *target) {
+    return mako_native_slice_index_str_ptr(s, target) >= 0 ? 1 : 0;
+}
+int64_t mako_native_slice_contains_byte_ptr(MakoNativeByteSlice *s, int64_t target) {
+    return mako_native_slice_index_byte_ptr(s, target) >= 0 ? 1 : 0;
+}
+
+int64_t mako_native_slice_compare_int_ptr(MakoNativeIntSlice *a, MakoNativeIntSlice *b) {
+    MakoIntArray ma = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoIntArray mb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return mako_slice_compare_int(ma, mb);
+}
+int64_t mako_native_slice_compare_float_ptr(MakoNativeFloatSlice *a, MakoNativeFloatSlice *b) {
+    MakoFloatArray ma = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoFloatArray mb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return mako_slice_compare_float(ma, mb);
+}
+int64_t mako_native_slice_compare_str_ptr(MakoNativeStringSlice *a, MakoNativeStringSlice *b) {
+    size_t na = a ? a->len : 0;
+    size_t nb = b ? b->len : 0;
+    size_t n = na < nb ? na : nb;
+    for (size_t i = 0; i < n; i++) {
+        int64_t c = mako_str_compare(bridge_borrow_str(a->data[i]), bridge_borrow_str(b->data[i]));
+        if (c < 0) return -1;
+        if (c > 0) return 1;
+    }
+    return na < nb ? -1 : (na > nb ? 1 : 0);
+}
+int64_t mako_native_slice_compare_byte_ptr(MakoNativeByteSlice *a, MakoNativeByteSlice *b) {
+    MakoByteArray ma = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoByteArray mb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return mako_slice_compare_byte(ma, mb);
+}
+
+int64_t mako_native_slice_equal_int_ptr(MakoNativeIntSlice *a, MakoNativeIntSlice *b) {
+    MakoIntArray ma = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoIntArray mb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return mako_slice_equal_int(ma, mb) ? 1 : 0;
+}
+int64_t mako_native_slice_equal_float_ptr(MakoNativeFloatSlice *a, MakoNativeFloatSlice *b) {
+    MakoFloatArray ma = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoFloatArray mb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return mako_slice_equal_float(ma, mb) ? 1 : 0;
+}
+int64_t mako_native_slice_equal_str_ptr(MakoNativeStringSlice *a, MakoNativeStringSlice *b) {
+    size_t na = a ? a->len : 0;
+    size_t nb = b ? b->len : 0;
+    if (na != nb) return 0;
+    for (size_t i = 0; i < na; i++) {
+        if (!mako_str_eq(bridge_borrow_str(a->data[i]), bridge_borrow_str(b->data[i]))) return 0;
+    }
+    return 1;
+}
+int64_t mako_native_slice_equal_byte_ptr(MakoNativeByteSlice *a, MakoNativeByteSlice *b) {
+    MakoByteArray ma = { a ? a->data : NULL, a ? a->len : 0, 0 };
+    MakoByteArray mb = { b ? b->data : NULL, b ? b->len : 0, 0 };
+    return mako_slice_equal_byte(ma, mb) ? 1 : 0;
+}
+
+MakoNativeIntSlice *mako_native_slice_reverse_int_ptr(MakoNativeIntSlice *s) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return bridge_take_int_array(mako_slice_reverse_int(a));
+}
+MakoNativeFloatSlice *mako_native_slice_reverse_float_ptr(MakoNativeFloatSlice *s) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return bridge_take_float_array(mako_slice_reverse_float(a));
+}
+MakoNativeStringSlice *mako_native_slice_reverse_str_ptr(MakoNativeStringSlice *s) {
+    size_t n = s ? s->len : 0;
+    MakoNativeStringSlice *out = mako_native_string_slice_make_ptr((int64_t)n, (int64_t)(n ? n : 1));
+    for (size_t i = 0; i < n; i++) out->data[i] = mako_native_string_clone_ptr(s->data[n - 1 - i]);
+    out->len = n;
+    return out;
+}
+MakoNativeByteSlice *mako_native_slice_reverse_byte_ptr(MakoNativeByteSlice *s) {
+    size_t n = s ? s->len : 0;
+    MakoNativeByteSlice *out = mako_native_byte_slice_make_ptr((int64_t)n, (int64_t)(n ? n : 1));
+    for (size_t i = 0; i < n; i++) out->data[i] = s->data[n - 1 - i];
+    out->len = n;
+    return out;
+}
+
+int64_t mako_native_slice_min_int_ptr(MakoNativeIntSlice *s) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return mako_slice_min_int(a);
+}
+int64_t mako_native_slice_max_int_ptr(MakoNativeIntSlice *s) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return mako_slice_max_int(a);
+}
+double mako_native_slice_min_float_ptr(MakoNativeFloatSlice *s) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return mako_slice_min_float(a);
+}
+double mako_native_slice_max_float_ptr(MakoNativeFloatSlice *s) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return mako_slice_max_float(a);
+}
+MakoNativeString *mako_native_slice_min_str_ptr(MakoNativeStringSlice *s) {
+    size_t n = s ? s->len : 0;
+    if (n == 0) return mako_native_string_literal_ptr("", 0);
+    MakoNativeString *best = s->data[0];
+    for (size_t i = 1; i < n; i++) {
+        if (mako_str_compare(bridge_borrow_str(s->data[i]), bridge_borrow_str(best)) < 0) best = s->data[i];
+    }
+    return mako_native_string_clone_ptr(best);
+}
+MakoNativeString *mako_native_slice_max_str_ptr(MakoNativeStringSlice *s) {
+    size_t n = s ? s->len : 0;
+    if (n == 0) return mako_native_string_literal_ptr("", 0);
+    MakoNativeString *best = s->data[0];
+    for (size_t i = 1; i < n; i++) {
+        if (mako_str_compare(bridge_borrow_str(s->data[i]), bridge_borrow_str(best)) > 0) best = s->data[i];
+    }
+    return mako_native_string_clone_ptr(best);
+}
+
+MakoNativeIntSlice *mako_native_slice_replace_int_ptr(MakoNativeIntSlice *s, int64_t i, int64_t j, MakoNativeIntSlice *rep) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    MakoIntArray r = { rep ? rep->data : NULL, rep ? rep->len : 0, 0 };
+    return bridge_take_int_array(mako_slice_replace_int(a, i, j, r));
+}
+MakoNativeFloatSlice *mako_native_slice_replace_float_ptr(MakoNativeFloatSlice *s, int64_t i, int64_t j, MakoNativeFloatSlice *rep) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    MakoFloatArray r = { rep ? rep->data : NULL, rep ? rep->len : 0, 0 };
+    return bridge_take_float_array(mako_slice_replace_float(a, i, j, r));
+}
+MakoNativeStringSlice *mako_native_slice_replace_str_ptr(MakoNativeStringSlice *s, int64_t i, int64_t j, MakoNativeStringSlice *rep) {
+    size_t n = s ? s->len : 0;
+    size_t rn = rep ? rep->len : 0;
+    size_t lo = i < 0 ? 0 : ((size_t)i > n ? n : (size_t)i);
+    size_t hi = j < 0 ? 0 : ((size_t)j > n ? n : (size_t)j);
+    if (hi < lo) hi = lo;
+    size_t new_len = lo + rn + (n - hi);
+    MakoNativeStringSlice *out = mako_native_string_slice_make_ptr((int64_t)new_len, (int64_t)(new_len ? new_len : 1));
+    size_t k = 0;
+    for (size_t idx = 0; idx < lo; idx++) out->data[k++] = mako_native_string_clone_ptr(s->data[idx]);
+    for (size_t idx = 0; idx < rn; idx++) out->data[k++] = mako_native_string_clone_ptr(rep->data[idx]);
+    for (size_t idx = hi; idx < n; idx++) out->data[k++] = mako_native_string_clone_ptr(s->data[idx]);
+    out->len = new_len;
+    return out;
+}
+MakoNativeByteSlice *mako_native_slice_replace_byte_ptr(MakoNativeByteSlice *s, int64_t i, int64_t j, MakoNativeByteSlice *rep) {
+    size_t n = s ? s->len : 0;
+    size_t rn = rep ? rep->len : 0;
+    size_t lo = i < 0 ? 0 : ((size_t)i > n ? n : (size_t)i);
+    size_t hi = j < 0 ? 0 : ((size_t)j > n ? n : (size_t)j);
+    if (hi < lo) hi = lo;
+    size_t new_len = lo + rn + (n - hi);
+    MakoNativeByteSlice *out = mako_native_byte_slice_make_ptr((int64_t)new_len, (int64_t)(new_len ? new_len : 1));
+    if (lo > 0 && s->data) memcpy(out->data, s->data, lo);
+    if (rn > 0 && rep->data) memcpy(out->data + lo, rep->data, rn);
+    if (n > hi && s->data) memcpy(out->data + lo + rn, s->data + hi, n - hi);
+    out->len = new_len;
+    return out;
+}
+
+MakoNativeIntSlice *mako_native_slice_repeat_int_ptr(MakoNativeIntSlice *s, int64_t count) {
+    MakoIntArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return bridge_take_int_array(mako_slice_repeat_int(a, count));
+}
+MakoNativeFloatSlice *mako_native_slice_repeat_float_ptr(MakoNativeFloatSlice *s, int64_t count) {
+    MakoFloatArray a = { s ? s->data : NULL, s ? s->len : 0, 0 };
+    return bridge_take_float_array(mako_slice_repeat_float(a, count));
+}
+MakoNativeStringSlice *mako_native_slice_repeat_str_ptr(MakoNativeStringSlice *s, int64_t count) {
+    size_t n = s ? s->len : 0;
+    if (n == 0 || count <= 0) return mako_native_string_slice_make_ptr(0, 1);
+    size_t new_len = n * (size_t)count;
+    MakoNativeStringSlice *out = mako_native_string_slice_make_ptr((int64_t)new_len, (int64_t)new_len);
+    size_t k = 0;
+    for (size_t c = 0; c < (size_t)count; c++) {
+        for (size_t i = 0; i < n; i++) out->data[k++] = mako_native_string_clone_ptr(s->data[i]);
+    }
+    out->len = new_len;
+    return out;
+}
+MakoNativeByteSlice *mako_native_slice_repeat_byte_ptr(MakoNativeByteSlice *s, int64_t count) {
+    size_t n = s ? s->len : 0;
+    if (n == 0 || count <= 0) return mako_native_byte_slice_make_ptr(0, 1);
+    size_t new_len = n * (size_t)count;
+    MakoNativeByteSlice *out = mako_native_byte_slice_make_ptr((int64_t)new_len, (int64_t)new_len);
+    for (size_t c = 0; c < (size_t)count; c++) {
+        memcpy(out->data + c * n, s->data, n);
+    }
+    out->len = new_len;
+    return out;
+}
+
+

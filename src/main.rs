@@ -4332,9 +4332,13 @@ fn link_args_native(opts: &BuildOpts, _runtime_dir: &Path) -> Vec<String> {
     let mut args = cc::base_link_args(opts);
     // Dead-strip unused sections/symbols from the embedded runtime archive.
     match os {
-        cc::OsKind::Macos => args.push("-Wl,-dead_strip".into()),
+        cc::OsKind::Macos => {
+            args.push("-Wl,-dead_strip".into());
+            args.push("-Wl,-dead_strip_dylibs".into());
+        }
         cc::OsKind::Linux | cc::OsKind::Other => {
             args.push("-Wl,--gc-sections".into());
+            args.push("-Wl,--as-needed".into());
         }
         cc::OsKind::Windows | cc::OsKind::Wasm => {}
     }
@@ -4712,6 +4716,7 @@ fn build_native_object(
         // Drop unreferenced runtime symbols (full bridge archive is multi-MB
         // without this — a hello-world would otherwise pull every builtin).
         arguments.push(std::ffi::OsString::from("-dead_strip"));
+        arguments.push(std::ffi::OsString::from("-dead_strip_dylibs"));
         arguments.push(std::ffi::OsString::from("-o"));
         arguments.push(out_bin.as_os_str().to_owned());
         let argument_refs = arguments

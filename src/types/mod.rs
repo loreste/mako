@@ -1748,6 +1748,64 @@ impl TypeChecker {
             Type::Fn(vec![Type::Int, Type::Int, Type::Float], Box::new(Type::Void)),
         );
         fns.insert(
+            "mem_atomic_load_i64".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_atomic_store_i64".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_atomic_add_i64".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_atomic_sub_i64".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_atomic_exchange_i64".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_atomic_cas_i64".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert("memory_fence".into(), Type::Fn(vec![], Box::new(Type::Void)));
+        fns.insert(
+            "madvise".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "msync".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "pread_raw".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "pwrite_raw".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "flock".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "poll_fd".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
             "i128_from_parts".into(),
             Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int128)),
         );
@@ -1770,6 +1828,312 @@ impl TypeChecker {
         fns.insert(
             "u128_lo".into(),
             Type::Fn(vec![Type::UInt128], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_read_u8".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_u8".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_i8".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_i8".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_u16_le".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_read_u16_be".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_u16_le".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_write_u16_be".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_u32_le".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_read_u32_be".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_u32_le".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_write_u32_be".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_read_u64_le".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_read_u64_be".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mem_write_u64_le".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_write_u64_be".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_zero".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_copy".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "mem_cmp".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "writev_raw".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "readv_raw".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "pwritev_raw".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "preadv_raw".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "unix_listen".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "unix_connect".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "unix_accept".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "mprotect_raw".into(),
+            Type::Fn(vec![Type::Int, Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "shm_open_raw".into(),
+            Type::Fn(vec![Type::String, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "shm_unlink_raw".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "proc_spawn_piped".into(),
+            Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "proc_write_stdin".into(),
+            Type::Fn(vec![Type::Int, Type::String], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "proc_close_stdin".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "proc_read_stdout".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::String)),
+        );
+        fns.insert(
+            "proc_wait_nb".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "proc_exit_code".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "proc_kill".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "proc_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hton16".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ntoh16".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hton32".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ntoh32".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "hton64".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "ntoh64".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bit_clz64".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bit_ctz64".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bit_popcnt64".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bit_ffs64".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bit_rotl64".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "bit_rotr64".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wrapping_add".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wrapping_sub".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "wrapping_mul".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "saturating_add".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "saturating_sub".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "u128_add".into(),
+            Type::Fn(vec![Type::UInt128, Type::UInt128], Box::new(Type::UInt128)),
+        );
+        fns.insert(
+            "u128_sub".into(),
+            Type::Fn(vec![Type::UInt128, Type::UInt128], Box::new(Type::UInt128)),
+        );
+        fns.insert(
+            "u128_mul".into(),
+            Type::Fn(vec![Type::UInt128, Type::UInt128], Box::new(Type::UInt128)),
+        );
+        fns.insert(
+            "u128_div".into(),
+            Type::Fn(vec![Type::UInt128, Type::UInt128], Box::new(Type::UInt128)),
+        );
+        fns.insert(
+            "u128_rem".into(),
+            Type::Fn(vec![Type::UInt128, Type::UInt128], Box::new(Type::UInt128)),
+        );
+        fns.insert(
+            "u128_shl".into(),
+            Type::Fn(vec![Type::UInt128, Type::Int], Box::new(Type::UInt128)),
+        );
+        fns.insert(
+            "u128_shr".into(),
+            Type::Fn(vec![Type::UInt128, Type::Int], Box::new(Type::UInt128)),
+        );
+        fns.insert(
+            "u128_eq".into(),
+            Type::Fn(vec![Type::UInt128, Type::UInt128], Box::new(Type::Bool)),
+        );
+        fns.insert(
+            "u128_cmp".into(),
+            Type::Fn(vec![Type::UInt128, Type::UInt128], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "u128_to_hex".into(),
+            Type::Fn(vec![Type::UInt128], Box::new(Type::String)),
+        );
+        fns.insert(
+            "i128_add".into(),
+            Type::Fn(vec![Type::Int128, Type::Int128], Box::new(Type::Int128)),
+        );
+        fns.insert(
+            "i128_sub".into(),
+            Type::Fn(vec![Type::Int128, Type::Int128], Box::new(Type::Int128)),
+        );
+        fns.insert(
+            "i128_mul".into(),
+            Type::Fn(vec![Type::Int128, Type::Int128], Box::new(Type::Int128)),
+        );
+        fns.insert(
+            "i128_div".into(),
+            Type::Fn(vec![Type::Int128, Type::Int128], Box::new(Type::Int128)),
+        );
+        fns.insert(
+            "i128_cmp".into(),
+            Type::Fn(vec![Type::Int128, Type::Int128], Box::new(Type::Int)),
         );
         // Scatter-gather I/O for zero-copy block transfers (SAN/iSCSI)
         fns.insert(
@@ -9543,6 +9907,78 @@ impl TypeChecker {
         fns.insert(
             "signal_fired".into(),
             Type::Fn(vec![Type::String], Box::new(Type::Int)),
+        );
+        // Track 2: Zero-Allocation Kernel Poller (kqueue / epoll) & CPU Intrinsics
+        fns.insert(
+            "poller_new".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "poller_add".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "poller_mod".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "poller_del".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "poller_wait".into(),
+            Type::Fn(
+                vec![
+                    Type::Int,
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Array(Box::new(Type::Int)),
+                    Type::Int,
+                    Type::Int,
+                ],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "poller_close".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "cpu_ticks".into(),
+            Type::Fn(vec![], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "cpu_pause".into(),
+            Type::Fn(vec![], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "prefetch_read".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Void)),
+        );
+        fns.insert(
+            "prefetch_write".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Void)),
+        );
+        // Track 3: Raw File-Backed mmap_file & Aligned Heap Allocation
+        fns.insert(
+            "mmap_file".into(),
+            Type::Fn(
+                vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int],
+                Box::new(Type::Int),
+            ),
+        );
+        fns.insert(
+            "alloc_aligned".into(),
+            Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Int)),
+        );
+        fns.insert(
+            "free_aligned".into(),
+            Type::Fn(vec![Type::Int], Box::new(Type::Void)),
         );
         fns.insert(
             "signal_ignore".into(),
@@ -18708,6 +19144,126 @@ impl TypeChecker {
                             let _ = self.check_expr(&args[0])?;
                             return Ok(Type::Int);
                         }
+                        "sizeof" | "alignof" if args.len() == 1 => {
+                            if let Expr::Ident(type_name) = &args[0] {
+                                if matches!(self.types.get(type_name), Some(Type::Struct { .. }))
+                                    || matches!(
+                                        type_name.as_str(),
+                                        "int"
+                                            | "int64"
+                                            | "i64"
+                                            | "isize"
+                                            | "uint64"
+                                            | "u64"
+                                            | "usize"
+                                            | "uintptr"
+                                            | "int32"
+                                            | "i32"
+                                            | "uint32"
+                                            | "u32"
+                                            | "int16"
+                                            | "i16"
+                                            | "uint16"
+                                            | "u16"
+                                            | "int8"
+                                            | "i8"
+                                            | "byte"
+                                            | "u8"
+                                            | "uint8"
+                                            | "i128"
+                                            | "int128"
+                                            | "u128"
+                                            | "uint128"
+                                            | "float"
+                                            | "f64"
+                                            | "float64"
+                                            | "f32"
+                                            | "float32"
+                                            | "bool"
+                                            | "string"
+                                    )
+                                {
+                                    return Ok(Type::Int);
+                                }
+                            }
+                            let _ = self.check_expr(&args[0])?;
+                            return Ok(Type::Int);
+                        }
+                        "offsetof" if args.len() == 2 => {
+                            let struct_name = match &args[0] {
+                                Expr::Ident(sn) => sn.clone(),
+                                _ => {
+                                    let t = self.check_expr(&args[0])?;
+                                    match t {
+                                        Type::Struct { name, .. } => name,
+                                        other => {
+                                            return Err(TypeError::new(format!(
+                                                "offsetof first argument must be a struct type or value, got {}",
+                                                other.display()
+                                            )));
+                                        }
+                                    }
+                                }
+                            };
+                            let field_name = match &args[1] {
+                                Expr::String(s) => s.clone(),
+                                Expr::Ident(id) => id.clone(),
+                                _ => {
+                                    return Err(TypeError::new(
+                                        "offsetof second argument must be a field name string or identifier",
+                                    ));
+                                }
+                            };
+                            if let Some(Type::Struct { fields, .. }) = self.types.get(&struct_name) {
+                                if !fields.iter().any(|(f, _)| f == &field_name) {
+                                    return Err(TypeError::new(format!(
+                                        "struct `{struct_name}` has no field `{field_name}`"
+                                    )));
+                                }
+                            } else {
+                                return Err(TypeError::new(format!(
+                                    "offsetof: unknown struct `{struct_name}`"
+                                )));
+                            }
+                            return Ok(Type::Int);
+                        }
+                        "static_assert" if args.len() == 1 || args.len() == 2 => {
+                            let cond_ty = self.check_expr(&args[0])?;
+                            if cond_ty != Type::Bool && !is_int_family(&cond_ty) {
+                                return Err(TypeError::new(format!(
+                                    "static_assert condition must be bool or int, got {}",
+                                    cond_ty.display()
+                                )));
+                            }
+                            let msg = if args.len() == 2 {
+                                let mty = self.check_expr(&args[1])?;
+                                if mty != Type::String {
+                                    return Err(TypeError::new(format!(
+                                        "static_assert message must be string, got {}",
+                                        mty.display()
+                                    )));
+                                }
+                                match &args[1] {
+                                    Expr::String(s) => s.clone(),
+                                    _ => "static assertion failed".into(),
+                                }
+                            } else {
+                                "static assertion failed".into()
+                            };
+                            if let Ok(v) = fold_const_expr_with(
+                                &args[0],
+                                &self.const_ints,
+                                &self.const_strs,
+                                &self.const_fns,
+                            ) {
+                                if v == 0 {
+                                    return Err(TypeError::new(format!(
+                                        "static_assert failed: {msg}"
+                                    )));
+                                }
+                            }
+                            return Ok(Type::Void);
+                        }
                         "mem_write_i64"
                         | "mem_write_u64"
                         | "mem_write_i32"
@@ -18715,6 +19271,14 @@ impl TypeChecker {
                         | "mem_write_i16"
                         | "mem_write_u16"
                         | "mem_write_byte"
+                        | "mem_write_u8"
+                        | "mem_write_i8"
+                        | "mem_write_u16_le"
+                        | "mem_write_u16_be"
+                        | "mem_write_u32_le"
+                        | "mem_write_u32_be"
+                        | "mem_write_u64_le"
+                        | "mem_write_u64_be"
                             if args.len() == 3 =>
                         {
                             let a0 = self.check_expr(&args[0])?;
@@ -19030,7 +19594,7 @@ impl TypeChecker {
                                 ))),
                             };
                         }
-                        "maps_keys" if args.len() == 1 => {
+                        "maps_keys" | "map_keys" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             return match t {
                                 Type::Map(k, _) if matches!(k.as_ref(), Type::String) => {
@@ -19052,58 +19616,119 @@ impl TypeChecker {
                                     Ok(Type::Array(k))
                                 }
                                 other => Err(TypeError::new(format!(
-                                    "maps_keys needs a map, got {}",
+                                    "{name} needs a map, got {}",
                                     other.display()
                                 ))),
                             };
                         }
-                        "maps_values" if args.len() == 1 => {
+                        "maps_values" | "map_values" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             return match t {
                                 Type::Map(_, v) => Ok(Type::Array(v)),
                                 other => Err(TypeError::new(format!(
-                                    "maps_values needs a map, got {}",
+                                    "{name} needs a map, got {}",
                                     other.display()
                                 ))),
                             };
                         }
-                        "maps_clear" if args.len() == 1 => {
+                        "maps_clear" | "map_clear" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             return match t {
                                 Type::Map(_, _) => Ok(Type::Void),
                                 other => Err(TypeError::new(format!(
-                                    "maps_clear needs a map, got {}",
+                                    "{name} needs a map, got {}",
                                     other.display()
                                 ))),
                             };
                         }
-                        "maps_clone" if args.len() == 1 => {
+                        "clear" if args.len() == 1 => {
+                            let t = self.check_expr(&args[0])?;
+                            return match t {
+                                Type::Map(_, _) | Type::Array(_) => Ok(Type::Void),
+                                other => Err(TypeError::new(format!(
+                                    "clear needs a map or slice, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "min" | "max" if args.len() >= 2 => {
+                            let t0 = self.check_expr(&args[0])?;
+                            let ok_t0 = self.compatible(&t0, &Type::Int)
+                                || matches!(t0, Type::Int128 | Type::UInt128 | Type::String)
+                                || self.compatible(&t0, &Type::Float);
+                            if !ok_t0 {
+                                return Err(TypeError::new(format!(
+                                    "{name} needs ordered scalar arguments (int, i128, u128, float, or string), got {}",
+                                    t0.display()
+                                )));
+                            }
+                            for (idx, a) in args.iter().enumerate().skip(1) {
+                                let ti = self.check_expr(a)?;
+                                if !self.compatible(&ti, &t0) {
+                                    return Err(TypeError::new(format!(
+                                        "{name} argument {} has type {}, expected {}",
+                                        idx + 1,
+                                        ti.display(),
+                                        t0.display()
+                                    )));
+                                }
+                            }
+                            return Ok(t0);
+                        }
+                        "clamp" if args.len() == 3 => {
+                            let t0 = self.check_expr(&args[0])?;
+                            let ok_t0 = self.compatible(&t0, &Type::Int)
+                                || matches!(t0, Type::Int128 | Type::UInt128)
+                                || self.compatible(&t0, &Type::Float);
+                            if !ok_t0 {
+                                return Err(TypeError::new(format!(
+                                    "clamp needs numeric arguments (int, i128, u128, or float), got {}",
+                                    t0.display()
+                                )));
+                            }
+                            let t1 = self.check_expr(&args[1])?;
+                            let t2 = self.check_expr(&args[2])?;
+                            if !self.compatible(&t1, &t0) || !self.compatible(&t2, &t0) {
+                                return Err(TypeError::new(format!(
+                                    "clamp arguments must have matching numeric types, got ({}, {}, {})",
+                                    t0.display(),
+                                    t1.display(),
+                                    t2.display()
+                                )));
+                            }
+                            return Ok(t0);
+                        }
+                        "maps_clone" | "map_clone" if args.len() == 1 => {
                             let t = self.check_expr(&args[0])?;
                             return match t {
                                 Type::Map(_, _) => Ok(t),
                                 other => Err(TypeError::new(format!(
-                                    "maps_clone needs a map, got {}",
+                                    "{name} needs a map, got {}",
                                     other.display()
                                 ))),
                             };
                         }
-                        "maps_equal" if args.len() == 2 => {
+                        "maps_equal" | "map_equal" if args.len() == 2 => {
                             let a = self.check_expr(&args[0])?;
                             let b = self.check_expr(&args[1])?;
                             return match (&a, &b) {
                                 (Type::Map(k1, v1), Type::Map(k2, v2))
                                     if self.compatible(k1, k2) && self.compatible(v1, v2) =>
                                 {
-                                    Ok(Type::Int)
+                                    if name == "map_equal" {
+                                        Ok(Type::Bool)
+                                    } else {
+                                        Ok(Type::Int)
+                                    }
                                 }
                                 _ => Err(TypeError::new(format!(
-                                    "maps_equal needs two maps of the same type, got {} and {}",
+                                    "{name} needs two maps of the same type, got {} and {}",
                                     a.display(),
                                     b.display()
                                 ))),
                             };
                         }
-                        "maps_copy" if args.len() == 2 => {
+                        "maps_copy" | "map_copy" if args.len() == 2 => {
                             let a = self.check_expr(&args[0])?;
                             let b = self.check_expr(&args[1])?;
                             return match (&a, &b) {
@@ -19113,9 +19738,215 @@ impl TypeChecker {
                                     Ok(Type::Void)
                                 }
                                 _ => Err(TypeError::new(format!(
-                                    "maps_copy needs two maps of the same type, got {} and {}",
+                                    "{name} needs two maps of the same type, got {} and {}",
                                     a.display(),
                                     b.display()
+                                ))),
+                            };
+                        }
+                        "slice_binary_search" if args.len() == 2 => {
+                            let st = self.check_expr(&args[0])?;
+                            let vt = self.check_expr(&args[1])?;
+                            return match st {
+                                Type::Array(inner) => {
+                                    if !self.compatible(&vt, &inner)
+                                        || !matches!(
+                                            inner.as_ref(),
+                                            Type::Int | Type::Float | Type::String
+                                        )
+                                    {
+                                        return Err(TypeError::new(format!(
+                                            "slice_binary_search needs ([]int|[]float|[]string, T), got ([], {})",
+                                            vt.display()
+                                        )));
+                                    }
+                                    Ok(Type::Tuple(vec![Type::Int, Type::Bool]))
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "slice_binary_search needs a slice, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "slice_compact" | "slice_clip" | "slice_reverse" if args.len() == 1 => {
+                            let st = self.check_expr(&args[0])?;
+                            return match &st {
+                                Type::Array(inner)
+                                    if matches!(
+                                        inner.as_ref(),
+                                        Type::Int | Type::Float | Type::String | Type::Byte
+                                    ) =>
+                                {
+                                    Ok(st)
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "{name} needs []int, []float, []string, or []byte, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "slice_min" | "slice_max" if args.len() == 1 => {
+                            let st = self.check_expr(&args[0])?;
+                            return match st {
+                                Type::Array(inner)
+                                    if matches!(
+                                        inner.as_ref(),
+                                        Type::Int | Type::Float | Type::String
+                                    ) =>
+                                {
+                                    Ok(*inner)
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "{name} needs []int, []float, or []string, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "slice_contains" | "slice_index" if args.len() == 2 => {
+                            let st = self.check_expr(&args[0])?;
+                            let vt = self.check_expr(&args[1])?;
+                            return match &st {
+                                Type::Array(inner)
+                                    if matches!(
+                                        inner.as_ref(),
+                                        Type::Int | Type::Float | Type::String | Type::Byte
+                                    ) && self.compatible(&vt, inner) =>
+                                {
+                                    if name == "slice_contains" {
+                                        Ok(Type::Bool)
+                                    } else {
+                                        Ok(Type::Int)
+                                    }
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "{name} needs ([]int|[]float|[]string|[]byte, T), got ({}, {})",
+                                    other.display(),
+                                    vt.display()
+                                ))),
+                            };
+                        }
+                        "slice_equal" | "slice_compare" if args.len() == 2 => {
+                            let a = self.check_expr(&args[0])?;
+                            let b = self.check_expr(&args[1])?;
+                            return match (&a, &b) {
+                                (Type::Array(ia), Type::Array(ib))
+                                    if matches!(
+                                        ia.as_ref(),
+                                        Type::Int | Type::Float | Type::String | Type::Byte
+                                    ) && self.compatible(ia, ib) =>
+                                {
+                                    if name == "slice_equal" {
+                                        Ok(Type::Bool)
+                                    } else {
+                                        Ok(Type::Int)
+                                    }
+                                }
+                                _ => Err(TypeError::new(format!(
+                                    "{name} needs two matching slices ([]int, []float, []string, or []byte), got ({}, {})",
+                                    a.display(),
+                                    b.display()
+                                ))),
+                            };
+                        }
+                        "slice_grow" | "slice_repeat" if args.len() == 2 => {
+                            let st = self.check_expr(&args[0])?;
+                            let nt = self.check_expr(&args[1])?;
+                            if !is_int_family(&nt) {
+                                return Err(TypeError::new(format!(
+                                    "{name} second argument must be int, got {}",
+                                    nt.display()
+                                )));
+                            }
+                            return match &st {
+                                Type::Array(inner)
+                                    if matches!(
+                                        inner.as_ref(),
+                                        Type::Int | Type::Float | Type::String | Type::Byte
+                                    ) =>
+                                {
+                                    Ok(st)
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "{name} needs []int, []float, []string, or []byte, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "slice_replace" if args.len() == 4 => {
+                            let st = self.check_expr(&args[0])?;
+                            let i_ty = self.check_expr(&args[1])?;
+                            let j_ty = self.check_expr(&args[2])?;
+                            let rep_ty = self.check_expr(&args[3])?;
+                            if !is_int_family(&i_ty) || !is_int_family(&j_ty) {
+                                return Err(TypeError::new(
+                                    "slice_replace indices must be integers",
+                                ));
+                            }
+                            return match (&st, &rep_ty) {
+                                (Type::Array(ia), Type::Array(ib))
+                                    if matches!(
+                                        ia.as_ref(),
+                                        Type::Int | Type::Float | Type::String | Type::Byte
+                                    ) && self.compatible(ia, ib) =>
+                                {
+                                    Ok(st)
+                                }
+                                _ => Err(TypeError::new(format!(
+                                    "slice_replace needs ([]T, int, int, []T) for int/float/string/byte, got ({}, {}, {}, {})",
+                                    st.display(),
+                                    i_ty.display(),
+                                    j_ty.display(),
+                                    rep_ty.display()
+                                ))),
+                            };
+                        }
+                        "slice_delete" if args.len() == 3 => {
+                            let st = self.check_expr(&args[0])?;
+                            let i_ty = self.check_expr(&args[1])?;
+                            let j_ty = self.check_expr(&args[2])?;
+                            if !is_int_family(&i_ty) || !is_int_family(&j_ty) {
+                                return Err(TypeError::new(
+                                    "slice_delete indices must be integers",
+                                ));
+                            }
+                            return match &st {
+                                Type::Array(inner)
+                                    if matches!(
+                                        inner.as_ref(),
+                                        Type::Int | Type::Float | Type::String
+                                    ) =>
+                                {
+                                    Ok(st)
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "slice_delete needs []int, []float, or []string, got {}",
+                                    other.display()
+                                ))),
+                            };
+                        }
+                        "slice_insert" if args.len() == 3 => {
+                            let st = self.check_expr(&args[0])?;
+                            let i_ty = self.check_expr(&args[1])?;
+                            let v_ty = self.check_expr(&args[2])?;
+                            if !is_int_family(&i_ty) {
+                                return Err(TypeError::new(
+                                    "slice_insert index must be an integer",
+                                ));
+                            }
+                            return match &st {
+                                Type::Array(inner)
+                                    if matches!(
+                                        inner.as_ref(),
+                                        Type::Int | Type::Float | Type::String
+                                    ) && self.compatible(&v_ty, inner) =>
+                                {
+                                    Ok(st)
+                                }
+                                other => Err(TypeError::new(format!(
+                                    "slice_insert needs ([]int|[]float|[]string, int, T), got ({}, {}, {})",
+                                    other.display(),
+                                    i_ty.display(),
+                                    v_ty.display()
                                 ))),
                             };
                         }
@@ -22885,6 +23716,9 @@ impl TypeChecker {
             Some(Type::Struct { fields, .. }) => fields
                 .iter()
                 .all(|(_, ty)| self.is_kick_sendable_ty_depth(ty, depth + 1)),
+            Some(Type::Enum { variants, .. }) => variants
+                .iter()
+                .all(|(_, fields)| fields.iter().all(|ty| self.is_kick_sendable_ty_depth(ty, depth + 1))),
             _ => false,
         }
     }
@@ -22901,6 +23735,13 @@ impl TypeChecker {
             Type::Named(n) => self.struct_fields_all_send_depth(n, depth + 1),
             Type::Struct { name, .. } if self.is_pod_struct(name) => true,
             Type::Struct { name, .. } => self.struct_fields_all_send_depth(name, depth + 1),
+            Type::Array(inner) | Type::RawArray(inner) => {
+                self.is_kick_sendable_ty_depth(inner, depth + 1)
+            }
+            Type::Map(k, v) => {
+                self.is_kick_sendable_ty_depth(k, depth + 1)
+                    && self.is_kick_sendable_ty_depth(v, depth + 1)
+            }
             Type::Option(inner) => self.is_kick_sendable_ty_depth(inner, depth + 1),
             Type::Result(ok, err) => {
                 self.is_kick_sendable_ty_depth(ok, depth + 1)
@@ -22909,6 +23750,14 @@ impl TypeChecker {
             Type::Tuple(elems) => elems
                 .iter()
                 .all(|e| self.is_kick_sendable_ty_depth(e, depth + 1)),
+            Type::Enum { name, variants, .. } => {
+                if !name.is_empty() && self.is_pod_enum_depth(name, 0) {
+                    return true;
+                }
+                variants
+                    .iter()
+                    .all(|(_, fields)| fields.iter().all(|f| self.is_kick_sendable_ty_depth(f, depth + 1)))
+            }
             _ => false,
         }
     }

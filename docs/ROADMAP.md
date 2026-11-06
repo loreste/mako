@@ -1,12 +1,12 @@
 # Makori roadmap
 
-**Product version:** **0.6.34** (tip) · release tag **v0.6.34** · Last sync: **2026-09-14**.
-**Suite:** **452** `examples/testing` `*_test.mko` files · **2026-09-14:**
-C **452 passed, 0 failed** · native **452 passed, 0 failed** (per-file sweep) ·
-`cargo test` **202 passed, 0 failed** · tooling, stdlib, memory-safety, and performance gates passed locally.
+**Product version:** **0.7.1** (tip) · release tag **v0.7.1** · Last sync: **2026-11-05**.
+**Suite:** **488** `examples/testing` `*_test.mko` files · **2026-11-05:**
+C **488 passed, 0 failed** · native **488 passed, 0 failed** (per-file sweep) ·
+`cargo test` **232 passed, 0 failed** (bin unit tests) · tooling, stdlib, memory-safety, and performance gates passed locally (all 7 `./scripts/bench-gate.sh` kernels beat Rust).
 
 **Versioning:** [VERSIONING.md](VERSIONING.md) — **prefer small patches** over mega-minors.  
-**Release:** tag **`v0.6.34`**; tip train **0.6.34**.
+**Release:** tag **`v0.7.1`**; tip train **0.7.1**.
 
 **Verified:** [STATUS.md](STATUS.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Security:** [SECURITY.md](SECURITY.md) · **Release:** [RELEASE.md](RELEASE.md).  
 **Book:** [The Makori Book](book/) · **Identity:** [IDENTITY.md](IDENTITY.md).  
@@ -57,8 +57,10 @@ C **452 passed, 0 failed** · native **452 passed, 0 failed** (per-file sweep) �
 | **0.6.31** | Loop-exit ownership drop, temporary string arg leaks, reassign double-frees, zero-cost trace | **Shipped** |
 | **0.6.32** | Structured crew cancellation, zero-allocation channels, struct memset elision | **Shipped** |
 | **0.6.33** | if let, iterator combinators, variadic, embed, cfg, contextual raw arrays, struct move safety, nonblocking accept | **Shipped** |
-| **0.6.34** | iterator invalidation prevention, channel trylock fast path (TSan clean), 8MB stack safety, raw array move tracking, struct DCE retention | **Tip** |
-| **0.6.x** | Further patches on 0.6 | **Planned** as needed |
+| **0.6.34–0.6.38** | iterator invalidation prevention, channel trylock fast path (TSan clean), 8MB stack safety, raw array move tracking, struct DCE retention, release claims | **Shipped** |
+| **0.7.0** | Generics parity (multi-bound, where, associated types, vtables, fixed-size arrays), systems primitives, channel/actor fast-path beating Rust | **Shipped** |
+| **0.7.1** | Full native backend parity for systems/Go 1.21–1.23 primitives, `#[align(N)]`/`#[cache_aligned]`/`sizeof`/`alignof`/`offsetof`/`static_assert`, kernel poller (`kqueue`/`epoll`), `mmap_file`/`alloc_aligned`, structs with `enum` fields across `kick`/`join` | **Tip** |
+| **0.7.x** | Further patches on 0.7 | **Planned** as needed |
 | **1.0** | Stability contract (compat, LTS-ish discipline) | **Planned** after the 0.x series |
 
 **Principle:** ship **measurable** gates each **patch or minor**; do not reopen identity (no free `go`, no lifetime params, no silent native→C fallback). Prefer **0.4.N** patches over waiting for **0.5.0**.

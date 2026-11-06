@@ -94,6 +94,7 @@ static inline void mako_http_reply_conn(
         reason,
         ctype ? ctype : "application/octet-stream",
         body.len,
+        (size_t)body.len,
         conn
     );
     if (n > 0) (void)send(cfd, hdr, (size_t)n, 0);
@@ -2068,6 +2069,7 @@ static inline MakoString mako_http2_response_ex(
     }
     char clen[24];
     snprintf(clen, sizeof(clen), "%zu", body.data ? body.len : 0);
+    snprintf(clen, sizeof(clen), "%zu", (size_t)(body.data ? body.len : 0));
     MakoString clh = mako_hpack_encode_literal(mako_str_view("content-length", 14),
                                                mako_str_view(clen, strlen(clen)));
     {

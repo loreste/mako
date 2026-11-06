@@ -1,0 +1,6 @@
+pack main
+
+fn main() {
+    static_assert(1 + 1 == 3, "math is broken")
+}
+

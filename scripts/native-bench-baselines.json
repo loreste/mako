@@ -28,7 +28,7 @@
       "rust": 1.10
     },
     "native_string_slice": {
-      "mako-c": 0.72,
+      "mako-c": 0.98,
       "hand-c": 1.12,
       "rust": 1.20
     },

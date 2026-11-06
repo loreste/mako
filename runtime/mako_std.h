@@ -2236,7 +2236,7 @@ static inline MakoString mako_profile_pprof_http_body(void) {
         buf, cap,
         "HTTP/1.0 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
         "Content-Length: %zu\r\nConnection: close\r\n\r\n%.*s",
-        body.len, (int)body.len, body.data ? body.data : ""
+        (size_t)body.len, (int)body.len, body.data ? body.data : ""
     );
     mako_str_free(body);
     if (n < 0) {
@@ -2264,7 +2264,7 @@ static inline MakoString mako_profile_http_route(MakoString path) {
             buf, cap,
             "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n"
             "Content-Length: %zu\r\nConnection: close\r\n\r\n%.*s",
-            body.len, (int)body.len, body.data ? body.data : ""
+            (size_t)body.len, (int)body.len, body.data ? body.data : ""
         );
         mako_str_free(body);
         if (n < 0) {
@@ -2285,7 +2285,7 @@ static inline MakoString mako_profile_http_route(MakoString path) {
             buf, cap,
             "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n"
             "Content-Length: %zu\r\nConnection: close\r\n\r\n%.*s",
-            body.len, (int)body.len, body.data ? body.data : ""
+            (size_t)body.len, (int)body.len, body.data ? body.data : ""
         );
         mako_str_free(body);
         if (n < 0) {
@@ -2306,7 +2306,7 @@ static inline MakoString mako_profile_http_route(MakoString path) {
             buf, cap,
             "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n"
             "Content-Length: %zu\r\nConnection: close\r\n\r\n%.*s",
-            body.len, (int)body.len, body.data ? body.data : ""
+            (size_t)body.len, (int)body.len, body.data ? body.data : ""
         );
         mako_str_free(body);
         if (n < 0) {
@@ -2525,6 +2525,7 @@ static inline MakoString mako_metrics_export_prom(void) {
 /* ---- JSON seed (escape + wrap object with one string field) ---- */
 static inline MakoString mako_json_escape(MakoString s) {
     if (s.len > (SIZE_MAX - 8) / 2) mako_abort("json_escape: size overflow");
+    if ((size_t)s.len > (SIZE_MAX - 8) / 2) mako_abort("json_escape: size overflow");
     size_t cap = s.len * 2 + 8;
     char *d = (char *)malloc(cap);
     if (!d) mako_abort("json_escape: out of memory");

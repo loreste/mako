@@ -473,6 +473,24 @@ impl Parser {
                 ItemAttr::Derive(out)
             }
             "packed" => ItemAttr::Derive(vec!["packed".into()]),
+            "cache_aligned" => ItemAttr::Derive(vec!["align:64".into()]),
+            "align" => {
+                self.expect(TokenKind::LParen)?;
+                let n = match self.peek_kind().clone() {
+                    TokenKind::Int(v) if v > 0 && (v as usize).is_power_of_two() => {
+                        self.bump();
+                        v as usize
+                    }
+                    _ => {
+                        return Err(self.err(
+                            "#[align(N)] expects a positive power-of-two integer (e.g. #[align(64)])"
+                                .into(),
+                        ));
+                    }
+                };
+                self.expect(TokenKind::RParen)?;
+                ItemAttr::Derive(vec![format!("align:{n}")])
+            }
             "no_alloc" => ItemAttr::NoAlloc,
             "stable" => ItemAttr::Stable,
             "deprecated" => {

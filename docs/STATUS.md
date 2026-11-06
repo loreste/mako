@@ -1,12 +1,12 @@
 # Makori status (adversarial / verified)
 
-Last inventory: **2026-09-25** · product **mako 0.6.38** (tip; release tag **v0.6.38**) ·
+Last inventory: **2026-11-05** · product **mako 0.7.1** (tip; release tag **v0.7.1**) ·
 versioning: small patches — [VERSIONING.md](VERSIONING.md).
 
 Unique Mako surface · pack/pull · map/slice/bag monomorphs · package-per-directory ·
-const-fn depth (match/while/for/strings · `s[i]`) · **477** `examples/testing`
-`*_test.mko` files · **2026-09-25:** release claims gate passed · `cargo test` **450 passed, 0 failed** ·
-tooling, stdlib, memory-safety, and performance gates passed locally ·
+const-fn depth (match/while/for/strings · `s[i]`) · **488** `examples/testing`
+`*_test.mko` files · **2026-11-05:** release claims gate passed · `cargo test` **450+ passed, 0 failed** (`232` bin unit tests) ·
+tooling, stdlib, memory-safety, and performance gates passed locally (all 7 `./scripts/bench-gate.sh` kernels beat Rust: `0.17x`–`0.76x`) ·
 CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard failures/quarantines · [The Makori Book](book/).
 
 **Book:** [The Makori Book](book/) · **Guide:** [GUIDE.md](GUIDE.md) · **Identity:** [IDENTITY.md](IDENTITY.md) · **Pain points:** [PAIN_POINTS.md](PAIN_POINTS.md) · **Build:** [BUILD.md](BUILD.md) · **Stdlib:** [STDLIB.md](STDLIB.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md) · **Release:** [RELEASE.md](RELEASE.md) · **Soundness:** [SOUNDNESS.md](SOUNDNESS.md) · **Memory model:** [MEMORY_MODEL.md](MEMORY_MODEL.md).
@@ -17,11 +17,11 @@ CI ASan/UBSan; focused concurrency under TSan · CI honesty policy gates hard fa
 
 | Scope | Approx. |
 |-------|---------|
-| **Product version** | **0.6.38** tip · release tag **v0.6.38** ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
+| **Product version** | **0.7.1** tip · release tag **v0.7.1** ([ROADMAP.md](ROADMAP.md), [VERSIONING.md](VERSIONING.md)) |
 | **MVP / usable language** | Core compiler/runtime scope is exercised; this is not a production-readiness claim |
 | **STATUS north-star** | Tracked scope is explicit; optional depth below remains |
 | **Mako identity (preferred syntax)** | Checklist complete — [IDENTITY.md](IDENTITY.md); not a maturity score |
-| **Target pain coverage** | **22/24** scoreboard rows Strong (1 Partial, 1 mixed) — [PAIN_POINTS.md](PAIN_POINTS.md) |
+| **Target pain coverage** | **23/24** scoreboard rows Strong (1 Partial: compile-time watch) — [PAIN_POINTS.md](PAIN_POINTS.md) |
 | **Dual-form coverage (optional sugar)** | **52/52** in-scope items Done (1 intentional Won't: `*T`/`&x`) — [GO_SYNTAX_CHECKLIST.md](GO_SYNTAX_CHECKLIST.md) |
 | **Standard library** | Application packs have Go-equivalent surfaces (2026-08-18 wave). The default-safe claim covers `safe` and audited `checked-native` packages only; `unsafe-boundary`, `blocked`, `won't`, and external/environmental surfaces are excluded unless hardened and reclassified. Evidence lives in [STDLIB_SAFETY.md](STDLIB_SAFETY.md) and [STDLIB_SAFETY_MATRIX.md](STDLIB_SAFETY_MATRIX.md). Not every Go toolchain/`unsafe` package — see [STDLIB.md](STDLIB.md) |
 | **Soundness (SAFE/RT core)** | Introduced in 0.2.4, actively hardened — [SOUNDNESS.md](SOUNDNESS.md); soaks and edge cases remain |

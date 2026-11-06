@@ -3453,15 +3453,24 @@ All fixed-width and systems scalar aliases are supported as type annotations and
 | `f32` | `float32` | `f32(x)`, `float32(x)` |
 | `f64` / `float` | `float64` | `f64(x)`, `float64(x)`, `float(x)` |
 
-In `#[packed]` structs, fixed-width scalar fields emit exact hardware byte widths (`uint8_t`, `int8_t`, `uint16_t`, `int16_t`, `uint32_t`, `int32_t`, `uint64_t`, `int64_t`, `mako_i128_t`, `mako_u128_t`, `float`, `double`).
+In `#[packed]` structs, fixed-width scalar fields emit exact hardware byte widths (`uint8_t`, `int8_t`, `uint16_t`, `int16_t`, `uint32_t`, `int32_t`, `uint64_t`, `int64_t`, `mako_i128_t`, `mako_u128_t`, `float`, `double`). Structs may also carry `#[align(N)]` (power-of-two byte alignment `1..=4096`) or `#[cache_aligned]` (64-byte cache-line alignment).
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `sizeof` | `sizeof(T_or_val) -> int` | Exact byte size of type `T` or value (`sizeof(T)` in C; honors `#[packed]`, `#[align(N)]`, `#[cache_aligned]`) |
 | `sizeof_val` | `sizeof_val(x: T) -> int` | Exact byte size of value `x` (`sizeof(x)` in C) |
+| `alignof` | `alignof(T_or_val) -> int` | Alignment in bytes of type `T` or value (`_Alignof(T)` in C) |
+| `offsetof` | `offsetof(StructType, "field") -> int` | Exact byte offset of `field` within `StructType` (`offsetof(T, field)` in C) |
+| `static_assert` | `static_assert(cond: bool, msg?: string) -> void` | Compile-time assertion; rejects false constant expressions during typechecking and emits `_Static_assert` in C |
 | `i128_from_parts` | `i128_from_parts(hi: int, lo: int) -> i128` | Construct 128-bit signed integer from `(hi << 64) \| uint64(lo)` |
 | `u128_from_parts` | `u128_from_parts(hi: int, lo: int) -> u128` | Construct 128-bit unsigned integer from `(hi << 64) \| uint64(lo)` |
 | `i128_hi` / `i128_lo` | `(x: i128) -> int` | Extract high / low 64-bit halves of `i128` |
 | `u128_hi` / `u128_lo` | `(x: u128) -> int` | Extract high / low 64-bit halves of `u128` |
+| `u128_add` / `u128_sub` / `u128_mul` / `u128_div` / `u128_rem` | `(a: u128, b: u128) -> u128` | Explicit 128-bit unsigned arithmetic helpers |
+| `u128_shl` / `u128_shr` | `(a: u128, shift: int) -> u128` | 128-bit unsigned bit shifts |
+| `u128_eq` / `u128_cmp` | `(a: u128, b: u128) -> bool` / `int` | 128-bit unsigned equality and three-way comparison (`-1`, `0`, `1`) |
+| `u128_to_hex` | `u128_to_hex(x: u128) -> string` | Format 128-bit unsigned integer as lowercase hexadecimal string |
+| `i128_add` / `i128_sub` / `i128_mul` / `i128_div` / `i128_cmp` | `(a: i128, b: i128) -> i128` / `int` | Explicit 128-bit signed arithmetic and three-way comparison (`-1`, `0`, `1`) |
 
 ### Raw Memory Read / Write
 
@@ -3473,21 +3482,108 @@ In `#[packed]` structs, fixed-width scalar fields emit exact hardware byte width
 | `mem_read_u32` / `mem_write_u32` | `(addr: int, off: int) -> u32` / `(addr, off, val: u32) -> void` | 32-bit unsigned raw memory access |
 | `mem_read_i16` / `mem_write_i16` | `(addr: int, off: int) -> i16` / `(addr, off, val: i16) -> void` | 16-bit signed raw memory access |
 | `mem_read_u16` / `mem_write_u16` | `(addr: int, off: int) -> u16` / `(addr, off, val: u16) -> void` | 16-bit unsigned raw memory access |
-| `mem_read_byte` / `mem_write_byte` | `(addr: int, off: int) -> int` / `(addr, off, val) -> void` | 8-bit unsigned raw memory access |
+| `mem_read_u8` / `mem_write_u8` | `(addr: int, off: int) -> int` / `(addr, off, val: int) -> void` | 8-bit unsigned raw memory access (aliases: `mem_read_byte` / `mem_write_byte`) |
+| `mem_read_i8` / `mem_write_i8` | `(addr: int, off: int) -> int` / `(addr, off, val: int) -> void` | 8-bit signed raw memory access |
+| `mem_read_u16_le` / `mem_read_u16_be` | `(addr: int, off: int) -> int` | Unaligned 16-bit little-endian / big-endian load |
+| `mem_read_u32_le` / `mem_read_u32_be` | `(addr: int, off: int) -> int` | Unaligned 32-bit little-endian / big-endian load |
+| `mem_read_u64_le` / `mem_read_u64_be` | `(addr: int, off: int) -> int` | Unaligned 64-bit little-endian / big-endian load |
+| `mem_write_u16_le` / `mem_write_u16_be` | `(addr: int, off: int, val: int) -> void` | Unaligned 16-bit little-endian / big-endian store |
+| `mem_write_u32_le` / `mem_write_u32_be` | `(addr: int, off: int, val: int) -> void` | Unaligned 32-bit little-endian / big-endian store |
+| `mem_write_u64_le` / `mem_write_u64_be` | `(addr: int, off: int, val: int) -> void` | Unaligned 64-bit little-endian / big-endian store |
+| `mem_zero` | `mem_zero(addr: int, len: int) -> void` | Zero `len` bytes starting at `addr` (`memset(addr, 0, len)`) |
+| `mem_copy` | `mem_copy(dst: int, src: int, len: int) -> void` | Copy `len` bytes from `src` to `dst` (`memmove`, overlap-safe) |
+| `mem_cmp` | `mem_cmp(a: int, b: int, len: int) -> int` | Compare `len` bytes at `a` and `b` (`memcmp`) |
 | `mem_read_f32` / `mem_write_f32` | `(addr: int, off: int) -> f32` / `(addr, off, val: f32) -> void` | 32-bit IEEE-754 float raw memory access |
 | `mem_read_f64` / `mem_write_f64` | `(addr: int, off: int) -> f64` / `(addr, off, val: f64) -> void` | 64-bit IEEE-754 float raw memory access |
+| `mem_atomic_load_i64` | `mem_atomic_load_i64(addr: int, off: int) -> int` | Sequentially consistent 64-bit atomic load at `addr + off` |
+| `mem_atomic_store_i64` | `mem_atomic_store_i64(addr: int, off: int, val: int) -> void` | Sequentially consistent 64-bit atomic store at `addr + off` |
+| `mem_atomic_add_i64` | `mem_atomic_add_i64(addr: int, off: int, delta: int) -> int` | Atomic fetch-and-add at `addr + off` (returns previous value) |
+| `mem_atomic_sub_i64` | `mem_atomic_sub_i64(addr: int, off: int, delta: int) -> int` | Atomic fetch-and-sub at `addr + off` (returns previous value) |
+| `mem_atomic_exchange_i64` | `mem_atomic_exchange_i64(addr: int, off: int, val: int) -> int` | Atomic exchange at `addr + off` (returns previous value) |
+| `mem_atomic_cas_i64` | `mem_atomic_cas_i64(addr: int, off: int, expected: int, desired: int) -> int` | Atomic compare-and-swap at `addr + off` (`1` if swapped, `0` otherwise) |
+| `memory_fence` | `memory_fence() -> void` | Full sequentially consistent hardware memory barrier (`__ATOMIC_SEQ_CST`) |
 
-### Bit Manipulation & Endian Conversion
+### Virtual Memory, Zero-Copy Positional & Scatter-Gather I/O, Shared Memory & Subprocess Pipes
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `mmap_anon` | `mmap_anon(size: int) -> int` | Map anonymous read/write memory region (`MAP_PRIVATE \| MAP_ANONYMOUS`) |
+| `mmap_file` | `mmap_file(fd: int, offset: int, size: int, prot: int, shared: int) -> int` | Map file-backed region (`prot`: `1`=`READ`, `2`=`WRITE`, `4`=`EXEC`; `shared != 0` = `MAP_SHARED`, `0` = `MAP_PRIVATE`); returns raw pointer (`0` on failure) |
+| `munmap` | `munmap(addr: int, size: int) -> int` | Unmap memory region |
+| `alloc_aligned` | `alloc_aligned(size: int, align: int) -> int` | Allocate zero-initialized heap memory aligned to `align` bytes (tracked by `MAKO_LEAK_CHECK=1`) |
+| `free_aligned` | `free_aligned(ptr: int) -> void` | Free aligned memory returned by `alloc_aligned` |
+| `mprotect_raw` | `mprotect_raw(addr: int, size: int, prot: int) -> int` | Set memory protection flags (`1`=`PROT_READ`, `2`=`PROT_WRITE`, `4`=`PROT_EXEC`) |
+| `madvise` | `madvise(addr: int, size: int, advice: int) -> int` | Kernel paging advice (`MADV_NORMAL`, `MADV_RANDOM`, `MADV_SEQUENTIAL`, `MADV_WILLNEED`, `MADV_DONTNEED`) |
+| `msync` | `msync(addr: int, size: int, flags: int) -> int` | Flush memory-mapped pages to storage |
+| `shm_open_raw` | `shm_open_raw(name: string, size: int) -> int` | Open/create POSIX shared memory object (`O_CREAT \| O_RDWR`) and `ftruncate` to `size` |
+| `shm_unlink_raw` | `shm_unlink_raw(name: string) -> int` | Unlink POSIX shared memory object |
+| `pread_raw` | `pread_raw(fd: int, addr: int, count: int, offset: int) -> int` | Zero-copy positional read directly into raw memory `addr` |
+| `pwrite_raw` | `pwrite_raw(fd: int, addr: int, count: int, offset: int) -> int` | Zero-copy positional write directly from raw memory `addr` |
+| `readv_raw` / `writev_raw` | `(fd: int, ptrs: []int, lens: []int) -> int` | Zero-copy scatter-gather `readv` / `writev` across raw buffer pointers |
+| `preadv_raw` / `pwritev_raw` | `(fd: int, ptrs: []int, lens: []int, offset: int) -> int` | Positional scatter-gather `preadv` / `pwritev` at `offset` |
+| `flock` | `flock(fd: int, op: int) -> int` | Advisory file lock (`1`=`LOCK_SH`, `2`=`LOCK_EX`, `4`=`LOCK_NB`, `8`=`LOCK_UN`) |
+| `poll_fd` | `poll_fd(fd: int, events: int, timeout_ms: int) -> int` | Poll single descriptor readiness; returns `revents` mask (`0` on timeout, `-1` on error) |
+| `poller_new` | `poller_new() -> int` | Create kernel event poller (`kqueue` on macOS/BSD, `epoll` on Linux) |
+| `poller_add` / `poller_mod` | `(p: int, fd: int, events: int, token: int) -> int` | Register or update `fd` in poller (`events`: `1`=read, `2`=write) with user `token` |
+| `poller_del` | `poller_del(p: int, fd: int) -> int` | Remove `fd` from kernel poller |
+| `poller_wait` | `poller_wait(p: int, out_tokens: []int, out_events: []int, max_events: int, timeout_ms: int) -> int` | Wait for up to `max_events` ready descriptors directly into caller slices (zero allocation) |
+| `poller_close` | `poller_close(p: int) -> int` | Close kernel poller descriptor |
+| `cpu_ticks` | `cpu_ticks() -> int` | Hardware cycle/tick counter (`cntvct_el0` on ARM64, `rdtsc` on x86_64) |
+| `cpu_pause` | `cpu_pause() -> void` | CPU spin-wait hint (`yield` on ARM64, `pause` on x86_64) |
+| `prefetch_read` / `prefetch_write` | `(addr: int) -> void` | L1 cache prefetch hint for raw memory address `addr` |
+| `proc_spawn_piped` | `proc_spawn_piped(cmd: string) -> int` | Spawn child process `sh -c cmd` with piped stdin/stdout handles |
+| `proc_write_stdin` | `proc_write_stdin(h: int, data: string) -> int` | Write bytes to child process stdin pipe |
+| `proc_close_stdin` | `proc_close_stdin(h: int) -> int` | Close child process stdin pipe (signals EOF) |
+| `proc_read_stdout` | `proc_read_stdout(h: int, max_len: int) -> string` | Read up to `max_len` bytes from child process stdout pipe |
+| `proc_wait_nb` | `proc_wait_nb(h: int) -> int` | Non-blocking poll of child process status (`1` exited, `0` running, `-1` error) |
+| `proc_exit_code` | `proc_exit_code(h: int) -> int` | Blocking wait and return child process exit status |
+| `proc_kill` | `proc_kill(h: int, sig: int) -> int` | Send signal `sig` to child process |
+| `proc_close` | `proc_close(h: int) -> void` | Close pipes, reap child if needed, and release slot |
+
+### Polymorphic `min`, `max`, `clamp`, `clear` & Go 1.21+ `slices` / `maps` Ergonomics
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `min` | `min(a: T, b: T, ...) -> T` | Variadic minimum across 2+ `int` / fixed-width ints, `i128`, `u128`, `float`/`f32`, or `string` |
+| `max` | `max(a: T, b: T, ...) -> T` | Variadic maximum across 2+ `int` / fixed-width ints, `i128`, `u128`, `float`/`f32`, or `string` |
+| `clamp` | `clamp(x: T, lo: T, hi: T) -> T` | Clamp numeric value `x` to `[lo, hi]` (`int`, `i128`, `u128`, `float`/`f32`) |
+| `clear` | `clear(m_or_slice) -> void` | Delete all entries of a `map[K]V` or zero all elements of a `[]T` slice in-place |
+| `slice_binary_search` | `slice_binary_search(s: []T, target: T) -> (int, bool)` | Binary search sorted `[]int`, `[]float`, or `[]string` slice; returns `(index, found)` |
+| `slice_compact` | `slice_compact(s: []T) -> []T` | Remove consecutive duplicate elements from `[]int`, `[]float`, or `[]string` |
+| `slice_delete` | `slice_delete(s: []T, i: int, j: int) -> []T` | Return new slice with elements `s[i..j]` removed |
+| `slice_insert` | `slice_insert(s: []T, i: int, v: T) -> []T` | Return new slice with `v` inserted at index `i` |
+| `slice_grow` | `slice_grow(s: []T, n: int) -> []T` | Ensure capacity for at least `n` additional elements |
+| `slice_clip` | `slice_clip(s: []T) -> []T` | Shrink unused capacity so `cap == len` |
+| `slice_contains` | `slice_contains(s: []T, target: T) -> bool` | Return `true` if `target` is in `s` (`[]int`, `[]float`, `[]string`, `[]byte`) |
+| `slice_index` | `slice_index(s: []T, target: T) -> int` | Return first index of `target` in `s`, or `-1` (`[]int`, `[]float`, `[]string`, `[]byte`) |
+| `slice_equal` | `slice_equal(a: []T, b: []T) -> bool` | Element-wise equality of two slices (`[]int`, `[]float`, `[]string`, `[]byte`) |
+| `slice_compare` | `slice_compare(a: []T, b: []T) -> int` | Lexicographical comparison (`-1`, `0`, `1`) of two slices |
+| `slice_reverse` | `slice_reverse(s: []T) -> []T` | Return new slice with elements in reverse order (`[]int`, `[]float`, `[]string`, `[]byte`) |
+| `slice_min` / `slice_max` | `(s: []T) -> T` | Minimum / maximum element of `[]int`, `[]float`, or `[]string` |
+| `slice_replace` | `slice_replace(s: []T, i: int, j: int, rep: []T) -> []T` | Return new slice with `s[i..j]` replaced by `rep` |
+| `slice_repeat` | `slice_repeat(s: []T, count: int) -> []T` | Return new slice repeating `s` `count` times |
+| `map_keys` / `maps_keys` | `(m: map[K]V) -> []K` | Return slice of all keys in `m` |
+| `map_values` / `maps_values` | `(m: map[K]V) -> []V` | Return slice of all values in `m` |
+| `map_equal` / `maps_equal` | `(a: map[K]V, b: map[K]V) -> bool / int` | Deep key-value equality of two maps (`map_equal` returns `bool`, `maps_equal` returns `int`) |
+| `map_clear` / `maps_clear` | `(m: map[K]V) -> void` | Remove all entries from map `m` in-place |
+| `map_clone` | `map_clone(m: map[K]V) -> map[K]V` | Shallow clone of any `map[K]V` |
+| `map_copy` | `map_copy(dst: map[K]V, src: map[K]V) -> void` | Copy all key-value entries from `src` into `dst` |
+
+### Bit Manipulation, Endian Conversion & Wrapping / Saturating Math
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `clz` / `ctz` / `popcount` | `(x: int) -> int` | 64-bit leading zeros, trailing zeros, population count |
+| `bit_clz64` / `bit_ctz64` / `bit_popcnt64` / `bit_ffs64` | `(x: int) -> int` | 64-bit hardware bit scan & population count (`bit_clz64(0) == 64`, `bit_ctz64(0) == 64`, `bit_ffs64(0) == 0`) |
 | `clz32` / `ctz32` / `popcount32` | `(x: int) -> int` | 32-bit leading zeros, trailing zeros, population count |
-| `rotl64` / `rotr64` | `(x: int, k: int) -> int` | 64-bit rotate left / right (safe for `k = 0`) |
+| `rotl64` / `rotr64` / `bit_rotl64` / `bit_rotr64` | `(x: int, k: int) -> int` | 64-bit rotate left / right (safe for `k = 0`) |
 | `rotl32` / `rotr32` | `(x: int, k: int) -> int` | 32-bit rotate left / right (zero-extended 32-bit result) |
 | `bswap64` / `bswap32` / `bswap16` | `(x: int) -> int` | 64-bit, 32-bit, and 16-bit byte swap |
-| `htons` / `ntohs` | `(x: int) -> int` | Host ↔ network 16-bit byte order |
-| `htonl` / `ntohl` | `(x: int) -> int` | Host ↔ network 32-bit byte order |
+| `hton16` / `ntoh16` / `htons` / `ntohs` | `(x: int) -> int` | Host ↔ network 16-bit byte order |
+| `hton32` / `ntoh32` / `htonl` / `ntohl` | `(x: int) -> int` | Host ↔ network 32-bit byte order |
+| `hton64` / `ntoh64` | `(x: int) -> int` | Host ↔ network 64-bit byte order |
+| `wrapping_add` / `wrapping_sub` / `wrapping_mul` | `(a: int, b: int) -> int` | Two's-complement wrapping 64-bit integer arithmetic (no signed overflow UB) |
+| `saturating_add` / `saturating_sub` | `(a: int, b: int) -> int` | Saturating 64-bit signed addition and subtraction (`[INT64_MIN, INT64_MAX]`) |
 
 ### 4-Lane SIMD Vector Operations
 

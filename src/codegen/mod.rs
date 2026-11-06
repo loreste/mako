@@ -425,6 +425,10 @@ impl Codegen {
     /// for scope-exit drop so inline expressions like `slices_reverse_strs(["a", "b"])`
     /// do not leak.
     fn emit_slice_arg_borrow(&mut self, expr: &Expr) -> String {
+        self.emit_slice_arg_borrow_typed(expr).1
+    }
+
+    fn emit_slice_arg_borrow_typed(&mut self, expr: &Expr) -> (String, String) {
         let (ty, v) = self.emit_expr(expr);
         let is_owned_slice_expr = match expr {
             Expr::Array(_) => matches!(ty.as_str(), "MakoStrArray") || ty.starts_with("MakoArr_"),
@@ -445,9 +449,9 @@ impl Codegen {
             self.note_own_bind_scope(&cap);
             self.register_own_drop(&cap, &ty);
             self.scope_drop_safe.insert(cap.clone());
-            return cap;
+            return (ty, cap);
         }
-        v
+        (ty, v)
     }
 
     /// Struct channel sends clone their payload. Reclaim a temporary source
@@ -920,7 +924,9 @@ impl Codegen {
                 "i".to_string()
             }
             TypeExpr::Named(n) if n == "string" => "s".to_string(),
-            TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "f64" | "float32" | "f32") => {
+            TypeExpr::Named(n)
+                if matches!(n.as_str(), "float" | "float64" | "f64" | "float32" | "f32") =>
+            {
                 "f".to_string()
             }
             TypeExpr::Named(n) if n == "bool" => "b".to_string(),
@@ -968,7 +974,9 @@ impl Codegen {
                     "string".into()
                 }
             }
-            TypeExpr::Named(n) if matches!(n.as_str(), "float" | "float64" | "f64" | "float32" | "f32") => {
+            TypeExpr::Named(n)
+                if matches!(n.as_str(), "float" | "float64" | "f64" | "float32" | "f32") =>
+            {
                 if named_key {
                     "f".into()
                 } else {
@@ -1017,7 +1025,10 @@ impl Codegen {
                     }
                     TypeExpr::Named(n) if n == "string" => "string".into(),
                     TypeExpr::Named(n)
-                        if matches!(n.as_str(), "float" | "float64" | "f64" | "float32" | "f32") =>
+                        if matches!(
+                            n.as_str(),
+                            "float" | "float64" | "f64" | "float32" | "f32"
+                        ) =>
                     {
                         "float".into()
                     }
@@ -1081,7 +1092,9 @@ impl Codegen {
     fn value_payload_kind(ty: &TypeExpr) -> &'static str {
         match ty {
             TypeExpr::Named(t) if t == "string" => "string",
-            TypeExpr::Named(t) if matches!(t.as_str(), "float" | "float64" | "f64" | "float32" | "f32") => {
+            TypeExpr::Named(t)
+                if matches!(t.as_str(), "float" | "float64" | "f64" | "float32" | "f32") =>
+            {
                 "float"
             }
             TypeExpr::Generic(n, _) if n == "Option" => "option",
@@ -1090,7 +1103,10 @@ impl Codegen {
                 match &args[0] {
                     TypeExpr::Named(t) if t == "string" => "chan_string",
                     TypeExpr::Named(t)
-                        if matches!(t.as_str(), "float" | "float64" | "f64" | "float32" | "f32") =>
+                        if matches!(
+                            t.as_str(),
+                            "float" | "float64" | "f64" | "float32" | "f32"
+                        ) =>
                     {
                         "chan_float"
                     }
@@ -1968,6 +1984,9 @@ impl Codegen {
                 if cty == "int64_t"
                     || cty == "bool"
                     || cty == "double"
+                    || cty == "float"
+                    || cty == "mako_i128_t"
+                    || cty == "mako_u128_t"
                     || cty == "MakoString"
                     || cty.ends_with('*')
                     || cty.starts_with("Mako")
@@ -2779,7 +2798,13 @@ impl Codegen {
     }
 
     fn expr_has_tuple(expr: &Expr) -> bool {
-        matches!(expr, Expr::Tuple(_))
+        match expr {
+            Expr::Tuple(_) => true,
+            Expr::Call { callee, .. } => {
+                matches!(callee.as_ref(), Expr::Ident(n) if n == "slice_binary_search")
+            }
+            _ => false,
+        }
     }
 
     /// Compile-time string concatenation for adjacent string literals.
@@ -2907,6 +2932,14 @@ impl Codegen {
                 | "slices_unique"
                 | "slices_reverse_strs"
                 | "slices_unique_strs"
+                | "slice_compact"
+                | "slice_delete"
+                | "slice_insert"
+                | "slice_grow"
+                | "slice_clip"
+                | "slice_reverse"
+                | "slice_replace"
+                | "slice_repeat"
                 | "strings_copy"
                 | "ints_copy"
                 | "sort_ints"
@@ -2938,8 +2971,11 @@ impl Codegen {
                 | "list_filter_gt_int"
                 | "list_zip_int"
                 | "maps_keys"
+                | "map_keys"
                 | "maps_values"
+                | "map_values"
                 | "maps_clone"
+                | "map_clone"
                 | "sql_query_col_int"
                 | "sql_query_col_str"
                 | "simd_f32x4_add"
@@ -3288,11 +3324,13 @@ impl Codegen {
         "mail_msg_rcpt_at",
         "mail_parse_address",
         "mail_simple",
+        "max",
         "md5_hex",
         "metrics_export",
         "metrics_export_prom",
         "middleware_trace",
         "mime_type",
+        "min",
         "mldsa44_keygen",
         "mldsa65_keygen",
         "mldsa87_keygen",
@@ -3361,6 +3399,7 @@ impl Codegen {
         "png_encode_gray",
         "png_encode_rgb",
         "pread",
+        "proc_read_stdout",
         "profile_http_route",
         "profile_pprof_http_body",
         "profile_samples_pprof_text",
@@ -3535,6 +3574,8 @@ impl Codegen {
         "sip_via_value_rport",
         "sip_view_copy",
         "sip_www_authenticate",
+        "slice_max",
+        "slice_min",
         "slog_redact",
         "smtp_auth_plain",
         "smtp_format_message",
@@ -5827,19 +5868,25 @@ impl Codegen {
             Expr::Ident(n) => {
                 self.note_own_drop_moved(&mangle(n));
             }
-            // Struct literals: mark ident fields as moved to prevent
-            // double-free on scope exit (#65 use-after-free in matview).
+            // Struct literals: mark single-use ident fields as moved to prevent
+            // double-free on scope exit (#65 use-after-free in matview). When an
+            // ident appears multiple times in the return statement, `prepare_own_store_rhs`
+            // cloned it for each use and kept the original live to be freed before return.
             Expr::StructLit { fields, .. } => {
                 for (_, val) in fields {
                     if let Expr::Ident(n) = val {
-                        self.note_own_drop_moved(&mangle(n));
+                        if !self.ident_used_after_current(n) {
+                            self.note_own_drop_moved(&mangle(n));
+                        }
                     }
                 }
             }
             Expr::StructLitPos { values, .. } => {
                 for val in values {
                     if let Expr::Ident(n) = val {
-                        self.note_own_drop_moved(&mangle(n));
+                        if !self.ident_used_after_current(n) {
+                            self.note_own_drop_moved(&mangle(n));
+                        }
                     }
                 }
             }
@@ -5859,6 +5906,11 @@ impl Codegen {
                     if Self::builtin_returns_owned_string(name)
                         || Self::builtin_returns_owned_slice(name)
                     {
+                        return;
+                    }
+                    // Enum variant constructors already move/clone payload strings via
+                    // `prepare_own_store_rhs` in `emit_enum_construct`.
+                    if self.variant_to_enum.contains_key(name) {
                         return;
                     }
                     // A user function cannot hand back a borrow of an argument:
@@ -7845,6 +7897,10 @@ impl Codegen {
         let info = self.structs.get(&s.name).unwrap().clone();
         let c_name = info.c_name.clone();
         let packed = s.derives.iter().any(|d| d == "packed");
+        let explicit_align = s
+            .derives
+            .iter()
+            .find_map(|d| d.strip_prefix("align:").and_then(|v| v.parse::<usize>().ok()));
         let _ = writeln!(self.out, "typedef struct {c_name} {{");
         for (i, (fname, fty)) in info.fields.iter().enumerate() {
             let emitted_ty = if packed {
@@ -7871,10 +7927,22 @@ impl Codegen {
             };
             let _ = writeln!(self.out, "    {emitted_ty} {fname};");
         }
-        if packed {
-            let _ = writeln!(self.out, "}} __attribute__((packed)) {c_name};");
-        } else {
-            let _ = writeln!(self.out, "}} {c_name};");
+        match (packed, explicit_align) {
+            (true, Some(a)) => {
+                let _ = writeln!(
+                    self.out,
+                    "}} __attribute__((packed, aligned({a}))) {c_name};"
+                );
+            }
+            (true, None) => {
+                let _ = writeln!(self.out, "}} __attribute__((packed)) {c_name};");
+            }
+            (false, Some(a)) => {
+                let _ = writeln!(self.out, "}} __attribute__((aligned({a}))) {c_name};");
+            }
+            (false, None) => {
+                let _ = writeln!(self.out, "}} {c_name};");
+            }
         }
         // Structural equality (content for strings; field-wise for nested structs).
         // Slice/map/array fields use identity (data pointer + len) — not deep content.
@@ -13794,6 +13862,187 @@ impl Codegen {
             .any(|w| w == name)
     }
 
+    fn block_has_nested_loop(b: &Block) -> bool {
+        b.stmts.iter().any(|s| match s {
+            Stmt::While { .. } | Stmt::For { .. } | Stmt::CFor { .. } => true,
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            }
+            | Stmt::IfLet {
+                then_block,
+                else_block,
+                ..
+            } => {
+                Self::block_has_nested_loop(then_block)
+                    || else_block.as_ref().is_some_and(Self::block_has_nested_loop)
+            }
+            Stmt::Crew { body, .. } | Stmt::Arena { body, .. } | Stmt::Unsafe { body } => {
+                Self::block_has_nested_loop(body)
+            }
+            _ => false,
+        })
+    }
+
+    fn collect_nested_slice_expr(
+        e: &Expr,
+        idx_var: &str,
+        outer_only: &mut Vec<(String, String, String)>,
+        prechecks: &mut Vec<(String, String, String, String)>,
+    ) -> bool {
+        match e {
+            Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) | Expr::Ident(_) => {
+                true
+            }
+            Expr::Unary { expr, .. } => {
+                Self::collect_nested_slice_expr(expr, idx_var, outer_only, prechecks)
+            }
+            Expr::Binary {
+                op, left, right, ..
+            } => {
+                !matches!(op, BinOp::Div | BinOp::Mod)
+                    && Self::collect_nested_slice_expr(left, idx_var, outer_only, prechecks)
+                    && Self::collect_nested_slice_expr(right, idx_var, outer_only, prechecks)
+            }
+            Expr::Field { base, .. } => {
+                Self::collect_nested_slice_expr(base, idx_var, outer_only, prechecks)
+            }
+            Expr::Call { callee, args } => {
+                matches!(callee.as_ref(), Expr::Ident(fn_name) if fn_name == "len")
+                    && args.len() == 1
+                    && Self::collect_nested_slice_expr(&args[0], idx_var, outer_only, prechecks)
+            }
+            Expr::Index { base, index } => {
+                if let (
+                    Expr::Field {
+                        base: inner_base,
+                        field: inner_field,
+                    },
+                    Expr::Ident(ix),
+                ) = (base.as_ref(), index.as_ref())
+                {
+                    if ix == idx_var {
+                        if let Expr::Index {
+                            base: outer_base,
+                            index: outer_idx,
+                        } = inner_base.as_ref()
+                        {
+                            if let (
+                                Expr::Field {
+                                    base: root_base,
+                                    field: outer_field,
+                                },
+                                Expr::Ident(outer_idx_var),
+                            ) = (outer_base.as_ref(), outer_idx.as_ref())
+                            {
+                                if let Expr::Ident(outer_var) = root_base.as_ref() {
+                                    let entry = (
+                                        outer_var.clone(),
+                                        outer_field.clone(),
+                                        outer_idx_var.clone(),
+                                        inner_field.clone(),
+                                    );
+                                    if !prechecks.contains(&entry) {
+                                        prechecks.push(entry);
+                                    }
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    if let Expr::Ident(outer_var) = inner_base.as_ref() {
+                        let entry = (outer_var.clone(), inner_field.clone(), ix.clone());
+                        if !outer_only.contains(&entry) {
+                            outer_only.push(entry);
+                        }
+                        return true;
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn counted_nested_slice_prechecks(
+        &self,
+        cond: &Expr,
+        body: &Block,
+    ) -> Option<(String, String, Vec<(String, String, String, String)>)> {
+        let Expr::Binary {
+            op: BinOp::Lt,
+            left,
+            right,
+        } = cond
+        else {
+            return None;
+        };
+        let (Expr::Ident(idx_var), Expr::Ident(limit_var)) = (left.as_ref(), right.as_ref()) else {
+            return None;
+        };
+        if idx_var == limit_var || body.stmts.len() < 2 {
+            return None;
+        }
+        let Some(Stmt::Assign {
+            name: last_name,
+            value:
+                Expr::Binary {
+                    op: BinOp::Add,
+                    left: inc_l,
+                    right: inc_r,
+                },
+        }) = body.stmts.last()
+        else {
+            return None;
+        };
+        if last_name != idx_var
+            || inc_l.as_ref() != &Expr::Ident(idx_var.clone())
+            || inc_r.as_ref() != &Expr::Int(1)
+        {
+            return None;
+        }
+        let mut assigned = Vec::new();
+        let mut outer_only = Vec::new();
+        let mut prechecks = Vec::new();
+        for s in &body.stmts[..body.stmts.len() - 1] {
+            let Stmt::Assign { name, value } = s else {
+                return None;
+            };
+            if name == idx_var || name == limit_var {
+                return None;
+            }
+            assigned.push(name.clone());
+            if !Self::collect_nested_slice_expr(value, idx_var, &mut outer_only, &mut prechecks) {
+                return None;
+            }
+        }
+        if prechecks.is_empty() {
+            return None;
+        }
+        for (ov, of, oix) in &outer_only {
+            if !prechecks
+                .iter()
+                .any(|(pv, pf, pix, _)| pv == ov && pf == of && pix == oix)
+            {
+                return None;
+            }
+        }
+        for (ov, of, oix, _) in &prechecks {
+            if assigned.iter().any(|a| a == ov || a == oix) || oix == idx_var {
+                return None;
+            }
+            let outer_ty = self.peek_expr_c_ty(&Expr::Field {
+                base: Box::new(Expr::Ident(ov.clone())),
+                field: of.clone(),
+            });
+            if !outer_ty.starts_with("MakoArr_") {
+                return None;
+            }
+        }
+        Some((idx_var.clone(), limit_var.clone(), prechecks))
+    }
+
     fn invalidate_struct_elem_ptr_cache(&mut self, assigned: &str) {
         let assigned = mangle(assigned);
         self.struct_elem_ptr_cache.retain(|(arr, idx), _| {
@@ -13983,9 +14232,9 @@ impl Codegen {
         }
         match t {
             TypeExpr::Named(n) => match n.as_str() {
-                "int" | "int64" | "i64" | "isize" | "int32" | "i32" | "rune" | "char"
-                | "int8" | "i8" | "uint64" | "u64" | "usize" | "uintptr" | "uint32" | "u32"
-                | "uint16" | "u16" | "int16" | "i16" | "byte" | "u8" | "uint8" => "int64_t".into(),
+                "int" | "int64" | "i64" | "isize" | "int32" | "i32" | "rune" | "char" | "int8"
+                | "i8" | "uint64" | "u64" | "usize" | "uintptr" | "uint32" | "u32" | "uint16"
+                | "u16" | "int16" | "i16" | "byte" | "u8" | "uint8" => "int64_t".into(),
                 "i128" | "int128" => "mako_i128_t".into(),
                 "u128" | "uint128" => "mako_u128_t".into(),
                 "float" | "float64" | "f64" | "float32" | "f32" => "double".into(),
@@ -14438,11 +14687,19 @@ impl Codegen {
             let ok = matches!(
                 ty.as_str(),
                 "int64_t"
+                    | "uint64_t"
                     | "int32_t"
+                    | "uint32_t"
+                    | "int16_t"
+                    | "uint16_t"
                     | "int8_t"
+                    | "uint8_t"
                     | "int"
                     | "bool"
                     | "double"
+                    | "float"
+                    | "mako_i128_t"
+                    | "mako_u128_t"
                     | "_Bool"
                     | "MakoString"
                     | "MakoShareInt"
@@ -15521,7 +15778,20 @@ impl Codegen {
                 // the returned expression (issue #55).
                 let ret_is_scalar = matches!(
                     ty.as_str(),
-                    "int64_t" | "double" | "bool" | "uint8_t" | "void"
+                    "int64_t"
+                        | "uint64_t"
+                        | "int32_t"
+                        | "uint32_t"
+                        | "int16_t"
+                        | "uint16_t"
+                        | "int8_t"
+                        | "uint8_t"
+                        | "double"
+                        | "float"
+                        | "mako_i128_t"
+                        | "mako_u128_t"
+                        | "bool"
+                        | "void"
                 );
                 if !ret_is_scalar {
                     self.transfer_own_on_return(e);
@@ -16690,7 +16960,10 @@ impl Codegen {
                 let transient_call_result_struct = *ownership != Ownership::Share
                     && self.current_arena.is_none()
                     && !self.struct_own_field_frees(&ty).is_empty()
-                    && matches!(init, Expr::Call { .. } | Expr::Method { .. } | Expr::Try(_));
+                    && matches!(
+                        init,
+                        Expr::Call { .. } | Expr::Method { .. } | Expr::Try(_) | Expr::Join(_)
+                    );
                 let (val, field_value_owned) = if ty == "MakoFn"
                     && matches!(
                         init,
@@ -17375,7 +17648,7 @@ impl Codegen {
                             if (!{od}[__i].data) continue; \
                             int __in_new = 0; \
                             for (size_t __j = 0; __j < {mn}.len; __j++) {{ if ({mn}.data[__j].data == {od}[__i].data) {{ __in_new = 1; break; }} }} \
-                            if (!__in_new || ({od}[__i]._rc && mako_rc_shared({od}[__i].data))) mako_str_free({od}[__i]); }}"
+                            if (!__in_new || ({od}[__i]._rc == 1 && mako_rc_shared({od}[__i].data))) mako_str_free({od}[__i]); }}"
                         ));
                         self.emit_line(format_args!("mako_rc_release({od});"));
                         self.indent -= 1;
@@ -17855,7 +18128,13 @@ impl Codegen {
             Stmt::Expr(e) => {
                 let (ty, val) = self.emit_expr(e);
                 if val != "/*void*/" && !self.emit_discarded_bag(e, None, &ty, &val) {
-                    self.emit_line(format_args!("{val};"));
+                    if val.starts_with("__mako_")
+                        && val.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    {
+                        self.emit_line(format_args!("(void){val};"));
+                    } else {
+                        self.emit_line(format_args!("{val};"));
+                    }
                 }
                 // SAFE: void-returning calls that take an owned binding as first arg
                 // consume ownership (e.g. buf_put, channel send, free wrappers).
@@ -17924,7 +18203,20 @@ impl Codegen {
                 // not known-scalar keeps transferring exactly as before.
                 let ret_is_scalar = matches!(
                     ty.as_str(),
-                    "int64_t" | "double" | "bool" | "uint8_t" | "void"
+                    "int64_t"
+                        | "uint64_t"
+                        | "int32_t"
+                        | "uint32_t"
+                        | "int16_t"
+                        | "uint16_t"
+                        | "int8_t"
+                        | "uint8_t"
+                        | "double"
+                        | "float"
+                        | "mako_i128_t"
+                        | "mako_u128_t"
+                        | "bool"
+                        | "void"
                 );
                 if !ret_is_scalar {
                     self.transfer_own_on_return(e);
@@ -18003,9 +18295,51 @@ impl Codegen {
                 }
             }
             Stmt::While { label, cond, body } => {
+                let mut prechecked_nested = false;
                 if let Some(lab) = label {
                     self.emit_line(format_args!("{lab}: while (1) {{"));
                 } else {
+                    let has_nested = Self::block_has_nested_loop(body);
+                    if !has_nested {
+                        if let Some((idx_var, limit_var, prechecks)) =
+                            self.counted_nested_slice_prechecks(cond, body)
+                        {
+                            prechecked_nested = true;
+                            let (_, idx_c) = self.emit_expr(&Expr::Ident(idx_var));
+                            let (_, lim_c) = self.emit_expr(&Expr::Ident(limit_var));
+                            self.emit_line(format_args!("if ({idx_c} < {lim_c}) {{"));
+                            self.indent += 1;
+                            for (outer_var, outer_field, outer_idx_var, inner_field) in &prechecks {
+                                let (_, outer_arr_c) = self.emit_expr(&Expr::Field {
+                                    base: Box::new(Expr::Ident(outer_var.clone())),
+                                    field: outer_field.clone(),
+                                });
+                                let (_, outer_idx_c) =
+                                    self.emit_expr(&Expr::Ident(outer_idx_var.clone()));
+                                self.emit_bounds_check(
+                                    &format!(
+                                        "{outer_idx_c} < 0 || (size_t){outer_idx_c} >= ({outer_arr_c}).len"
+                                    ),
+                                    "struct slice index out of bounds",
+                                );
+                                self.emit_bounds_check(
+                                    &format!(
+                                        "{idx_c} < 0 || (size_t){lim_c} > (({outer_arr_c}).data[{outer_idx_c}].{inner_field}).len"
+                                    ),
+                                    "struct slice index out of bounds",
+                                );
+                            }
+                            self.indent -= 1;
+                            self.line("}");
+                            self.line(
+                                "#if defined(__clang__)\n#pragma clang loop vectorize(disable) interleave_count(4)\n#endif",
+                            );
+                        } else {
+                            self.line(
+                                "#if defined(__clang__)\n#pragma clang loop unroll_count(4)\n#endif",
+                            );
+                        }
+                    }
                     self.line("while (1) {");
                 }
                 self.indent += 1;
@@ -18014,7 +18348,13 @@ impl Codegen {
                 self.push_share_scope();
                 self.struct_elem_ptr_cache.clear();
                 self.push_loop_drop_base(label.as_deref());
+                if prechecked_nested {
+                    self.unsafe_depth += 1;
+                }
                 self.emit_body(body);
+                if prechecked_nested {
+                    self.unsafe_depth -= 1;
+                }
                 self.pop_loop_drop_base(label.as_deref());
                 self.pop_share_scope();
                 if let Some(lab) = label {
@@ -18755,6 +19095,95 @@ impl Codegen {
                             let (_, v) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("(int64_t)sizeof({v})"));
                         }
+                        "sizeof" | "alignof" => {
+                            let is_align = name == "alignof";
+                            if let Expr::Ident(type_name) = &args[0] {
+                                if let Some(info) = self.structs.get(type_name) {
+                                    let c_ty = info.c_name.clone();
+                                    return if is_align {
+                                        (
+                                            "int64_t".into(),
+                                            format!("(int64_t)__alignof__({c_ty})"),
+                                        )
+                                    } else {
+                                        ("int64_t".into(), format!("(int64_t)sizeof({c_ty})"))
+                                    };
+                                }
+                                let scalar_c = match type_name.as_str() {
+                                    "int" | "int64" | "i64" | "isize" => Some("int64_t"),
+                                    "uint64" | "u64" | "usize" | "uintptr" => Some("uint64_t"),
+                                    "int32" | "i32" | "rune" | "char" => Some("int32_t"),
+                                    "uint32" | "u32" => Some("uint32_t"),
+                                    "int16" | "i16" => Some("int16_t"),
+                                    "uint16" | "u16" => Some("uint16_t"),
+                                    "int8" | "i8" => Some("int8_t"),
+                                    "byte" | "u8" | "uint8" => Some("uint8_t"),
+                                    "i128" | "int128" => Some("mako_i128_t"),
+                                    "u128" | "uint128" => Some("mako_u128_t"),
+                                    "float" | "f64" | "float64" => Some("double"),
+                                    "f32" | "float32" => Some("float"),
+                                    "bool" => Some("bool"),
+                                    "string" => Some("MakoString"),
+                                    _ => None,
+                                };
+                                if let Some(c_ty) = scalar_c {
+                                    return if is_align {
+                                        (
+                                            "int64_t".into(),
+                                            format!("(int64_t)__alignof__({c_ty})"),
+                                        )
+                                    } else {
+                                        ("int64_t".into(), format!("(int64_t)sizeof({c_ty})"))
+                                    };
+                                }
+                            }
+                            let (_, v) = self.emit_expr(&args[0]);
+                            return if is_align {
+                                ("int64_t".into(), format!("(int64_t)__alignof__({v})"))
+                            } else {
+                                ("int64_t".into(), format!("(int64_t)sizeof({v})"))
+                            };
+                        }
+                        "offsetof" => {
+                            let c_struct = match &args[0] {
+                                Expr::Ident(sn) => {
+                                    if let Some(info) = self.structs.get(sn) {
+                                        info.c_name.clone()
+                                    } else {
+                                        let (ty, _) = self.emit_expr(&args[0]);
+                                        ty
+                                    }
+                                }
+                                _ => {
+                                    let (ty, _) = self.emit_expr(&args[0]);
+                                    ty
+                                }
+                            };
+                            let field = match &args[1] {
+                                Expr::String(s) => s.clone(),
+                                Expr::Ident(id) => id.clone(),
+                                _ => "0".into(),
+                            };
+                            return (
+                                "int64_t".into(),
+                                format!("(int64_t)__builtin_offsetof({c_struct}, {field})"),
+                            );
+                        }
+                        "static_assert" => {
+                            let (_, c) = self.emit_expr(&args[0]);
+                            let msg = if args.len() >= 2 {
+                                match &args[1] {
+                                    Expr::String(s) => escape_c(s),
+                                    _ => "static_assert failed".into(),
+                                }
+                            } else {
+                                "static_assert failed".into()
+                            };
+                            self.line(&format!(
+                                "if (!({c})) mako_abort(\"{msg}\");"
+                            ));
+                            return ("void".into(), "/*void*/".into());
+                        }
                         "i128" | "int128" => {
                             let (_, v) = self.emit_expr(&args[0]);
                             return ("mako_i128_t".into(), format!("(mako_i128_t)({v})"));
@@ -18779,9 +19208,39 @@ impl Codegen {
                                 format!("mako_u128_from_parts({hi}, {lo})"),
                             );
                         }
-                        "i128_hi" | "i128_lo" | "u128_hi" | "u128_lo" => {
-                            let (_, v) = self.emit_expr(&args[0]);
-                            return ("int64_t".into(), format!("mako_{name}({v})"));
+                        "i128_hi" | "i128_lo" | "u128_hi" | "u128_lo" | "u128_cmp"
+                        | "i128_cmp" => {
+                            let mut cargs = Vec::new();
+                            for a in args {
+                                let (_, v) = self.emit_expr(a);
+                                cargs.push(v);
+                            }
+                            return (
+                                "int64_t".into(),
+                                format!("mako_{name}({})", cargs.join(", ")),
+                            );
+                        }
+                        "u128_eq" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return ("bool".into(), format!("mako_u128_eq({a}, {b})"));
+                        }
+                        "u128_to_hex" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let tmp = self.fresh("uhex");
+                            self.line(&format!("MakoString {tmp} = mako_u128_to_hex({a});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "u128_add" | "u128_sub" | "u128_mul" | "u128_div" | "u128_rem"
+                        | "u128_shl" | "u128_shr" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return ("mako_u128_t".into(), format!("mako_{name}({a}, {b})"));
+                        }
+                        "i128_add" | "i128_sub" | "i128_mul" | "i128_div" => {
+                            let (_, a) = self.emit_expr(&args[0]);
+                            let (_, b) = self.emit_expr(&args[1]);
+                            return ("mako_i128_t".into(), format!("mako_{name}({a}, {b})"));
                         }
                         "int64" | "i64" | "isize" | "int" => {
                             let (ty, v) = self.emit_expr(&args[0]);
@@ -20360,9 +20819,17 @@ impl Codegen {
                             self.line(&format!("int64_t {tmp} = mako_setsid();"));
                             return ("int64_t".into(), tmp);
                         }
-                        "ioctl" | "mmap_anon" | "munmap" | "mprotect" | "mem_read_i64"
-                        | "mem_read_u64" | "mem_read_i32" | "mem_read_u32" | "mem_read_i16"
-                        | "mem_read_u16" | "mem_read_byte" => {
+                        "ioctl" | "mmap_anon" | "munmap" | "mprotect" | "mprotect_raw"
+                        | "madvise" | "msync" | "pread_raw" | "pwrite_raw" | "flock"
+                        | "poll_fd" | "mem_read_i64" | "mem_read_u64" | "mem_read_i32"
+                        | "mem_read_u32" | "mem_read_i16" | "mem_read_u16" | "mem_read_byte"
+                        | "mem_read_u8" | "mem_read_i8" | "mem_read_u16_le" | "mem_read_u16_be"
+                        | "mem_read_u32_le" | "mem_read_u32_be" | "mem_read_u64_le"
+                        | "mem_read_u64_be" | "mem_cmp" | "mem_atomic_load_i64"
+                        | "mem_atomic_add_i64" | "mem_atomic_sub_i64"
+                        | "mem_atomic_exchange_i64" | "mem_atomic_cas_i64"
+                        | "proc_close_stdin" | "proc_wait_nb" | "proc_exit_code"
+                        | "proc_kill" | "proc_close" => {
                             let mut cargs = Vec::new();
                             for a in args {
                                 let (_, v) = self.emit_expr(a);
@@ -20372,6 +20839,52 @@ impl Codegen {
                             self.line(&format!(
                                 "int64_t {tmp} = mako_{name}({});",
                                 cargs.join(", ")
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "shm_unlink_raw" | "proc_spawn_piped" => {
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let tmp = self.fresh("us");
+                            self.line(&format!("int64_t {tmp} = mako_{name}({s});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "shm_open_raw" => {
+                            let s = self.emit_str_arg_borrow(&args[0]);
+                            let (_, sz) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("shm");
+                            self.line(&format!("int64_t {tmp} = mako_shm_open_raw({s}, {sz});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "proc_write_stdin" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let s = self.emit_str_arg_borrow(&args[1]);
+                            let tmp = self.fresh("pws");
+                            self.line(&format!("int64_t {tmp} = mako_proc_write_stdin({h}, {s});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "proc_read_stdout" => {
+                            let (_, h) = self.emit_expr(&args[0]);
+                            let (_, mx) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("prs");
+                            self.line(&format!("MakoString {tmp} = mako_proc_read_stdout({h}, {mx});"));
+                            return ("MakoString".into(), tmp);
+                        }
+                        "writev_raw" | "readv_raw" => {
+                            let (_, fd) = self.emit_expr(&args[0]);
+                            let ptrs = self.emit_slice_arg_borrow(&args[1]);
+                            let lens = self.emit_slice_arg_borrow(&args[2]);
+                            let tmp = self.fresh("sgv");
+                            self.line(&format!("int64_t {tmp} = mako_{name}({fd}, {ptrs}, {lens});"));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "pwritev_raw" | "preadv_raw" => {
+                            let (_, fd) = self.emit_expr(&args[0]);
+                            let ptrs = self.emit_slice_arg_borrow(&args[1]);
+                            let lens = self.emit_slice_arg_borrow(&args[2]);
+                            let (_, off) = self.emit_expr(&args[3]);
+                            let tmp = self.fresh("sgpv");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_{name}({fd}, {ptrs}, {lens}, {off});"
                             ));
                             return ("int64_t".into(), tmp);
                         }
@@ -20390,7 +20903,11 @@ impl Codegen {
                         }
                         "mem_write_i64" | "mem_write_u64" | "mem_write_i32" | "mem_write_u32"
                         | "mem_write_i16" | "mem_write_u16" | "mem_write_byte"
-                        | "mem_write_f32" | "mem_write_f64" => {
+                        | "mem_write_u8" | "mem_write_i8" | "mem_write_u16_le"
+                        | "mem_write_u16_be" | "mem_write_u32_le" | "mem_write_u32_be"
+                        | "mem_write_u64_le" | "mem_write_u64_be" | "mem_zero" | "mem_copy"
+                        | "mem_write_f32" | "mem_write_f64" | "mem_atomic_store_i64"
+                        | "memory_fence" => {
                             let mut cargs = Vec::new();
                             for a in args {
                                 let (_, v) = self.emit_expr(a);
@@ -20450,7 +20967,11 @@ impl Codegen {
                         }
                         "clz" | "ctz" | "popcount" | "clz32" | "ctz32" | "popcount32"
                         | "bswap64" | "bswap32" | "bswap16" | "htons" | "ntohs" | "htonl"
-                        | "ntohl" | "rotl64" | "rotr64" | "rotl32" | "rotr32" => {
+                        | "ntohl" | "rotl64" | "rotr64" | "rotl32" | "rotr32" | "hton16"
+                        | "ntoh16" | "hton32" | "ntoh32" | "hton64" | "ntoh64" | "bit_clz64"
+                        | "bit_ctz64" | "bit_popcnt64" | "bit_ffs64" | "bit_rotl64"
+                        | "bit_rotr64" | "wrapping_add" | "wrapping_sub" | "wrapping_mul"
+                        | "saturating_add" | "saturating_sub" => {
                             let mut cargs = Vec::new();
                             for a in args {
                                 let (_, v) = self.emit_expr(a);
@@ -20607,21 +21128,79 @@ impl Codegen {
                             let (_, x) = self.emit_expr(&args[0]);
                             return ("int64_t".into(), format!("mako_abs({x})"));
                         }
-                        "min" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_min({a}, {b})"));
-                        }
-                        "max" => {
-                            let (_, a) = self.emit_expr(&args[0]);
-                            let (_, b) = self.emit_expr(&args[1]);
-                            return ("int64_t".into(), format!("mako_max({a}, {b})"));
+                        "min" | "max" => {
+                            let is_min = name == "min";
+                            if self.peek_expr_c_ty(&args[0]) == "MakoString" {
+                                let cmp_op = if is_min { "< 0" } else { "> 0" };
+                                let win = self.fresh("mm_w");
+                                let a0 = self.emit_str_arg_borrow(&args[0]);
+                                self.line(&format!("MakoString {win} = {a0};"));
+                                for arg in args.iter().skip(1) {
+                                    let ai = self.emit_str_arg_borrow(arg);
+                                    let ait = self.fresh("mm_ai");
+                                    self.line(&format!("MakoString {ait} = {ai};"));
+                                    self.line(&format!(
+                                        "if (mako_str_lex_cmp({ait}, {win}) {cmp_op}) {win} = {ait};"
+                                    ));
+                                }
+                                let res = self.fresh("mm_s");
+                                self.line(&format!("MakoString {res} = mako_str_clone({win});"));
+                                return ("MakoString".into(), res);
+                            }
+                            let (ty0, mut acc) = self.emit_expr(&args[0]);
+                            if ty0 == "double" || ty0 == "float" {
+                                let fn_name = if is_min { "mako_min_f64" } else { "mako_max_f64" };
+                                for arg in args.iter().skip(1) {
+                                    let (_, v) = self.emit_expr(arg);
+                                    acc = format!("{fn_name}((double)({acc}), (double)({v}))");
+                                }
+                                return (ty0.clone(), format!("({ty0})({acc})"));
+                            }
+                            if ty0 == "mako_i128_t" || ty0 == "mako_u128_t" {
+                                let op = if is_min { "<" } else { ">" };
+                                let tmp = self.fresh("mm128");
+                                self.line(&format!("{ty0} {tmp} = {acc};"));
+                                for arg in args.iter().skip(1) {
+                                    let (_, v) = self.emit_expr(arg);
+                                    let vt = self.fresh("mm128v");
+                                    self.line(&format!("{ty0} {vt} = {v};"));
+                                    self.line(&format!("if ({vt} {op} {tmp}) {tmp} = {vt};"));
+                                }
+                                return (ty0, tmp);
+                            }
+                            let fn_name = if is_min { "mako_min" } else { "mako_max" };
+                            for arg in args.iter().skip(1) {
+                                let (_, v) = self.emit_expr(arg);
+                                acc = format!("{fn_name}((int64_t)({acc}), (int64_t)({v}))");
+                            }
+                            return ("int64_t".into(), acc);
                         }
                         "clamp" => {
-                            let (_, x) = self.emit_expr(&args[0]);
+                            let (ty0, x) = self.emit_expr(&args[0]);
                             let (_, lo) = self.emit_expr(&args[1]);
                             let (_, hi) = self.emit_expr(&args[2]);
-                            return ("int64_t".into(), format!("mako_clamp({x}, {lo}, {hi})"));
+                            if ty0 == "double" || ty0 == "float" {
+                                return (
+                                    ty0.clone(),
+                                    format!(
+                                        "({ty0})mako_clamp_f64((double)({x}), (double)({lo}), (double)({hi}))"
+                                    ),
+                                );
+                            }
+                            if ty0 == "mako_i128_t" || ty0 == "mako_u128_t" {
+                                let tmp = self.fresh("cl128");
+                                let lo_t = self.fresh("cl128_lo");
+                                let hi_t = self.fresh("cl128_hi");
+                                self.line(&format!("{ty0} {tmp} = {x};"));
+                                self.line(&format!("{ty0} {lo_t} = {lo};"));
+                                self.line(&format!("{ty0} {hi_t} = {hi};"));
+                                self.line(&format!("if ({tmp} < {lo_t}) {tmp} = {lo_t}; else if ({tmp} > {hi_t}) {tmp} = {hi_t};"));
+                                return (ty0, tmp);
+                            }
+                            return (
+                                "int64_t".into(),
+                                format!("mako_clamp((int64_t)({x}), (int64_t)({lo}), (int64_t)({hi}))"),
+                            );
                         }
                         "math_abs" => {
                             let (_, x) = self.emit_expr(&args[0]);
@@ -30566,6 +31145,456 @@ impl Codegen {
                             ));
                             return ("MakoStrArray".into(), tmp);
                         }
+                        "slice_binary_search" => {
+                            let cname = "MakoTup_int_bool".to_string();
+                            if self.note_tuple_typedef(
+                                &cname,
+                                vec!["int64_t".into(), "bool".into()],
+                            ) {
+                                self.pending_tuple_typedefs.push(
+                                    "typedef struct {\n    int64_t _0;\n    bool _1;\n} MakoTup_int_bool;\n".into(),
+                                );
+                            }
+                            let a = self.emit_slice_arg_borrow(&args[0]);
+                            let fnd = self.fresh("bsf");
+                            let idx = self.fresh("bsi");
+                            let tup = self.fresh("bst");
+                            let (vty, v) = if matches!(args[1], Expr::String(_)) {
+                                ("MakoString".into(), self.emit_str_arg_borrow(&args[1]))
+                            } else {
+                                self.emit_expr(&args[1])
+                            };
+                            self.line(&format!("bool {fnd} = false;"));
+                            if vty == "MakoString" {
+                                self.line(&format!(
+                                    "int64_t {idx} = mako_slice_bsearch_str({a}, {v}, &{fnd});"
+                                ));
+                            } else if vty == "double" || vty == "float" {
+                                self.line(&format!(
+                                    "int64_t {idx} = mako_slice_bsearch_float({a}, (double)({v}), &{fnd});"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "int64_t {idx} = mako_slice_bsearch_int({a}, (int64_t)({v}), &{fnd});"
+                                ));
+                            }
+                            self.line(&format!(
+                                "{cname} {tup} = ({cname}){{ {idx}, {fnd} }};"
+                            ));
+                            return (cname, tup);
+                        }
+                        "slice_compact" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let tmp = self.fresh("scmp");
+                            match sty.as_str() {
+                                "MakoStrArray" => {
+                                    self.line(&format!(
+                                        "MakoStrArray {tmp} = mako_slice_compact_str({a});"
+                                    ));
+                                    return ("MakoStrArray".into(), tmp);
+                                }
+                                "MakoFloatArray" => {
+                                    self.line(&format!(
+                                        "MakoFloatArray {tmp} = mako_slice_compact_float({a});"
+                                    ));
+                                    return ("MakoFloatArray".into(), tmp);
+                                }
+                                _ => {
+                                    self.line(&format!(
+                                        "MakoIntArray {tmp} = mako_slice_compact_int({a});"
+                                    ));
+                                    return ("MakoIntArray".into(), tmp);
+                                }
+                            }
+                        }
+                        "slice_delete" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            let (_, j) = self.emit_expr(&args[2]);
+                            let tmp = self.fresh("sdel");
+                            match sty.as_str() {
+                                "MakoStrArray" => {
+                                    self.line(&format!(
+                                        "MakoStrArray {tmp} = mako_slice_delete_str({a}, {i}, {j});"
+                                    ));
+                                    return ("MakoStrArray".into(), tmp);
+                                }
+                                "MakoFloatArray" => {
+                                    self.line(&format!(
+                                        "MakoFloatArray {tmp} = mako_slice_delete_float({a}, {i}, {j});"
+                                    ));
+                                    return ("MakoFloatArray".into(), tmp);
+                                }
+                                _ => {
+                                    self.line(&format!(
+                                        "MakoIntArray {tmp} = mako_slice_delete_int({a}, {i}, {j});"
+                                    ));
+                                    return ("MakoIntArray".into(), tmp);
+                                }
+                            }
+                        }
+                        "slice_insert" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sins");
+                            match sty.as_str() {
+                                "MakoStrArray" => {
+                                    let v = self.emit_str_arg_borrow(&args[2]);
+                                    self.line(&format!(
+                                        "MakoStrArray {tmp} = mako_slice_insert_str({a}, {i}, {v});"
+                                    ));
+                                    return ("MakoStrArray".into(), tmp);
+                                }
+                                "MakoFloatArray" => {
+                                    let (_, v) = self.emit_expr(&args[2]);
+                                    self.line(&format!(
+                                        "MakoFloatArray {tmp} = mako_slice_insert_float({a}, {i}, {v});"
+                                    ));
+                                    return ("MakoFloatArray".into(), tmp);
+                                }
+                                _ => {
+                                    let (_, v) = self.emit_expr(&args[2]);
+                                    self.line(&format!(
+                                        "MakoIntArray {tmp} = mako_slice_insert_int({a}, {i}, {v});"
+                                    ));
+                                    return ("MakoIntArray".into(), tmp);
+                                }
+                            }
+                        }
+                        "slice_grow" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let (_, n) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("sgrw");
+                            match sty.as_str() {
+                                "MakoStrArray" => {
+                                    self.line(&format!(
+                                        "MakoStrArray {tmp} = mako_slice_grow_str({a}, {n});"
+                                    ));
+                                    return ("MakoStrArray".into(), tmp);
+                                }
+                                "MakoFloatArray" => {
+                                    self.line(&format!(
+                                        "MakoFloatArray {tmp} = mako_slice_grow_float({a}, {n});"
+                                    ));
+                                    return ("MakoFloatArray".into(), tmp);
+                                }
+                                "MakoByteArray" => {
+                                    self.line(&format!(
+                                        "MakoByteArray {tmp} = mako_slice_grow_byte({a}, {n});"
+                                    ));
+                                    return ("MakoByteArray".into(), tmp);
+                                }
+                                _ => {
+                                    self.line(&format!(
+                                        "MakoIntArray {tmp} = mako_slice_grow_int({a}, {n});"
+                                    ));
+                                    return ("MakoIntArray".into(), tmp);
+                                }
+                            }
+                        }
+                        "slice_clip" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let tmp = self.fresh("sclp");
+                            match sty.as_str() {
+                                "MakoStrArray" => {
+                                    self.line(&format!(
+                                        "MakoStrArray {tmp} = mako_slice_clip_str({a});"
+                                    ));
+                                    return ("MakoStrArray".into(), tmp);
+                                }
+                                "MakoFloatArray" => {
+                                    self.line(&format!(
+                                        "MakoFloatArray {tmp} = mako_slice_clip_float({a});"
+                                    ));
+                                    return ("MakoFloatArray".into(), tmp);
+                                }
+                                "MakoByteArray" => {
+                                    self.line(&format!(
+                                        "MakoByteArray {tmp} = mako_slice_clip_byte({a});"
+                                    ));
+                                    return ("MakoByteArray".into(), tmp);
+                                }
+                                _ => {
+                                    self.line(&format!(
+                                        "MakoIntArray {tmp} = mako_slice_clip_int({a});"
+                                    ));
+                                    return ("MakoIntArray".into(), tmp);
+                                }
+                            }
+                        }
+                        "slice_reverse" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let tmp = self.fresh("srev");
+                            match sty.as_str() {
+                                "MakoStrArray" => {
+                                    self.line(&format!(
+                                        "MakoStrArray {tmp} = mako_slice_reverse_str({a});"
+                                    ));
+                                    return ("MakoStrArray".into(), tmp);
+                                }
+                                "MakoFloatArray" => {
+                                    self.line(&format!(
+                                        "MakoFloatArray {tmp} = mako_slice_reverse_float({a});"
+                                    ));
+                                    return ("MakoFloatArray".into(), tmp);
+                                }
+                                "MakoByteArray" => {
+                                    self.line(&format!(
+                                        "MakoByteArray {tmp} = mako_slice_reverse_byte({a});"
+                                    ));
+                                    return ("MakoByteArray".into(), tmp);
+                                }
+                                _ => {
+                                    self.line(&format!(
+                                        "MakoIntArray {tmp} = mako_slice_reverse_int({a});"
+                                    ));
+                                    return ("MakoIntArray".into(), tmp);
+                                }
+                            }
+                        }
+                        "slice_min" | "slice_max" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let op = if name == "slice_min" { "min" } else { "max" };
+                            let tmp = self.fresh("smm");
+                            match sty.as_str() {
+                                "MakoStrArray" => {
+                                    self.line(&format!(
+                                        "MakoString {tmp} = mako_slice_{op}_str({a});"
+                                    ));
+                                    return ("MakoString".into(), tmp);
+                                }
+                                "MakoFloatArray" => {
+                                    self.line(&format!(
+                                        "double {tmp} = mako_slice_{op}_float({a});"
+                                    ));
+                                    return ("double".into(), tmp);
+                                }
+                                _ => {
+                                    self.line(&format!(
+                                        "int64_t {tmp} = mako_slice_{op}_int({a});"
+                                    ));
+                                    return ("int64_t".into(), tmp);
+                                }
+                            }
+                        }
+                        "slice_contains" | "slice_index" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let op = if name == "slice_contains" {
+                                "contains"
+                            } else {
+                                "index"
+                            };
+                            let ret_ty = if name == "slice_contains" {
+                                "bool"
+                            } else {
+                                "int64_t"
+                            };
+                            let tmp = self.fresh("sfnd");
+                            match sty.as_str() {
+                                "MakoStrArray" => {
+                                    let v = self.emit_str_arg_borrow(&args[1]);
+                                    self.line(&format!(
+                                        "{ret_ty} {tmp} = mako_slice_{op}_str({a}, {v});"
+                                    ));
+                                    return (ret_ty.into(), tmp);
+                                }
+                                "MakoFloatArray" => {
+                                    let (_, v) = self.emit_expr(&args[1]);
+                                    self.line(&format!(
+                                        "{ret_ty} {tmp} = mako_slice_{op}_float({a}, (double)({v}));"
+                                    ));
+                                    return (ret_ty.into(), tmp);
+                                }
+                                "MakoByteArray" => {
+                                    let (_, v) = self.emit_expr(&args[1]);
+                                    self.line(&format!(
+                                        "{ret_ty} {tmp} = mako_slice_{op}_byte({a}, (uint8_t)({v}));"
+                                    ));
+                                    return (ret_ty.into(), tmp);
+                                }
+                                _ => {
+                                    let (_, v) = self.emit_expr(&args[1]);
+                                    self.line(&format!(
+                                        "{ret_ty} {tmp} = mako_slice_{op}_int({a}, (int64_t)({v}));"
+                                    ));
+                                    return (ret_ty.into(), tmp);
+                                }
+                            }
+                        }
+                        "slice_equal" | "slice_compare" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let (_, b) = self.emit_slice_arg_borrow_typed(&args[1]);
+                            let op = if name == "slice_equal" {
+                                "equal"
+                            } else {
+                                "compare"
+                            };
+                            let ret_ty = if name == "slice_equal" {
+                                "bool"
+                            } else {
+                                "int64_t"
+                            };
+                            let tmp = self.fresh("scmp2");
+                            let suf = match sty.as_str() {
+                                "MakoStrArray" => "str",
+                                "MakoFloatArray" => "float",
+                                "MakoByteArray" => "byte",
+                                _ => "int",
+                            };
+                            self.line(&format!(
+                                "{ret_ty} {tmp} = mako_slice_{op}_{suf}({a}, {b});"
+                            ));
+                            return (ret_ty.into(), tmp);
+                        }
+                        "slice_replace" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let (_, i) = self.emit_expr(&args[1]);
+                            let (_, j) = self.emit_expr(&args[2]);
+                            let (_, rep) = self.emit_slice_arg_borrow_typed(&args[3]);
+                            let tmp = self.fresh("srep");
+                            match sty.as_str() {
+                                "MakoStrArray" => {
+                                    self.line(&format!(
+                                        "MakoStrArray {tmp} = mako_slice_replace_str({a}, {i}, {j}, {rep});"
+                                    ));
+                                    return ("MakoStrArray".into(), tmp);
+                                }
+                                "MakoFloatArray" => {
+                                    self.line(&format!(
+                                        "MakoFloatArray {tmp} = mako_slice_replace_float({a}, {i}, {j}, {rep});"
+                                    ));
+                                    return ("MakoFloatArray".into(), tmp);
+                                }
+                                "MakoByteArray" => {
+                                    self.line(&format!(
+                                        "MakoByteArray {tmp} = mako_slice_replace_byte({a}, {i}, {j}, {rep});"
+                                    ));
+                                    return ("MakoByteArray".into(), tmp);
+                                }
+                                _ => {
+                                    self.line(&format!(
+                                        "MakoIntArray {tmp} = mako_slice_replace_int({a}, {i}, {j}, {rep});"
+                                    ));
+                                    return ("MakoIntArray".into(), tmp);
+                                }
+                            }
+                        }
+                        "slice_repeat" => {
+                            let (sty, a) = self.emit_slice_arg_borrow_typed(&args[0]);
+                            let (_, count) = self.emit_expr(&args[1]);
+                            let tmp = self.fresh("srpt");
+                            match sty.as_str() {
+                                "MakoStrArray" => {
+                                    self.line(&format!(
+                                        "MakoStrArray {tmp} = mako_slice_repeat_str({a}, {count});"
+                                    ));
+                                    return ("MakoStrArray".into(), tmp);
+                                }
+                                "MakoFloatArray" => {
+                                    self.line(&format!(
+                                        "MakoFloatArray {tmp} = mako_slice_repeat_float({a}, {count});"
+                                    ));
+                                    return ("MakoFloatArray".into(), tmp);
+                                }
+                                "MakoByteArray" => {
+                                    self.line(&format!(
+                                        "MakoByteArray {tmp} = mako_slice_repeat_byte({a}, {count});"
+                                    ));
+                                    return ("MakoByteArray".into(), tmp);
+                                }
+                                _ => {
+                                    self.line(&format!(
+                                        "MakoIntArray {tmp} = mako_slice_repeat_int({a}, {count});"
+                                    ));
+                                    return ("MakoIntArray".into(), tmp);
+                                }
+                            }
+                        }
+                        "poller_new" => {
+                            return ("int64_t".into(), "mako_poller_new()".into());
+                        }
+                        "poller_add" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, fd) = self.emit_expr(&args[1]);
+                            let (_, ev) = self.emit_expr(&args[2]);
+                            let (_, tok) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_poller_add({p}, {fd}, {ev}, {tok})"),
+                            );
+                        }
+                        "poller_mod" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, fd) = self.emit_expr(&args[1]);
+                            let (_, ev) = self.emit_expr(&args[2]);
+                            let (_, tok) = self.emit_expr(&args[3]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_poller_mod({p}, {fd}, {ev}, {tok})"),
+                            );
+                        }
+                        "poller_del" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, fd) = self.emit_expr(&args[1]);
+                            return ("int64_t".into(), format!("mako_poller_del({p}, {fd})"));
+                        }
+                        "poller_wait" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            let (_, toks) = self.emit_slice_arg_borrow_typed(&args[1]);
+                            let (_, evs) = self.emit_slice_arg_borrow_typed(&args[2]);
+                            let (_, max_ev) = self.emit_expr(&args[3]);
+                            let (_, tmo) = self.emit_expr(&args[4]);
+                            let tmp = self.fresh("pw");
+                            self.line(&format!(
+                                "int64_t {tmp} = mako_poller_wait({p}, {toks}, {evs}, {max_ev}, {tmo});"
+                            ));
+                            return ("int64_t".into(), tmp);
+                        }
+                        "poller_close" => {
+                            let (_, p) = self.emit_expr(&args[0]);
+                            return ("int64_t".into(), format!("mako_poller_close({p})"));
+                        }
+                        "cpu_ticks" => {
+                            return ("int64_t".into(), "mako_cpu_ticks()".into());
+                        }
+                        "cpu_pause" => {
+                            self.line("mako_cpu_pause();");
+                            return ("void".into(), "/*void*/".into());
+                        }
+                        "prefetch_read" => {
+                            let (_, addr) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_prefetch_read({addr});"));
+                            return ("void".into(), "/*void*/".into());
+                        }
+                        "prefetch_write" => {
+                            let (_, addr) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_prefetch_write({addr});"));
+                            return ("void".into(), "/*void*/".into());
+                        }
+                        "mmap_file" => {
+                            let (_, fd) = self.emit_expr(&args[0]);
+                            let (_, off) = self.emit_expr(&args[1]);
+                            let (_, sz) = self.emit_expr(&args[2]);
+                            let (_, prot) = self.emit_expr(&args[3]);
+                            let (_, sh) = self.emit_expr(&args[4]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_mmap_file({fd}, {off}, {sz}, {prot}, {sh})"),
+                            );
+                        }
+                        "alloc_aligned" => {
+                            let (_, sz) = self.emit_expr(&args[0]);
+                            let (_, al) = self.emit_expr(&args[1]);
+                            return (
+                                "int64_t".into(),
+                                format!("mako_alloc_aligned({sz}, {al})"),
+                            );
+                        }
+                        "free_aligned" => {
+                            let (_, ptr) = self.emit_expr(&args[0]);
+                            self.line(&format!("mako_free_aligned({ptr});"));
+                            return ("void".into(), "/*void*/".into());
+                        }
                         "strings_index" => {
                             let a = self.emit_slice_arg_borrow(&args[0]);
                             let v = self.emit_str_arg_borrow(&args[1]);
@@ -30867,7 +31896,7 @@ impl Codegen {
                             let s = self.emit_str_arg_borrow(&args[0]);
                             return ("int64_t".into(), format!("mako_png_height({s})"));
                         }
-                        "maps_keys" => {
+                        "maps_keys" | "map_keys" => {
                             let (ty, m) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("mk");
                             if ty == "MakoMapSI*" {
@@ -31028,7 +32057,7 @@ impl Codegen {
                             self.line(&format!("MakoStrArray {tmp} = mako_maps_keys_si({m});"));
                             return ("MakoStrArray".into(), tmp);
                         }
-                        "maps_values" => {
+                        "maps_values" | "map_values" => {
                             let (ty, m) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("mv");
                             if ty == "MakoMapSI*" {
@@ -31225,9 +32254,46 @@ impl Codegen {
                             self.line(&format!("MakoIntArray {tmp} = mako_maps_values_si({m});"));
                             return ("MakoIntArray".into(), tmp);
                         }
-                        "maps_clear" => {
+                        "maps_clear" | "map_clear" | "clear" => {
                             let (ty, m) = self.emit_expr(&args[0]);
-                            if ty == "MakoMapSI*" {
+                            if ty == "MakoIntArray"
+                                || ty == "MakoFloatArray"
+                                || ty == "MakoBoolArray"
+                                || ty == "MakoByteArray"
+                            {
+                                let tmp = self.fresh("clr");
+                                self.line(&format!("{ty} {tmp} = {m};"));
+                                self.line(&format!(
+                                    "if ({tmp}.data && {tmp}.len > 0) memset({tmp}.data, 0, {tmp}.len * sizeof({tmp}.data[0]));"
+                                ));
+                                return ("void".into(), "/*void*/".into());
+                            } else if let Some(sn) = ty.strip_prefix("MakoArr_") {
+                                let tmp = self.fresh("clra");
+                                self.line(&format!("{ty} {tmp} = {m};"));
+                                let fields = self.struct_own_field_frees(sn);
+                                if !fields.is_empty() {
+                                    self.line(&format!(
+                                        "if ({tmp}.data && {tmp}.cap > 0 && !mako_rc_shared({tmp}.data)) {{ for (size_t _ci = 0; _ci < {tmp}.len; _ci++) {{"
+                                    ));
+                                    self.indent += 1;
+                                    for (path, ff) in fields {
+                                        self.line(&format!("{ff}({tmp}.data[_ci].{path});"));
+                                    }
+                                    self.indent -= 1;
+                                    self.line("} }");
+                                }
+                                self.line(&format!(
+                                    "if ({tmp}.data && {tmp}.len > 0) memset({tmp}.data, 0, {tmp}.len * sizeof({tmp}.data[0]));"
+                                ));
+                                return ("void".into(), "/*void*/".into());
+                            } else if ty == "MakoStrArray" {
+                                let tmp = self.fresh("clrs");
+                                self.line(&format!("MakoStrArray {tmp} = {m};"));
+                                self.line(&format!(
+                                    "for (size_t _ci = 0; _ci < {tmp}.len; _ci++) {{ if ({tmp}.cap > 0 && !mako_rc_shared({tmp}.data)) mako_str_free({tmp}.data[_ci]); {tmp}.data[_ci] = mako_str_empty; }}"
+                                ));
+                                return ("void".into(), "/*void*/".into());
+                            } else if ty == "MakoMapSI*" {
                                 self.line(&format!("mako_maps_clear_si({m});"));
                             } else if ty == "MakoMapII*" {
                                 self.line(&format!("mako_maps_clear_ii({m});"));
@@ -31290,7 +32356,7 @@ impl Codegen {
                             }
                             return ("void".into(), "/*void*/".into());
                         }
-                        "maps_clone" => {
+                        "maps_clone" | "map_clone" => {
                             let (ty, m) = self.emit_expr(&args[0]);
                             let tmp = self.fresh("mc");
                             if ty == "MakoMapSI*" {
@@ -31434,7 +32500,7 @@ impl Codegen {
                             self.line(&format!("MakoMapSI *{tmp} = mako_maps_clone_si({m});"));
                             return ("MakoMapSI*".into(), tmp);
                         }
-                        "maps_equal" => {
+                        "maps_equal" | "map_equal" => {
                             let (ty, a) = self.emit_expr(&args[0]);
                             let (_, b) = self.emit_expr(&args[1]);
                             if ty == "MakoMapII*" {
@@ -31547,7 +32613,7 @@ impl Codegen {
                             }
                             return ("int64_t".into(), format!("mako_maps_equal_si({a}, {b})"));
                         }
-                        "maps_copy" => {
+                        "maps_copy" | "map_copy" => {
                             let (ty, d) = self.emit_expr(&args[0]);
                             let (_, s) = self.emit_expr(&args[1]);
                             if ty == "MakoMapII*" {
@@ -39966,7 +41032,14 @@ impl Codegen {
                                         self.line(&format!(
                                             "MakoString *{boxn} = (MakoString*)malloc(sizeof(MakoString));"
                                         ));
-                                        self.line(&format!("*{boxn} = mako_str_clone({v});"));
+                                        if !Self::expr_is_fresh_own(a)
+                                            || matches!(a, Expr::Index { .. } | Expr::Slice { .. })
+                                            || self.own_drop_live.contains(&v)
+                                        {
+                                            self.line(&format!("*{boxn} = mako_str_clone({v});"));
+                                        } else {
+                                            self.line(&format!("*{boxn} = {v};"));
+                                        }
                                         self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if matches!(
                                         aty.as_str(),
@@ -40036,13 +41109,35 @@ impl Codegen {
                                         self.line(&format!(
                                             "{arg_name}[{i}] = (intptr_t)mako_f64_to_bits({v});"
                                         ));
+                                    } else if aty.starts_with("MakoEnum_")
+                                        || pty.starts_with("MakoEnum_")
+                                    {
+                                        let ename = if aty.starts_with("MakoEnum_") {
+                                            aty.clone()
+                                        } else {
+                                            pty.to_string()
+                                        };
+                                        let v = if !Self::expr_is_fresh_own(a)
+                                            || matches!(a, Expr::Index { .. } | Expr::Slice { .. })
+                                            || self.own_drop_live.contains(&v)
+                                        {
+                                            self.clone_own_val(&ename, &v)
+                                        } else {
+                                            v
+                                        };
+                                        let boxn = self.fresh("ebox");
+                                        self.line(&format!(
+                                            "{ename} *{boxn} = ({ename}*)malloc(sizeof({ename}));"
+                                        ));
+                                        self.emit_line(format_args!("*{boxn} = {v};"));
+                                        self.line(&format!("{arg_name}[{i}] = (intptr_t){boxn};"));
                                     } else if self.structs.contains_key(&aty)
                                         || self.structs.values().any(|s| s.c_name == aty)
                                         || self.structs.contains_key(pty)
                                         || self.structs.values().any(|s| s.c_name == *pty)
                                     {
                                         // Independent task copy: clone every owned field
-                                        // (strings, slices, nested structs), not just strings.
+                                        // (strings, slices, nested structs, enums), not just strings.
                                         let (aty, v) = Self::coerce_user_struct_value(&aty, v);
                                         let cname = if self.structs.contains_key(&aty) {
                                             aty.clone()
@@ -40051,7 +41146,14 @@ impl Codegen {
                                         } else {
                                             aty.clone()
                                         };
-                                        let v = self.clone_own_val(&cname, &v);
+                                        let v = if !Self::expr_is_fresh_own(a)
+                                            || matches!(a, Expr::Index { .. } | Expr::Slice { .. })
+                                            || self.own_drop_live.contains(&v)
+                                        {
+                                            self.clone_own_val(&cname, &v)
+                                        } else {
+                                            v
+                                        };
                                         let boxn = self.fresh("podbox");
                                         self.line(&format!(
                                             "{cname} *{boxn} = ({cname}*)malloc(sizeof({cname}));"
@@ -41204,9 +42306,15 @@ impl Codegen {
                 // Materialize the struct, free non-extracted fields, zero the
                 // extracted field so the caller owns it without double-free.
                 let is_transient_struct = self.current_arena.is_none()
-                    && matches!(base.as_ref(), Expr::Call { .. } | Expr::Method { .. })
+                    && matches!(
+                        base.as_ref(),
+                        Expr::Call { .. } | Expr::Method { .. } | Expr::Join(_)
+                    )
                     && !self.struct_own_field_frees(&bty).is_empty();
                 if is_transient_struct {
+                    if self.own_drop_live.contains(&b) {
+                        self.note_own_drop_moved(&b);
+                    }
                     let frees = self.struct_own_field_frees(&bty);
                     let fty_lookup = self
                         .structs
@@ -41368,6 +42476,7 @@ impl Codegen {
             match kind {
                 "string" => {
                     if str_slot < 2 {
+                        let v = self.prepare_own_store_rhs(a, "MakoString", v);
                         self.line(&format!("{tmp}.s{str_slot} = {v};"));
                         str_slot += 1;
                     }
@@ -42534,6 +43643,24 @@ impl Codegen {
                      MakoUuid *__box = (MakoUuid*)malloc(sizeof(MakoUuid));\n\
                      *__box = __r;\nreturn (void*)__box;\n"
                 )
+            } else if ret_ty.starts_with("MakoEnum_")
+                || self.structs.contains_key(ret_ty)
+                || self.structs.values().any(|s| s.c_name == ret_ty)
+                || matches!(
+                    ret_ty,
+                    "MakoIntArray"
+                        | "MakoByteArray"
+                        | "MakoStrArray"
+                        | "MakoFloatArray"
+                        | "MakoBoolArray"
+                )
+                || ret_ty.starts_with("MakoArr_")
+            {
+                format!(
+                    "{ret_ty} __r = {call};\n\
+                     {ret_ty} *__box = ({ret_ty}*)malloc(sizeof({ret_ty}));\n\
+                     *__box = __r;\nreturn (void*)__box;\n"
+                )
             } else if ret_ty == "double" {
                 format!("return (void*)(intptr_t)mako_f64_to_bits({call});\n")
             } else if ret_ty.contains('*') {
@@ -42618,6 +43745,14 @@ impl Codegen {
                 let free_fn = Self::own_free_fn(ty)
                     .unwrap_or_else(|| format!("{}_free", ty.replace("MakoArr_", "mako_arr_")));
                 cleanup.push_str(&format!("{free_fn}({local});\n"));
+            } else if ty.starts_with("MakoEnum_") {
+                unpack.push_str(&format!(
+                    "{ty} {local} = *({ty}*)a[{i}]; free((void*)a[{i}]);\n"
+                ));
+                call_args.push(local.clone());
+                if let Some(free_fn) = Self::own_free_fn(ty) {
+                    cleanup.push_str(&format!("{free_fn}({local});\n"));
+                }
             } else if self.structs.contains_key(ty)
                 || self.structs.values().any(|s| s.c_name == *ty)
             {
@@ -42682,6 +43817,24 @@ impl Codegen {
             format!(
                 "{unpack}MakoUuid __r = {call};\n\
                  MakoUuid *__box = (MakoUuid*)malloc(sizeof(MakoUuid));\n\
+                 *__box = __r;\n{cleanup}return (void*)__box;\n"
+            )
+        } else if ret_ty.starts_with("MakoEnum_")
+            || self.structs.contains_key(ret_ty)
+            || self.structs.values().any(|s| s.c_name == ret_ty)
+            || matches!(
+                ret_ty,
+                "MakoIntArray"
+                    | "MakoByteArray"
+                    | "MakoStrArray"
+                    | "MakoFloatArray"
+                    | "MakoBoolArray"
+            )
+            || ret_ty.starts_with("MakoArr_")
+        {
+            format!(
+                "{unpack}{ret_ty} __r = {call};\n\
+                 {ret_ty} *__box = ({ret_ty}*)malloc(sizeof({ret_ty}));\n\
                  *__box = __r;\n{cleanup}return (void*)__box;\n"
             )
         } else if ret_ty.contains('*') {
@@ -42758,6 +43911,31 @@ impl Codegen {
                 "if ({p}) {{ {tmp} = *{p}; free({p}); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
             ));
             "MakoUuid".into()
+        } else if ret_ty.starts_with("MakoEnum_")
+            || self.structs.contains_key(ret_ty)
+            || self.structs.values().any(|s| s.c_name == ret_ty)
+            || matches!(
+                ret_ty,
+                "MakoIntArray"
+                    | "MakoByteArray"
+                    | "MakoStrArray"
+                    | "MakoFloatArray"
+                    | "MakoBoolArray"
+            )
+            || ret_ty.starts_with("MakoArr_")
+        {
+            let p = self.fresh("jbp");
+            self.line(&format!("{ret_ty} *{p} = ({ret_ty}*)mako_await({task});"));
+            self.line(&format!("{ret_ty} {tmp};"));
+            self.line(&format!(
+                "if ({p}) {{ {tmp} = *{p}; free({p}); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+            ));
+            ret_ty.to_string()
+        } else if ret_ty.contains('*') {
+            self.line(&format!(
+                "{ret_ty} {tmp} = ({ret_ty})mako_await({task});"
+            ));
+            ret_ty.to_string()
         } else if ret_ty == "double" {
             self.line(&format!(
                 "double {tmp} = mako_bits_to_f64((int64_t)(intptr_t)mako_await({task}));"
@@ -43250,6 +44428,14 @@ impl Codegen {
                     }
                 }
                 Expr::Call { callee, args } => {
+                    if let Expr::Ident(name) = callee.as_ref() {
+                        if name == "slice_binary_search" {
+                            out.push(vec![
+                                TypeExpr::Named("int".into()),
+                                TypeExpr::Named("bool".into()),
+                            ]);
+                        }
+                    }
                     walk_expr(callee, out);
                     for a in args {
                         walk_expr(a, out);
@@ -46439,6 +47625,87 @@ fn main() {
                 && body.contains("mako_float_array_free(added);")
                 && body.contains("(int64_t)sizeof(hdr)"),
             "expected i128, mem_read/write_u64, simd_f32x4_add + drop, and sizeof(hdr):\n{body}"
+        );
+    }
+
+    #[test]
+    fn min_max_str_and_clear_slice_are_leak_free() {
+        let source = r#"
+struct Item {
+    label: string
+}
+fn check_min_clear(prefix: string) -> string {
+    let mut items = [Item{label: prefix + "_1"}, Item{label: prefix + "_2"}]
+    clear(items)
+    let mut strs = [prefix + "_a", prefix + "_b"]
+    clear(strs)
+    let best = min("pear", str_to_lower(prefix + "_APPLE"), "banana")
+    return best
+}
+fn main() {
+    print(check_min_clear("X"))
+}
+"#;
+        let generated = emit_src(source);
+        let body = fn_body(&generated, "check_min_clear(");
+        assert!(
+            body.contains("mako_str_view(\"pear\", 4)")
+                && body.contains("mako_str_lex_cmp(")
+                && body.contains("mako_str_free(")
+                && body.contains("mako_str_empty"),
+            "min(string) must borrow literals as views, free temp args, and clear(strs) must free owned elements:\n{body}"
+        );
+    }
+
+    #[test]
+    fn poller_aligned_slices_maps_and_multi_use_return_are_leak_free() {
+        let source = r#"
+enum TagKind {
+    Empty,
+    Named(string),
+}
+struct DupPair {
+    first: string,
+    kind: TagKind,
+}
+fn make_dup_pair(seed: string) -> DupPair {
+    let mut s = seed + "_val"
+    let p = poller_new()
+    cpu_pause()
+    let ticks = cpu_ticks()
+    let buf = alloc_aligned(64, 64)
+    prefetch_write(buf)
+    prefetch_read(buf)
+    free_aligned(buf)
+    poller_close(p)
+    let rep = slice_repeat([s], 2)
+    let has = slice_contains(rep, "x")
+    if has && ticks > 0 {
+        s = s + "_ok"
+    }
+    return DupPair {
+        first: s,
+        kind: Named(s),
+    }
+}
+fn main() {
+    let d = make_dup_pair("k")
+    print(d.first)
+}
+"#;
+        let generated = emit_src(source);
+        let body = fn_body(&generated, "make_dup_pair(");
+        assert!(
+            body.contains("mako_poller_new()")
+                && body.contains("mako_cpu_pause()")
+                && body.contains("mako_cpu_ticks()")
+                && body.contains("mako_alloc_aligned(")
+                && body.contains("mako_free_aligned(")
+                && body.contains("mako_slice_repeat_str(")
+                && body.contains("mako_slice_contains_str(")
+                && body.contains("mako_str_array_free(rep);")
+                && body.contains("mako_str_free(s);"),
+            "expected poller/cpu/aligned/slice intrinsics and scope-exit free of multi-use return local `s`:\n{body}"
         );
     }
 }

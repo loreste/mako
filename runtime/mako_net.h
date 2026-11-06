@@ -710,7 +710,7 @@ static inline MakoString mako_http_forward(MakoString host, int64_t port,
     char head[2560];
     int hlen = snprintf(head, sizeof(head),
         "%.*s %.*s HTTP/1.1\r\nHost: %s\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
-        mlen, m, plen, pp, hbuf, body.len);
+        mlen, m, plen, pp, hbuf, (size_t)body.len);
     if (hlen < 0 || (size_t)hlen >= sizeof(head)) { mako_tcp_close(fd); return mako_str_from_cstr(""); }
     mako_tcp_write(fd, (MakoString){head, (size_t)hlen});
     if (body.len) mako_tcp_write(fd, body);

@@ -900,6 +900,10 @@ pub struct StructLayout {
     pub fields: Vec<(String, Type)>,
     /// Per-field default expressions from `field: T = expr` (const-ish in v1).
     pub defaults: Vec<Option<Expr>>,
+    /// Source-level field types for exact C-ABI `sizeof` / `alignof` / `offsetof`.
+    pub c_fields: Vec<(String, TypeExpr)>,
+    /// Struct attributes (`"packed"`, `"align:N"`, etc.).
+    pub derives: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1098,6 +1102,68 @@ impl StructRegistry {
             })
     }
 
+    fn c_type_size_align(&self, ty: &TypeExpr) -> (i64, i64) {
+        match ty {
+            TypeExpr::Named(n) => match n.as_str() {
+                "bool" | "int8" | "i8" | "uint8" | "u8" | "byte" => (1, 1),
+                "int16" | "i16" | "uint16" | "u16" => (2, 2),
+                "int32" | "i32" | "uint32" | "u32" | "rune" | "char" | "float32" | "f32" => (4, 4),
+                "int" | "int64" | "i64" | "isize" | "uint" | "uint64" | "u64" | "usize"
+                | "uintptr" | "float" | "float64" | "f64" => (8, 8),
+                "i128" | "int128" | "u128" | "uint128" => (16, 16),
+                "string" => (24, 8),
+                other => {
+                    if let Some(&id) = self.by_name.get(other) {
+                        let (sz, al, _) = self.c_struct_layout(id);
+                        (sz, al)
+                    } else {
+                        (8, 8)
+                    }
+                }
+            },
+            TypeExpr::Array(_) | TypeExpr::RawArray(_) => (32, 8),
+            TypeExpr::Generic(name, args) if name == "List" && args.len() == 1 => (32, 8),
+            _ => (8, 8),
+        }
+    }
+
+    /// Compute C-ABI `(size, align, Vec<(field_name, byte_offset)>)` for struct `id`.
+    fn c_struct_layout(&self, id: u32) -> (i64, i64, Vec<(String, i64)>) {
+        let (c_fields, derives) = {
+            let layouts = self.layouts.borrow();
+            let l = &layouts[id as usize];
+            (l.c_fields.clone(), l.derives.clone())
+        };
+        let is_packed = derives.iter().any(|d| d == "packed");
+        let explicit_align = derives
+            .iter()
+            .find_map(|d| d.strip_prefix("align:").and_then(|n| n.parse::<i64>().ok()));
+        let mut offset = 0i64;
+        let mut max_align = 1i64;
+        let mut offsets = Vec::with_capacity(c_fields.len());
+        for (fname, fty) in &c_fields {
+            let (fsz, fal) = self.c_type_size_align(fty);
+            let field_align = if is_packed { 1 } else { fal };
+            offset = (offset + field_align - 1) & !(field_align - 1);
+            offsets.push((fname.clone(), offset));
+            offset += fsz;
+            if field_align > max_align {
+                max_align = field_align;
+            }
+        }
+        let struct_align = if let Some(a) = explicit_align {
+            max_align.max(a)
+        } else {
+            max_align
+        };
+        let total_size = if offset == 0 {
+            struct_align
+        } else {
+            (offset + struct_align - 1) & !(struct_align - 1)
+        };
+        (total_size, struct_align, offsets)
+    }
+
     /// Find or create the anonymous struct layout for a tuple shape.
     fn intern_tuple(&self, fields: Vec<Type>) -> u32 {
         if let Some(&id) = self.tuple_shapes.borrow().get(&fields) {
@@ -1114,6 +1180,8 @@ impl StructRegistry {
             name: format!("tuple.{id}"),
             fields: named,
             defaults: Vec::new(),
+            c_fields: Vec::new(),
+            derives: Vec::new(),
         });
         self.tuple_shapes.borrow_mut().insert(fields, id);
         id
@@ -1134,6 +1202,8 @@ impl StructRegistry {
                 ("Err_0".into(), err),
             ],
             defaults: Vec::new(),
+            c_fields: Vec::new(),
+            derives: Vec::new(),
         });
         drop(layouts);
         self.enum_ids.borrow_mut().insert(id);
@@ -1172,6 +1242,8 @@ impl StructRegistry {
             name: format!("Option.{id}"),
             fields: vec![("tag".into(), Type::I64), ("Some_0".into(), inner)],
             defaults: Vec::new(),
+            c_fields: Vec::new(),
+            derives: Vec::new(),
         });
         drop(layouts);
         self.enum_ids.borrow_mut().insert(id);
@@ -1800,6 +1872,8 @@ fn build_structs(program: &Program) -> Result<StructRegistry, IrError> {
                     name: def.name.clone(),
                     fields: Vec::new(),
                     defaults: Vec::new(),
+                    c_fields: Vec::new(),
+                    derives: def.derives.clone(),
                 });
                 concrete_tags.insert(def.name.clone(), next_tag);
                 next_tag += 1;
@@ -1820,6 +1894,8 @@ fn build_structs(program: &Program) -> Result<StructRegistry, IrError> {
                     name: def.name.clone(),
                     fields: Vec::new(),
                     defaults: Vec::new(),
+                    c_fields: Vec::new(),
+                    derives: Vec::new(),
                 });
                 enum_ids.insert(id);
             }
@@ -1892,6 +1968,12 @@ fn build_structs(program: &Program) -> Result<StructRegistry, IrError> {
                 let mut layouts = registry.layouts.borrow_mut();
                 layouts[id as usize].fields = fields;
                 layouts[id as usize].defaults = defaults;
+                layouts[id as usize].c_fields = def
+                    .fields
+                    .iter()
+                    .map(|(fname, fty, _)| (fname.clone(), fty.clone()))
+                    .collect();
+                layouts[id as usize].derives = def.derives.clone();
             }
             Item::Enum(def) => {
                 if !def.type_params.is_empty() {
@@ -3111,6 +3193,8 @@ struct FunctionLowerer<'a> {
     /// Outer `let mut` int captures redirected through a heap cell pointer (i64).
     /// Loads/stores of the name go through `mako_native_i64_cell_{load,store}`.
     mut_i64_cells: HashMap<String, Value>,
+    /// Local variables holding boxed 128-bit (`i128` / `u128`) values.
+    i128_vars: HashSet<String>,
 }
 
 struct LoopFrame {
@@ -3148,7 +3232,14 @@ impl<'a> FunctionLowerer<'a> {
         };
         let mut locals = HashMap::new();
         let mut heap_owned = HashMap::new();
+        let mut i128_vars = HashSet::new();
         for (index, param) in source.params.iter().enumerate() {
+            if matches!(
+                &param.ty,
+                TypeExpr::Named(n) if matches!(n.as_str(), "i128" | "int128" | "u128" | "uint128")
+            ) {
+                i128_vars.insert(param.name.clone());
+            }
             let ty = signatures[&source.name].0[index];
             let incoming = Value(function.next_value);
             function.next_value += 1;
@@ -3205,7 +3296,73 @@ impl<'a> FunctionLowerer<'a> {
             job_crews: HashMap::new(),
             return_as_yield: false,
             mut_i64_cells: HashMap::new(),
+            i128_vars,
         })
+    }
+
+    fn expr_is_128bit(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Ident(name) => self.i128_vars.contains(name),
+            Expr::Call { callee, .. } => matches!(
+                callee.as_ref(),
+                Expr::Ident(f)
+                    if matches!(
+                        f.as_str(),
+                        "i128"
+                            | "int128"
+                            | "u128"
+                            | "uint128"
+                            | "i128_from_parts"
+                            | "u128_from_parts"
+                            | "u128_add"
+                            | "u128_sub"
+                            | "u128_mul"
+                            | "u128_div"
+                            | "u128_rem"
+                            | "u128_shl"
+                            | "u128_shr"
+                            | "i128_add"
+                            | "i128_sub"
+                            | "i128_mul"
+                            | "i128_div"
+                    )
+            ),
+            Expr::Convert {
+                ty: TypeExpr::Named(n),
+                ..
+            } => matches!(n.as_str(), "i128" | "int128" | "u128" | "uint128"),
+            Expr::Binary { op, left, right } => {
+                !matches!(
+                    op,
+                    BinOp::Eq
+                        | BinOp::Ne
+                        | BinOp::Lt
+                        | BinOp::Le
+                        | BinOp::Gt
+                        | BinOp::Ge
+                        | BinOp::And
+                        | BinOp::Or
+                ) && (self.expr_is_128bit(left) || self.expr_is_128bit(right))
+            }
+            Expr::Unary { expr: inner, .. } => self.expr_is_128bit(inner),
+            Expr::Field { base, field } => {
+                if let Expr::Ident(bname) = base.as_ref() {
+                    if let Some((_, Type::Struct(sid))) = self.locals.get(bname) {
+                        let layouts = self.structs.layouts.borrow();
+                        return layouts[*sid as usize].c_fields.iter().any(|(fname, fty)| {
+                            fname == field
+                                && matches!(
+                                    fty,
+                                    TypeExpr::Named(n)
+                                        if matches!(n.as_str(), "i128" | "int128" | "u128" | "uint128")
+                                )
+                        });
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
     }
 
     fn with_lambda_collector(mut self, stubs: &'a mut Vec<FnDef>, id: &'a mut u32) -> Self {
@@ -3538,6 +3695,10 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     _ => {}
                 }
+                let is_128_binding = matches!(
+                    ty,
+                    Some(TypeExpr::Named(ref n)) if matches!(n.as_str(), "i128" | "int128" | "u128" | "uint128")
+                ) || self.expr_is_128bit(init);
                 let ty = annotated.unwrap_or(inferred);
                 let (value, owned) = if ty != inferred {
                     // Struct → interface conversion.
@@ -3593,6 +3754,11 @@ impl<'a> FunctionLowerer<'a> {
                 self.emit(Inst::Alloca { out: slot, ty });
                 self.emit(Inst::Store { ptr: slot, value });
                 self.locals.insert(name.clone(), (slot, ty));
+                if is_128_binding {
+                    self.i128_vars.insert(name.clone());
+                } else {
+                    self.i128_vars.remove(name);
+                }
                 if ty.is_heap() {
                     self.heap_owned.insert(name.clone(), owned);
                 }
@@ -7980,8 +8146,70 @@ impl<'a> FunctionLowerer<'a> {
                 if matches!(op, BinOp::And | BinOp::Or) {
                     return self.lower_short_circuit(*op, left, right);
                 }
+                let is_128 = self.expr_is_128bit(left) || self.expr_is_128bit(right);
                 let (mut left, mut left_ty, left_owned) = self.lower_expr(left)?;
                 let (mut right, mut right_ty, right_owned) = self.lower_expr(right)?;
+                if is_128 && left_ty == Type::I64 && right_ty == Type::I64 {
+                    match op {
+                        BinOp::Add
+                        | BinOp::Sub
+                        | BinOp::Mul
+                        | BinOp::Div
+                        | BinOp::Mod
+                        | BinOp::Shl
+                        | BinOp::Shr
+                        | BinOp::BitAnd
+                        | BinOp::BitOr
+                        | BinOp::BitXor => {
+                            let fname = match op {
+                                BinOp::Add => "mako_native_i128_add",
+                                BinOp::Sub => "mako_native_i128_sub",
+                                BinOp::Mul => "mako_native_i128_mul",
+                                BinOp::Div => "mako_native_i128_div",
+                                BinOp::Mod => "mako_native_i128_rem",
+                                BinOp::Shl => "mako_native_i128_shl",
+                                BinOp::Shr => "mako_native_i128_shr",
+                                BinOp::BitAnd => "mako_native_i128_bitand",
+                                BinOp::BitOr => "mako_native_i128_bitor",
+                                BinOp::BitXor => "mako_native_i128_bitxor",
+                                _ => unreachable!(),
+                            };
+                            let out = self.value();
+                            self.emit(Inst::Call {
+                                out: Some(out),
+                                function: fname.into(),
+                                args: vec![left, right],
+                                ret: Some(Type::I64),
+                            });
+                            return Ok((out, Type::I64, false));
+                        }
+                        BinOp::Eq
+                        | BinOp::Ne
+                        | BinOp::Lt
+                        | BinOp::Le
+                        | BinOp::Gt
+                        | BinOp::Ge => {
+                            let cmp = self.value();
+                            self.emit(Inst::Call {
+                                out: Some(cmp),
+                                function: "mako_native_i128_cmp".into(),
+                                args: vec![left, right],
+                                ret: Some(Type::I64),
+                            });
+                            let z = self.const_int(0, Type::I64);
+                            let out = self.value();
+                            self.emit(Inst::Binary {
+                                out,
+                                op: *op,
+                                left: cmp,
+                                right: z,
+                                ty: Type::I64,
+                            });
+                            return Ok((out, Type::I1, false));
+                        }
+                        _ => {}
+                    }
+                }
                 // Allow I1/I64 mixing at binary ops (common for len + int).
                 if left_ty == Type::I1 && right_ty == Type::I64 {
                     let c = self.value();
@@ -9249,11 +9477,42 @@ impl<'a> FunctionLowerer<'a> {
                         | "char"
                 ) && args.len() == 1
                 {
-                    let (v, ty, owned) = self.lower_expr(&args[0])?;
+                    let is_src_128 = self.expr_is_128bit(&args[0]);
+                    let (mut v, ty, owned) = self.lower_expr(&args[0])?;
                     match ty {
                         Type::I64 => {
                             if owned {
                                 return Err(IrError::new("native IR: integer cast of owned value"));
+                            }
+                            if matches!(function.as_str(), "i128" | "int128") {
+                                let out = self.value();
+                                self.emit(Inst::Call {
+                                    out: Some(out),
+                                    function: "mako_native_i128_box".into(),
+                                    args: vec![v],
+                                    ret: Some(Type::I64),
+                                });
+                                return Ok((out, Type::I64, false));
+                            }
+                            if matches!(function.as_str(), "u128" | "uint128") {
+                                let out = self.value();
+                                self.emit(Inst::Call {
+                                    out: Some(out),
+                                    function: "mako_native_u128_box".into(),
+                                    args: vec![v],
+                                    ret: Some(Type::I64),
+                                });
+                                return Ok((out, Type::I64, false));
+                            }
+                            if is_src_128 {
+                                let unboxed = self.value();
+                                self.emit(Inst::Call {
+                                    out: Some(unboxed),
+                                    function: "mako_native_i128_lo".into(),
+                                    args: vec![v],
+                                    ret: Some(Type::I64),
+                                });
+                                v = unboxed;
                             }
                             // Truncate narrow destinations so print/arith match
                             // the C backend's intN_t narrowing.
@@ -10645,7 +10904,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     return Ok((out, Type::F64, false));
                 }
-                if function == "maps_keys" && args.len() == 1 {
+                if (function == "maps_keys" || function == "map_keys") && args.len() == 1 {
                     let (m, mt, mo) = self.lower_expr(&args[0])?;
                     let out = self.value();
                     if let Type::MapIPtr(vk) = mt {
@@ -10690,7 +10949,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     return Ok((out, ret_ty, true));
                 }
-                if function == "maps_values" && args.len() == 1 {
+                if (function == "maps_values" || function == "map_values") && args.len() == 1 {
                     let (m, mt, mo) = self.lower_expr(&args[0])?;
                     let out = self.value();
                     if let Type::MapIPtr(vk) = mt {
@@ -10803,7 +11062,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     return Ok((out, ret_ty, true));
                 }
-                if function == "maps_clone" && args.len() == 1 {
+                if (function == "maps_clone" || function == "map_clone") && args.len() == 1 {
                     let (m, mt, mo) = self.lower_expr(&args[0])?;
                     let out = self.value();
                     // Content-keyed struct maps must re-bucket by content hash.
@@ -10846,7 +11105,12 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     return Ok((out, mt, true));
                 }
-                if function == "maps_equal" && args.len() == 2 {
+                if (function == "maps_equal" || function == "map_equal") && args.len() == 2 {
+                    let ret_ty = if function == "map_equal" {
+                        Type::I1
+                    } else {
+                        Type::I64
+                    };
                     let (a, at, ao) = self.lower_expr(&args[0])?;
                     let (b, bt, bo) = self.lower_expr(&args[1])?;
                     if at != bt {
@@ -10866,7 +11130,7 @@ impl<'a> FunctionLowerer<'a> {
                                     a, b, nf, sm, nm, nfp, nsp, val_kind, val_nf, val_sm, val_nm,
                                     val_nfp, val_nsp,
                                 ],
-                                ret: Some(Type::I64),
+                                ret: Some(ret_ty),
                             });
                             if ao {
                                 self.emit_drop(a, at);
@@ -10874,7 +11138,7 @@ impl<'a> FunctionLowerer<'a> {
                             if bo {
                                 self.emit_drop(b, bt);
                             }
-                            return Ok((out, Type::I64, false));
+                            return Ok((out, ret_ty, false));
                         }
                     }
                     // Pointer maps of structs: deep field equality (strings by
@@ -10908,7 +11172,7 @@ impl<'a> FunctionLowerer<'a> {
                                 out: Some(out),
                                 function: fname.into(),
                                 args: vec![a, b, nf, sm],
-                                ret: Some(Type::I64),
+                                ret: Some(ret_ty),
                             });
                             if ao {
                                 self.emit_drop(a, at);
@@ -10916,7 +11180,7 @@ impl<'a> FunctionLowerer<'a> {
                             if bo {
                                 self.emit_drop(b, bt);
                             }
-                            return Ok((out, Type::I64, false));
+                            return Ok((out, ret_ty, false));
                         }
                     }
                     let fname = match at {
@@ -10933,7 +11197,7 @@ impl<'a> FunctionLowerer<'a> {
                         out: Some(out),
                         function: fname.into(),
                         args: vec![a, b],
-                        ret: Some(Type::I64),
+                        ret: Some(ret_ty),
                     });
                     if ao {
                         self.emit_drop(a, at);
@@ -10941,10 +11205,40 @@ impl<'a> FunctionLowerer<'a> {
                     if bo {
                         self.emit_drop(b, bt);
                     }
-                    return Ok((out, Type::I64, false));
+                    return Ok((out, ret_ty, false));
                 }
-                if function == "maps_clear" && args.len() == 1 {
+                if (function == "maps_clear" || function == "map_clear" || function == "clear")
+                    && args.len() == 1
+                {
                     let (m, mt, mo) = self.lower_expr(&args[0])?;
+                    if function == "clear"
+                        && matches!(
+                            mt,
+                            Type::IntSlice
+                                | Type::FloatSlice
+                                | Type::ByteSlice
+                                | Type::BoolSlice
+                                | Type::StrSlice
+                        )
+                    {
+                        let fname = match mt {
+                            Type::IntSlice | Type::BoolSlice => "mako_native_slice_clear_int_ptr",
+                            Type::FloatSlice => "mako_native_slice_clear_float_ptr",
+                            Type::ByteSlice => "mako_native_slice_clear_byte_ptr",
+                            Type::StrSlice => "mako_native_slice_clear_str_ptr",
+                            _ => unreachable!(),
+                        };
+                        self.emit(Inst::Call {
+                            out: None,
+                            function: fname.into(),
+                            args: vec![m],
+                            ret: None,
+                        });
+                        if mo {
+                            self.emit_drop(m, mt);
+                        }
+                        return Ok((self.const_int(0, Type::I64), Type::I64, false));
+                    }
                     if mo {
                         return Err(IrError::new(
                             "native IR: maps_clear requires a borrowed map local",
@@ -10983,7 +11277,7 @@ impl<'a> FunctionLowerer<'a> {
                     });
                     return Ok((self.const_int(0, Type::I64), Type::I64, false));
                 }
-                if function == "maps_copy" && args.len() == 2 {
+                if (function == "maps_copy" || function == "map_copy") && args.len() == 2 {
                     // maps_copy(dst, src)
                     let (dst, dt, d_owned) = self.lower_expr(&args[0])?;
                     let (src, st, s_owned) = self.lower_expr(&args[1])?;
@@ -11088,6 +11382,962 @@ impl<'a> FunctionLowerer<'a> {
                         ret: None,
                     });
                     return Ok((self.const_int(0, Type::I64), Type::I64, false));
+                }
+                // Compile-time & layout intrinsics: static_assert, sizeof, sizeof_val, alignof, offsetof
+                if function == "static_assert" && (args.len() == 1 || args.len() == 2) {
+                    let (v, ty, owned) = self.lower_expr(&args[0])?;
+                    let as_i64 = match ty {
+                        Type::I1 if !owned => {
+                            let w = self.value();
+                            self.emit(Inst::Cast {
+                                out: w,
+                                value: v,
+                                from: Type::I1,
+                                to: Type::I64,
+                            });
+                            w
+                        }
+                        Type::I64 if !owned => v,
+                        _ => return Err(IrError::new("native IR: static_assert expects bool/int")),
+                    };
+                    if args.len() == 2 {
+                        let (m, mt, mo) = self.lower_expr(&args[1])?;
+                        if mo && mt == Type::Str {
+                            self.emit(Inst::DropString { value: m });
+                        }
+                    }
+                    self.emit(Inst::Call {
+                        out: None,
+                        function: "mako_native_assert".into(),
+                        args: vec![as_i64],
+                        ret: None,
+                    });
+                    return Ok((self.const_int(0, Type::I64), Type::I64, false));
+                }
+                if (function == "sizeof" || function == "sizeof_val") && args.len() == 1 {
+                    if let Expr::Ident(name) = &args[0] {
+                        if !self.locals.contains_key(name) {
+                            let (sz, _) = self.structs.c_type_size_align(&TypeExpr::Named(name.clone()));
+                            return Ok((self.const_int(sz, Type::I64), Type::I64, false));
+                        }
+                    }
+                    let is_128 = self.expr_is_128bit(&args[0]);
+                    let (v, ty, owned) = self.lower_expr(&args[0])?;
+                    if owned {
+                        self.emit_drop(v, ty);
+                    }
+                    let sz = if is_128 {
+                        16
+                    } else {
+                        match ty {
+                            Type::I1 => 1,
+                            Type::I32 => 4,
+                            Type::I64 | Type::F64 => 8,
+                            Type::Str => 24,
+                            Type::IntSlice
+                            | Type::FloatSlice
+                            | Type::ByteSlice
+                            | Type::BoolSlice
+                            | Type::StrSlice => 32,
+                            Type::Struct(id) => self.structs.c_struct_layout(id).0,
+                            _ => 8,
+                        }
+                    };
+                    return Ok((self.const_int(sz, Type::I64), Type::I64, false));
+                }
+                if function == "alignof" && args.len() == 1 {
+                    if let Expr::Ident(name) = &args[0] {
+                        if !self.locals.contains_key(name) {
+                            let (_, al) = self.structs.c_type_size_align(&TypeExpr::Named(name.clone()));
+                            return Ok((self.const_int(al, Type::I64), Type::I64, false));
+                        }
+                    }
+                    let is_128 = self.expr_is_128bit(&args[0]);
+                    let (v, ty, owned) = self.lower_expr(&args[0])?;
+                    if owned {
+                        self.emit_drop(v, ty);
+                    }
+                    let al = if is_128 {
+                        16
+                    } else {
+                        match ty {
+                            Type::I1 => 1,
+                            Type::I32 => 4,
+                            Type::Struct(id) => self.structs.c_struct_layout(id).1,
+                            _ => 8,
+                        }
+                    };
+                    return Ok((self.const_int(al, Type::I64), Type::I64, false));
+                }
+                if function == "offsetof" && args.len() == 2 {
+                    let field_name = match &args[1] {
+                        Expr::String(s) | Expr::Ident(s) => s.clone(),
+                        _ => {
+                            return Err(IrError::new(
+                                "native IR: offsetof second arg must be field name",
+                            ))
+                        }
+                    };
+                    let struct_id = if let Expr::Ident(name) = &args[0] {
+                        if !self.locals.contains_key(name) {
+                            self.structs.struct_id(name)
+                        } else if let Some((_, Type::Struct(id))) = self.locals.get(name) {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    } else {
+                        let (v, ty, owned) = self.lower_expr(&args[0])?;
+                        if owned {
+                            self.emit_drop(v, ty);
+                        }
+                        if let Type::Struct(id) = ty {
+                            Some(id)
+                        } else {
+                            None
+                        }
+                    };
+                    let Some(id) = struct_id else {
+                        return Err(IrError::new("native IR: offsetof expects struct type or value"));
+                    };
+                    let (_, _, offsets) = self.structs.c_struct_layout(id);
+                    let off = offsets
+                        .iter()
+                        .find_map(|(n, o)| (n == &field_name).then_some(*o))
+                        .unwrap_or(0);
+                    return Ok((self.const_int(off, Type::I64), Type::I64, false));
+                }
+                // Variadic polymorphic min(a, b, ...) / max(a, b, ...)
+                if (function == "min" || function == "max") && args.len() >= 2 {
+                    let is_min = function == "min";
+                    let (mut acc, ty, mut acc_owned) = self.lower_expr(&args[0])?;
+                    if ty == Type::Str && !acc_owned {
+                        acc = self.emit_clone(acc, Type::Str);
+                        acc_owned = true;
+                    }
+                    let slot = self.value();
+                    self.emit(Inst::Alloca { out: slot, ty });
+                    self.emit(Inst::Store {
+                        ptr: slot,
+                        value: acc,
+                    });
+                    for arg in &args[1..] {
+                        let (mut rhs, rty, ro) = self.lower_expr(arg)?;
+                        if rty != ty {
+                            return Err(IrError::new("native IR: min/max argument type mismatch"));
+                        }
+                        let cur = self.value();
+                        self.emit(Inst::Load {
+                            out: cur,
+                            ptr: slot,
+                            ty,
+                        });
+                        if ty == Type::Str {
+                            if !ro {
+                                rhs = self.emit_clone(rhs, Type::Str);
+                            }
+                            let cmp = self.value();
+                            self.emit(Inst::StringCompare {
+                                out: cmp,
+                                left: rhs,
+                                right: cur,
+                                op: if is_min { BinOp::Lt } else { BinOp::Gt },
+                            });
+                            let take_b = self.new_block();
+                            let keep_b = self.new_block();
+                            let merge_b = self.new_block();
+                            self.terminate(Terminator::Branch {
+                                condition: cmp,
+                                then_block: take_b,
+                                else_block: keep_b,
+                            })?;
+                            self.current = take_b;
+                            self.emit(Inst::DropString { value: cur });
+                            self.emit(Inst::Store {
+                                ptr: slot,
+                                value: rhs,
+                            });
+                            self.terminate(Terminator::Jump(merge_b))?;
+                            self.current = keep_b;
+                            self.emit(Inst::DropString { value: rhs });
+                            self.terminate(Terminator::Jump(merge_b))?;
+                            self.current = merge_b;
+                        } else {
+                            let cmp = self.value();
+                            self.emit(Inst::Binary {
+                                out: cmp,
+                                op: if is_min { BinOp::Lt } else { BinOp::Gt },
+                                left: rhs,
+                                right: cur,
+                                ty,
+                            });
+                            let take_b = self.new_block();
+                            let merge_b = self.new_block();
+                            self.terminate(Terminator::Branch {
+                                condition: cmp,
+                                then_block: take_b,
+                                else_block: merge_b,
+                            })?;
+                            self.current = take_b;
+                            self.emit(Inst::Store {
+                                ptr: slot,
+                                value: rhs,
+                            });
+                            self.terminate(Terminator::Jump(merge_b))?;
+                            self.current = merge_b;
+                        }
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Load {
+                        out,
+                        ptr: slot,
+                        ty,
+                    });
+                    return Ok((out, ty, acc_owned));
+                }
+                // Polymorphic clamp(x, lo, hi) for int and float
+                if function == "clamp" && args.len() == 3 {
+                    let (x, xt, xo) = self.lower_expr(&args[0])?;
+                    let (lo, lot, loo) = self.lower_expr(&args[1])?;
+                    let (hi, hit, hio) = self.lower_expr(&args[2])?;
+                    if xt != lot || xt != hit || xo || loo || hio {
+                        return Err(IrError::new("native IR: clamp expects matching int/float"));
+                    }
+                    let slot = self.value();
+                    self.emit(Inst::Alloca { out: slot, ty: xt });
+                    self.emit(Inst::Store { ptr: slot, value: x });
+                    let cur0 = self.value();
+                    self.emit(Inst::Load {
+                        out: cur0,
+                        ptr: slot,
+                        ty: xt,
+                    });
+                    let lt_lo = self.value();
+                    self.emit(Inst::Binary {
+                        out: lt_lo,
+                        op: BinOp::Lt,
+                        left: cur0,
+                        right: lo,
+                        ty: xt,
+                    });
+                    let set_lo = self.new_block();
+                    let chk_hi = self.new_block();
+                    self.terminate(Terminator::Branch {
+                        condition: lt_lo,
+                        then_block: set_lo,
+                        else_block: chk_hi,
+                    })?;
+                    self.current = set_lo;
+                    self.emit(Inst::Store {
+                        ptr: slot,
+                        value: lo,
+                    });
+                    self.terminate(Terminator::Jump(chk_hi))?;
+                    self.current = chk_hi;
+                    let cur1 = self.value();
+                    self.emit(Inst::Load {
+                        out: cur1,
+                        ptr: slot,
+                        ty: xt,
+                    });
+                    let gt_hi = self.value();
+                    self.emit(Inst::Binary {
+                        out: gt_hi,
+                        op: BinOp::Gt,
+                        left: cur1,
+                        right: hi,
+                        ty: xt,
+                    });
+                    let set_hi = self.new_block();
+                    let done = self.new_block();
+                    self.terminate(Terminator::Branch {
+                        condition: gt_hi,
+                        then_block: set_hi,
+                        else_block: done,
+                    })?;
+                    self.current = set_hi;
+                    self.emit(Inst::Store {
+                        ptr: slot,
+                        value: hi,
+                    });
+                    self.terminate(Terminator::Jump(done))?;
+                    self.current = done;
+                    let out = self.value();
+                    self.emit(Inst::Load {
+                        out,
+                        ptr: slot,
+                        ty: xt,
+                    });
+                    return Ok((out, xt, false));
+                }
+                // Go 1.21–1.23 slice ergonomics: slice_binary_search, slice_compact, slice_delete, slice_insert, slice_grow, slice_clip
+                if function == "slice_binary_search" && args.len() == 2 {
+                    let (s, sty, so) = self.lower_expr(&args[0])?;
+                    let (t, tty, to) = self.lower_expr(&args[1])?;
+                    let (idx_fn, found_fn) = match (sty, tty) {
+                        (Type::IntSlice, Type::I64) => (
+                            "mako_native_slice_bsearch_int_idx_ptr",
+                            "mako_native_slice_bsearch_int_found_ptr",
+                        ),
+                        (Type::FloatSlice, Type::F64) => (
+                            "mako_native_slice_bsearch_float_idx_ptr",
+                            "mako_native_slice_bsearch_float_found_ptr",
+                        ),
+                        (Type::StrSlice, Type::Str) => (
+                            "mako_native_slice_bsearch_str_idx_ptr",
+                            "mako_native_slice_bsearch_str_found_ptr",
+                        ),
+                        _ => {
+                            return Err(IrError::new(
+                                "native IR: slice_binary_search expects ([]int|[]float|[]string, T)",
+                            ))
+                        }
+                    };
+                    let idx_val = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(idx_val),
+                        function: idx_fn.into(),
+                        args: vec![s, t],
+                        ret: Some(Type::I64),
+                    });
+                    let found_i64 = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(found_i64),
+                        function: found_fn.into(),
+                        args: vec![s, t],
+                        ret: Some(Type::I64),
+                    });
+                    let found_i1 = self.value();
+                    self.emit(Inst::Cast {
+                        out: found_i1,
+                        value: found_i64,
+                        from: Type::I64,
+                        to: Type::I1,
+                    });
+                    if so {
+                        self.emit_drop(s, sty);
+                    }
+                    if to {
+                        self.emit_drop(t, tty);
+                    }
+                    let tup_id = self.structs.intern_tuple(vec![Type::I64, Type::I1]);
+                    let out = self.value();
+                    self.emit(Inst::StructMake {
+                        out,
+                        struct_id: tup_id,
+                        fields: vec![idx_val, found_i1],
+                    });
+                    return Ok((out, Type::Struct(tup_id), true));
+                }
+                if (function == "slice_compact"
+                    || function == "slice_clip"
+                    || function == "slice_reverse")
+                    && args.len() == 1
+                {
+                    let (s, sty, so) = self.lower_expr(&args[0])?;
+                    let fname = if function == "slice_compact" {
+                        match sty {
+                            Type::IntSlice => "mako_native_slice_compact_int_ptr",
+                            Type::FloatSlice => "mako_native_slice_compact_float_ptr",
+                            Type::StrSlice => "mako_native_slice_compact_str_ptr",
+                            _ => {
+                                return Err(IrError::new(
+                                    "native IR: slice_compact expects []int, []float, or []string",
+                                ))
+                            }
+                        }
+                    } else if function == "slice_reverse" {
+                        match sty {
+                            Type::IntSlice => "mako_native_slice_reverse_int_ptr",
+                            Type::FloatSlice => "mako_native_slice_reverse_float_ptr",
+                            Type::ByteSlice => "mako_native_slice_reverse_byte_ptr",
+                            Type::StrSlice => "mako_native_slice_reverse_str_ptr",
+                            _ => {
+                                return Err(IrError::new(
+                                    "native IR: slice_reverse expects []int, []float, []byte, or []string",
+                                ))
+                            }
+                        }
+                    } else {
+                        match sty {
+                            Type::IntSlice => "mako_native_slice_clip_int_ptr",
+                            Type::FloatSlice => "mako_native_slice_clip_float_ptr",
+                            Type::ByteSlice => "mako_native_slice_clip_byte_ptr",
+                            Type::StrSlice => "mako_native_slice_clip_str_ptr",
+                            _ => {
+                                return Err(IrError::new(
+                                    "native IR: slice_clip expects []int, []float, []byte, or []string",
+                                ))
+                            }
+                        }
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![s],
+                        ret: Some(sty),
+                    });
+                    if so {
+                        self.emit_drop(s, sty);
+                    }
+                    return Ok((out, sty, true));
+                }
+                if (function == "slice_min" || function == "slice_max") && args.len() == 1 {
+                    let (s, sty, so) = self.lower_expr(&args[0])?;
+                    let is_min = function == "slice_min";
+                    let (fname, ret_ty, is_owned) = match sty {
+                        Type::IntSlice => (
+                            if is_min {
+                                "mako_native_slice_min_int_ptr"
+                            } else {
+                                "mako_native_slice_max_int_ptr"
+                            },
+                            Type::I64,
+                            false,
+                        ),
+                        Type::FloatSlice => (
+                            if is_min {
+                                "mako_native_slice_min_float_ptr"
+                            } else {
+                                "mako_native_slice_max_float_ptr"
+                            },
+                            Type::F64,
+                            false,
+                        ),
+                        Type::StrSlice => (
+                            if is_min {
+                                "mako_native_slice_min_str_ptr"
+                            } else {
+                                "mako_native_slice_max_str_ptr"
+                            },
+                            Type::Str,
+                            true,
+                        ),
+                        _ => {
+                            return Err(IrError::new(
+                                "native IR: slice_min/slice_max expects []int, []float, or []string",
+                            ))
+                        }
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![s],
+                        ret: Some(ret_ty),
+                    });
+                    if so {
+                        self.emit_drop(s, sty);
+                    }
+                    return Ok((out, ret_ty, is_owned));
+                }
+                if (function == "slice_contains" || function == "slice_index") && args.len() == 2 {
+                    let (s, sty, so) = self.lower_expr(&args[0])?;
+                    let (v, vty, vo) = self.lower_expr(&args[1])?;
+                    let is_contains = function == "slice_contains";
+                    let ret_ty = if is_contains { Type::I1 } else { Type::I64 };
+                    let fname = match (sty, vty) {
+                        (Type::IntSlice, Type::I64) => {
+                            if is_contains {
+                                "mako_native_slice_contains_int_ptr"
+                            } else {
+                                "mako_native_slice_index_int_ptr"
+                            }
+                        }
+                        (Type::FloatSlice, Type::F64) => {
+                            if is_contains {
+                                "mako_native_slice_contains_float_ptr"
+                            } else {
+                                "mako_native_slice_index_float_ptr"
+                            }
+                        }
+                        (Type::StrSlice, Type::Str) => {
+                            if is_contains {
+                                "mako_native_slice_contains_str_ptr"
+                            } else {
+                                "mako_native_slice_index_str_ptr"
+                            }
+                        }
+                        (Type::ByteSlice, Type::I64) => {
+                            if is_contains {
+                                "mako_native_slice_contains_byte_ptr"
+                            } else {
+                                "mako_native_slice_index_byte_ptr"
+                            }
+                        }
+                        _ => {
+                            return Err(IrError::new(
+                                "native IR: slice_contains/slice_index expects ([]int|[]float|[]string|[]byte, T)",
+                            ))
+                        }
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![s, v],
+                        ret: Some(ret_ty),
+                    });
+                    if so {
+                        self.emit_drop(s, sty);
+                    }
+                    if vo {
+                        self.emit_drop(v, vty);
+                    }
+                    return Ok((out, ret_ty, false));
+                }
+                if (function == "slice_equal" || function == "slice_compare") && args.len() == 2 {
+                    let (a, aty, ao) = self.lower_expr(&args[0])?;
+                    let (b, bty, bo) = self.lower_expr(&args[1])?;
+                    if aty != bty {
+                        return Err(IrError::new(
+                            "native IR: slice_equal/slice_compare type mismatch",
+                        ));
+                    }
+                    let is_eq = function == "slice_equal";
+                    let ret_ty = if is_eq { Type::I1 } else { Type::I64 };
+                    let fname = match aty {
+                        Type::IntSlice => {
+                            if is_eq {
+                                "mako_native_slice_equal_int_ptr"
+                            } else {
+                                "mako_native_slice_compare_int_ptr"
+                            }
+                        }
+                        Type::FloatSlice => {
+                            if is_eq {
+                                "mako_native_slice_equal_float_ptr"
+                            } else {
+                                "mako_native_slice_compare_float_ptr"
+                            }
+                        }
+                        Type::StrSlice => {
+                            if is_eq {
+                                "mako_native_slice_equal_str_ptr"
+                            } else {
+                                "mako_native_slice_compare_str_ptr"
+                            }
+                        }
+                        Type::ByteSlice => {
+                            if is_eq {
+                                "mako_native_slice_equal_byte_ptr"
+                            } else {
+                                "mako_native_slice_compare_byte_ptr"
+                            }
+                        }
+                        _ => {
+                            return Err(IrError::new(
+                                "native IR: slice_equal/slice_compare expects []int, []float, []string, or []byte",
+                            ))
+                        }
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![a, b],
+                        ret: Some(ret_ty),
+                    });
+                    if ao {
+                        self.emit_drop(a, aty);
+                    }
+                    if bo {
+                        self.emit_drop(b, bty);
+                    }
+                    return Ok((out, ret_ty, false));
+                }
+                if (function == "slice_grow" || function == "slice_repeat") && args.len() == 2 {
+                    let (s, sty, so) = self.lower_expr(&args[0])?;
+                    let (n, nty, no) = self.lower_expr(&args[1])?;
+                    if nty != Type::I64 || no {
+                        return Err(IrError::new(
+                            "native IR: slice_grow/slice_repeat count must be int",
+                        ));
+                    }
+                    let fname = if function == "slice_repeat" {
+                        match sty {
+                            Type::IntSlice => "mako_native_slice_repeat_int_ptr",
+                            Type::FloatSlice => "mako_native_slice_repeat_float_ptr",
+                            Type::ByteSlice => "mako_native_slice_repeat_byte_ptr",
+                            Type::StrSlice => "mako_native_slice_repeat_str_ptr",
+                            _ => {
+                                return Err(IrError::new(
+                                    "native IR: slice_repeat expects []int, []float, []byte, or []string",
+                                ))
+                            }
+                        }
+                    } else {
+                        match sty {
+                            Type::IntSlice => "mako_native_slice_grow_int_ptr",
+                            Type::FloatSlice => "mako_native_slice_grow_float_ptr",
+                            Type::ByteSlice => "mako_native_slice_grow_byte_ptr",
+                            Type::StrSlice => "mako_native_slice_grow_str_ptr",
+                            _ => {
+                                return Err(IrError::new(
+                                    "native IR: slice_grow expects []int, []float, []byte, or []string",
+                                ))
+                            }
+                        }
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![s, n],
+                        ret: Some(sty),
+                    });
+                    if so {
+                        self.emit_drop(s, sty);
+                    }
+                    return Ok((out, sty, true));
+                }
+                if function == "slice_replace" && args.len() == 4 {
+                    let (s, sty, so) = self.lower_expr(&args[0])?;
+                    let (i, ity, io) = self.lower_expr(&args[1])?;
+                    let (j, jty, jo) = self.lower_expr(&args[2])?;
+                    let (rep, rty, ro) = self.lower_expr(&args[3])?;
+                    if ity != Type::I64 || jty != Type::I64 || io || jo || sty != rty {
+                        return Err(IrError::new(
+                            "native IR: slice_replace expects ([]T, int, int, []T)",
+                        ));
+                    }
+                    let fname = match sty {
+                        Type::IntSlice => "mako_native_slice_replace_int_ptr",
+                        Type::FloatSlice => "mako_native_slice_replace_float_ptr",
+                        Type::ByteSlice => "mako_native_slice_replace_byte_ptr",
+                        Type::StrSlice => "mako_native_slice_replace_str_ptr",
+                        _ => {
+                            return Err(IrError::new(
+                                "native IR: slice_replace expects []int, []float, []byte, or []string",
+                            ))
+                        }
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![s, i, j, rep],
+                        ret: Some(sty),
+                    });
+                    if so {
+                        self.emit_drop(s, sty);
+                    }
+                    if ro {
+                        self.emit_drop(rep, rty);
+                    }
+                    return Ok((out, sty, true));
+                }
+                if function == "poller_wait" && args.len() == 5 {
+                    let (p, pty, po) = self.lower_expr(&args[0])?;
+                    let (toks, tty, to) = self.lower_expr(&args[1])?;
+                    let (evs, ety, eo) = self.lower_expr(&args[2])?;
+                    let (max_ev, mty, mo) = self.lower_expr(&args[3])?;
+                    let (tmo, tmty, tmo_o) = self.lower_expr(&args[4])?;
+                    if pty != Type::I64
+                        || tty != Type::IntSlice
+                        || ety != Type::IntSlice
+                        || mty != Type::I64
+                        || tmty != Type::I64
+                        || po
+                        || mo
+                        || tmo_o
+                    {
+                        return Err(IrError::new(
+                            "native IR: poller_wait expects (int, []int, []int, int, int)",
+                        ));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_poller_wait_ptr".into(),
+                        args: vec![p, toks, evs, max_ev, tmo],
+                        ret: Some(Type::I64),
+                    });
+                    if to {
+                        self.emit_drop(toks, tty);
+                    }
+                    if eo {
+                        self.emit_drop(evs, ety);
+                    }
+                    return Ok((out, Type::I64, false));
+                }
+                if function == "slice_delete" && args.len() == 3 {
+                    let (s, sty, so) = self.lower_expr(&args[0])?;
+                    let (i, ity, io) = self.lower_expr(&args[1])?;
+                    let (j, jty, jo) = self.lower_expr(&args[2])?;
+                    if ity != Type::I64 || jty != Type::I64 || io || jo {
+                        return Err(IrError::new("native IR: slice_delete bounds must be int"));
+                    }
+                    let fname = match sty {
+                        Type::IntSlice => "mako_native_slice_delete_int_ptr",
+                        Type::FloatSlice => "mako_native_slice_delete_float_ptr",
+                        Type::StrSlice => "mako_native_slice_delete_str_ptr",
+                        _ => {
+                            return Err(IrError::new(
+                                "native IR: slice_delete expects []int, []float, or []string",
+                            ))
+                        }
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![s, i, j],
+                        ret: Some(sty),
+                    });
+                    if so {
+                        self.emit_drop(s, sty);
+                    }
+                    return Ok((out, sty, true));
+                }
+                if function == "slice_insert" && args.len() == 3 {
+                    let (s, sty, so) = self.lower_expr(&args[0])?;
+                    let (i, ity, io) = self.lower_expr(&args[1])?;
+                    let (v, vty, vo) = self.lower_expr(&args[2])?;
+                    if ity != Type::I64 || io {
+                        return Err(IrError::new("native IR: slice_insert index must be int"));
+                    }
+                    let fname = match (sty, vty) {
+                        (Type::IntSlice, Type::I64) => "mako_native_slice_insert_int_ptr",
+                        (Type::FloatSlice, Type::F64) => "mako_native_slice_insert_float_ptr",
+                        (Type::StrSlice, Type::Str) => "mako_native_slice_insert_str_ptr",
+                        _ => {
+                            return Err(IrError::new(
+                                "native IR: slice_insert expects ([]int|[]float|[]string, int, T)",
+                            ))
+                        }
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![s, i, v],
+                        ret: Some(sty),
+                    });
+                    if so {
+                        self.emit_drop(s, sty);
+                    }
+                    if vo {
+                        self.emit_drop(v, vty);
+                    }
+                    return Ok((out, sty, true));
+                }
+                // Scatter-gather vectored raw I/O (takes []int ptrs, []int lens)
+                if (function == "writev_raw" || function == "readv_raw") && args.len() == 3 {
+                    let (fd, fty, fo) = self.lower_expr(&args[0])?;
+                    let (ptrs, pty, po) = self.lower_expr(&args[1])?;
+                    let (lens, lty, lo) = self.lower_expr(&args[2])?;
+                    if fty != Type::I64 || pty != Type::IntSlice || lty != Type::IntSlice || fo {
+                        return Err(IrError::new(
+                            "native IR: writev_raw/readv_raw expects (int, []int, []int)",
+                        ));
+                    }
+                    let fname = if function == "writev_raw" {
+                        "mako_native_writev_raw_ptr"
+                    } else {
+                        "mako_native_readv_raw_ptr"
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![fd, ptrs, lens],
+                        ret: Some(Type::I64),
+                    });
+                    if po {
+                        self.emit_drop(ptrs, pty);
+                    }
+                    if lo {
+                        self.emit_drop(lens, lty);
+                    }
+                    return Ok((out, Type::I64, false));
+                }
+                if (function == "pwritev_raw" || function == "preadv_raw") && args.len() == 4 {
+                    let (fd, fty, fo) = self.lower_expr(&args[0])?;
+                    let (ptrs, pty, po) = self.lower_expr(&args[1])?;
+                    let (lens, lty, lo) = self.lower_expr(&args[2])?;
+                    let (off, oty, oo) = self.lower_expr(&args[3])?;
+                    if fty != Type::I64
+                        || pty != Type::IntSlice
+                        || lty != Type::IntSlice
+                        || oty != Type::I64
+                        || fo
+                        || oo
+                    {
+                        return Err(IrError::new(
+                            "native IR: pwritev_raw/preadv_raw expects (int, []int, []int, int)",
+                        ));
+                    }
+                    let fname = if function == "pwritev_raw" {
+                        "mako_native_pwritev_raw_ptr"
+                    } else {
+                        "mako_native_preadv_raw_ptr"
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![fd, ptrs, lens, off],
+                        ret: Some(Type::I64),
+                    });
+                    if po {
+                        self.emit_drop(ptrs, pty);
+                    }
+                    if lo {
+                        self.emit_drop(lens, lty);
+                    }
+                    return Ok((out, Type::I64, false));
+                }
+                // SIMD 4-lane & 8-lane slice builtins
+                if matches!(
+                    function.as_str(),
+                    "simd_f32x4_add" | "simd_f32x4_sub" | "simd_f32x4_mul"
+                ) && args.len() == 2
+                {
+                    let (a, at, ao) = self.lower_expr(&args[0])?;
+                    let (b, bt, bo) = self.lower_expr(&args[1])?;
+                    if at != Type::FloatSlice || bt != Type::FloatSlice {
+                        return Err(IrError::new(
+                            "native IR: simd_f32x4_* expects ([]float, []float)",
+                        ));
+                    }
+                    let fname = match function.as_str() {
+                        "simd_f32x4_add" => "mako_native_simd_f32x4_add_ptr",
+                        "simd_f32x4_sub" => "mako_native_simd_f32x4_sub_ptr",
+                        _ => "mako_native_simd_f32x4_mul_ptr",
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![a, b],
+                        ret: Some(Type::FloatSlice),
+                    });
+                    if ao {
+                        self.emit_drop(a, at);
+                    }
+                    if bo {
+                        self.emit_drop(b, bt);
+                    }
+                    return Ok((out, Type::FloatSlice, true));
+                }
+                if function == "simd_f32x4_scale" && args.len() == 2 {
+                    let (a, at, ao) = self.lower_expr(&args[0])?;
+                    let (s, st, so) = self.lower_expr(&args[1])?;
+                    if at != Type::FloatSlice || st != Type::F64 || so {
+                        return Err(IrError::new(
+                            "native IR: simd_f32x4_scale expects ([]float, float)",
+                        ));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_simd_f32x4_scale_ptr".into(),
+                        args: vec![a, s],
+                        ret: Some(Type::FloatSlice),
+                    });
+                    if ao {
+                        self.emit_drop(a, at);
+                    }
+                    return Ok((out, Type::FloatSlice, true));
+                }
+                if function == "simd_f32x4_fma" && args.len() == 3 {
+                    let (a, at, ao) = self.lower_expr(&args[0])?;
+                    let (b, bt, bo) = self.lower_expr(&args[1])?;
+                    let (c, ct, co) = self.lower_expr(&args[2])?;
+                    if at != Type::FloatSlice || bt != Type::FloatSlice || ct != Type::FloatSlice {
+                        return Err(IrError::new(
+                            "native IR: simd_f32x4_fma expects ([]float, []float, []float)",
+                        ));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_simd_f32x4_fma_ptr".into(),
+                        args: vec![a, b, c],
+                        ret: Some(Type::FloatSlice),
+                    });
+                    if ao {
+                        self.emit_drop(a, at);
+                    }
+                    if bo {
+                        self.emit_drop(b, bt);
+                    }
+                    if co {
+                        self.emit_drop(c, ct);
+                    }
+                    return Ok((out, Type::FloatSlice, true));
+                }
+                if function == "simd_f32x4_dot" && args.len() == 2 {
+                    let (a, at, ao) = self.lower_expr(&args[0])?;
+                    let (b, bt, bo) = self.lower_expr(&args[1])?;
+                    if at != Type::FloatSlice || bt != Type::FloatSlice {
+                        return Err(IrError::new(
+                            "native IR: simd_f32x4_dot expects ([]float, []float)",
+                        ));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_simd_f32x4_dot_ptr".into(),
+                        args: vec![a, b],
+                        ret: Some(Type::F64),
+                    });
+                    if ao {
+                        self.emit_drop(a, at);
+                    }
+                    if bo {
+                        self.emit_drop(b, bt);
+                    }
+                    return Ok((out, Type::F64, false));
+                }
+                if function == "simd_f32x4_hadd" && args.len() == 1 {
+                    let (a, at, ao) = self.lower_expr(&args[0])?;
+                    if at != Type::FloatSlice {
+                        return Err(IrError::new("native IR: simd_f32x4_hadd expects []float"));
+                    }
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_simd_f32x4_hadd_ptr".into(),
+                        args: vec![a],
+                        ret: Some(Type::F64),
+                    });
+                    if ao {
+                        self.emit_drop(a, at);
+                    }
+                    return Ok((out, Type::F64, false));
+                }
+                if matches!(function.as_str(), "simd_i32x4_add" | "simd_i16x8_add")
+                    && args.len() == 2
+                {
+                    let (a, at, ao) = self.lower_expr(&args[0])?;
+                    let (b, bt, bo) = self.lower_expr(&args[1])?;
+                    if at != Type::IntSlice || bt != Type::IntSlice {
+                        return Err(IrError::new(
+                            "native IR: simd_i32x4_add/simd_i16x8_add expects ([]int, []int)",
+                        ));
+                    }
+                    let fname = if function == "simd_i32x4_add" {
+                        "mako_native_simd_i32x4_add_ptr"
+                    } else {
+                        "mako_native_simd_i16x8_add_ptr"
+                    };
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: fname.into(),
+                        args: vec![a, b],
+                        ret: Some(Type::IntSlice),
+                    });
+                    if ao {
+                        self.emit_drop(a, at);
+                    }
+                    if bo {
+                        self.emit_drop(b, bt);
+                    }
+                    return Ok((out, Type::IntSlice, true));
                 }
                 // Runtime bridge builtins (mako_rt via native_bridge.c).
                 if let Some(result) = self.lower_runtime_builtin(function, args)? {
@@ -15075,7 +16325,42 @@ impl<'a> FunctionLowerer<'a> {
         expr: &Expr,
     ) -> Result<(Value, Type, bool), IrError> {
         let target = resolve_type(ty, self.structs)?;
+        let is_src_128 = self.expr_is_128bit(expr);
         let (v, src, owned) = self.lower_expr(expr)?;
+        if target == Type::I64 && src == Type::I64 && !owned {
+            if let TypeExpr::Named(n) = ty {
+                if matches!(n.as_str(), "i128" | "int128") {
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_i128_box".into(),
+                        args: vec![v],
+                        ret: Some(Type::I64),
+                    });
+                    return Ok((out, Type::I64, false));
+                }
+                if matches!(n.as_str(), "u128" | "uint128") {
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_u128_box".into(),
+                        args: vec![v],
+                        ret: Some(Type::I64),
+                    });
+                    return Ok((out, Type::I64, false));
+                }
+                if is_src_128 {
+                    let out = self.value();
+                    self.emit(Inst::Call {
+                        out: Some(out),
+                        function: "mako_native_i128_lo".into(),
+                        args: vec![v],
+                        ret: Some(Type::I64),
+                    });
+                    return Ok((out, Type::I64, false));
+                }
+            }
+        }
         if target == src {
             return Ok((v, src, owned));
         }
@@ -16949,6 +18234,726 @@ impl<'a> FunctionLowerer<'a> {
         // arg types: I64, F64, Str, ChanI, Arena, I1
         type Spec = (&'static str, &'static [Type], Option<Type>, bool);
         let spec: Option<Spec> = match function {
+            "u128_from_parts" if args.len() == 2 => Some((
+                "mako_native_u128_from_parts",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "i128_from_parts" if args.len() == 2 => Some((
+                "mako_native_i128_from_parts",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_hi" if args.len() == 1 => Some((
+                "mako_native_u128_hi",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_lo" if args.len() == 1 => Some((
+                "mako_native_u128_lo",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "i128_hi" if args.len() == 1 => Some((
+                "mako_native_i128_hi",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "i128_lo" if args.len() == 1 => Some((
+                "mako_native_i128_lo",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_add" if args.len() == 2 => Some((
+                "mako_native_u128_add",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_sub" if args.len() == 2 => Some((
+                "mako_native_u128_sub",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_mul" if args.len() == 2 => Some((
+                "mako_native_u128_mul",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_div" if args.len() == 2 => Some((
+                "mako_native_u128_div",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_rem" if args.len() == 2 => Some((
+                "mako_native_u128_rem",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_shl" if args.len() == 2 => Some((
+                "mako_native_u128_shl",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_shr" if args.len() == 2 => Some((
+                "mako_native_u128_shr",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_eq" if args.len() == 2 => Some((
+                "mako_native_u128_eq",
+                &[Type::I64, Type::I64],
+                Some(Type::I1),
+                false,
+            )),
+            "u128_cmp" if args.len() == 2 => Some((
+                "mako_native_u128_cmp",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "u128_to_hex" if args.len() == 1 => Some((
+                "mako_native_u128_to_hex_ptr",
+                &[Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "i128_add" if args.len() == 2 => Some((
+                "mako_native_i128_add",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "i128_sub" if args.len() == 2 => Some((
+                "mako_native_i128_sub",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "i128_mul" if args.len() == 2 => Some((
+                "mako_native_i128_mul",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "i128_div" if args.len() == 2 => Some((
+                "mako_native_i128_div",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "i128_cmp" if args.len() == 2 => Some((
+                "mako_native_i128_cmp",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_u8" | "mem_read_byte" if args.len() == 2 => Some((
+                "mako_native_mem_read_u8",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_i8" if args.len() == 2 => Some((
+                "mako_native_mem_read_i8",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_u16" if args.len() == 2 => Some((
+                "mako_native_mem_read_u16",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_i16" if args.len() == 2 => Some((
+                "mako_native_mem_read_i16",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_u32" if args.len() == 2 => Some((
+                "mako_native_mem_read_u32",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_i32" if args.len() == 2 => Some((
+                "mako_native_mem_read_i32",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_u64" if args.len() == 2 => Some((
+                "mako_native_mem_read_u64",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_i64" if args.len() == 2 => Some((
+                "mako_native_mem_read_i64",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_f32" if args.len() == 2 => Some((
+                "mako_native_mem_read_f32",
+                &[Type::I64, Type::I64],
+                Some(Type::F64),
+                false,
+            )),
+            "mem_read_f64" if args.len() == 2 => Some((
+                "mako_native_mem_read_f64",
+                &[Type::I64, Type::I64],
+                Some(Type::F64),
+                false,
+            )),
+            "mem_write_u8" | "mem_write_byte" if args.len() == 3 => Some((
+                "mako_native_mem_write_u8",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_i8" if args.len() == 3 => Some((
+                "mako_native_mem_write_i8",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_u16" if args.len() == 3 => Some((
+                "mako_native_mem_write_u16",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_i16" if args.len() == 3 => Some((
+                "mako_native_mem_write_i16",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_u32" if args.len() == 3 => Some((
+                "mako_native_mem_write_u32",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_i32" if args.len() == 3 => Some((
+                "mako_native_mem_write_i32",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_u64" if args.len() == 3 => Some((
+                "mako_native_mem_write_u64",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_i64" if args.len() == 3 => Some((
+                "mako_native_mem_write_i64",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_f32" if args.len() == 3 => Some((
+                "mako_native_mem_write_f32",
+                &[Type::I64, Type::I64, Type::F64],
+                None,
+                false,
+            )),
+            "mem_write_f64" if args.len() == 3 => Some((
+                "mako_native_mem_write_f64",
+                &[Type::I64, Type::I64, Type::F64],
+                None,
+                false,
+            )),
+            "mem_read_u16_le" if args.len() == 2 => Some((
+                "mako_native_mem_read_u16_le",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_u16_be" if args.len() == 2 => Some((
+                "mako_native_mem_read_u16_be",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_u32_le" if args.len() == 2 => Some((
+                "mako_native_mem_read_u32_le",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_u32_be" if args.len() == 2 => Some((
+                "mako_native_mem_read_u32_be",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_u64_le" if args.len() == 2 => Some((
+                "mako_native_mem_read_u64_le",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_read_u64_be" if args.len() == 2 => Some((
+                "mako_native_mem_read_u64_be",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_write_u16_le" if args.len() == 3 => Some((
+                "mako_native_mem_write_u16_le",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_u16_be" if args.len() == 3 => Some((
+                "mako_native_mem_write_u16_be",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_u32_le" if args.len() == 3 => Some((
+                "mako_native_mem_write_u32_le",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_u32_be" if args.len() == 3 => Some((
+                "mako_native_mem_write_u32_be",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_u64_le" if args.len() == 3 => Some((
+                "mako_native_mem_write_u64_le",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_write_u64_be" if args.len() == 3 => Some((
+                "mako_native_mem_write_u64_be",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_zero" if args.len() == 2 => Some((
+                "mako_native_mem_zero",
+                &[Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_copy" if args.len() == 3 => Some((
+                "mako_native_mem_copy",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_cmp" if args.len() == 3 => Some((
+                "mako_native_mem_cmp",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_atomic_load_i64" if args.len() == 2 => Some((
+                "mako_native_mem_atomic_load_i64",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_atomic_store_i64" if args.len() == 3 => Some((
+                "mako_native_mem_atomic_store_i64",
+                &[Type::I64, Type::I64, Type::I64],
+                None,
+                false,
+            )),
+            "mem_atomic_add_i64" if args.len() == 3 => Some((
+                "mako_native_mem_atomic_add_i64",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_atomic_sub_i64" if args.len() == 3 => Some((
+                "mako_native_mem_atomic_sub_i64",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_atomic_exchange_i64" if args.len() == 3 => Some((
+                "mako_native_mem_atomic_exchange_i64",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mem_atomic_cas_i64" if args.len() == 4 => Some((
+                "mako_native_mem_atomic_cas_i64",
+                &[Type::I64, Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "memory_fence" if args.is_empty() => Some((
+                "mako_native_memory_fence",
+                &[],
+                None,
+                false,
+            )),
+            "pread_raw" if args.len() == 4 => Some((
+                "mako_native_pread_raw",
+                &[Type::I64, Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "pwrite_raw" if args.len() == 4 => Some((
+                "mako_native_pwrite_raw",
+                &[Type::I64, Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "madvise" if args.len() == 3 => Some((
+                "mako_native_madvise",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "msync" if args.len() == 3 => Some((
+                "mako_native_msync",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "flock" if args.len() == 2 => Some((
+                "mako_native_flock",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "poll_fd" if args.len() == 3 => Some((
+                "mako_native_poll_fd",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "poller_new" if args.is_empty() => Some((
+                "mako_native_poller_new",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "poller_add" if args.len() == 4 => Some((
+                "mako_native_poller_add",
+                &[Type::I64, Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "poller_mod" if args.len() == 4 => Some((
+                "mako_native_poller_mod",
+                &[Type::I64, Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "poller_del" if args.len() == 2 => Some((
+                "mako_native_poller_del",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "poller_close" if args.len() == 1 => Some((
+                "mako_native_poller_close",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "cpu_ticks" if args.is_empty() => Some((
+                "mako_native_cpu_ticks",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "cpu_pause" if args.is_empty() => Some((
+                "mako_native_cpu_pause",
+                &[],
+                Some(Type::I64),
+                false,
+            )),
+            "prefetch_read" if args.len() == 1 => Some((
+                "mako_native_prefetch_read",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "prefetch_write" if args.len() == 1 => Some((
+                "mako_native_prefetch_write",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mmap_file" if args.len() == 5 => Some((
+                "mako_native_mmap_file",
+                &[Type::I64, Type::I64, Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "alloc_aligned" if args.len() == 2 => Some((
+                "mako_native_alloc_aligned",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "free_aligned" if args.len() == 1 => Some((
+                "mako_native_free_aligned",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mmap_anon" if args.len() == 1 => Some((
+                "mako_native_mmap_anon",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "munmap" if args.len() == 2 => Some((
+                "mako_native_munmap",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "mprotect_raw" | "mprotect" if args.len() == 3 => Some((
+                "mako_native_mprotect_raw",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "ioctl" if args.len() == 3 => Some((
+                "mako_native_ioctl",
+                &[Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "shm_open_raw" if args.len() == 2 => Some((
+                "mako_native_shm_open_raw_ptr",
+                &[Type::Str, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "shm_unlink_raw" if args.len() == 1 => Some((
+                "mako_native_shm_unlink_raw_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "proc_spawn_piped" if args.len() == 1 => Some((
+                "mako_native_proc_spawn_piped_ptr",
+                &[Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "proc_write_stdin" if args.len() == 2 => Some((
+                "mako_native_proc_write_stdin_ptr",
+                &[Type::I64, Type::Str],
+                Some(Type::I64),
+                false,
+            )),
+            "proc_close_stdin" if args.len() == 1 => Some((
+                "mako_native_proc_close_stdin",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "proc_read_stdout" if args.len() == 2 => Some((
+                "mako_native_proc_read_stdout_ptr",
+                &[Type::I64, Type::I64],
+                Some(Type::Str),
+                true,
+            )),
+            "proc_wait_nb" if args.len() == 1 => Some((
+                "mako_native_proc_wait_nb",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "proc_exit_code" if args.len() == 1 => Some((
+                "mako_native_proc_exit_code",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "proc_kill" if args.len() == 2 => Some((
+                "mako_native_proc_kill",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "proc_close" if args.len() == 1 => Some((
+                "mako_native_proc_close",
+                &[Type::I64],
+                None,
+                false,
+            )),
+            "bswap16" if args.len() == 1 => Some((
+                "mako_native_bswap16",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "bswap32" if args.len() == 1 => Some((
+                "mako_native_bswap32",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "bswap64" if args.len() == 1 => Some((
+                "mako_native_bswap64",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "hton16" | "htons" if args.len() == 1 => Some((
+                "mako_native_hton16",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "hton32" | "htonl" if args.len() == 1 => Some((
+                "mako_native_hton32",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "hton64" if args.len() == 1 => Some((
+                "mako_native_hton64",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "ntoh16" | "ntohs" if args.len() == 1 => Some((
+                "mako_native_ntoh16",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "ntoh32" | "ntohl" if args.len() == 1 => Some((
+                "mako_native_ntoh32",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "ntoh64" if args.len() == 1 => Some((
+                "mako_native_ntoh64",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "rotl64" | "bit_rotl64" if args.len() == 2 => Some((
+                "mako_native_bit_rotl64",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "rotr64" | "bit_rotr64" if args.len() == 2 => Some((
+                "mako_native_bit_rotr64",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "rotl32" if args.len() == 2 => Some((
+                "mako_native_rotl32",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "rotr32" if args.len() == 2 => Some((
+                "mako_native_rotr32",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "popcount32" if args.len() == 1 => Some((
+                "mako_native_popcount32",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "clz32" if args.len() == 1 => Some((
+                "mako_native_clz32",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "ctz32" if args.len() == 1 => Some((
+                "mako_native_ctz32",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "bit_clz64" if args.len() == 1 => Some((
+                "mako_native_bit_clz64",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "bit_ctz64" if args.len() == 1 => Some((
+                "mako_native_bit_ctz64",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "bit_popcnt64" if args.len() == 1 => Some((
+                "mako_native_bit_popcnt64",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "bit_ffs64" if args.len() == 1 => Some((
+                "mako_native_bit_ffs64",
+                &[Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "wrapping_add" if args.len() == 2 => Some((
+                "mako_native_wrapping_add",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "wrapping_sub" if args.len() == 2 => Some((
+                "mako_native_wrapping_sub",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "wrapping_mul" if args.len() == 2 => Some((
+                "mako_native_wrapping_mul",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "saturating_add" if args.len() == 2 => Some((
+                "mako_native_saturating_add",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "saturating_sub" if args.len() == 2 => Some((
+                "mako_native_saturating_sub",
+                &[Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
             "tcp_listen" if args.len() == 1 => Some((
                 "mako_native_tcp_listen",
                 &[Type::I64],
@@ -17760,7 +19765,7 @@ impl<'a> FunctionLowerer<'a> {
                 false,
             )),
             "actor_recv" if args.len() == 1 => Some((
-                "mako_native_chan_recv",
+                "mako_native_actor_recv",
                 &[Type::ChanI],
                 Some(Type::I64),
                 false,

@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -191,8 +192,11 @@ static void mako_native_slice_bounds(MakoNativeIntSlice value, int64_t index) {
 
 void mako_native_int_slice_make(MakoNativeIntSlice *result, size_t len, size_t cap) {
     if (cap < len) abort();
-    int64_t *data = cap ? calloc(cap, sizeof(*data)) : NULL;
-    if (cap && data == NULL) abort();
+    int64_t *data = NULL;
+    if (cap) {
+        data = len ? calloc(cap, sizeof(*data)) : malloc(cap * sizeof(*data));
+        if (data == NULL) abort();
+    }
     *result = (MakoNativeIntSlice){data, len, cap, 1};
 }
 
@@ -230,12 +234,12 @@ void mako_native_int_slice_append(MakoNativeIntSlice *result, int64_t *data, siz
     }
     size_t cap = value.cap;
     if (cap < value.len + 1) cap = cap ? cap * 2 : 1;
-    MakoNativeIntSlice out;
-    mako_native_int_slice_make(&out, value.len + 1, cap);
-    if (value.len) memcpy(out.data, value.data, value.len * sizeof(*value.data));
-    out.data[value.len] = element;
+    int64_t *new_data = malloc(cap * sizeof(*new_data));
+    if (!new_data) abort();
+    if (value.len) memcpy(new_data, value.data, value.len * sizeof(*new_data));
+    new_data[value.len] = element;
     if (value.owned) free(value.data);
-    *result = out;
+    *result = (MakoNativeIntSlice){new_data, value.len + 1, cap, 1};
 }
 
 void mako_native_int_slice_slice(MakoNativeIntSlice *result, int64_t *data, size_t len,
@@ -1055,8 +1059,11 @@ typedef struct {
 
 void mako_native_str_slice_make(MakoNativeStrSliceValue *result, size_t len, size_t cap) {
     if (cap < len) abort();
-    MakoNativeString *data = cap ? calloc(cap, sizeof(*data)) : NULL;
-    if (cap && data == NULL) abort();
+    MakoNativeString *data = NULL;
+    if (cap) {
+        data = len ? calloc(cap, sizeof(*data)) : malloc(cap * sizeof(*data));
+        if (data == NULL) abort();
+    }
     *result = (MakoNativeStrSliceValue){data, len, cap, 1};
 }
 
@@ -1098,7 +1105,7 @@ void mako_native_str_slice_append(MakoNativeStrSliceValue *result, MakoNativeStr
     }
     size_t new_cap = cap ? cap * 2 : 1;
     if (new_cap < len + 1) new_cap = len + 1;
-    MakoNativeString *new_data = calloc(new_cap, sizeof(*new_data));
+    MakoNativeString *new_data = malloc(new_cap * sizeof(*new_data));
     if (!new_data) abort();
     if (len) memcpy(new_data, data, len * sizeof(*new_data));
     new_data[len] = mako_native_string_clone(element);
@@ -1139,9 +1146,9 @@ void mako_native_str_slice_drop(MakoNativeString *data, size_t len, size_t cap, 
     (void)cap;
     if (!owned || !data) return;
     /* Inline the immortal/static check so a []string of literals (string_slice
-     * bench) does not pay  N  external drop calls — only free the buffer. */
+     * bench) does not pay N external drop calls — only free the buffer. */
     for (size_t i = 0; i < len; ++i) {
-        if (data[i].data && !mako_str_is_static_len(data[i].len)) {
+        if ((int64_t)data[i].len >= 0 && data[i].data) {
             free((void *)data[i].data);
         }
     }
@@ -1445,8 +1452,8 @@ int64_t mako_native_struct_content_key_flat(void *p, int64_t nfields, int64_t st
 }
 
 static void mako_native_map_ii_alloc_tables(MakoNativeMapII *m, size_t cap) {
-    m->keys = calloc(cap, sizeof(int64_t));
-    m->vals = calloc(cap, sizeof(int64_t));
+    m->keys = malloc(cap * sizeof(int64_t));
+    m->vals = malloc(cap * sizeof(int64_t));
     m->state = calloc(cap, 1);
     /* Keep existing lenp across rehash; only create on first alloc. */
     if (!m->lenp) {
@@ -1695,11 +1702,103 @@ typedef struct {
     int64_t owned;
 } MakoNativeStructSlice;
 
-void *mako_native_iface_clone(void *box);
-void mako_native_iface_drop(void *box);
-int64_t mako_native_http_request_clone_ptr(int64_t handle);
-int64_t mako_native_http_request_eq_ptr(int64_t a, int64_t b);
-void mako_native_http_request_drop_ptr(int64_t handle);
+typedef void (*MakoNativeIfaceDrop)(void *);
+
+typedef struct {
+    int64_t tag;
+    void *data;
+    MakoNativeIfaceDrop drop;
+    _Atomic size_t refs;
+} MakoNativeIface;
+
+void *mako_native_iface_box(int64_t tag, void *data, MakoNativeIfaceDrop drop) {
+    MakoNativeIface *b = (MakoNativeIface *)malloc(sizeof(MakoNativeIface));
+    if (!b) abort();
+    b->tag = tag;
+    b->data = data;
+    b->drop = drop;
+    atomic_init(&b->refs, 1);
+    return b;
+}
+
+void *mako_native_iface_clone(void *box) {
+    MakoNativeIface *b = (MakoNativeIface *)box;
+    if (b) atomic_fetch_add_explicit(&b->refs, 1, memory_order_relaxed);
+    return box;
+}
+
+int64_t mako_native_iface_tag(void *box) {
+    return box ? ((MakoNativeIface *)box)->tag : 0;
+}
+
+void *mako_native_iface_data(void *box) {
+    return box ? ((MakoNativeIface *)box)->data : NULL;
+}
+
+void mako_native_iface_drop(void *box) {
+    MakoNativeIface *b = (MakoNativeIface *)box;
+    if (!b) return;
+    if (atomic_fetch_sub_explicit(&b->refs, 1, memory_order_acq_rel) != 1) return;
+    if (b->drop) b->drop(b->data);
+    free(box);
+}
+
+typedef struct {
+    MakoNativeString *method;
+    MakoNativeString *path;
+    MakoNativeString *body;
+} MakoNativeHttpRequest;
+
+int64_t mako_native_http_request_clone_ptr(int64_t h) {
+    const MakoNativeHttpRequest *src = (const MakoNativeHttpRequest *)(intptr_t)h;
+    if (!src) return 0;
+    MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)calloc(1, sizeof(*box));
+    if (!box) abort();
+    box->method = mako_native_string_clone_ptr(src->method);
+    box->path = mako_native_string_clone_ptr(src->path);
+    box->body = mako_native_string_clone_ptr(src->body);
+    return (int64_t)(intptr_t)box;
+}
+
+int64_t mako_native_http_request_eq_ptr(int64_t a, int64_t b) {
+    MakoNativeHttpRequest *left = (MakoNativeHttpRequest *)(intptr_t)a;
+    MakoNativeHttpRequest *right = (MakoNativeHttpRequest *)(intptr_t)b;
+    if (left == right) return 1;
+    if (!left || !right) return 0;
+    return left->method && right->method &&
+           left->path && right->path &&
+           left->body && right->body &&
+           mako_native_string_equal_ptr(left->method, right->method) &&
+           mako_native_string_equal_ptr(left->path, right->path) &&
+           mako_native_string_equal_ptr(left->body, right->body);
+}
+
+void mako_native_http_request_drop_ptr(int64_t h) {
+    MakoNativeHttpRequest *box = (MakoNativeHttpRequest *)(intptr_t)h;
+    if (!box) return;
+    mako_native_string_drop_ptr(box->method);
+    mako_native_string_drop_ptr(box->path);
+    mako_native_string_drop_ptr(box->body);
+    free(box);
+}
+
+MakoNativeString *mako_native_http_request_method_ptr(int64_t h) {
+    MakoNativeHttpRequest *b = (MakoNativeHttpRequest *)(intptr_t)h;
+    if (!b || !b->method) return mako_native_string_literal_ptr("", 0);
+    return mako_native_string_clone_ptr(b->method);
+}
+
+MakoNativeString *mako_native_http_request_path_ptr(int64_t h) {
+    MakoNativeHttpRequest *b = (MakoNativeHttpRequest *)(intptr_t)h;
+    if (!b || !b->path) return mako_native_string_literal_ptr("", 0);
+    return mako_native_string_clone_ptr(b->path);
+}
+
+MakoNativeString *mako_native_http_request_body_ptr(int64_t h) {
+    MakoNativeHttpRequest *b = (MakoNativeHttpRequest *)(intptr_t)h;
+    if (!b || !b->body) return mako_native_string_literal_ptr("", 0);
+    return mako_native_string_clone_ptr(b->body);
+}
 
 MakoNativeStructSlice *mako_native_struct_slice_clone_ptr(
     const MakoNativeStructSlice *in, int64_t nfields, int64_t str_mask,
@@ -1738,12 +1837,8 @@ void mako_native_struct_slice_drop_ptr(
     free(slice);
 }
 
-extern void *mako_native_chan_clone(void *);
-extern void *mako_native_chan_str_clone(void *);
-extern void *mako_native_chan_ptr_clone(void *);
-extern void mako_native_chan_drop(void *);
-extern void mako_native_chan_str_drop(void *);
-extern void mako_native_chan_ptr_drop(void *);
+void *(*mako_native_chan_clone_hook)(void *) = NULL;
+void (*mako_native_chan_drop_hook)(void *) = NULL;
 
 /* Value kinds for content-keyed maps:
  * 0 scalar/shared handle, 1 string, 2 struct, 3 []int, 4 []string,
@@ -1785,9 +1880,11 @@ static void mako_native_struct_map_value_drop(
         case 8:
             mako_native_http_request_drop_ptr(value);
             break;
-        case 9: mako_native_chan_drop((void *)(intptr_t)value); break;
-        case 10: mako_native_chan_str_drop((void *)(intptr_t)value); break;
-        case 11: mako_native_chan_ptr_drop((void *)(intptr_t)value); break;
+        case 9:
+        case 10:
+        case 11:
+            if (mako_native_chan_drop_hook) mako_native_chan_drop_hook((void *)(intptr_t)value);
+            break;
         default:
             break;
     }
@@ -1832,9 +1929,12 @@ static int64_t mako_native_struct_map_value_clone(
             );
         case 8:
             return mako_native_http_request_clone_ptr(value);
-        case 9: return (int64_t)(intptr_t)mako_native_chan_clone((void *)(intptr_t)value);
-        case 10: return (int64_t)(intptr_t)mako_native_chan_str_clone((void *)(intptr_t)value);
-        case 11: return (int64_t)(intptr_t)mako_native_chan_ptr_clone((void *)(intptr_t)value);
+        case 9:
+        case 10:
+        case 11:
+            return mako_native_chan_clone_hook
+                ? (int64_t)(intptr_t)mako_native_chan_clone_hook((void *)(intptr_t)value)
+                : value;
         default:
             return value;
     }
@@ -2924,10 +3024,121 @@ MakoNativeIntSlice *mako_native_maps_values_ii_ptr(const MakoNativeMapII *m) {
     return out;
 }
 
-// Defined in native_bridge.c (same archive).
-typedef struct MakoNativePtrSlice MakoNativePtrSlice;
-extern MakoNativePtrSlice *mako_native_ptr_slice_make(int64_t len, int64_t cap);
-extern void mako_native_ptr_slice_set(MakoNativePtrSlice *s, int64_t i, void *elem);
+typedef struct {
+    void **data;
+    size_t len;
+    size_t cap;
+    int64_t owned;
+} MakoNativePtrSlice;
+
+MakoNativePtrSlice *mako_native_ptr_slice_make(int64_t len, int64_t cap) {
+    if (cap < len) cap = len;
+    if (cap < 0) cap = 0;
+    MakoNativePtrSlice *s = (MakoNativePtrSlice *)calloc(1, sizeof(*s));
+    if (!s) abort();
+    if (cap > 0) {
+        s->data = (void **)calloc((size_t)cap, sizeof(void *));
+        if (!s->data) abort();
+    }
+    s->len = (size_t)len;
+    s->cap = (size_t)cap;
+    s->owned = 1;
+    return s;
+}
+
+int64_t mako_native_ptr_slice_len(const MakoNativePtrSlice *s) {
+    return s ? (int64_t)s->len : 0;
+}
+
+void *mako_native_ptr_slice_get(const MakoNativePtrSlice *s, int64_t i) {
+    if (!s || i < 0 || (size_t)i >= s->len) abort();
+    return s->data[i];
+}
+
+void mako_native_ptr_slice_set(MakoNativePtrSlice *s, int64_t i, void *elem) {
+    if (!s || i < 0 || (size_t)i >= s->len) abort();
+    s->data[i] = elem;
+}
+
+MakoNativePtrSlice *mako_native_ptr_slice_append(MakoNativePtrSlice *s, void *elem) {
+    if (!s) abort();
+    if (s->owned && s->len < s->cap) {
+        s->data[s->len++] = elem;
+        return s;
+    }
+    size_t ncap = s->cap ? s->cap * 2 : 4;
+    if (ncap < s->len + 1) ncap = s->len + 1;
+    MakoNativePtrSlice *out = mako_native_ptr_slice_make((int64_t)s->len + 1, (int64_t)ncap);
+    for (size_t i = 0; i < s->len; ++i) out->data[i] = s->data[i];
+    out->data[s->len] = elem;
+    if (s->owned) {
+        free(s->data);
+        s->data = NULL;
+        s->len = s->cap = 0;
+        free(s);
+    }
+    return out;
+}
+
+void mako_native_ptr_slice_drop(MakoNativePtrSlice *s) {
+    if (!s) return;
+    if (s->owned && s->data) {
+        free(s->data);
+    }
+    free(s);
+}
+
+void mako_native_ptr_slice_drop_free_elems(MakoNativePtrSlice *s) {
+    if (!s) return;
+    if (s->owned && s->data) {
+        for (size_t i = 0; i < s->len; ++i) free(s->data[i]);
+        free(s->data);
+    }
+    free(s);
+}
+
+MakoNativePtrSlice *mako_native_ptr_slice_clone(const MakoNativePtrSlice *s) {
+    if (!s) return NULL;
+    MakoNativePtrSlice *out = mako_native_ptr_slice_make((int64_t)s->len, (int64_t)s->len);
+    for (size_t i = 0; i < s->len; ++i) out->data[i] = s->data[i];
+    return out;
+}
+
+MakoNativePtrSlice *mako_native_ptr_slice_clone_deep(const MakoNativePtrSlice *s, int64_t elem_bytes) {
+    if (!s) return NULL;
+    if (elem_bytes <= 0) elem_bytes = 8;
+    MakoNativePtrSlice *out = mako_native_ptr_slice_make((int64_t)s->len, (int64_t)s->len);
+    for (size_t i = 0; i < s->len; ++i) {
+        void *e = s->data[i];
+        if (!e) { out->data[i] = NULL; continue; }
+        void *c = calloc(1, (size_t)elem_bytes);
+        if (!c) abort();
+        memcpy(c, e, (size_t)elem_bytes);
+        out->data[i] = c;
+    }
+    return out;
+}
+
+MakoNativePtrSlice *mako_native_ptr_slice_slice(
+    const MakoNativePtrSlice *s, int64_t low, int64_t high, int64_t max
+) {
+    if (!s) return mako_native_ptr_slice_make(0, 0);
+    int64_t n = (int64_t)s->len;
+    if (low < 0) low = 0;
+    if (high < 0 || high > n) high = n;
+    if (low > high) low = high;
+    int64_t cap = max >= 0 && max <= (int64_t)s->cap
+        ? max - low
+        : (int64_t)s->cap - low;
+    if (cap < high - low) cap = high - low;
+    MakoNativePtrSlice *out = (MakoNativePtrSlice *)calloc(1, sizeof(*out));
+    if (!out) abort();
+    out->data = s->data ? s->data + low : NULL;
+    out->len = (size_t)(high - low);
+    out->cap = (size_t)cap;
+    out->owned = 0;
+    return out;
+}
 
 MakoNativePtrSlice *mako_native_maps_values_si_ptr(const MakoNativeMapSI *m) {
     /* MapSI uses inline `len`, not MapII's separate `lenp` pointer. */
@@ -3155,8 +3366,7 @@ void mako_native_maps_clear_ss(MakoNativeMapSS *m) {
 }
 
 void mako_native_maps_copy_ii(MakoNativeMapII *dst, const MakoNativeMapII *src) {
-    mako_native_maps_clear_ii(dst);
-    if (!src || !src->state) return;
+    if (!dst || !src || !src->state) return;
     uint8_t *state = mako_native_map_ii_state(src);
     int64_t *keys = mako_native_map_ii_keys(src);
     int64_t *vals = mako_native_map_ii_vals(src);
@@ -3167,8 +3377,7 @@ void mako_native_maps_copy_ii(MakoNativeMapII *dst, const MakoNativeMapII *src) 
 }
 
 void mako_native_maps_copy_si(MakoNativeMapSI *dst, const MakoNativeMapSI *src) {
-    mako_native_maps_clear_si(dst);
-    if (!src) return;
+    if (!dst || !src) return;
     for (size_t i = 0; i < src->cap; ++i) {
         if (src->state[i] == MAKO_NMAP_FULL)
             mako_native_map_si_set_ptr(dst, src->keys[i], src->vals[i]);
@@ -3176,8 +3385,7 @@ void mako_native_maps_copy_si(MakoNativeMapSI *dst, const MakoNativeMapSI *src) 
 }
 
 void mako_native_maps_copy_ss(MakoNativeMapSS *dst, const MakoNativeMapSS *src) {
-    mako_native_maps_clear_ss(dst);
-    if (!src) return;
+    if (!dst || !src) return;
     for (size_t i = 0; i < src->cap; ++i) {
         if (src->state[i] == MAKO_NMAP_FULL)
             mako_native_map_ss_set_ptr(dst, src->keys[i], src->vals[i]);
@@ -3406,7 +3614,6 @@ void mako_native_maps_clear_fi(MakoNativeMapFI *m) {
 
 void mako_native_maps_copy_if(MakoNativeMapIF *dst, const MakoNativeMapIF *src) {
     if (!dst || !src) return;
-    mako_native_maps_clear_if(dst);
     for (size_t i = 0; i < src->cap; ++i) {
         if (src->state[i] == MAKO_NMAP_FULL)
             mako_native_map_if_set_ptr(dst, src->keys[i], src->vals[i]);
@@ -3415,7 +3622,6 @@ void mako_native_maps_copy_if(MakoNativeMapIF *dst, const MakoNativeMapIF *src) 
 
 void mako_native_maps_copy_fi(MakoNativeMapFI *dst, const MakoNativeMapFI *src) {
     if (!dst || !src) return;
-    mako_native_maps_clear_fi(dst);
     for (size_t i = 0; i < src->cap; ++i) {
         if (src->state[i] == MAKO_NMAP_FULL)
             mako_native_map_fi_set_ptr(dst, src->keys[i], src->vals[i]);
@@ -3573,36 +3779,61 @@ static const char *mako_native_path_cstr(const MakoNativeString *path, char *scr
     if (!path || !path->data || !scratch) return NULL;
     size_t plen = mako_str_raw_len(path->len);
     if (plen == 0 || plen >= cap) return NULL;
-    for (size_t i = 0; i < plen; i++) {
-        if (path->data[i] == 0) return NULL;
+    if (memchr(path->data, 0, plen) != NULL) return NULL;
+    if (mako_str_is_static_len(path->len) && path->data[plen] == '\0') {
+        return path->data;
     }
     memcpy(scratch, path->data, plen);
     scratch[plen] = 0;
     return scratch;
 }
 
-/* Whole-file I/O: open + fstat/read or write (parity with mako_read/write_file). */
-MakoNativeString *mako_native_read_file_ptr(const MakoNativeString *path) {
-    char scratch[4096];
-    const char *p = mako_native_path_cstr(path, scratch, sizeof(scratch));
-    if (!p) return mako_native_string_literal_ptr("", 0);
+static MakoNativeString mako_native_empty_str_owned(void) {
+    char *buf = malloc(1);
+    if (!buf) abort();
+    buf[0] = '\0';
+    return (MakoNativeString){buf, 0};
+}
+
+MakoNativeString mako_native_str_repeat(MakoNativeString s, int64_t n) {
+    size_t slen = s.data ? mako_str_raw_len(s.len) : 0;
+    if (n <= 0 || slen == 0) return mako_native_empty_str_owned();
+    if (n > 1000000) abort();
+    size_t total = (size_t)n * slen;
+    char *d = malloc(total + 1);
+    if (!d) abort();
+    if (slen == 1) {
+        memset(d, (unsigned char)s.data[0], total);
+    } else {
+        for (int64_t i = 0; i < n; i++) {
+            memcpy(d + (size_t)i * slen, s.data, slen);
+        }
+    }
+    d[total] = '\0';
+    return (MakoNativeString){d, total};
+}
+
+MakoNativeString *mako_native_str_repeat_ptr(MakoNativeString *s, int64_t n) {
+    MakoNativeString val = s ? mako_native_str_repeat(*s, n) : mako_native_empty_str_owned();
+    MakoNativeString *out = malloc(sizeof(*out));
+    if (!out) abort();
+    *out = val;
+    return out;
+}
+
+/* Whole-file I/O: open + read (skip fstat for small/medium files < 8 KB). */
+MakoNativeString mako_native_read_file(MakoNativeString path) {
+    char scratch[1024];
+    const char *p = mako_native_path_cstr(&path, scratch, sizeof(scratch));
+    if (!p) return mako_native_empty_str_owned();
 #if defined(_WIN32)
     int fd = _open(p, _O_RDONLY | _O_BINARY);
 #else
     int fd = open(p, O_RDONLY);
 #endif
-    if (fd < 0) return mako_native_string_literal_ptr("", 0);
-    struct stat st;
-    if (fstat(fd, &st) != 0 || st.st_size < 0) {
-#if defined(_WIN32)
-        _close(fd);
-#else
-        close(fd);
-#endif
-        return mako_native_string_literal_ptr("", 0);
-    }
-    size_t sz = (size_t)st.st_size;
-    char *buf = malloc(sz + 1);
+    if (fd < 0) return mako_native_empty_str_owned();
+    size_t init_cap = 4098;
+    char *buf = malloc(init_cap);
     if (!buf) {
 #if defined(_WIN32)
         _close(fd);
@@ -3611,24 +3842,71 @@ MakoNativeString *mako_native_read_file_ptr(const MakoNativeString *path) {
 #endif
         abort();
     }
-    size_t got = 0;
-    while (got < sz) {
 #if defined(_WIN32)
-        int n = _read(fd, buf + got, (unsigned)(sz - got > 0x7fffffff ? 0x7fffffff : sz - got));
+    int first_n = _read(fd, buf, (unsigned)(init_cap - 1));
 #else
-        ssize_t n = read(fd, buf + got, sz - got);
+    ssize_t first_n = read(fd, buf, init_cap - 1);
 #endif
-        if (n < 0) {
+    if (first_n < 0) {
+#if defined(_WIN32)
+        _close(fd);
+#else
+        close(fd);
+#endif
+        free(buf);
+        return mako_native_empty_str_owned();
+    }
+    size_t got = (size_t)first_n;
+    if (got < init_cap - 1) {
+#if defined(_WIN32)
+        _close(fd);
+#else
+        close(fd);
+#endif
+        buf[got] = '\0';
+        return (MakoNativeString){buf, got};
+    }
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size < 0) {
+#if defined(_WIN32)
+        _close(fd);
+#else
+        close(fd);
+#endif
+        free(buf);
+        return mako_native_empty_str_owned();
+    }
+    size_t sz = (size_t)st.st_size;
+    if (sz > got) {
+        char *nbuf = realloc(buf, sz + 1);
+        if (!nbuf) {
 #if defined(_WIN32)
             _close(fd);
 #else
             close(fd);
 #endif
             free(buf);
-            return mako_native_string_literal_ptr("", 0);
+            abort();
         }
-        if (n == 0) break;
-        got += (size_t)n;
+        buf = nbuf;
+        while (got < sz) {
+#if defined(_WIN32)
+            int n = _read(fd, buf + got, (unsigned)(sz - got > 0x7fffffff ? 0x7fffffff : sz - got));
+#else
+            ssize_t n = read(fd, buf + got, sz - got);
+#endif
+            if (n < 0) {
+#if defined(_WIN32)
+                _close(fd);
+#else
+                close(fd);
+#endif
+                free(buf);
+                return mako_native_empty_str_owned();
+            }
+            if (n == 0) break;
+            got += (size_t)n;
+        }
     }
 #if defined(_WIN32)
     _close(fd);
@@ -3636,16 +3914,20 @@ MakoNativeString *mako_native_read_file_ptr(const MakoNativeString *path) {
     close(fd);
 #endif
     buf[got] = '\0';
+    return (MakoNativeString){buf, got};
+}
+
+MakoNativeString *mako_native_read_file_ptr(const MakoNativeString *path) {
+    MakoNativeString val = path ? mako_native_read_file(*path) : mako_native_empty_str_owned();
     MakoNativeString *out = malloc(sizeof(*out));
     if (!out) abort();
-    out->data = buf;
-    out->len = got;
+    *out = val;
     return out;
 }
 
 int64_t mako_native_write_file_ptr(const MakoNativeString *path,
                                    const MakoNativeString *contents) {
-    char scratch[4096];
+    char scratch[1024];
     const char *p = mako_native_path_cstr(path, scratch, sizeof(scratch));
     if (!p) return -1;
 #if defined(_WIN32)
@@ -3789,13 +4071,6 @@ MakoNativeString mako_native_env_get(MakoNativeString key) {
 
 int64_t mako_native_env_set(MakoNativeString key, MakoNativeString val) {
     return mako_native_env_set_ptr(&key, &val);
-}
-
-MakoNativeString mako_native_read_file(MakoNativeString path) {
-    MakoNativeString *p = mako_native_read_file_ptr(&path);
-    MakoNativeString out = *p;
-    free(p);
-    return out;
 }
 
 int64_t mako_native_write_file(MakoNativeString path, MakoNativeString contents) {

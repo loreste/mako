@@ -2,6 +2,30 @@
 
 ## 0.7.1
 
+### Systems programming, native backend parity & Go 1.21–1.23 ergonomics
+
+- **Native backend (`--backend native`) parity for systems & Go 1.21+ primitives (`src/native_ir.rs`, `runtime/native_bridge.c`)**:
+  - Lowered 128-bit integers (`i128` / `u128` binary operators, casts, `u128_from_parts`, `i128_from_parts`, `u128_hi`, `u128_lo`, `i128_hi`, `i128_lo`, `u128_add`/`sub`/`mul`/`div`/`rem`/`shl`/`shr`/`eq`/`cmp`/`to_hex`, `i128_add`/`sub`/`mul`/`div`/`cmp`), raw memory typed and endian accessors (`mem_read_*`, `mem_write_*`, `mem_zero`, `mem_copy`, `mem_cmp`), raw-address hardware atomics (`mem_atomic_*`, `memory_fence`), VM and positional I/O (`mmap_anon`, `munmap`, `mprotect_raw`, `madvise`, `msync`, `pread_raw`, `pwrite_raw`, `flock`, `poll_fd`), 4-lane SIMD vector operations (`simd_f32x4_*`, `simd_i32x4_add`, `simd_i16x8_add`, `simd_fma`), variadic `min`/`max`, polymorphic `clamp`, and `clear(m_or_s)` on `--backend native`.
+- **Scatter-gather I/O, shared memory & interactive piped subprocesses (`runtime/mako_stdlib.h`, `runtime/native_bridge.c`, `src/types/mod.rs`, `src/codegen/mod.rs`, `src/native_ir.rs`)**:
+  - Added `readv_raw`, `writev_raw`, `preadv_raw`, and `pwritev_raw` for zero-copy vectored I/O across raw pointer/length slices.
+  - Added `mprotect_raw`, `shm_open_raw`, and `shm_unlink_raw` for POSIX shared memory and page protection control.
+  - Added `proc_spawn_piped`, `proc_write_stdin`, `proc_close_stdin`, `proc_read_stdout`, `proc_wait_nb`, `proc_exit_code`, `proc_kill`, and `proc_close` for interactive non-blocking child process pipes.
+- **Hardware bitops, endianness & wrapping/saturating arithmetic**:
+  - Added `hton16`/`ntoh16`, `hton32`/`ntoh32`, `hton64`/`ntoh64`, `bit_clz64`, `bit_ctz64`, `bit_popcnt64`, `bit_ffs64`, `bit_rotl64`, `bit_rotr64`, `wrapping_add`, `wrapping_sub`, `wrapping_mul`, `saturating_add`, and `saturating_sub`, plus unaligned endian memory loads/stores (`mem_read_u16_le`/`be`, `mem_read_u32_le`/`be`, `mem_read_u64_le`/`be`, `mem_write_u16_le`/`be`, `mem_write_u32_le`/`be`, `mem_write_u64_le`/`be`, `mem_zero`, `mem_copy`, `mem_cmp`).
+- **Go 1.21–1.23 `slices` & `maps` ergonomics builtins**:
+  - Added polymorphic `slice_binary_search(s, target) -> (int, bool)`, `slice_compact(s)`, `slice_delete(s, i, j)`, `slice_insert(s, i, v)`, `slice_grow(s, n)`, `slice_clip(s)`, `slice_contains(s, target)`, `slice_index(s, target)`, `slice_equal(a, b)`, `slice_compare(a, b)`, `slice_reverse(s)`, `slice_min(s)`, `slice_max(s)`, `slice_replace(s, i, j, rep)`, `slice_repeat(s, count)`, `map_keys(m)`, `map_values(m)`, `map_equal(a, b)`, `map_clear(m)`, `map_clone(m)`, and `map_copy(dst, src)`.
+- **Zero-allocation kernel event poller (`kqueue`/`epoll`), CPU intrinsics & file-backed `mmap_file` (`runtime/mako_stdlib.h`, `runtime/native_bridge.c`)**:
+  - Added `poller_new`, `poller_add`, `poller_mod`, `poller_del`, `poller_wait`, and `poller_close` for direct batch kernel readiness multiplexing into caller slices.
+  - Added `cpu_ticks`, `cpu_pause`, `prefetch_read`, `prefetch_write`, `mmap_file`, `alloc_aligned` (tracked by `MAKO_LEAK_CHECK=1`), and `free_aligned`.
+- **Full `struct` + `enum` concurrency across `crew.kick` / `job.join` (`src/types/mod.rs`, `src/codegen/mod.rs`)**:
+  - Enabled structs containing unit or payload `enum` fields, payload `enum` arguments/returns, and user `struct` returns across `crew.kick(...)` / `job.join()` with deep-cloning on spawn and zero-leak cleanup on both C and native backends (closing row 23 of `docs/PAIN_POINTS.md`).
+- **Struct alignment attributes & compile-time layout intrinsics (`src/parser/mod.rs`, `src/types/mod.rs`, `src/codegen/mod.rs`, `src/native_ir.rs`)**:
+  - Added `#[align(N)]` and `#[cache_aligned]` (64-byte alignment) on struct definitions, `sizeof(T)`, `alignof(T)`, `offsetof(StructType, "field")`, and `static_assert(cond, "msg")` across both C and native backends.
+- **Native LLVM backend, actor scaling & nested struct-slice speed optimizations (`src/llvm_codegen.rs`, `src/codegen/mod.rs`, `runtime/mako_rt.h`, `runtime/native_runtime.c`)**:
+  - Set non-`main` functions to `Linkage::Internal` in `src/llvm_codegen.rs`, bounded `slow_cap` in inline slice append helpers for LLVM ScalarEvolution, and added inline `map[int]int` make/drop/get LLVM IR fast paths (`native_parity` `0.98x`, `native_fib` `0.97x`, `native_slice` `1.00x`, `native_string_slice` `0.63x`, `native_map` `0.16x`, `native_io` `1.00x` vs Rust).
+  - Added a producer-side thread-local write-combining batch buffer (`mako_tls_actor_buf[64]`), O(1) lock-free task registry, and OS thread stack cache fast path in `runtime/mako_rt.h`, beating Rust across all 11 rows of `./scripts/bench-actor-scaling.sh` (`0.04x–0.73x` vs Rust, up to `287 Mmsg/s`).
+  - Compacted `MakoString` in `runtime/mako_rt.h` from 24 bytes to 16 bytes (`{ char *data; uint32_t len; uint32_t _rc; }`) and hoisted counted nested struct-slice bounds checks (`arr[r].field[c]`) into the loop preheader with 4-way scalar interleaving in `src/codegen/mod.rs`, beating Rust on `examples/bench/nested_index_read.mko` (`nested_index_scores` `0.82x` Rust, `nested_index_labels` `0.97x` Rust).
+
 ### Bug fixes
 
 - Fix `if let` inside deeply nested blocks (crew, while, if, defer, unsafe) triggering "internal: if let was not desugared".
@@ -24,8 +48,15 @@
 - Fixed-size array types: `[int; 8192]` with type-level size enforcement.
 - Dynamic dispatch foundation: vtable generation, fat pointers (`MakoIface_*`), and heterogeneous interface array types.
 
-### Systems programming
+### Systems programming & runtime speed
 
+- **Channel & Actor runtime fast-path (`runtime/mako_rt.h`, `runtime/native_bridge.c`, `src/native_ir.rs`, `src/codegen/mod.rs`)**:
+  - Replaced `pthread_mutex_lock` dylib crossings on the `MakoChan` hot path with an inline C11 atomic spinlock (`mako_chan_lock` / `mako_chan_unlock`) and gated `pthread_cond_signal` behind `waiters_recv > 0` / `waiters_send > 0`, cutting `chan50k` to **0.45x Rust (2.2x faster than Rust)**.
+  - Added a 128-byte-aligned consumer batch buffer (`batch_buf[64]`) in `MakoChan` for `mako_actor_recv` with adaptive user-space spin/coalesce before kernel `pthread_cond_wait`, cutting `actor200k` from `11.8ms` (`1.28x` Rust) to **1.83ms (0.17x Rust — 6x faster than Rust)**.
+  - Added `#pragma clang loop unroll_count(4)` to unlabeled `while` loops in C codegen, cutting `struct1m` from `514us` (`1.00x` Rust) to **269us (0.52x Rust — nearly 2x faster than Rust)**. All 7 kernels in `./scripts/bench-gate.sh` now beat Rust (`0.17x`–`0.73x`).
+- **Raw-address hardware atomics & memory fences**: `mem_atomic_load_i64`, `mem_atomic_store_i64`, `mem_atomic_add_i64`, `mem_atomic_sub_i64`, `mem_atomic_exchange_i64`, `mem_atomic_cas_i64`, `memory_fence` for shared-memory IPC and lock-free rings.
+- **Zero-copy positional I/O, VM advice & file locking**: `pread_raw`, `pwrite_raw`, `madvise`, `msync`, `flock`, `poll_fd`.
+- **Go 1.21+ `clear`, `min`, `max`, `clamp` parity**: `clear(m_or_s)` clears any `map[K]V` or zeroes any `[]T` slice in-place; `min` and `max` are variadic (2+ args) and polymorphic across `int`/fixed-width ints, `i128`/`u128`, `float`/`f32`, and `string`; `clamp` is polymorphic across numeric types.
 - Short/long fixed-width and systems scalar aliases (`u8`/`uint8`/`byte`, `i8`/`int8`, `i16`/`int16`, `u16`/`uint16`, `i32`/`int32`/`rune`/`char`, `u32`/`uint32`, `i64`/`int64`/`isize`, `u64`/`uint64`/`usize`/`uintptr`, `f32`/`float32`, `f64`/`float64`/`float`) and matching cast builtins across typechecking, monomorphization, C codegen, and native IR.
 - 128-bit integers (`i128`/`int128`, `u128`/`uint128`): native `__int128` / `unsigned __int128` arithmetic, comparisons, bitwise operations, `print` support, casts, and `i128_from_parts`/`u128_from_parts`/`i128_hi`/`i128_lo`/`u128_hi`/`u128_lo`.
 - True hardware byte-width fields in `#[packed]` structs (`uint8_t`, `int8_t`, `uint16_t`, `int16_t`, `uint32_t`, `int32_t`, `uint64_t`, `int64_t`, `mako_i128_t`, `mako_u128_t`, `float`, `double`) and `sizeof_val(x) -> int` builtin.

@@ -28,6 +28,12 @@
 #include <sys/utsname.h>
 #include <sys/uio.h>
 #include <sys/socket.h>
+#if !defined(MAKO_WASI)
+#include <sys/file.h>
+#include <sys/un.h>
+#include <poll.h>
+#include <signal.h>
+#endif
 #ifdef __linux__
 #include <sys/sendfile.h>
 #endif
@@ -35,6 +41,11 @@
 #define MAKO_SENDFILE_DECL
 struct sf_hdtr;
 int sendfile(int fd, int s, off_t offset, off_t *len, struct sf_hdtr *hdtr, int flags);
+#endif
+#if !defined(_WIN32) && !defined(MAKO_WASI) && !defined(MAKO_MADVISE_FLOCK_DECL)
+#define MAKO_MADVISE_FLOCK_DECL
+int madvise(void *addr, size_t len, int advice);
+int flock(int fd, int operation);
 #endif
 #ifndef MAP_ANONYMOUS
 #ifdef MAP_ANON
@@ -160,8 +171,12 @@ static inline MakoString mako_str_repeat(MakoString s, int64_t n) {
     size_t total = (size_t)n * s.len;
     char *d = (char *)malloc(total + 1);
     if (!d) mako_abort("str_repeat OOM");
-    for (int64_t i = 0; i < n; i++) {
-        memcpy(d + (size_t)i * s.len, s.data, s.len);
+    if (s.len == 1) {
+        memset(d, (unsigned char)s.data[0], total);
+    } else {
+        for (int64_t i = 0; i < n; i++) {
+            memcpy(d + (size_t)i * s.len, s.data, s.len);
+        }
     }
     d[total] = 0;
     return (MakoString){d, total};
@@ -1587,6 +1602,109 @@ static inline void mako_mem_write_f64(int64_t addr, int64_t offset, double val) 
     *(double *)((char *)(uintptr_t)addr + offset) = val;
 }
 
+/* Hardware atomic operations on raw memory addresses (shared memory / IPC / lock-free rings) */
+static inline int64_t mako_mem_atomic_load_i64(int64_t addr, int64_t offset) {
+    return __atomic_load_n((int64_t *)((char *)(uintptr_t)addr + offset), __ATOMIC_SEQ_CST);
+}
+static inline void mako_mem_atomic_store_i64(int64_t addr, int64_t offset, int64_t val) {
+    __atomic_store_n((int64_t *)((char *)(uintptr_t)addr + offset), val, __ATOMIC_SEQ_CST);
+}
+static inline int64_t mako_mem_atomic_add_i64(int64_t addr, int64_t offset, int64_t delta) {
+    return __atomic_fetch_add((int64_t *)((char *)(uintptr_t)addr + offset), delta, __ATOMIC_SEQ_CST);
+}
+static inline int64_t mako_mem_atomic_sub_i64(int64_t addr, int64_t offset, int64_t delta) {
+    return __atomic_fetch_sub((int64_t *)((char *)(uintptr_t)addr + offset), delta, __ATOMIC_SEQ_CST);
+}
+static inline int64_t mako_mem_atomic_exchange_i64(int64_t addr, int64_t offset, int64_t val) {
+    return __atomic_exchange_n((int64_t *)((char *)(uintptr_t)addr + offset), val, __ATOMIC_SEQ_CST);
+}
+static inline int64_t mako_mem_atomic_cas_i64(int64_t addr, int64_t offset, int64_t expected, int64_t desired) {
+    int64_t exp = expected;
+    return __atomic_compare_exchange_n(
+               (int64_t *)((char *)(uintptr_t)addr + offset),
+               &exp,
+               desired,
+               0,
+               __ATOMIC_SEQ_CST,
+               __ATOMIC_SEQ_CST)
+               ? 1
+               : 0;
+}
+static inline void mako_memory_fence(void) {
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+}
+
+/* Virtual memory advice, page sync, raw positional I/O, advisory locking, readiness polling */
+static inline int64_t mako_madvise(int64_t addr, int64_t size, int64_t advice) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)addr; (void)size; (void)advice; return -1;
+#else
+    return madvise((void *)(uintptr_t)addr, (size_t)size, (int)advice) == 0 ? 0 : -1;
+#endif
+}
+static inline int64_t mako_msync(int64_t addr, int64_t size, int64_t flags) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)addr; (void)size; (void)flags; return -1;
+#else
+    return msync((void *)(uintptr_t)addr, (size_t)size, (int)flags) == 0 ? 0 : -1;
+#endif
+}
+static inline int64_t mako_pread_raw(int64_t fd, int64_t addr, int64_t count, int64_t offset) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)addr; (void)count; (void)offset; return -1;
+#else
+    return (int64_t)pread((int)fd, (void *)(uintptr_t)addr, (size_t)count, (off_t)offset);
+#endif
+}
+static inline int64_t mako_pwrite_raw(int64_t fd, int64_t addr, int64_t count, int64_t offset) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)addr; (void)count; (void)offset; return -1;
+#else
+    return (int64_t)pwrite((int)fd, (const void *)(uintptr_t)addr, (size_t)count, (off_t)offset);
+#endif
+}
+static inline int64_t mako_flock(int64_t fd, int64_t op) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)op; return -1;
+#else
+    return flock((int)fd, (int)op) == 0 ? 0 : -1;
+#endif
+}
+static inline int64_t mako_poll_fd(int64_t fd, int64_t events, int64_t timeout_ms) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)events; (void)timeout_ms; return -1;
+#else
+    struct pollfd pfd;
+    pfd.fd = (int)fd;
+    pfd.events = (short)events;
+    pfd.revents = 0;
+    int r = poll(&pfd, 1, (int)timeout_ms);
+    if (r < 0) return -1;
+    if (r == 0) return 0;
+    return (int64_t)(uint16_t)pfd.revents;
+#endif
+}
+
+static inline double mako_min_f64(double a, double b) { return a < b ? a : b; }
+static inline double mako_max_f64(double a, double b) { return a > b ? a : b; }
+static inline double mako_clamp_f64(double x, double lo, double hi) {
+    return x < lo ? lo : (x > hi ? hi : x);
+}
+static inline int mako_str_lex_cmp(MakoString a, MakoString b) {
+    size_t min_len = a.len < b.len ? a.len : b.len;
+    if (min_len > 0) {
+        int c = memcmp(a.data ? a.data : "", b.data ? b.data : "", min_len);
+        if (c != 0) return c;
+    }
+    return a.len < b.len ? -1 : (a.len > b.len ? 1 : 0);
+}
+static inline MakoString mako_min_str(MakoString a, MakoString b) {
+    return mako_str_lex_cmp(a, b) <= 0 ? mako_str_clone(a) : mako_str_clone(b);
+}
+static inline MakoString mako_max_str(MakoString a, MakoString b) {
+    return mako_str_lex_cmp(a, b) >= 0 ? mako_str_clone(a) : mako_str_clone(b);
+}
+
 /* ---- Scatter-gather I/O for zero-copy block transfers (SAN/iSCSI) ---- */
 static inline int64_t mako_writev(int64_t fd, MakoStrArray bufs) {
 #if defined(_WIN32) || defined(MAKO_WASI)
@@ -2484,6 +2602,1321 @@ static inline MakoString mako_watch_poll(void *wp, int64_t timeout_ms) {
 static inline int64_t mako_watch_close(void *wp) { (void)wp; return -1; }
 static inline int64_t mako_watch_available(void) { return 0; }
 #endif
+
+/* ------------------------------------------------------------------------- */
+/* Systems & OS Primitives, Hardware Intrinsics, and Go 1.21-1.23 Slices     */
+/* ------------------------------------------------------------------------- */
+
+/* Raw typed memory aliases + endian-explicit memory access + zero/copy/cmp */
+static inline int64_t mako_mem_read_u8(int64_t addr, int64_t offset) {
+    return (int64_t)*((uint8_t *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_u8(int64_t addr, int64_t offset, int64_t val) {
+    *((uint8_t *)(uintptr_t)addr + offset) = (uint8_t)val;
+}
+static inline int64_t mako_mem_read_i8(int64_t addr, int64_t offset) {
+    return (int64_t)*((int8_t *)(uintptr_t)addr + offset);
+}
+static inline void mako_mem_write_i8(int64_t addr, int64_t offset, int64_t val) {
+    *((int8_t *)(uintptr_t)addr + offset) = (int8_t)val;
+}
+static inline int64_t mako_mem_read_u16_le(int64_t addr, int64_t offset) {
+    uint16_t v = 0;
+    memcpy(&v, (const char *)(uintptr_t)addr + offset, sizeof(v));
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    v = __builtin_bswap16(v);
+#endif
+    return (int64_t)v;
+}
+static inline int64_t mako_mem_read_u16_be(int64_t addr, int64_t offset) {
+    uint16_t v = 0;
+    memcpy(&v, (const char *)(uintptr_t)addr + offset, sizeof(v));
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    v = __builtin_bswap16(v);
+#endif
+    return (int64_t)v;
+}
+static inline void mako_mem_write_u16_le(int64_t addr, int64_t offset, int64_t val) {
+    uint16_t v = (uint16_t)val;
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    v = __builtin_bswap16(v);
+#endif
+    memcpy((char *)(uintptr_t)addr + offset, &v, sizeof(v));
+}
+static inline void mako_mem_write_u16_be(int64_t addr, int64_t offset, int64_t val) {
+    uint16_t v = (uint16_t)val;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    v = __builtin_bswap16(v);
+#endif
+    memcpy((char *)(uintptr_t)addr + offset, &v, sizeof(v));
+}
+static inline int64_t mako_mem_read_u32_le(int64_t addr, int64_t offset) {
+    uint32_t v = 0;
+    memcpy(&v, (const char *)(uintptr_t)addr + offset, sizeof(v));
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    v = __builtin_bswap32(v);
+#endif
+    return (int64_t)v;
+}
+static inline int64_t mako_mem_read_u32_be(int64_t addr, int64_t offset) {
+    uint32_t v = 0;
+    memcpy(&v, (const char *)(uintptr_t)addr + offset, sizeof(v));
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    v = __builtin_bswap32(v);
+#endif
+    return (int64_t)v;
+}
+static inline void mako_mem_write_u32_le(int64_t addr, int64_t offset, int64_t val) {
+    uint32_t v = (uint32_t)val;
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    v = __builtin_bswap32(v);
+#endif
+    memcpy((char *)(uintptr_t)addr + offset, &v, sizeof(v));
+}
+static inline void mako_mem_write_u32_be(int64_t addr, int64_t offset, int64_t val) {
+    uint32_t v = (uint32_t)val;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    v = __builtin_bswap32(v);
+#endif
+    memcpy((char *)(uintptr_t)addr + offset, &v, sizeof(v));
+}
+static inline int64_t mako_mem_read_u64_le(int64_t addr, int64_t offset) {
+    uint64_t v = 0;
+    memcpy(&v, (const char *)(uintptr_t)addr + offset, sizeof(v));
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    v = __builtin_bswap64(v);
+#endif
+    return (int64_t)v;
+}
+static inline int64_t mako_mem_read_u64_be(int64_t addr, int64_t offset) {
+    uint64_t v = 0;
+    memcpy(&v, (const char *)(uintptr_t)addr + offset, sizeof(v));
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    v = __builtin_bswap64(v);
+#endif
+    return (int64_t)v;
+}
+static inline void mako_mem_write_u64_le(int64_t addr, int64_t offset, int64_t val) {
+    uint64_t v = (uint64_t)val;
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    v = __builtin_bswap64(v);
+#endif
+    memcpy((char *)(uintptr_t)addr + offset, &v, sizeof(v));
+}
+static inline void mako_mem_write_u64_be(int64_t addr, int64_t offset, int64_t val) {
+    uint64_t v = (uint64_t)val;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    v = __builtin_bswap64(v);
+#endif
+    memcpy((char *)(uintptr_t)addr + offset, &v, sizeof(v));
+}
+static inline void mako_mem_zero(int64_t addr, int64_t size) {
+    if (addr && size > 0) memset((void *)(uintptr_t)addr, 0, (size_t)size);
+}
+static inline void mako_mem_copy(int64_t dst, int64_t src, int64_t size) {
+    if (dst && src && size > 0) memmove((void *)(uintptr_t)dst, (const void *)(uintptr_t)src, (size_t)size);
+}
+static inline int64_t mako_mem_cmp(int64_t a, int64_t b, int64_t size) {
+    if (size <= 0) return 0;
+    if (!a || !b) return a == b ? 0 : (a < b ? -1 : 1);
+    int r = memcmp((const void *)(uintptr_t)a, (const void *)(uintptr_t)b, (size_t)size);
+    return r < 0 ? -1 : (r > 0 ? 1 : 0);
+}
+
+/* Raw Scatter-Gather I/O (zero-copy iovec arrays over raw pointers & lengths) */
+static inline int64_t mako_writev_raw(int64_t fd, MakoIntArray ptrs, MakoIntArray lens) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)ptrs; (void)lens; return -1;
+#else
+    size_t n = ptrs.len < lens.len ? ptrs.len : lens.len;
+    if (n == 0) return 0;
+    struct iovec stack_iov[16];
+    struct iovec *iov = n <= 16 ? stack_iov : (struct iovec *)malloc(n * sizeof(struct iovec));
+    if (!iov) return -1;
+    for (size_t i = 0; i < n; i++) {
+        iov[i].iov_base = (void *)(uintptr_t)ptrs.data[i];
+        iov[i].iov_len = (size_t)lens.data[i];
+    }
+    ssize_t total = writev((int)fd, iov, (int)n);
+    if (iov != stack_iov) free(iov);
+    return (int64_t)total;
+#endif
+}
+
+static inline int64_t mako_readv_raw(int64_t fd, MakoIntArray ptrs, MakoIntArray lens) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)ptrs; (void)lens; return -1;
+#else
+    size_t n = ptrs.len < lens.len ? ptrs.len : lens.len;
+    if (n == 0) return 0;
+    struct iovec stack_iov[16];
+    struct iovec *iov = n <= 16 ? stack_iov : (struct iovec *)malloc(n * sizeof(struct iovec));
+    if (!iov) return -1;
+    for (size_t i = 0; i < n; i++) {
+        iov[i].iov_base = (void *)(uintptr_t)ptrs.data[i];
+        iov[i].iov_len = (size_t)lens.data[i];
+    }
+    ssize_t total = readv((int)fd, iov, (int)n);
+    if (iov != stack_iov) free(iov);
+    return (int64_t)total;
+#endif
+}
+
+static inline int64_t mako_pwritev_raw(int64_t fd, MakoIntArray ptrs, MakoIntArray lens, int64_t offset) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)ptrs; (void)lens; (void)offset; return -1;
+#else
+    size_t n = ptrs.len < lens.len ? ptrs.len : lens.len;
+    if (n == 0) return 0;
+    int64_t total = 0;
+    off_t cur_off = (off_t)offset;
+    for (size_t i = 0; i < n; i++) {
+        size_t len = (size_t)lens.data[i];
+        if (len == 0) continue;
+        ssize_t w = pwrite((int)fd, (const void *)(uintptr_t)ptrs.data[i], len, cur_off);
+        if (w < 0) return total > 0 ? total : -1;
+        total += (int64_t)w;
+        cur_off += (off_t)w;
+        if ((size_t)w < len) break;
+    }
+    return total;
+#endif
+}
+
+static inline int64_t mako_preadv_raw(int64_t fd, MakoIntArray ptrs, MakoIntArray lens, int64_t offset) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)fd; (void)ptrs; (void)lens; (void)offset; return -1;
+#else
+    size_t n = ptrs.len < lens.len ? ptrs.len : lens.len;
+    if (n == 0) return 0;
+    int64_t total = 0;
+    off_t cur_off = (off_t)offset;
+    for (size_t i = 0; i < n; i++) {
+        size_t len = (size_t)lens.data[i];
+        if (len == 0) continue;
+        ssize_t r = pread((int)fd, (void *)(uintptr_t)ptrs.data[i], len, cur_off);
+        if (r < 0) return total > 0 ? total : -1;
+        if (r == 0) break;
+        total += (int64_t)r;
+        cur_off += (off_t)r;
+        if ((size_t)r < len) break;
+    }
+    return total;
+#endif
+}
+
+/* Shared Memory & mprotect_raw */
+static inline int64_t mako_mprotect_raw(int64_t addr, int64_t size, int64_t prot) {
+    return mako_mprotect(addr, size, prot);
+}
+
+static inline void mako_shm_normalize_path(MakoString name, char *out, size_t cap) {
+    const char *raw = name.data ? name.data : "mako_shm";
+    size_t len = name.len;
+    while (len > 0 && raw[0] == '/') { raw++; len--; }
+    char clean[128];
+    size_t ci = 0;
+    for (size_t i = 0; i < len && ci + 1 < sizeof(clean); i++) {
+        char c = raw[i];
+        clean[ci++] = (c == '/' || c == '\\' || c == ' ') ? '_' : c;
+    }
+    clean[ci] = 0;
+    snprintf(out, cap, "/tmp/mako_shm_%s", clean[0] ? clean : "default");
+}
+
+static inline int64_t mako_shm_open_raw(MakoString name, int64_t size) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)name; (void)size; return 0;
+#else
+    if (size <= 0) return 0;
+    char path[256];
+    mako_shm_normalize_path(name, path, sizeof(path));
+    int fd = open(path, O_CREAT | O_RDWR, 0600);
+    if (fd < 0) return 0;
+    if (ftruncate(fd, (off_t)size) != 0) {
+        close(fd);
+        return 0;
+    }
+    void *p = mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (p == MAP_FAILED) return 0;
+    return (int64_t)(uintptr_t)p;
+#endif
+}
+
+static inline int64_t mako_shm_unlink_raw(MakoString name) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)name; return -1;
+#else
+    char path[256];
+    mako_shm_normalize_path(name, path, sizeof(path));
+    return unlink(path) == 0 ? 0 : -1;
+#endif
+}
+
+/* Interactive Subprocess Pipes */
+typedef struct {
+    int pid;
+    int stdin_fd;
+    int stdout_fd;
+    int status;
+    int exited;
+} MakoPipedProc;
+
+static inline int64_t mako_proc_spawn_piped(MakoString cmd) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)cmd; return 0;
+#else
+    int in_pipe[2];
+    int out_pipe[2];
+    if (pipe(in_pipe) != 0) return 0;
+    if (pipe(out_pipe) != 0) {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        return 0;
+    }
+    char *cmd_c = (char *)malloc(cmd.len + 1);
+    if (!cmd_c) {
+        close(in_pipe[0]); close(in_pipe[1]);
+        close(out_pipe[0]); close(out_pipe[1]);
+        return 0;
+    }
+    if (cmd.len && cmd.data) memcpy(cmd_c, cmd.data, cmd.len);
+    cmd_c[cmd.len] = 0;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        free(cmd_c);
+        close(in_pipe[0]); close(in_pipe[1]);
+        close(out_pipe[0]); close(out_pipe[1]);
+        return 0;
+    }
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        close(in_pipe[0]); close(in_pipe[1]);
+        close(out_pipe[0]); close(out_pipe[1]);
+        execl("/bin/sh", "sh", "-c", cmd_c, (char *)NULL);
+        _exit(127);
+    }
+    free(cmd_c);
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    MakoPipedProc *p = (MakoPipedProc *)calloc(1, sizeof(MakoPipedProc));
+    if (!p) {
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        return 0;
+    }
+    p->pid = (int)pid;
+    p->stdin_fd = in_pipe[1];
+    p->stdout_fd = out_pipe[0];
+    p->status = 0;
+    p->exited = 0;
+    return (int64_t)(uintptr_t)p;
+#endif
+}
+
+static inline int64_t mako_proc_write_stdin(int64_t h, MakoString data) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)h; (void)data; return -1;
+#else
+    MakoPipedProc *p = (MakoPipedProc *)(uintptr_t)h;
+    if (!p || p->stdin_fd < 0) return -1;
+    if (!data.data || data.len == 0) return 0;
+    ssize_t w = write(p->stdin_fd, data.data, data.len);
+    return (int64_t)w;
+#endif
+}
+
+static inline int64_t mako_proc_close_stdin(int64_t h) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)h; return -1;
+#else
+    MakoPipedProc *p = (MakoPipedProc *)(uintptr_t)h;
+    if (!p) return -1;
+    if (p->stdin_fd >= 0) {
+        close(p->stdin_fd);
+        p->stdin_fd = -1;
+    }
+    return 0;
+#endif
+}
+
+static inline MakoString mako_proc_read_stdout(int64_t h, int64_t max_len) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)h; (void)max_len; return mako_str_from_cstr("");
+#else
+    MakoPipedProc *p = (MakoPipedProc *)(uintptr_t)h;
+    if (!p || p->stdout_fd < 0 || max_len <= 0) return mako_str_from_cstr("");
+    if (max_len > (1 << 20)) max_len = (1 << 20);
+    char *buf = (char *)malloc((size_t)max_len + 1);
+    if (!buf) return mako_str_from_cstr("");
+    ssize_t r = read(p->stdout_fd, buf, (size_t)max_len);
+    if (r <= 0) {
+        free(buf);
+        return mako_str_from_cstr("");
+    }
+    buf[r] = 0;
+    MakoString out = {buf, (size_t)r};
+    return out;
+#endif
+}
+
+static inline int64_t mako_proc_wait_nb(int64_t h) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)h; return -1;
+#else
+    MakoPipedProc *p = (MakoPipedProc *)(uintptr_t)h;
+    if (!p) return -1;
+    if (p->exited) return 1;
+    int st = 0;
+    pid_t r = waitpid((pid_t)p->pid, &st, WNOHANG);
+    if (r == 0) return 0;
+    if (r < 0) return -1;
+    p->exited = 1;
+    p->status = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+    return 1;
+#endif
+}
+
+static inline int64_t mako_proc_exit_code(int64_t h) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)h; return -1;
+#else
+    MakoPipedProc *p = (MakoPipedProc *)(uintptr_t)h;
+    if (!p) return -1;
+    if (!p->exited) {
+        int st = 0;
+        pid_t r = waitpid((pid_t)p->pid, &st, 0);
+        if (r > 0) {
+            p->exited = 1;
+            p->status = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+        }
+    }
+    return (int64_t)p->status;
+#endif
+}
+
+static inline int64_t mako_proc_kill(int64_t h, int64_t sig) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)h; (void)sig; return -1;
+#else
+    MakoPipedProc *p = (MakoPipedProc *)(uintptr_t)h;
+    if (!p || p->exited) return 0;
+    return kill((pid_t)p->pid, (int)sig) == 0 ? 0 : -1;
+#endif
+}
+
+static inline int64_t mako_proc_close(int64_t h) {
+#if defined(_WIN32) || defined(MAKO_WASI)
+    (void)h; return -1;
+#else
+    MakoPipedProc *p = (MakoPipedProc *)(uintptr_t)h;
+    if (!p) return -1;
+    if (p->stdin_fd >= 0) close(p->stdin_fd);
+    if (p->stdout_fd >= 0) close(p->stdout_fd);
+    if (!p->exited) {
+        int st = 0;
+        (void)waitpid((pid_t)p->pid, &st, 0);
+        if (WIFEXITED(st)) p->status = WEXITSTATUS(st);
+    }
+    int64_t rc = (int64_t)p->status;
+    free(p);
+    return rc;
+#endif
+}
+
+/* Single-Instruction Hardware Intrinsics (Endianness, Bitops, Wrapping & Saturating Math) */
+static inline int64_t mako_hton16(int64_t x) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    return (int64_t)__builtin_bswap16((uint16_t)x);
+#else
+    return (int64_t)(uint16_t)x;
+#endif
+}
+static inline int64_t mako_ntoh16(int64_t x) { return mako_hton16(x); }
+static inline int64_t mako_hton32(int64_t x) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    return (int64_t)__builtin_bswap32((uint32_t)x);
+#else
+    return (int64_t)(uint32_t)x;
+#endif
+}
+static inline int64_t mako_ntoh32(int64_t x) { return mako_hton32(x); }
+static inline int64_t mako_hton64(int64_t x) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    return (int64_t)__builtin_bswap64((uint64_t)x);
+#else
+    return x;
+#endif
+}
+static inline int64_t mako_ntoh64(int64_t x) { return mako_hton64(x); }
+
+static inline int64_t mako_bit_clz64(int64_t x) {
+    return x == 0 ? 64 : (int64_t)__builtin_clzll((unsigned long long)x);
+}
+static inline int64_t mako_bit_ctz64(int64_t x) {
+    return x == 0 ? 64 : (int64_t)__builtin_ctzll((unsigned long long)x);
+}
+static inline int64_t mako_bit_popcnt64(int64_t x) {
+    return (int64_t)__builtin_popcountll((unsigned long long)x);
+}
+static inline int64_t mako_bit_ffs64(int64_t x) {
+    return (int64_t)__builtin_ffsll((long long)x);
+}
+static inline int64_t mako_bit_rotl64(int64_t x, int64_t n) {
+    uint64_t v = (uint64_t)x;
+    unsigned int s = (unsigned int)n & 63u;
+    return s == 0 ? (int64_t)v : (int64_t)((v << s) | (v >> (64u - s)));
+}
+static inline int64_t mako_bit_rotr64(int64_t x, int64_t n) {
+    uint64_t v = (uint64_t)x;
+    unsigned int s = (unsigned int)n & 63u;
+    return s == 0 ? (int64_t)v : (int64_t)((v >> s) | (v << (64u - s)));
+}
+
+static inline int64_t mako_wrapping_add(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a + (uint64_t)b);
+}
+static inline int64_t mako_wrapping_sub(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a - (uint64_t)b);
+}
+static inline int64_t mako_wrapping_mul(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a * (uint64_t)b);
+}
+static inline int64_t mako_saturating_add(int64_t a, int64_t b) {
+    int64_t res = 0;
+    if (__builtin_add_overflow(a, b, &res)) {
+        return a >= 0 ? INT64_MAX : INT64_MIN;
+    }
+    return res;
+}
+static inline int64_t mako_saturating_sub(int64_t a, int64_t b) {
+    int64_t res = 0;
+    if (__builtin_sub_overflow(a, b, &res)) {
+        return a >= 0 ? INT64_MAX : INT64_MIN;
+    }
+    return res;
+}
+
+/* Go 1.21-1.23 slices ergonomics: binary_search, compact, delete, insert, grow, clip */
+static inline int64_t mako_slice_bsearch_int(MakoIntArray a, int64_t target, bool *found) {
+    size_t lo = 0, hi = a.len;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (a.data[mid] < target) lo = mid + 1;
+        else hi = mid;
+    }
+    *found = (lo < a.len && a.data[lo] == target);
+    return (int64_t)lo;
+}
+
+static inline int64_t mako_slice_bsearch_float(MakoFloatArray a, double target, bool *found) {
+    size_t lo = 0, hi = a.len;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (a.data[mid] < target) lo = mid + 1;
+        else hi = mid;
+    }
+    *found = (lo < a.len && a.data[lo] == target);
+    return (int64_t)lo;
+}
+
+static inline int64_t mako_slice_bsearch_str(MakoStrArray a, MakoString target, bool *found) {
+    size_t lo = 0, hi = a.len;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (mako_str_lex_cmp(a.data[mid], target) < 0) lo = mid + 1;
+        else hi = mid;
+    }
+    *found = (lo < a.len && mako_str_eq(a.data[lo], target));
+    return (int64_t)lo;
+}
+
+static inline MakoIntArray mako_slice_compact_int(MakoIntArray a) {
+    if (a.len == 0) return mako_int_array_empty();
+    size_t n = 1;
+    for (size_t i = 1; i < a.len; i++) {
+        if (a.data[i] != a.data[i - 1]) n++;
+    }
+    MakoIntArray out = mako_int_array_make((int64_t)n, (int64_t)n);
+    size_t j = 0;
+    for (size_t i = 0; i < a.len; i++) {
+        if (i == 0 || a.data[i] != a.data[i - 1]) out.data[j++] = a.data[i];
+    }
+    out.len = j;
+    return out;
+}
+
+static inline MakoFloatArray mako_slice_compact_float(MakoFloatArray a) {
+    if (a.len == 0) return mako_float_array_empty();
+    size_t n = 1;
+    for (size_t i = 1; i < a.len; i++) {
+        if (a.data[i] != a.data[i - 1]) n++;
+    }
+    MakoFloatArray out = mako_float_array_make((int64_t)n, (int64_t)n);
+    size_t j = 0;
+    for (size_t i = 0; i < a.len; i++) {
+        if (i == 0 || a.data[i] != a.data[i - 1]) out.data[j++] = a.data[i];
+    }
+    out.len = j;
+    return out;
+}
+
+static inline MakoStrArray mako_slice_compact_str(MakoStrArray a) {
+    if (a.len == 0) return (MakoStrArray){NULL, 0, 0};
+    size_t n = 1;
+    for (size_t i = 1; i < a.len; i++) {
+        if (!mako_str_eq(a.data[i], a.data[i - 1])) n++;
+    }
+    MakoStrArray out = mako_str_array_make((int64_t)n, (int64_t)n);
+    size_t j = 0;
+    for (size_t i = 0; i < a.len; i++) {
+        if (i == 0 || !mako_str_eq(a.data[i], a.data[i - 1])) {
+            out.data[j++] = mako_str_clone(a.data[i]);
+        }
+    }
+    out.len = j;
+    return out;
+}
+
+static inline MakoIntArray mako_slice_delete_int(MakoIntArray a, int64_t i, int64_t j) {
+    if (i < 0) i = 0;
+    if ((size_t)j > a.len) j = (int64_t)a.len;
+    if (i >= j) return mako_ints_copy(a);
+    size_t rem = (size_t)(j - i);
+    size_t n = a.len - rem;
+    MakoIntArray out = mako_int_array_make((int64_t)n, (int64_t)n);
+    size_t dst = 0;
+    for (size_t k = 0; k < a.len; k++) {
+        if (k >= (size_t)i && k < (size_t)j) continue;
+        out.data[dst++] = a.data[k];
+    }
+    out.len = dst;
+    return out;
+}
+
+static inline MakoFloatArray mako_slice_delete_float(MakoFloatArray a, int64_t i, int64_t j) {
+    if (i < 0) i = 0;
+    if ((size_t)j > a.len) j = (int64_t)a.len;
+    if (i >= j) {
+        MakoFloatArray out = mako_float_array_make((int64_t)a.len, (int64_t)a.len);
+        if (a.len) memcpy(out.data, a.data, a.len * sizeof(double));
+        return out;
+    }
+    size_t rem = (size_t)(j - i);
+    size_t n = a.len - rem;
+    MakoFloatArray out = mako_float_array_make((int64_t)n, (int64_t)n);
+    size_t dst = 0;
+    for (size_t k = 0; k < a.len; k++) {
+        if (k >= (size_t)i && k < (size_t)j) continue;
+        out.data[dst++] = a.data[k];
+    }
+    out.len = dst;
+    return out;
+}
+
+static inline MakoStrArray mako_slice_delete_str(MakoStrArray a, int64_t i, int64_t j) {
+    if (i < 0) i = 0;
+    if ((size_t)j > a.len) j = (int64_t)a.len;
+    if (i >= j) return mako_strings_copy(a);
+    size_t rem = (size_t)(j - i);
+    size_t n = a.len - rem;
+    MakoStrArray out = mako_str_array_make((int64_t)n, (int64_t)n);
+    size_t dst = 0;
+    for (size_t k = 0; k < a.len; k++) {
+        if (k >= (size_t)i && k < (size_t)j) continue;
+        out.data[dst++] = mako_str_clone(a.data[k]);
+    }
+    out.len = dst;
+    return out;
+}
+
+static inline MakoIntArray mako_slice_insert_int(MakoIntArray a, int64_t i, int64_t v) {
+    return mako_list_insert_int(a, i, v);
+}
+
+static inline MakoFloatArray mako_slice_insert_float(MakoFloatArray a, int64_t i, double v) {
+    if (i < 0) i = 0;
+    if ((size_t)i > a.len) i = (int64_t)a.len;
+    MakoFloatArray out = mako_float_array_make((int64_t)a.len + 1, (int64_t)a.len + 1);
+    size_t j = 0;
+    for (size_t k = 0; k < a.len; k++) {
+        if ((int64_t)k == i) out.data[j++] = v;
+        out.data[j++] = a.data[k];
+    }
+    if ((size_t)i == a.len) out.data[j++] = v;
+    out.len = j;
+    return out;
+}
+
+static inline MakoStrArray mako_slice_insert_str(MakoStrArray a, int64_t i, MakoString v) {
+    return mako_list_insert_str(a, i, v);
+}
+
+static inline MakoIntArray mako_slice_grow_int(MakoIntArray a, int64_t n) {
+    if (n <= 0) return mako_int_array_clone(a);
+    size_t need = a.len + (size_t)n;
+    if (a.cap >= need && a.cap > 0 && !mako_rc_shared(a.data)) {
+        mako_rc_retain(a.data);
+        return a;
+    }
+    size_t ncap = a.cap ? a.cap * 2 : 8;
+    if (ncap < need) ncap = need;
+    MakoIntArray out = mako_int_array_make((int64_t)a.len, (int64_t)ncap);
+    if (a.len) memcpy(out.data, a.data, a.len * sizeof(int64_t));
+    out.len = a.len;
+    return out;
+}
+
+static inline MakoFloatArray mako_slice_grow_float(MakoFloatArray a, int64_t n) {
+    if (n <= 0) return mako_float_array_clone(a);
+    size_t need = a.len + (size_t)n;
+    if (a.cap >= need && a.cap > 0 && !mako_rc_shared(a.data)) {
+        mako_rc_retain(a.data);
+        return a;
+    }
+    size_t ncap = a.cap ? a.cap * 2 : 8;
+    if (ncap < need) ncap = need;
+    MakoFloatArray out = mako_float_array_make((int64_t)a.len, (int64_t)ncap);
+    if (a.len) memcpy(out.data, a.data, a.len * sizeof(double));
+    out.len = a.len;
+    return out;
+}
+
+static inline MakoStrArray mako_slice_grow_str(MakoStrArray a, int64_t n) {
+    if (n <= 0) return mako_str_array_clone(a);
+    size_t need = a.len + (size_t)n;
+    if (a.cap >= need && a.cap > 0 && !mako_rc_shared(a.data)) {
+        mako_rc_retain(a.data);
+        return a;
+    }
+    size_t ncap = a.cap ? a.cap * 2 : 8;
+    if (ncap < need) ncap = need;
+    MakoStrArray out = mako_str_array_make((int64_t)a.len, (int64_t)ncap);
+    for (size_t i = 0; i < a.len; i++) out.data[i] = mako_str_clone(a.data[i]);
+    out.len = a.len;
+    return out;
+}
+
+static inline MakoByteArray mako_slice_grow_byte(MakoByteArray a, int64_t n) {
+    if (n <= 0) return mako_byte_array_clone(a);
+    size_t actual_cap = a.cap & ~MAKO_POOL_CAP_FLAG;
+    size_t need = a.len + (size_t)n;
+    if (actual_cap >= need && actual_cap > 0 && !(a.cap & MAKO_POOL_CAP_FLAG) && !mako_rc_shared(a.data)) {
+        mako_rc_retain(a.data);
+        return a;
+    }
+    size_t ncap = actual_cap ? actual_cap * 2 : 8;
+    if (ncap < need) ncap = need;
+    MakoByteArray out = mako_byte_array_make((int64_t)a.len, (int64_t)ncap);
+    if (a.len) memcpy(out.data, a.data, a.len);
+    out.len = a.len;
+    return out;
+}
+
+static inline MakoIntArray mako_slice_clip_int(MakoIntArray a) {
+    if (a.len == 0) return mako_int_array_empty();
+    if (a.cap == a.len && a.cap > 0) {
+        mako_rc_retain(a.data);
+        return a;
+    }
+    return mako_ints_copy(a);
+}
+
+static inline MakoFloatArray mako_slice_clip_float(MakoFloatArray a) {
+    if (a.len == 0) return mako_float_array_empty();
+    if (a.cap == a.len && a.cap > 0) {
+        mako_rc_retain(a.data);
+        return a;
+    }
+    MakoFloatArray out = mako_float_array_make((int64_t)a.len, (int64_t)a.len);
+    memcpy(out.data, a.data, a.len * sizeof(double));
+    return out;
+}
+
+static inline MakoStrArray mako_slice_clip_str(MakoStrArray a) {
+    if (a.len == 0) return (MakoStrArray){NULL, 0, 0};
+    if (a.cap == a.len && a.cap > 0) {
+        mako_rc_retain(a.data);
+        return a;
+    }
+    return mako_strings_copy(a);
+}
+
+static inline MakoByteArray mako_slice_clip_byte(MakoByteArray a) {
+    if (a.len == 0) return mako_byte_array_empty();
+    size_t actual_cap = a.cap & ~MAKO_POOL_CAP_FLAG;
+    if (actual_cap == a.len && actual_cap > 0 && !(a.cap & MAKO_POOL_CAP_FLAG)) {
+        mako_rc_retain(a.data);
+        return a;
+    }
+    return mako_byte_array_of_u8(a.data, a.len);
+}
+
+/* Extended u128 / i128 helper functions */
+static inline mako_u128_t mako_u128_add(mako_u128_t a, mako_u128_t b) { return a + b; }
+static inline mako_u128_t mako_u128_sub(mako_u128_t a, mako_u128_t b) { return a - b; }
+static inline mako_u128_t mako_u128_mul(mako_u128_t a, mako_u128_t b) { return a * b; }
+static inline mako_u128_t mako_u128_div(mako_u128_t a, mako_u128_t b) { return b == 0 ? 0 : a / b; }
+static inline mako_u128_t mako_u128_rem(mako_u128_t a, mako_u128_t b) { return b == 0 ? 0 : a % b; }
+static inline mako_u128_t mako_u128_shl(mako_u128_t a, int64_t s) {
+    unsigned int sh = (unsigned int)s & 127u;
+    return sh == 0 ? a : (a << sh);
+}
+static inline mako_u128_t mako_u128_shr(mako_u128_t a, int64_t s) {
+    unsigned int sh = (unsigned int)s & 127u;
+    return sh == 0 ? a : (a >> sh);
+}
+static inline bool mako_u128_eq(mako_u128_t a, mako_u128_t b) { return a == b; }
+static inline int64_t mako_u128_cmp(mako_u128_t a, mako_u128_t b) {
+    return a < b ? -1 : (a > b ? 1 : 0);
+}
+static inline MakoString mako_u128_to_hex(mako_u128_t a) {
+    uint64_t hi = (uint64_t)mako_u128_hi(a);
+    uint64_t lo = (uint64_t)mako_u128_lo(a);
+    char buf[40];
+    if (hi != 0) {
+        snprintf(buf, sizeof(buf), "%llx%016llx", (unsigned long long)hi, (unsigned long long)lo);
+    } else {
+        snprintf(buf, sizeof(buf), "%llx", (unsigned long long)lo);
+    }
+    return mako_str_from_cstr(buf);
+}
+static inline mako_i128_t mako_i128_add(mako_i128_t a, mako_i128_t b) { return a + b; }
+static inline mako_i128_t mako_i128_sub(mako_i128_t a, mako_i128_t b) { return a - b; }
+static inline mako_i128_t mako_i128_mul(mako_i128_t a, mako_i128_t b) { return a * b; }
+static inline mako_i128_t mako_i128_div(mako_i128_t a, mako_i128_t b) { return b == 0 ? 0 : a / b; }
+static inline int64_t mako_i128_cmp(mako_i128_t a, mako_i128_t b) {
+    return a < b ? -1 : (a > b ? 1 : 0);
+}
+
+/* =========================================================================
+ * Track 2: Zero-Allocation Kernel Poller (kqueue / epoll) & CPU Intrinsics
+ * ========================================================================= */
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#include <sys/event.h>
+#include <sys/time.h>
+#elif defined(__linux__)
+#include <sys/epoll.h>
+#endif
+
+static inline int64_t mako_poller_new(void) {
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    int kq = kqueue();
+    if (kq >= 0) {
+        int fl = fcntl(kq, F_GETFD, 0);
+        if (fl >= 0) fcntl(kq, F_SETFD, fl | FD_CLOEXEC);
+    }
+    return (int64_t)kq;
+#elif defined(__linux__)
+    return (int64_t)epoll_create1(EPOLL_CLOEXEC);
+#else
+    return -1;
+#endif
+}
+
+static inline int64_t mako_poller_add(int64_t p, int64_t fd, int64_t events, int64_t token) {
+    if (p < 0 || fd < 0) return -1;
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    struct kevent evs[2];
+    int n = 0;
+    if (events & 1) {
+        EV_SET(&evs[n++], (uintptr_t)fd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, (void *)(intptr_t)token);
+    }
+    if (events & 2) {
+        EV_SET(&evs[n++], (uintptr_t)fd, EVFILT_WRITE, EV_ADD | EV_ENABLE, 0, 0, (void *)(intptr_t)token);
+    }
+    if (n == 0) return 0;
+    return kevent((int)p, evs, n, NULL, 0, NULL) == 0 ? 0 : -1;
+#elif defined(__linux__)
+    struct epoll_event ev;
+    memset(&ev, 0, sizeof(ev));
+    if (events & 1) ev.events |= EPOLLIN;
+    if (events & 2) ev.events |= EPOLLOUT;
+    ev.data.u64 = (uint64_t)token;
+    return epoll_ctl((int)p, EPOLL_CTL_ADD, (int)fd, &ev) == 0 ? 0 : -1;
+#else
+    (void)events; (void)token;
+    return -1;
+#endif
+}
+
+static inline int64_t mako_poller_mod(int64_t p, int64_t fd, int64_t events, int64_t token) {
+    if (p < 0 || fd < 0) return -1;
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    struct kevent evs[2];
+    if (events & 1) {
+        EV_SET(&evs[0], (uintptr_t)fd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, (void *)(intptr_t)token);
+        kevent((int)p, &evs[0], 1, NULL, 0, NULL);
+    } else {
+        EV_SET(&evs[0], (uintptr_t)fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+        kevent((int)p, &evs[0], 1, NULL, 0, NULL);
+    }
+    if (events & 2) {
+        EV_SET(&evs[1], (uintptr_t)fd, EVFILT_WRITE, EV_ADD | EV_ENABLE, 0, 0, (void *)(intptr_t)token);
+        kevent((int)p, &evs[1], 1, NULL, 0, NULL);
+    } else {
+        EV_SET(&evs[1], (uintptr_t)fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+        kevent((int)p, &evs[1], 1, NULL, 0, NULL);
+    }
+    return 0;
+#elif defined(__linux__)
+    struct epoll_event ev;
+    memset(&ev, 0, sizeof(ev));
+    if (events & 1) ev.events |= EPOLLIN;
+    if (events & 2) ev.events |= EPOLLOUT;
+    ev.data.u64 = (uint64_t)token;
+    return epoll_ctl((int)p, EPOLL_CTL_MOD, (int)fd, &ev) == 0 ? 0 : -1;
+#else
+    (void)events; (void)token;
+    return -1;
+#endif
+}
+
+static inline int64_t mako_poller_del(int64_t p, int64_t fd) {
+    if (p < 0 || fd < 0) return -1;
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    struct kevent ev;
+    int r1 = 0, r2 = 0;
+    EV_SET(&ev, (uintptr_t)fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+    r1 = kevent((int)p, &ev, 1, NULL, 0, NULL);
+    EV_SET(&ev, (uintptr_t)fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+    r2 = kevent((int)p, &ev, 1, NULL, 0, NULL);
+    return (r1 == 0 || r2 == 0) ? 0 : -1;
+#elif defined(__linux__)
+    return epoll_ctl((int)p, EPOLL_CTL_DEL, (int)fd, NULL) == 0 ? 0 : -1;
+#else
+    return -1;
+#endif
+}
+
+static inline int64_t mako_poller_wait(int64_t p, MakoIntArray out_tokens, MakoIntArray out_events, int64_t max_events, int64_t timeout_ms) {
+    if (p < 0 || max_events <= 0) return 0;
+    size_t cap = out_tokens.len < out_events.len ? out_tokens.len : out_events.len;
+    if ((size_t)max_events < cap) cap = (size_t)max_events;
+    if (cap == 0) return 0;
+    if (cap > 256) cap = 256;
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    struct kevent kev[256];
+    struct timespec ts;
+    struct timespec *tsp = NULL;
+    if (timeout_ms >= 0) {
+        ts.tv_sec = timeout_ms / 1000;
+        ts.tv_nsec = (timeout_ms % 1000) * 1000000L;
+        tsp = &ts;
+    }
+    int n = kevent((int)p, NULL, 0, kev, (int)cap, tsp);
+    if (n < 0) return errno == EINTR ? 0 : -1;
+    for (int i = 0; i < n; i++) {
+        out_tokens.data[i] = (int64_t)(intptr_t)kev[i].udata;
+        int64_t ev = 0;
+        if (kev[i].filter == EVFILT_READ) ev |= 1;
+        if (kev[i].filter == EVFILT_WRITE) ev |= 2;
+        if (kev[i].flags & (EV_EOF | EV_ERROR)) ev |= 4;
+        out_events.data[i] = ev;
+    }
+    return (int64_t)n;
+#elif defined(__linux__)
+    struct epoll_event epev[256];
+    int tmo = timeout_ms < 0 ? -1 : (int)timeout_ms;
+    int n = epoll_wait((int)p, epev, (int)cap, tmo);
+    if (n < 0) return errno == EINTR ? 0 : -1;
+    for (int i = 0; i < n; i++) {
+        out_tokens.data[i] = (int64_t)epev[i].data.u64;
+        int64_t ev = 0;
+        if (epev[i].events & EPOLLIN) ev |= 1;
+        if (epev[i].events & EPOLLOUT) ev |= 2;
+        if (epev[i].events & (EPOLLERR | EPOLLHUP)) ev |= 4;
+        out_events.data[i] = ev;
+    }
+    return (int64_t)n;
+#else
+    (void)timeout_ms;
+    return -1;
+#endif
+}
+
+static inline int64_t mako_poller_close(int64_t p) {
+    if (p < 0) return -1;
+    return close((int)p) == 0 ? 0 : -1;
+}
+
+static inline int64_t mako_cpu_ticks(void) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+    uint64_t val = 0;
+    __asm__ __volatile__("mrs %0, cntvct_el0" : "=r"(val));
+    return (int64_t)val;
+#elif defined(__x86_64__) || defined(_M_X64)
+    uint32_t lo = 0, hi = 0;
+    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+    return (int64_t)(((uint64_t)hi << 32) | lo);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+#endif
+}
+
+static inline void mako_cpu_pause(void) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+    __asm__ __volatile__("yield" ::: "memory");
+#elif defined(__x86_64__) || defined(_M_X64)
+    __asm__ __volatile__("pause" ::: "memory");
+#else
+    atomic_signal_fence(memory_order_seq_cst);
+#endif
+}
+
+static inline void mako_prefetch_read(int64_t addr) {
+    if (addr != 0) __builtin_prefetch((const void *)(intptr_t)addr, 0, 3);
+}
+
+static inline void mako_prefetch_write(int64_t addr) {
+    if (addr != 0) __builtin_prefetch((const void *)(intptr_t)addr, 1, 3);
+}
+
+/* =========================================================================
+ * Track 3: Raw File-Backed mmap_file & Aligned Heap Allocation
+ * ========================================================================= */
+static inline int64_t mako_mmap_file(int64_t fd, int64_t offset, int64_t size, int64_t prot, int64_t shared) {
+#ifndef _WIN32
+    if (fd < 0 || size <= 0) return 0;
+    int p = 0;
+    if (prot & 1) p |= PROT_READ;
+    if (prot & 2) p |= PROT_WRITE;
+    if (prot & 4) p |= PROT_EXEC;
+    int flags = (shared != 0) ? MAP_SHARED : MAP_PRIVATE;
+    void *ptr = mmap(NULL, (size_t)size, p, flags, (int)fd, (off_t)offset);
+    if (ptr == MAP_FAILED) return 0;
+    return (int64_t)(intptr_t)ptr;
+#else
+    (void)fd; (void)offset; (void)size; (void)prot; (void)shared;
+    return 0;
+#endif
+}
+
+static inline int64_t mako_alloc_aligned(int64_t size, int64_t align) {
+    if (size <= 0) return 0;
+    size_t a = (align <= (int64_t)sizeof(void *)) ? sizeof(void *) : (size_t)align;
+    /* Ensure power of two */
+    if ((a & (a - 1)) != 0) {
+        size_t p2 = sizeof(void *);
+        while (p2 < a) p2 <<= 1;
+        a = p2;
+    }
+    void *ptr = NULL;
+#ifndef _WIN32
+    if (posix_memalign(&ptr, a, (size_t)size) != 0 || !ptr) return 0;
+#else
+    ptr = _aligned_malloc((size_t)size, a);
+    if (!ptr) return 0;
+#endif
+    memset(ptr, 0, (size_t)size);
+    atomic_fetch_add_explicit(&mako_rc_alloc_count, 1, memory_order_relaxed);
+    return (int64_t)(intptr_t)ptr;
+}
+
+static inline void mako_free_aligned(int64_t ptr) {
+    if (ptr == 0) return;
+    atomic_fetch_add_explicit(&mako_rc_free_count, 1, memory_order_relaxed);
+#ifndef _WIN32
+    free((void *)(intptr_t)ptr);
+#else
+    _aligned_free((void *)(intptr_t)ptr);
+#endif
+}
+
+/* =========================================================================
+ * Track 4: Complete Go 1.21-1.23 slices & maps Polymorphic Surface
+ * ========================================================================= */
+static inline int64_t mako_slice_index_int(MakoIntArray a, int64_t target) {
+    for (size_t i = 0; i < a.len; i++) {
+        if (a.data[i] == target) return (int64_t)i;
+    }
+    return -1;
+}
+
+static inline int64_t mako_slice_index_float(MakoFloatArray a, double target) {
+    for (size_t i = 0; i < a.len; i++) {
+        if (a.data[i] == target) return (int64_t)i;
+    }
+    return -1;
+}
+
+static inline int64_t mako_slice_index_str(MakoStrArray a, MakoString target) {
+    for (size_t i = 0; i < a.len; i++) {
+        if (mako_str_eq(a.data[i], target)) return (int64_t)i;
+    }
+    return -1;
+}
+
+static inline int64_t mako_slice_index_byte(MakoByteArray a, uint8_t target) {
+    if (a.len == 0 || !a.data) return -1;
+    const void *p = memchr(a.data, (int)target, a.len);
+    return p ? (int64_t)((const uint8_t *)p - a.data) : -1;
+}
+
+static inline bool mako_slice_contains_int(MakoIntArray a, int64_t target) {
+    return mako_slice_index_int(a, target) >= 0;
+}
+
+static inline bool mako_slice_contains_float(MakoFloatArray a, double target) {
+    return mako_slice_index_float(a, target) >= 0;
+}
+
+static inline bool mako_slice_contains_str(MakoStrArray a, MakoString target) {
+    return mako_slice_index_str(a, target) >= 0;
+}
+
+static inline bool mako_slice_contains_byte(MakoByteArray a, uint8_t target) {
+    return mako_slice_index_byte(a, target) >= 0;
+}
+
+static inline int64_t mako_slice_compare_int(MakoIntArray a, MakoIntArray b) {
+    size_t n = a.len < b.len ? a.len : b.len;
+    for (size_t i = 0; i < n; i++) {
+        if (a.data[i] < b.data[i]) return -1;
+        if (a.data[i] > b.data[i]) return 1;
+    }
+    return a.len < b.len ? -1 : (a.len > b.len ? 1 : 0);
+}
+
+static inline int64_t mako_slice_compare_float(MakoFloatArray a, MakoFloatArray b) {
+    size_t n = a.len < b.len ? a.len : b.len;
+    for (size_t i = 0; i < n; i++) {
+        if (a.data[i] < b.data[i]) return -1;
+        if (a.data[i] > b.data[i]) return 1;
+    }
+    return a.len < b.len ? -1 : (a.len > b.len ? 1 : 0);
+}
+
+static inline int64_t mako_slice_compare_str(MakoStrArray a, MakoStrArray b) {
+    size_t n = a.len < b.len ? a.len : b.len;
+    for (size_t i = 0; i < n; i++) {
+        int64_t c = mako_str_compare(a.data[i], b.data[i]);
+        if (c < 0) return -1;
+        if (c > 0) return 1;
+    }
+    return a.len < b.len ? -1 : (a.len > b.len ? 1 : 0);
+}
+
+static inline int64_t mako_slice_compare_byte(MakoByteArray a, MakoByteArray b) {
+    size_t n = a.len < b.len ? a.len : b.len;
+    if (n > 0 && a.data && b.data) {
+        int c = memcmp(a.data, b.data, n);
+        if (c < 0) return -1;
+        if (c > 0) return 1;
+    }
+    return a.len < b.len ? -1 : (a.len > b.len ? 1 : 0);
+}
+
+static inline bool mako_slice_equal_int(MakoIntArray a, MakoIntArray b) {
+    if (a.len != b.len) return false;
+    if (a.len == 0) return true;
+    return memcmp(a.data, b.data, a.len * sizeof(int64_t)) == 0;
+}
+
+static inline bool mako_slice_equal_float(MakoFloatArray a, MakoFloatArray b) {
+    if (a.len != b.len) return false;
+    for (size_t i = 0; i < a.len; i++) {
+        if (a.data[i] != b.data[i]) return false;
+    }
+    return true;
+}
+
+static inline bool mako_slice_equal_str(MakoStrArray a, MakoStrArray b) {
+    if (a.len != b.len) return false;
+    for (size_t i = 0; i < a.len; i++) {
+        if (!mako_str_eq(a.data[i], b.data[i])) return false;
+    }
+    return true;
+}
+
+static inline bool mako_slice_equal_byte(MakoByteArray a, MakoByteArray b) {
+    if (a.len != b.len) return false;
+    if (a.len == 0) return true;
+    return memcmp(a.data, b.data, a.len) == 0;
+}
+
+static inline MakoIntArray mako_slice_reverse_int(MakoIntArray a) {
+    if (a.len == 0) return mako_int_array_empty();
+    int64_t *buf = (int64_t *)mako_rc_alloc(a.len * sizeof(int64_t));
+    for (size_t i = 0; i < a.len; i++) buf[i] = a.data[a.len - 1 - i];
+    return (MakoIntArray){ .data = buf, .len = a.len, .cap = a.len };
+}
+
+static inline MakoFloatArray mako_slice_reverse_float(MakoFloatArray a) {
+    if (a.len == 0) return mako_float_array_empty();
+    double *buf = (double *)mako_rc_alloc(a.len * sizeof(double));
+    for (size_t i = 0; i < a.len; i++) buf[i] = a.data[a.len - 1 - i];
+    return (MakoFloatArray){ .data = buf, .len = a.len, .cap = a.len };
+}
+
+static inline MakoStrArray mako_slice_reverse_str(MakoStrArray a) {
+    if (a.len == 0) return (MakoStrArray){ NULL, 0, 0 };
+    MakoString *buf = (MakoString *)mako_rc_alloc(a.len * sizeof(MakoString));
+    for (size_t i = 0; i < a.len; i++) buf[i] = mako_str_clone(a.data[a.len - 1 - i]);
+    return (MakoStrArray){ .data = buf, .len = a.len, .cap = a.len };
+}
+
+static inline MakoByteArray mako_slice_reverse_byte(MakoByteArray a) {
+    if (a.len == 0) return mako_byte_array_empty();
+    uint8_t *buf = (uint8_t *)mako_rc_alloc(a.len);
+    for (size_t i = 0; i < a.len; i++) buf[i] = a.data[a.len - 1 - i];
+    return (MakoByteArray){ .data = buf, .len = a.len, .cap = a.len };
+}
+
+static inline int64_t mako_slice_min_int(MakoIntArray a) {
+    if (a.len == 0) return 0;
+    int64_t best = a.data[0];
+    for (size_t i = 1; i < a.len; i++) {
+        if (a.data[i] < best) best = a.data[i];
+    }
+    return best;
+}
+
+static inline int64_t mako_slice_max_int(MakoIntArray a) {
+    if (a.len == 0) return 0;
+    int64_t best = a.data[0];
+    for (size_t i = 1; i < a.len; i++) {
+        if (a.data[i] > best) best = a.data[i];
+    }
+    return best;
+}
+
+static inline double mako_slice_min_float(MakoFloatArray a) {
+    if (a.len == 0) return 0.0;
+    double best = a.data[0];
+    for (size_t i = 1; i < a.len; i++) {
+        if (a.data[i] < best) best = a.data[i];
+    }
+    return best;
+}
+
+static inline double mako_slice_max_float(MakoFloatArray a) {
+    if (a.len == 0) return 0.0;
+    double best = a.data[0];
+    for (size_t i = 1; i < a.len; i++) {
+        if (a.data[i] > best) best = a.data[i];
+    }
+    return best;
+}
+
+static inline MakoString mako_slice_min_str(MakoStrArray a) {
+    if (a.len == 0) return mako_str_from_cstr("");
+    MakoString best = a.data[0];
+    for (size_t i = 1; i < a.len; i++) {
+        if (mako_str_compare(a.data[i], best) < 0) best = a.data[i];
+    }
+    return mako_str_clone(best);
+}
+
+static inline MakoString mako_slice_max_str(MakoStrArray a) {
+    if (a.len == 0) return mako_str_from_cstr("");
+    MakoString best = a.data[0];
+    for (size_t i = 1; i < a.len; i++) {
+        if (mako_str_compare(a.data[i], best) > 0) best = a.data[i];
+    }
+    return mako_str_clone(best);
+}
+
+static inline MakoIntArray mako_slice_replace_int(MakoIntArray a, int64_t i, int64_t j, MakoIntArray rep) {
+    size_t lo = i < 0 ? 0 : ((size_t)i > a.len ? a.len : (size_t)i);
+    size_t hi = j < 0 ? 0 : ((size_t)j > a.len ? a.len : (size_t)j);
+    if (hi < lo) hi = lo;
+    size_t new_len = lo + rep.len + (a.len - hi);
+    if (new_len == 0) return mako_int_array_empty();
+    int64_t *buf = (int64_t *)mako_rc_alloc(new_len * sizeof(int64_t));
+    if (lo > 0) memcpy(buf, a.data, lo * sizeof(int64_t));
+    if (rep.len > 0) memcpy(buf + lo, rep.data, rep.len * sizeof(int64_t));
+    if (a.len > hi) memcpy(buf + lo + rep.len, a.data + hi, (a.len - hi) * sizeof(int64_t));
+    return (MakoIntArray){ .data = buf, .len = new_len, .cap = new_len };
+}
+
+static inline MakoFloatArray mako_slice_replace_float(MakoFloatArray a, int64_t i, int64_t j, MakoFloatArray rep) {
+    size_t lo = i < 0 ? 0 : ((size_t)i > a.len ? a.len : (size_t)i);
+    size_t hi = j < 0 ? 0 : ((size_t)j > a.len ? a.len : (size_t)j);
+    if (hi < lo) hi = lo;
+    size_t new_len = lo + rep.len + (a.len - hi);
+    if (new_len == 0) return mako_float_array_empty();
+    double *buf = (double *)mako_rc_alloc(new_len * sizeof(double));
+    if (lo > 0) memcpy(buf, a.data, lo * sizeof(double));
+    if (rep.len > 0) memcpy(buf + lo, rep.data, rep.len * sizeof(double));
+    if (a.len > hi) memcpy(buf + lo + rep.len, a.data + hi, (a.len - hi) * sizeof(double));
+    return (MakoFloatArray){ .data = buf, .len = new_len, .cap = new_len };
+}
+
+static inline MakoStrArray mako_slice_replace_str(MakoStrArray a, int64_t i, int64_t j, MakoStrArray rep) {
+    size_t lo = i < 0 ? 0 : ((size_t)i > a.len ? a.len : (size_t)i);
+    size_t hi = j < 0 ? 0 : ((size_t)j > a.len ? a.len : (size_t)j);
+    if (hi < lo) hi = lo;
+    size_t new_len = lo + rep.len + (a.len - hi);
+    if (new_len == 0) return (MakoStrArray){ NULL, 0, 0 };
+    MakoString *buf = (MakoString *)mako_rc_alloc(new_len * sizeof(MakoString));
+    size_t k = 0;
+    for (size_t idx = 0; idx < lo; idx++) buf[k++] = mako_str_clone(a.data[idx]);
+    for (size_t idx = 0; idx < rep.len; idx++) buf[k++] = mako_str_clone(rep.data[idx]);
+    for (size_t idx = hi; idx < a.len; idx++) buf[k++] = mako_str_clone(a.data[idx]);
+    return (MakoStrArray){ .data = buf, .len = new_len, .cap = new_len };
+}
+
+static inline MakoByteArray mako_slice_replace_byte(MakoByteArray a, int64_t i, int64_t j, MakoByteArray rep) {
+    size_t lo = i < 0 ? 0 : ((size_t)i > a.len ? a.len : (size_t)i);
+    size_t hi = j < 0 ? 0 : ((size_t)j > a.len ? a.len : (size_t)j);
+    if (hi < lo) hi = lo;
+    size_t new_len = lo + rep.len + (a.len - hi);
+    if (new_len == 0) return mako_byte_array_empty();
+    uint8_t *buf = (uint8_t *)mako_rc_alloc(new_len);
+    if (lo > 0) memcpy(buf, a.data, lo);
+    if (rep.len > 0) memcpy(buf + lo, rep.data, rep.len);
+    if (a.len > hi) memcpy(buf + lo + rep.len, a.data + hi, a.len - hi);
+    return (MakoByteArray){ .data = buf, .len = new_len, .cap = new_len };
+}
+
+static inline MakoIntArray mako_slice_repeat_int(MakoIntArray a, int64_t count) {
+    if (a.len == 0 || count <= 0) return mako_int_array_empty();
+    size_t new_len = a.len * (size_t)count;
+    int64_t *buf = (int64_t *)mako_rc_alloc(new_len * sizeof(int64_t));
+    for (size_t c = 0; c < (size_t)count; c++) {
+        memcpy(buf + c * a.len, a.data, a.len * sizeof(int64_t));
+    }
+    return (MakoIntArray){ .data = buf, .len = new_len, .cap = new_len };
+}
+
+static inline MakoFloatArray mako_slice_repeat_float(MakoFloatArray a, int64_t count) {
+    if (a.len == 0 || count <= 0) return mako_float_array_empty();
+    size_t new_len = a.len * (size_t)count;
+    double *buf = (double *)mako_rc_alloc(new_len * sizeof(double));
+    for (size_t c = 0; c < (size_t)count; c++) {
+        memcpy(buf + c * a.len, a.data, a.len * sizeof(double));
+    }
+    return (MakoFloatArray){ .data = buf, .len = new_len, .cap = new_len };
+}
+
+static inline MakoStrArray mako_slice_repeat_str(MakoStrArray a, int64_t count) {
+    if (a.len == 0 || count <= 0) return (MakoStrArray){ NULL, 0, 0 };
+    size_t new_len = a.len * (size_t)count;
+    MakoString *buf = (MakoString *)mako_rc_alloc(new_len * sizeof(MakoString));
+    size_t k = 0;
+    for (size_t c = 0; c < (size_t)count; c++) {
+        for (size_t i = 0; i < a.len; i++) {
+            buf[k++] = mako_str_clone(a.data[i]);
+        }
+    }
+    return (MakoStrArray){ .data = buf, .len = new_len, .cap = new_len };
+}
+
+static inline MakoByteArray mako_slice_repeat_byte(MakoByteArray a, int64_t count) {
+    if (a.len == 0 || count <= 0) return mako_byte_array_empty();
+    size_t new_len = a.len * (size_t)count;
+    uint8_t *buf = (uint8_t *)mako_rc_alloc(new_len);
+    for (size_t c = 0; c < (size_t)count; c++) {
+        memcpy(buf + c * a.len, a.data, a.len);
+    }
+    return (MakoByteArray){ .data = buf, .len = new_len, .cap = new_len };
+}
 
 #ifdef __cplusplus
 }

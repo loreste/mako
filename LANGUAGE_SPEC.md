@@ -889,6 +889,19 @@ p2.x = 10
 person.addr.city = "Lyon"    // nested field assign
 ```
 
+#### Struct Layout Attributes & Layout Intrinsics
+
+Structs may carry layout attributes before `struct`:
+- `#[packed]` — eliminates inter-field padding and emits exact hardware byte widths (`uint8_t`, `int8_t`, `uint16_t`, `int16_t`, `uint32_t`, `int32_t`, `uint64_t`, `int64_t`, `mako_i128_t`, `mako_u128_t`, `float`, `double`).
+- `#[align(N)]` — aligns the struct to `N` bytes (`N` must be a power of two in `1..=4096`).
+- `#[cache_aligned]` — aligns the struct to 64 bytes (`__attribute__((aligned(64)))`) to eliminate false sharing across CPU cache lines.
+
+Compile-time layout and assertion builtins:
+- `sizeof(T)` / `sizeof_val(x)` — exact byte size of type `T` or value `x`.
+- `alignof(T)` — byte alignment of type `T` or value `x`.
+- `offsetof(StructType, "field")` — byte offset of `field` inside `StructType`.
+- `static_assert(cond)` / `static_assert(cond, "msg")` — compile-time assertion verified during typechecking and in generated C.
+
 Structs may be used as slice elements:
 
 ```mko

@@ -1,0 +1,575 @@
+pack main
+
+#[packed]
+struct WireHeader {
+    magic: u8,
+    version: u16,
+    length: u32,
+    seq: u64,
+    trace_id: u128,
+    weight: f32,
+}
+
+#[cache_aligned]
+struct CacheLineCounter {
+    count: i64,
+    epoch: i64,
+}
+
+#[align(32)]
+struct AlignedSlot {
+    tag: u8,
+    val: i64,
+}
+
+fn TestFixedWidthAliasesAndPackedSizeof() {
+    let a: u8 = u8(255)
+    let b: i8 = i8(-5)
+    let c: u16 = u16(60000)
+    let d: i16 = i16(-1234)
+    let e: u32 = u32(3000000000)
+    let f: i32 = i32(-42)
+    let g: usize = usize(4096)
+    let h: uintptr = uintptr(8192)
+    let x: f32 = f32(1.5)
+    let y: f64 = f64(2.5)
+    assert_eq(int(a), 255)
+    assert_eq(int(b), -5)
+    assert_eq(int(c), 60000)
+    assert_eq(int(d), -1234)
+    assert_eq(int(e), 3000000000)
+    assert_eq(int(f), -42)
+    assert_eq(int(g + h), 12288)
+    assert_eq(int(x * f32(2.0)), 3)
+    assert_eq(int(y * 2.0), 5)
+
+    let hdr = WireHeader{
+        magic: u8(0x4D),
+        version: u16(1),
+        length: u32(1024),
+        seq: u64(99),
+        trace_id: u128_from_parts(7, 42),
+        weight: f32(0.5),
+    }
+    // 1 + 2 + 4 + 8 + 16 + 4 = 35 bytes exact packed hardware representation
+    assert_eq(sizeof_val(hdr), 35)
+    assert_eq(int(hdr.magic), 0x4D)
+    assert_eq(int(hdr.length), 1024)
+    assert_eq(u128_hi(hdr.trace_id), 7)
+    assert_eq(u128_lo(hdr.trace_id), 42)
+}
+
+fn TestI128AndU128Arithmetic() {
+    let big: i128 = (i128(1) << i128(100)) + i128(12345)
+    let shifted = big >> i128(100)
+    assert_eq(int(shifted), 1)
+    assert_eq(int(big & i128(0xFFFF)), 12345)
+
+    let parts = i128_from_parts(0x11223344, 0x55667788)
+    assert_eq(i128_hi(parts), 0x11223344)
+    assert_eq(i128_lo(parts), 0x55667788)
+
+    let u: u128 = u128_from_parts(3, 999)
+    let u2: u128 = u + u128(1)
+    assert_eq(u128_hi(u2), 3)
+    assert_eq(u128_lo(u2), 1000)
+}
+
+fn TestRawMemoryTypedAndAtomicOps() {
+    let page = mmap_anon(4096)
+    assert(page != 0)
+
+    mem_write_u16(page, 0, 50000)
+    assert_eq(mem_read_u16(page, 0), 50000)
+
+    mem_write_i16(page, 2, -12345)
+    assert_eq(mem_read_i16(page, 2), -12345)
+
+    mem_write_u32(page, 4, 3000000000)
+    assert_eq(mem_read_u32(page, 4), 3000000000)
+
+    mem_write_u64(page, 8, 123456789012345)
+    assert_eq(mem_read_u64(page, 8), 123456789012345)
+
+    mem_write_f32(page, 16, 3.25)
+    assert_eq(int(mem_read_f32(page, 16) * 4.0), 13)
+
+    mem_write_f64(page, 24, 6.125)
+    assert_eq(int(mem_read_f64(page, 24) * 8.0), 49)
+
+    // Raw hardware atomics on shared/mapped memory
+    mem_atomic_store_i64(page, 64, 100)
+    memory_fence()
+    assert_eq(mem_atomic_load_i64(page, 64), 100)
+    assert_eq(mem_atomic_add_i64(page, 64, 25), 100)
+    assert_eq(mem_atomic_load_i64(page, 64), 125)
+    assert_eq(mem_atomic_sub_i64(page, 64, 5), 125)
+    assert_eq(mem_atomic_exchange_i64(page, 64, 200), 120)
+    assert_eq(mem_atomic_cas_i64(page, 64, 999, 300), 0)
+    assert_eq(mem_atomic_cas_i64(page, 64, 200, 300), 1)
+    assert_eq(mem_atomic_load_i64(page, 64), 300)
+
+    // Virtual memory advice & sync
+    assert_eq(madvise(page, 4096, 0), 0)
+    assert_eq(msync(page, 4096, 0), 0)
+
+    // Positional raw I/O & flock
+    let tmp = temp_file("mako_raw_io_")
+    let fd = file_open(tmp, 2, 3)
+    assert(fd >= 0)
+    assert_eq(flock(fd, 2), 0) // LOCK_EX = 2
+    mem_write_i64(page, 128, 0x1122334455667788)
+    assert_eq(pwrite_raw(fd, page + 128, 8, 0), 8)
+    mem_write_i64(page, 256, 0)
+    assert_eq(pread_raw(fd, page + 256, 8, 0), 8)
+    assert_eq(mem_read_i64(page, 256), 0x1122334455667788)
+    assert_eq(flock(fd, 8), 0) // LOCK_UN = 8
+    file_close(fd)
+    remove_file(tmp)
+
+    assert_eq(munmap(page, 4096), 0)
+}
+
+fn TestBitOpsAndSimdVectors() {
+    assert_eq(bswap16(0x1234), 0x3412)
+    assert_eq(ntohs(htons(8080)), 8080)
+    assert_eq(ntohl(htonl(0x12345678)), 0x12345678)
+    assert_eq(rotr64(rotl64(0x123456789ABCDEF0, 13), 13), 0x123456789ABCDEF0)
+    assert_eq(rotr32(rotl32(0x12345678, 7), 7), 0x12345678)
+    assert_eq(popcount32(0xF0F00F0F), 16)
+    assert_eq(clz32(1), 31)
+    assert_eq(ctz32(8), 3)
+
+    let a = [1.0, 2.0, 3.0, 4.0, 5.0]
+    let b = [10.0, 20.0, 30.0, 40.0, 50.0]
+    let s = simd_f32x4_add(a, b)
+    assert_eq(int(s[0]), 11)
+    assert_eq(int(s[4]), 55)
+
+    let d = simd_f32x4_sub(b, a)
+    assert_eq(int(d[1]), 18)
+
+    let p = simd_f32x4_mul(a, b)
+    assert_eq(int(p[2]), 90)
+
+    let sc = simd_f32x4_scale(a, 3.0)
+    assert_eq(int(sc[3]), 12)
+
+    let ia = [1, 2, 3, 4, 5]
+    let ib = [100, 200, 300, 400, 500]
+    let isum = simd_i32x4_add(ia, ib)
+    assert_eq(isum[0], 101)
+    assert_eq(isum[4], 505)
+}
+
+fn TestPolymorphicMinMaxClampAndClear() {
+    assert_eq(min(10, 3, 7, 1, 9), 1)
+    assert_eq(max(10, 3, 7, 25, 9), 25)
+    assert_eq(int(min(3.5, 1.25, 2.0) * 4.0), 5)
+    assert_eq(int(max(3.5, 1.25, 4.75) * 4.0), 19)
+    assert(min("pear", "apple", "banana") == "apple")
+    assert(max("pear", "apple", "zebra") == "zebra")
+    assert(min("pear", str_to_lower("APPLE"), "banana") == "apple")
+    assert_eq(int(clamp(2.5, 0.0, 1.5) * 2.0), 3)
+
+    let mut xs = [10, 20, 30]
+    clear(xs)
+    assert_eq(len(xs), 3)
+    assert_eq(xs[0] + xs[1] + xs[2], 0)
+
+    let mut ss = make([]string, 0)
+    ss = append(ss, "hello" + "_world")
+    ss = append(ss, "foo" + "_bar")
+    clear(ss)
+    assert_eq(len(ss), 2)
+    assert(ss[0] == "")
+    assert(ss[1] == "")
+
+    let mut m = make(map[string]int)
+    m["a"] = 1
+    m["b"] = 2
+    assert_eq(len(m), 2)
+    clear(m)
+    assert_eq(len(m), 0)
+}
+
+fn TestStructAlignmentOffsetofAndStaticAssert() {
+    static_assert(1 + 1 == 2, "math works")
+    static_assert(true)
+
+    assert_eq(sizeof(WireHeader), 35)
+    assert_eq(alignof(WireHeader), 1)
+    assert_eq(offsetof(WireHeader, "magic"), 0)
+    assert_eq(offsetof(WireHeader, "version"), 1)
+    assert_eq(offsetof(WireHeader, "length"), 3)
+    assert_eq(offsetof(WireHeader, "seq"), 7)
+    assert_eq(offsetof(WireHeader, "trace_id"), 15)
+    assert_eq(offsetof(WireHeader, "weight"), 31)
+
+    assert_eq(alignof(CacheLineCounter), 64)
+    assert_eq(sizeof(CacheLineCounter), 64)
+    assert_eq(offsetof(CacheLineCounter, "count"), 0)
+    assert_eq(offsetof(CacheLineCounter, "epoch"), 8)
+
+    assert_eq(alignof(AlignedSlot), 32)
+    assert_eq(sizeof(AlignedSlot), 32)
+    assert_eq(offsetof(AlignedSlot, "tag"), 0)
+    assert_eq(offsetof(AlignedSlot, "val"), 8)
+}
+
+fn TestTrack3HardwareIntrinsics() {
+    assert_eq(bswap16(0x1234), 0x3412)
+    assert_eq(bswap32(0x12345678), 0x78563412)
+    assert_eq(bswap64(0x0102030405060708), 0x0807060504030201)
+
+    assert_eq(ntoh16(hton16(0xABCD)), 0xABCD)
+    assert_eq(ntoh32(hton32(0x12345678)), 0x12345678)
+    assert_eq(ntoh64(hton64(0x1122334455667788)), 0x1122334455667788)
+
+    assert_eq(bit_clz64(0), 64)
+    assert_eq(bit_clz64(1), 63)
+    assert_eq(bit_ctz64(0), 64)
+    assert_eq(bit_ctz64(16), 4)
+    assert_eq(bit_popcnt64(0xF0F00F0F), 16)
+    assert_eq(bit_ffs64(0), 0)
+    assert_eq(bit_ffs64(8), 4)
+    assert_eq(bit_rotr64(bit_rotl64(0x123456789ABCDEF0, 19), 19), 0x123456789ABCDEF0)
+
+    let max_i64 = 9223372036854775807
+    let min_i64 = -9223372036854775807 - 1
+    assert_eq(wrapping_add(max_i64, 1), min_i64)
+    assert_eq(wrapping_sub(min_i64, 1), max_i64)
+    assert_eq(wrapping_mul(1000000, 1000000), 1000000000000)
+    assert_eq(saturating_add(max_i64, 100), max_i64)
+    assert_eq(saturating_sub(min_i64, 100), min_i64)
+    assert_eq(saturating_add(10, 20), 30)
+    assert_eq(saturating_sub(50, 20), 30)
+
+    let u = u128_from_parts(0x1234, 0x5678)
+    let hx = u128_to_hex(u)
+    assert(str_len(hx) > 0)
+}
+
+fn TestTrack4SlicesAndMapsBuiltins() {
+    let nums = [10, 20, 30, 40, 50]
+    let idx1, found1 = slice_binary_search(nums, 30)
+    assert(found1)
+    assert_eq(idx1, 2)
+    let idx2, found2 = slice_binary_search(nums, 25)
+    assert(!found2)
+    assert_eq(idx2, 2)
+
+    let words = ["apple", "banana", "cherry", "date"]
+    let widx, wfound = slice_binary_search(words, "cherry")
+    assert(wfound)
+    assert_eq(widx, 2)
+
+    let dupes = [1, 1, 2, 2, 2, 3, 1, 1]
+    let comp = slice_compact(dupes)
+    assert_eq(len(comp), 4)
+    assert_eq(comp[0], 1)
+    assert_eq(comp[1], 2)
+    assert_eq(comp[2], 3)
+    assert_eq(comp[3], 1)
+
+    let del = slice_delete(nums, 1, 3)
+    assert_eq(len(del), 3)
+    assert_eq(del[0], 10)
+    assert_eq(del[1], 40)
+    assert_eq(del[2], 50)
+
+    let ins = slice_insert(del, 1, 25)
+    assert_eq(len(ins), 4)
+    assert_eq(ins[0], 10)
+    assert_eq(ins[1], 25)
+    assert_eq(ins[2], 40)
+
+    let grown = slice_grow(ins, 32)
+    let clipped = slice_clip(grown)
+    assert_eq(len(clipped), 4)
+    assert_eq(clipped[1], 25)
+
+    let mut m1 = make(map[string]int)
+    m1["x"] = 10
+    m1["y"] = 20
+    let mut m2 = map_clone(m1)
+    m2["z"] = 30
+    assert_eq(len(m1), 2)
+    assert_eq(len(m2), 3)
+
+    let mut m3 = make(map[string]int)
+    m3["a"] = 1
+    map_copy(m3, m1)
+    assert_eq(len(m3), 3)
+    assert_eq(m3["x"], 10)
+    assert_eq(m3["y"], 20)
+}
+
+fn TestTrack2VectoredIoShmAndProcPiped() {
+    let page = mmap_anon(4096)
+    assert(page != 0)
+    assert_eq(mprotect_raw(page, 4096, 3), 0) // PROT_READ | PROT_WRITE = 3
+
+    // Endian raw memory helpers + mem_zero / mem_copy / mem_cmp
+    mem_zero(page, 256)
+    mem_write_u16_be(page, 0, 0x1234)
+    assert_eq(mem_read_u16_be(page, 0), 0x1234)
+    mem_write_u32_be(page, 4, 0x12345678)
+    assert_eq(mem_read_u32_be(page, 4), 0x12345678)
+    mem_write_u64_be(page, 8, 0x1122334455667788)
+    assert_eq(mem_read_u64_be(page, 8), 0x1122334455667788)
+    mem_copy(page + 64, page, 16)
+    assert_eq(mem_cmp(page, page + 64, 16), 0)
+
+    // Scatter-gather vectored I/O (pwritev_raw / preadv_raw)
+    let tmp = temp_file("mako_vec_io_")
+    let fd = file_open(tmp, 2, 3)
+    assert(fd >= 0)
+    mem_write_i64(page + 128, 0, 0x1AAABBBBCCCCDDDD)
+    mem_write_i64(page + 136, 0, 0x1111222233334444)
+    let ptrs = [page + 128, page + 136]
+    let lens = [8, 8]
+    assert_eq(pwritev_raw(fd, ptrs, lens, 0), 16)
+
+    mem_zero(page + 256, 32)
+    let rptrs = [page + 256, page + 264]
+    let rlens = [8, 8]
+    assert_eq(preadv_raw(fd, rptrs, rlens, 0), 16)
+    assert_eq(mem_read_i64(page + 256, 0), 0x1AAABBBBCCCCDDDD)
+    assert_eq(mem_read_i64(page + 264, 0), 0x1111222233334444)
+    file_close(fd)
+    remove_file(tmp)
+    assert_eq(munmap(page, 4096), 0)
+
+    // Interactive piped subprocess
+    let ph = proc_spawn_piped("cat")
+    assert(ph >= 0)
+    let nw = proc_write_stdin(ph, "mako_piped_ok")
+    assert_eq(nw, 13)
+    assert_eq(proc_close_stdin(ph), 0)
+    let out = proc_read_stdout(ph, 64)
+    assert(out == "mako_piped_ok")
+    let code = proc_exit_code(ph)
+    assert_eq(code, 0)
+    proc_close(ph)
+}
+
+enum TaskKind {
+    Fast,
+    Tagged(string),
+    Weighted(int, string),
+}
+
+struct KickEnvelope {
+    id: int,
+    label: string,
+    kind: TaskKind,
+    scores: []int,
+}
+
+fn kick_envelope_worker(env: KickEnvelope) -> KickEnvelope {
+    let mut bonus = env.id
+    let mut tag_str = env.label
+    match env.kind {
+        Fast => {
+            bonus = bonus + 10
+        }
+        Tagged(s) => {
+            bonus = bonus + str_len(s)
+            tag_str = s
+        }
+        Weighted(w, s) => {
+            bonus = bonus + w + str_len(s)
+            tag_str = s
+        }
+    }
+    if len(env.scores) > 0 {
+        bonus = bonus + env.scores[0]
+    }
+    return KickEnvelope {
+        id: bonus,
+        label: tag_str,
+        kind: Tagged(tag_str),
+        scores: [bonus, env.id],
+    }
+}
+
+fn kick_enum_worker(k: TaskKind) -> int {
+    return match k {
+        Fast => 1,
+        Tagged(s) => str_len(s),
+        Weighted(w, s) => w + str_len(s),
+    }
+}
+
+fn TestKickStructWithEnumFieldsAndReturns() {
+    let base_tag = "alpha_payload"
+    let env1 = KickEnvelope {
+        id: 100,
+        label: "job_one",
+        kind: Weighted(25, base_tag),
+        scores: [7, 8, 9],
+    }
+    crew c {
+        let j1 = c.kick(kick_envelope_worker(env1))
+        let j2 = c.kick(kick_envelope_worker(KickEnvelope {
+            id: 50,
+            label: "job_two",
+            kind: Tagged("inline_tag"),
+            scores: [5],
+        }))
+        let j3 = c.kick(kick_enum_worker(Weighted(40, " DirectEnum")))
+        let r1 = j1.join()
+        let r2 = j2.join()
+        let r3 = j3.join()
+        // 100 + 25 + 13 ("alpha_payload") + 7 = 145
+        assert_eq(r1.id, 145)
+        assert(r1.label == "alpha_payload")
+        assert_eq(len(r1.scores), 2)
+        assert_eq(r1.scores[0], 145)
+        // 50 + 10 ("inline_tag") + 5 = 65
+        assert_eq(r2.id, 65)
+        assert(r2.label == "inline_tag")
+        assert_eq(r3, 51)
+    }
+    // Verify original env1 is still intact after deep-clone across kick
+    assert_eq(env1.id, 100)
+    assert(env1.label == "job_one")
+}
+
+fn TestKernelPollerCpuAndAlignedMmap() {
+    // CPU cycle counter, spin pause, cache prefetch
+    let t0 = cpu_ticks()
+    cpu_pause()
+    let t1 = cpu_ticks()
+    assert(t1 >= t0)
+
+    // Aligned heap allocation (64-byte cache line & 4096-byte page alignment)
+    let buf64 = alloc_aligned(256, 64)
+    assert(buf64 != 0)
+    assert_eq(buf64 % 64, 0)
+    prefetch_write(buf64)
+    mem_write_i64(buf64, 0, 0x4AFEBABE12345678)
+    prefetch_read(buf64)
+    assert_eq(mem_read_i64(buf64, 0), 0x4AFEBABE12345678)
+    free_aligned(buf64)
+
+    // Kernel poller (kqueue / epoll) on Unix domain socket pair
+    let p = poller_new()
+    assert(p >= 0)
+    let sock_path = temp_file("mako_poller_sock_")
+    remove_file(sock_path)
+    let srv = unix_listen(sock_path)
+    assert(srv >= 0)
+    let cli = unix_connect(sock_path)
+    assert(cli >= 0)
+    let peer = unix_accept(srv)
+    assert(peer >= 0)
+    assert_eq(poller_add(p, peer, 1, 777), 0)
+
+    let mut toks = [0, 0, 0, 0]
+    let mut evs = [0, 0, 0, 0]
+    // Before write: non-blocking wait (timeout 0) should return 0 ready events
+    let n0 = poller_wait(p, toks, evs, 4, 0)
+    assert_eq(n0, 0)
+
+    let wbuf = alloc_aligned(64, 64)
+    mem_write_u64_le(wbuf, 0, 0x5566778811223344)
+    assert_eq(writev_raw(cli, [wbuf], [8]), 8)
+    let n1 = poller_wait(p, toks, evs, 4, 100)
+    assert_eq(n1, 1)
+    assert_eq(toks[0], 777)
+    assert((evs[0] & 1) == 1)
+
+    let rbuf = alloc_aligned(64, 64)
+    assert_eq(readv_raw(peer, [rbuf], [8]), 8)
+    assert_eq(mem_read_u64_le(rbuf, 0), 0x5566778811223344)
+    free_aligned(wbuf)
+    free_aligned(rbuf)
+
+    assert_eq(poller_del(p, peer), 0)
+    file_close(peer)
+    file_close(cli)
+    file_close(srv)
+    remove_file(sock_path)
+    assert_eq(poller_close(p), 0)
+
+    // Raw file-backed mmap_file
+    let tmp = temp_file("mako_mmap_file_")
+    let fd = file_open(tmp, 2, 3)
+    assert(fd >= 0)
+    let zpage = alloc_aligned(4096, 64)
+    assert_eq(pwrite_raw(fd, zpage, 4096, 0), 4096)
+    free_aligned(zpage)
+    // prot = 3 (PROT_READ | PROT_WRITE), shared = 1 (MAP_SHARED)
+    let map_addr = mmap_file(fd, 0, 4096, 3, 1)
+    assert(map_addr != 0)
+    mem_write_u64_le(map_addr, 0, 0x0102030405060708)
+    assert_eq(msync(map_addr, 4096, 4), 0)
+    assert_eq(munmap(map_addr, 4096), 0)
+
+    // Verify via pread_raw on the underlying fd
+    let check = alloc_aligned(64, 64)
+    assert_eq(pread_raw(fd, check, 8, 0), 8)
+    assert_eq(mem_read_u64_le(check, 0), 0x0102030405060708)
+    free_aligned(check)
+    file_close(fd)
+    remove_file(tmp)
+}
+
+fn TestPolymorphicSlicesAndMapsSurface() {
+    let ints = [10, 20, 30, 40]
+    assert(slice_contains(ints, 30))
+    assert(!slice_contains(ints, 99))
+    assert_eq(slice_index(ints, 30), 2)
+    assert_eq(slice_index(ints, 99), -1)
+    assert(slice_equal(ints, [10, 20, 30, 40]))
+    assert(!slice_equal(ints, [10, 20, 30]))
+    assert_eq(slice_compare(ints, [10, 20, 30, 40]), 0)
+    assert_eq(slice_compare([10, 15], ints), -1)
+    assert_eq(slice_compare([10, 25], ints), 1)
+
+    let rev_i = slice_reverse(ints)
+    assert(slice_equal(rev_i, [40, 30, 20, 10]))
+    assert_eq(slice_min(rev_i), 10)
+    assert_eq(slice_max(rev_i), 40)
+
+    let rep_i = slice_replace(ints, 1, 3, [200, 300, 350])
+    assert(slice_equal(rep_i, [10, 200, 300, 350, 40]))
+
+    let rpt_i = slice_repeat([7, 8], 3)
+    assert(slice_equal(rpt_i, [7, 8, 7, 8, 7, 8]))
+
+    // String slices
+    let strs = ["beta", "alpha", "delta", "gamma"]
+    assert(slice_contains(strs, "delta"))
+    assert(!slice_contains(strs, "omega"))
+    assert_eq(slice_index(strs, "alpha"), 1)
+    assert(slice_min(strs) == "alpha")
+    assert(slice_max(strs) == "gamma")
+    let rev_s = slice_reverse(strs)
+    assert(slice_equal(rev_s, ["gamma", "delta", "alpha", "beta"]))
+    let rep_s = slice_replace(strs, 1, 3, [" middle "])
+    assert_eq(len(rep_s), 3)
+    assert(rep_s[1] == " middle ")
+    let rpt_s = slice_repeat(["hi"], 3)
+    assert(slice_equal(rpt_s, ["hi", "hi", "hi"]))
+
+    // Map polymorphic aliases: map_keys, map_values, map_equal, map_clear
+    let mut m1 = make(map[string]int)
+    m1["k1"] = 100
+    m1["k2"] = 200
+    let mut m2 = map_clone(m1)
+    assert(map_equal(m1, m2))
+    let ks = map_keys(m1)
+    let vs = map_values(m1)
+    assert_eq(len(ks), 2)
+    assert_eq(len(vs), 2)
+    assert(slice_contains(ks, "k1") && slice_contains(ks, "k2"))
+    assert(slice_contains(vs, 100) && slice_contains(vs, 200))
+    map_clear(m2)
+    assert_eq(len(m2), 0)
+    assert(!map_equal(m1, m2))
+}
+
+
