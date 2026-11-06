@@ -2524,7 +2524,6 @@ static inline MakoString mako_metrics_export_prom(void) {
 
 /* ---- JSON seed (escape + wrap object with one string field) ---- */
 static inline MakoString mako_json_escape(MakoString s) {
-    if (s.len > (SIZE_MAX - 8) / 2) mako_abort("json_escape: size overflow");
     if ((size_t)s.len > (SIZE_MAX - 8) / 2) mako_abort("json_escape: size overflow");
     size_t cap = s.len * 2 + 8;
     char *d = (char *)malloc(cap);
