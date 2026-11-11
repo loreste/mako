@@ -440,6 +440,50 @@ static inline int64_t mako_mmap_close(MakoMMap *m) {
     return ok ? 0 : -1;
 }
 
+/* Windows stubs for pread_cached and pread_line — call basic mako_pread. */
+static inline MakoString mako_pread_cached(int64_t fd, int64_t count, int64_t offset) {
+    return mako_pread(fd, count, offset);
+}
+
+static inline MakoString mako_pread_line(int64_t fd, int64_t size, int64_t offset, int64_t line) {
+    /* Simple fallback: read the full block and extract the line. */
+    if (fd < 0 || size <= 0) return mako_str_from_cstr("null");
+    MakoString block = mako_pread(fd, size, offset);
+    if (!block.data || block.len == 0) return mako_str_from_cstr("null");
+    /* Find the Nth line in the block. */
+    int64_t cur = 0;
+    const char *start = block.data;
+    const char *end = block.data + block.len;
+    const char *line_start = start;
+    while (start < end) {
+        if (*start == '\n') {
+            if (cur == line) {
+                size_t len = (size_t)(start - line_start);
+                char *copy = (char *)malloc(len + 1);
+                if (!copy) { mako_str_free(block); return mako_str_from_cstr("null"); }
+                memcpy(copy, line_start, len);
+                copy[len] = 0;
+                mako_str_free(block);
+                return (MakoString){copy, (uint32_t)len};
+            }
+            cur++;
+            line_start = start + 1;
+        }
+        start++;
+    }
+    if (cur == line && line_start < end) {
+        size_t len = (size_t)(end - line_start);
+        char *copy = (char *)malloc(len + 1);
+        if (!copy) { mako_str_free(block); return mako_str_from_cstr("null"); }
+        memcpy(copy, line_start, len);
+        copy[len] = 0;
+        mako_str_free(block);
+        return (MakoString){copy, (uint32_t)len};
+    }
+    mako_str_free(block);
+    return mako_str_from_cstr("null");
+}
+
 #else /* POSIX */
 
 /* macOS fcntl constants — use raw values to avoid _DARWIN_C_SOURCE ordering issues */
@@ -616,7 +660,18 @@ static inline MakoString mako_pread_cached(int64_t fd, int64_t count, int64_t of
     /* Miss: pread and cache. */
     char *buf = (char *)malloc((size_t)count + 1);
     if (!buf) return mako_str_from_cstr("");
+#if defined(_WIN32)
+    HANDLE handle = mako_win_file_handle(fd);
+    if (handle == INVALID_HANDLE_VALUE) { free(buf); return mako_str_from_cstr(""); }
+    OVERLAPPED ov = {0};
+    ov.Offset = (DWORD)(offset & 0xFFFFFFFF);
+    ov.OffsetHigh = (DWORD)(offset >> 32);
+    DWORD read_n = 0;
+    if (!ReadFile(handle, buf, (DWORD)count, &read_n, &ov)) { free(buf); return mako_str_from_cstr(""); }
+    ssize_t n = (ssize_t)read_n;
+#else
     ssize_t n = pread((int)fd, buf, (size_t)count, (off_t)offset);
+#endif
     if (n <= 0) {
         free(buf);
         return mako_str_from_cstr("");
@@ -685,7 +740,18 @@ static inline void _mako_line_cache_load(int fd, int64_t offset, int64_t size) {
 #endif
     char *buf = (char *)malloc((size_t)size + 1);
     if (!buf) return;
+#if defined(_WIN32)
+    HANDLE handle = mako_win_file_handle(fd);
+    if (handle == INVALID_HANDLE_VALUE) { free(buf); return; }
+    OVERLAPPED ov = {0};
+    ov.Offset = (DWORD)(offset & 0xFFFFFFFF);
+    ov.OffsetHigh = (DWORD)(offset >> 32);
+    DWORD read_n = 0;
+    if (!ReadFile(handle, buf, (DWORD)size, &read_n, &ov)) { free(buf); return; }
+    ssize_t n = (ssize_t)read_n;
+#else
     ssize_t n = pread(fd, buf, (size_t)size, (off_t)offset);
+#endif
     if (n <= 0) { free(buf); return; }
     buf[n] = 0;
     /* Count lines first */
