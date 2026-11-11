@@ -1731,7 +1731,7 @@ static inline MakoString mako_https_request(
         request, sizeof(request),
         "%.*s %s HTTP/1.1\r\nHost: %s\r\nAccept: */*\r\nConnection: close\r\n"
         "Content-Length: %zu\r\n%s%s\r\n",
-        (int)method.len, method.data, parsed.path, parsed.authority, body.len,
+        (int)method.len, method.data, parsed.path, parsed.authority, (size_t)body.len,
         body.len ? "Content-Type: " : "", body.len ? ctype : ""
     );
     if (n < 0 || (size_t)n >= sizeof(request)
