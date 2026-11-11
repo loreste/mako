@@ -27,7 +27,7 @@ extern "C" {
 /* ---- small utilities ---- */
 
 /* Non-owned string from a C string literal / static buffer. Do NOT mako_str_free. */
-#define MAKO_SIP_LIT(s) ((MakoString){(char *)(const char *)(s), sizeof(s) - 1})
+#define MAKO_SIP_LIT(s) ((MakoString){(char *)(const char *)(s), sizeof(s) - 1, 2})
 
 static inline int mako_sip_ci_eq(const char *a, size_t al, const char *b, size_t bl) {
     if (al != bl) return 0;

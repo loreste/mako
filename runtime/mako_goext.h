@@ -4599,12 +4599,26 @@ typedef struct {
     MakoString values[32];
     int n;
 } MakoReflectValue;
+static inline MakoString mako_reflect_str_dup(MakoString s) {
+    if (!s.data || s.len == 0) return mako_str_empty;
+    char *d = (char *)malloc((size_t)s.len + 1);
+    if (!d) mako_abort("reflect_str_dup OOM");
+    memcpy(d, s.data, s.len);
+    d[s.len] = 0;
+    return (MakoString){d, s.len, 0};
+}
+static inline void mako_reflect_value_free(MakoReflectValue *v) {
+    if (!v) return;
+    mako_str_free(v->schema);
+    for (int i = 0; i < v->n; i++) mako_str_free(v->values[i]);
+    free(v);
+}
 static inline MakoReflectValue *mako_reflect_value_new(MakoString schema) {
     MakoReflectValue *v = (MakoReflectValue *)calloc(1, sizeof(MakoReflectValue));
-    v->schema = mako_str_clone(schema);
+    v->schema = mako_reflect_str_dup(schema);
     v->n = (int)mako_reflect_struct_num_fields(schema);
     if (v->n > 32) v->n = 32;
-    for (int i = 0; i < v->n; i++) v->values[i] = mako_str_from_cstr("");
+    for (int i = 0; i < v->n; i++) v->values[i] = mako_str_empty;
     return v;
 }
 static inline int64_t mako_reflect_value_set(MakoReflectValue *v, MakoString field, MakoString val) {
@@ -4615,7 +4629,7 @@ static inline int64_t mako_reflect_value_set(MakoReflectValue *v, MakoString fie
         mako_str_free(f);
         if (ok) {
             mako_str_free(v->values[i]);
-            v->values[i] = mako_str_clone(val);
+            v->values[i] = mako_reflect_str_dup(val);
             return 0;
         }
     }
@@ -4627,7 +4641,7 @@ static inline MakoString mako_reflect_value_get(MakoReflectValue *v, MakoString 
         MakoString f = mako_reflect_struct_field_name(v->schema, i);
         int ok = (f.len == field.len && memcmp(f.data, field.data ? field.data : "", f.len) == 0);
         mako_str_free(f);
-        if (ok) return mako_str_clone(v->values[i]);
+        if (ok) return mako_reflect_str_dup(v->values[i]);
     }
     return mako_str_from_cstr("");
 }
@@ -4646,7 +4660,7 @@ static inline MakoReflectValue *mako_reflect_value_from_fields(
     if (lim > v->n) lim = v->n;
     for (int i = 0; i < lim; i++) {
         mako_str_free(v->values[i]);
-        v->values[i] = mako_str_clone(vals[i]);
+        v->values[i] = mako_reflect_str_dup(vals[i]);
     }
     return v;
 }
@@ -5037,16 +5051,16 @@ static inline MakoReflectValue *mako_gob_decode_struct(MakoString g) {
 /* ---- reflect: field-at / schema roundtrip depth ---- */
 static inline MakoString mako_reflect_value_field_at(MakoReflectValue *v, int64_t idx) {
     if (!v || idx < 0 || idx >= v->n) return mako_str_from_cstr("");
-    return mako_str_clone(v->values[(int)idx]);
+    return mako_reflect_str_dup(v->values[(int)idx]);
 }
 static inline MakoString mako_reflect_value_schema(MakoReflectValue *v) {
     if (!v) return mako_str_from_cstr("");
-    return mako_str_clone(v->schema);
+    return mako_reflect_str_dup(v->schema);
 }
 static inline int64_t mako_reflect_value_set_at(MakoReflectValue *v, int64_t idx, MakoString val) {
     if (!v || idx < 0 || idx >= v->n) return -1;
     mako_str_free(v->values[(int)idx]); /* may be empty singleton */
-    v->values[(int)idx] = mako_str_clone(val);
+    v->values[(int)idx] = mako_reflect_str_dup(val);
     return 0;
 }
 
@@ -5365,7 +5379,7 @@ static inline MakoReflectValue *mako_reflect_value_clone(MakoReflectValue *v) {
     MakoReflectValue *c = mako_reflect_value_new(v->schema);
     for (int i = 0; i < v->n && i < c->n; i++) {
         mako_str_free(c->values[i]);
-        c->values[i] = mako_str_clone(v->values[i]);
+        c->values[i] = mako_reflect_str_dup(v->values[i]);
     }
     return c;
 }
@@ -6424,8 +6438,6 @@ static inline int64_t mako_str_count(MakoString s, MakoString sub) {
 }
 #endif
 
-#endif /* MAKO_GOEXT_H */
-
 /* ---- SAFE-004: free built-in map heap handles ---- */
 
 #define MAKO_MAP_CLONE_STORAGE(MapType)                                      \
@@ -6434,8 +6446,8 @@ static inline int64_t mako_str_count(MakoString s, MakoString sub) {
     if (!out) mako_abort("out of memory cloning map");                       \
     *out = *m;                                                               \
     out->state = (uint8_t *)malloc(m->cap * sizeof(*out->state));            \
-    out->keys = malloc(m->cap * sizeof(*out->keys));                         \
-    out->vals = malloc(m->cap * sizeof(*out->vals));                         \
+    out->keys = (__typeof__(out->keys))malloc(m->cap * sizeof(*out->keys));  \
+    out->vals = (__typeof__(out->vals))malloc(m->cap * sizeof(*out->vals));  \
     if (!out->state || !out->keys || !out->vals)                             \
         mako_abort("out of memory cloning map");                            \
     memcpy(out->state, m->state, m->cap * sizeof(*out->state));              \
@@ -7008,3 +7020,5 @@ static inline MakoString mako_lzw_decompress(MakoString s) {
     }
     return (MakoString){(char *)out, olen};
 }
+
+#endif /* MAKO_GOEXT_H */

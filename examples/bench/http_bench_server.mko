@@ -4,7 +4,7 @@
 
 fn main() {
     let port = 9800
-    let srv = http_listen(port)
+    let srv = http_bind(port)
     if srv < 0 {
         print("error: could not bind port 9800")
         return
@@ -15,12 +15,12 @@ fn main() {
         if conn < 0 {
             continue
         }
-        let req = http_read_request(conn)
-        if str_contains(req, "GET /health") {
-            http_respond(conn, 200, "ok")
+        let path = http_path(conn)
+        if path == "/health" {
+            let _ = http_respond(conn, 200, "ok")
         } else {
-            http_respond(conn, 200, "{\"status\":\"ok\",\"server\":\"mako\"}")
+            let _ = http_respond_json(conn, 200, "{\"status\":\"ok\",\"server\":\"mako\"}")
         }
-        http_close(conn)
+        let _ = http_close(conn)
     }
 }

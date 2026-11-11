@@ -1416,18 +1416,13 @@ static inline int64_t mako_tcp_accept_nb(int64_t listen_fd) {
 #endif
 }
 
-#ifdef __cplusplus
-}
-#endif
-
-
 /* Fast TCP read for HTTP servers: thread-local buffer, no malloc per read. */
 static __thread char mako_tcp_read_fast_buf[8192];
 static inline MakoString mako_tcp_read_fast(int64_t fd) {
     ssize_t n = recv((int)fd, mako_tcp_read_fast_buf, sizeof(mako_tcp_read_fast_buf) - 1, 0);
     if (n <= 0) return mako_str_empty;
     mako_tcp_read_fast_buf[n] = 0;
-    return (MakoString){mako_tcp_read_fast_buf, (size_t)n};
+    return (MakoString){mako_tcp_read_fast_buf, (uint32_t)n, 3};
 }
 
 #ifdef __cplusplus

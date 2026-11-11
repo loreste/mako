@@ -6324,10 +6324,22 @@ impl<'a> FunctionLowerer<'a> {
                 self.move_fnptr_local(arg);
             }
             if ty.is_consumable_header() {
-                v = self.emit_clone(v, ty);
-            } else if matches!(ty, Type::Struct(_)) {
-                // Independent task copy: clone owned fields so the trampoline
-                // can drop the worker value without freeing the parent's.
+                if !owned {
+                    v = self.emit_clone(v, ty);
+                }
+            } else if matches!(
+                ty,
+                Type::Struct(_)
+                    | Type::MapII
+                    | Type::MapIPtr(_)
+                    | Type::MapSI
+                    | Type::MapSPtr(_)
+                    | Type::MapSS
+                    | Type::MapIF
+                    | Type::MapFI
+            ) {
+                // Independent task copy: clone owned fields/entries so the trampoline
+                // can drop the worker value without freeing or aliasing the parent's.
                 let original = v;
                 v = self.emit_clone(v, ty);
                 if owned {
@@ -6363,7 +6375,18 @@ impl<'a> FunctionLowerer<'a> {
             if owned
                 && ty.is_heap()
                 && !ty.is_consumable_header()
-                && !matches!(ty, Type::Struct(_) | Type::FnPtr)
+                && !matches!(
+                    ty,
+                    Type::Struct(_)
+                        | Type::FnPtr
+                        | Type::MapII
+                        | Type::MapIPtr(_)
+                        | Type::MapSI
+                        | Type::MapSPtr(_)
+                        | Type::MapSS
+                        | Type::MapIF
+                        | Type::MapFI
+                )
             {
                 // Pack holds a borrow of the pointer for the join lifetime.
                 // Heap temps (struct lits, etc.) are stored in a stack local so
@@ -6563,6 +6586,36 @@ impl<'a> FunctionLowerer<'a> {
                         struct_id: id,
                     });
                 }
+                Type::MapII | Type::MapIPtr(_) => emit(Inst::Call {
+                    out: None,
+                    function: "mako_native_map_ii_drop_ptr".into(),
+                    args: vec![*arg],
+                    ret: None,
+                }),
+                Type::MapSI | Type::MapSPtr(_) => emit(Inst::Call {
+                    out: None,
+                    function: "mako_native_map_si_drop_ptr".into(),
+                    args: vec![*arg],
+                    ret: None,
+                }),
+                Type::MapSS => emit(Inst::Call {
+                    out: None,
+                    function: "mako_native_map_ss_drop_ptr".into(),
+                    args: vec![*arg],
+                    ret: None,
+                }),
+                Type::MapIF => emit(Inst::Call {
+                    out: None,
+                    function: "mako_native_map_if_drop_ptr".into(),
+                    args: vec![*arg],
+                    ret: None,
+                }),
+                Type::MapFI => emit(Inst::Call {
+                    out: None,
+                    function: "mako_native_map_fi_drop_ptr".into(),
+                    args: vec![*arg],
+                    ret: None,
+                }),
                 Type::ChanI | Type::ChanS | Type::ChanF | Type::ChanP(_) => {
                     emit(Inst::Call {
                         out: None,
@@ -29296,8 +29349,8 @@ impl<'a> FunctionLowerer<'a> {
                 true,
             )),
             "file_append" if args.len() == 2 => Some((
-                "mako_native_file_append2_ptr",
-                &[Type::I64, Type::Str, Type::Str],
+                "mako_native_file_append_ptr",
+                &[Type::I64, Type::Str],
                 Some(Type::I64),
                 false,
             )),
@@ -32754,6 +32807,54 @@ impl<'a> FunctionLowerer<'a> {
             "gfx_window_set_pixel" if args.len() == 4 => Some((
                 "mako_native_gfx_window_set_pixel",
                 &[Type::Opaque, Type::I64, Type::I64, Type::I64],
+                Some(Type::I64),
+                false,
+            )),
+            "gfx_present" if args.len() == 1 => Some((
+                "mako_native_gfx_present",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "gfx_event_type" if args.len() == 1 => Some((
+                "mako_native_gfx_event_type",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "gfx_event_key" if args.len() == 1 => Some((
+                "mako_native_gfx_event_key",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "gfx_event_mouse_x" if args.len() == 1 => Some((
+                "mako_native_gfx_event_mouse_x",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "gfx_event_mouse_y" if args.len() == 1 => Some((
+                "mako_native_gfx_event_mouse_y",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "gfx_event_mouse_button" if args.len() == 1 => Some((
+                "mako_native_gfx_event_mouse_button",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "gfx_is_open" if args.len() == 1 => Some((
+                "mako_native_gfx_is_open",
+                &[Type::Opaque],
+                Some(Type::I64),
+                false,
+            )),
+            "gfx_asset_size" if args.len() == 1 => Some((
+                "mako_native_gfx_asset_size_ptr",
+                &[Type::Str],
                 Some(Type::I64),
                 false,
             )),

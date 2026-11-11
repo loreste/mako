@@ -57,6 +57,9 @@ static void           mako_wsi_set_title(MakoWsiWindow *win, const char *title);
  * ═══════════════════════════════════════════════════════════════════════ */
 #if defined(__APPLE__) && defined(__MACH__)
 
+/* Rename Objective-C's `id` typedef so user functions/types named `id` in Mako
+ * do not collide with `<objc/objc.h>` (`typedef struct objc_object *id;`). */
+#define id mako_objc_id
 #include <objc/objc.h>
 #include <objc/runtime.h>
 #include <objc/message.h>
@@ -272,6 +275,11 @@ static void mako_wsi_set_title(MakoWsiWindow *win, const char *title) {
     id ns_title = MSG(CLS("NSString"), SEL("stringWithUTF8String:"), title ? title : "");
     MSG(win->ns_window, SEL("setTitle:"), ns_title);
 }
+
+#undef SEL
+#undef CLS
+#undef MSG
+#undef id
 
 /* ═══════════════════════════════════════════════════════════════════════
  * Linux — X11 / Xlib (only when X11 headers are available)

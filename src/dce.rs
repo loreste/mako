@@ -165,6 +165,9 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
                     Some(format!("{}_", s.name))
                 }
                 Item::Enum(e) if reachable_types.contains(&e.name) => Some(format!("{}_", e.name)),
+                Item::Interface(i) if reachable_types.contains(&i.name) => {
+                    Some(format!("{}_", i.name))
+                }
                 _ => None,
             })
             .collect();
@@ -195,6 +198,7 @@ pub fn eliminate(program: &Program, roots: &[String]) -> Program {
         .filter_map(|item| match item {
             Item::Struct(s) => Some(s.name.as_str()),
             Item::Enum(e) => Some(e.name.as_str()),
+            Item::Interface(i) => Some(i.name.as_str()),
             Item::On(on) => Some(on.ty.as_str()),
             _ => None,
         })

@@ -1265,7 +1265,7 @@ static inline MakoString mako_pem_load_file(MakoString path) {
     MakoString raw = mako_read_file(path);
     if (!raw.data || raw.len == 0) return mako_str_from_cstr("");
     if (mako_pem_count_blocks(raw) == 0) {
-        free(raw.data);
+        mako_str_free(raw);
         return mako_str_from_cstr("");
     }
     return raw;
@@ -3539,6 +3539,23 @@ static inline int64_t mako_mq_publish(int64_t id, MakoString name, MakoString bo
     return 1;
 }
 
+static char mako_mq_pop_ring[8][4096];
+static _Atomic unsigned int mako_mq_pop_idx = 0;
+
+static inline MakoString mako_mq_stash_popped(MakoString out) {
+    if (!out.data || out.len == 0) {
+        mako_str_free(out);
+        return mako_str_empty;
+    }
+    unsigned int idx = atomic_fetch_add_explicit(&mako_mq_pop_idx, 1u, memory_order_relaxed) & 7u;
+    char *slot = mako_mq_pop_ring[idx];
+    size_t n = out.len < 4095 ? (size_t)out.len : 4095;
+    memcpy(slot, out.data, n);
+    slot[n] = '\0';
+    mako_str_free(out);
+    return mako_str_view_impl(slot, n, 3);
+}
+
 static inline MakoString mako_mq_try_take(int64_t id, MakoString name) {
     if (id < 1 || id > MAKO_MQ_MAX_BROKERS) return mako_str_from_cstr("");
     MakoMqBroker *b = &mako_mq_table[id - 1];
@@ -3554,7 +3571,7 @@ static inline MakoString mako_mq_try_take(int64_t id, MakoString name) {
     q->head = (q->head + 1) % q->cap;
     q->len--;
     pthread_mutex_unlock(&b->mu);
-    return out; /* ownership transferred to caller */
+    return mako_mq_stash_popped(out);
 }
 
 static inline int64_t mako_mq_len(int64_t id, MakoString name) {
@@ -3737,7 +3754,7 @@ static inline MakoString mako_nats_try_next(int64_t id, MakoString subject) {
     s->head = (s->head + 1) % s->cap;
     s->len--;
     pthread_mutex_unlock(&b->mu);
-    return out;
+    return mako_mq_stash_popped(out);
 }
 
 static inline int64_t mako_nats_len(int64_t id, MakoString subject) {
@@ -3922,7 +3939,7 @@ static inline MakoString mako_redis_mq_rpop(int64_t id, MakoString key) {
     q->ring[tail] = (MakoString){NULL, 0};
     q->len--;
     pthread_mutex_unlock(&b->mu);
-    return out;
+    return mako_mq_stash_popped(out);
 }
 
 static inline int64_t mako_redis_mq_llen(int64_t id, MakoString key) {
@@ -7257,18 +7274,25 @@ static inline MakoString mako_plugin_call(int64_t handle, MakoString op, MakoStr
     (void)handle;
     (void)op;
     (void)payload;
-    return mako_str_from_cstr("");
+    return mako_str_empty;
 #else
     if (handle < 0 || handle >= MAKO_PLUGIN_HOST_MAX || !mako_plugin_slots[handle].used)
-        return mako_str_from_cstr("");
+        return mako_str_empty;
     const MakoPluginVTable *vt = mako_plugin_slots[handle].vt;
-    if (!vt || !vt->call) return mako_str_from_cstr("");
+    if (!vt || !vt->call) return mako_str_empty;
     MakoString out = vt->call(op, payload);
     /* If plugin provides free_string, copy into host-owned buffer and free. */
     if (vt->free_string && out.data) {
-        MakoString copy = mako_str_clone(out);
+        static char mako_plugin_ret_ring[8][4096];
+        static unsigned mako_plugin_ret_idx = 0;
+        char *slot = mako_plugin_ret_ring[mako_plugin_ret_idx++ & 7u];
+        size_t n = out.len < sizeof(mako_plugin_ret_ring[0]) - 1
+                       ? (size_t)out.len
+                       : sizeof(mako_plugin_ret_ring[0]) - 1;
+        if (n > 0) memcpy(slot, out.data, n);
+        slot[n] = '\0';
         vt->free_string(out);
-        return copy;
+        return mako_str_view_impl(slot, n, 3);
     }
     return out;
 #endif

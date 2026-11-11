@@ -2050,7 +2050,7 @@ static MakoString plugin_call(MakoString operation, MakoString payload) {{
 }}
 
 static void plugin_free_string(MakoString value) {{
-    free(value.data);
+    mako_str_free(value);
 }}
 
 static const MakoPluginVTable VTABLE = {{

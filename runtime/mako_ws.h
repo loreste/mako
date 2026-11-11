@@ -1486,7 +1486,7 @@ static inline int64_t mako_wss_pool_close(int64_t handle) {
     pthread_mutex_unlock(&mako_wss_pool_mu);
     if (!old.used) return -1;
     if (old.conn) {
-        MakoString reason = {"proxy-close", 11};
+        MakoString reason = {(char *)"proxy-close", 11, 2};
         (void)mako_wss_client_send_close(old.conn, 1000, reason);
         (void)mako_wss_client_close(old.conn);
     }

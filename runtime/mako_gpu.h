@@ -1399,9 +1399,9 @@ static inline int64_t mako_gpu_attention_f32(
         return -1;
     }
     int64_t rc = -1;
+    double scale = 1.0 / sqrt((double)dim);
     if (mako_gpu_transpose_f32(kt, k_h, seq, dim) < 0) goto done;
     if (mako_gpu_matmul_f32(scores, q_h, kt, seq, seq, dim) < 0) goto done;
-    double scale = 1.0 / sqrt((double)dim);
     if (mako_gpu_scale_f32(scores, scores, scale) < 0) goto done;
     if (mako_gpu_softmax_rows_f32(weights, scores, seq, seq) < 0) goto done;
     if (mako_gpu_matmul_f32(out_h, weights, v_h, seq, dim, seq) < 0) goto done;

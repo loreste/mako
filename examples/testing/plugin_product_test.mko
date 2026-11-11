@@ -47,7 +47,7 @@ fn TestPluginProductLive() {
     assert_eq(write_plugin_src(src), 0)
     // Locate runtime headers
     let mut rt = env_get("MAKO_RUNTIME")
-    if len(rt) == 0 {
+    if len(rt) == 0 || file_exists("runtime/mako_plugin.h") {
         rt = "runtime"
     }
     let cmd = "cc -std=c11 -fPIC -shared -I" + rt + " " + src + " -o " + so + " 2>/dev/null || "

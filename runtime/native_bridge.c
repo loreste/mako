@@ -62,8 +62,8 @@ static MakoString bridge_borrow_str(const MakoNativeString *s) {
     MakoString m;
     m.data = (char *)(uintptr_t)s->data;
     /* Strip immortal/static high bit from native string lens. */
-    m.len = s->len & ~((size_t)1 << (sizeof(size_t) * 8 - 1));
-    m._rc = 0; /* borrow — not RC-owned */
+    m.len = (uint32_t)(s->len & ~((size_t)1 << (sizeof(size_t) * 8 - 1)));
+    m._rc = 3; /* borrow — not RC-owned and not plain-malloc'd */
     return m;
 }
 
@@ -4441,6 +4441,10 @@ int64_t mako_native_file_open_ptr(MakoNativeString *path, int64_t mode, int64_t 
 
 int64_t mako_native_file_close(int64_t fd) {
     return (int64_t)mako_file_close(fd);
+}
+
+int64_t mako_native_file_append_ptr(int64_t fd, MakoNativeString *a) {
+    return (int64_t)mako_file_append(fd, bridge_borrow_str(a));
 }
 
 int64_t mako_native_file_append2_ptr(int64_t fd, MakoNativeString *a, MakoNativeString *b) {
@@ -9689,6 +9693,16 @@ int64_t mako_native_gfx_window_fill(int64_t a0, int64_t a1) { return (int64_t)ma
 int64_t mako_native_gfx_window_get_pixel(int64_t a0, int64_t a1, int64_t a2) { return (int64_t)mako_gfx_window_get_pixel((void*)(intptr_t)a0, a1, a2); }
 int64_t mako_native_gfx_window_pixels(int64_t a0) { return (int64_t)mako_gfx_window_pixels((void*)(intptr_t)a0); }
 int64_t mako_native_gfx_window_set_pixel(int64_t a0, int64_t a1, int64_t a2, int64_t a3) { return (int64_t)mako_gfx_window_set_pixel((void*)(intptr_t)a0, a1, a2, a3); }
+int64_t mako_native_gfx_present(int64_t a0) { return (int64_t)mako_gfx_present((MakoGfxWindow*)(intptr_t)a0); }
+int64_t mako_native_gfx_event_type(int64_t a0) { return (int64_t)mako_gfx_event_type((MakoGfxWindow*)(intptr_t)a0); }
+int64_t mako_native_gfx_event_key(int64_t a0) { return (int64_t)mako_gfx_event_key((MakoGfxWindow*)(intptr_t)a0); }
+int64_t mako_native_gfx_event_mouse_x(int64_t a0) { return (int64_t)mako_gfx_event_mouse_x((MakoGfxWindow*)(intptr_t)a0); }
+int64_t mako_native_gfx_event_mouse_y(int64_t a0) { return (int64_t)mako_gfx_event_mouse_y((MakoGfxWindow*)(intptr_t)a0); }
+int64_t mako_native_gfx_event_mouse_button(int64_t a0) { return (int64_t)mako_gfx_event_mouse_button((MakoGfxWindow*)(intptr_t)a0); }
+int64_t mako_native_gfx_is_open(int64_t a0) { return (int64_t)mako_gfx_is_open((MakoGfxWindow*)(intptr_t)a0); }
+int64_t mako_native_gfx_asset_size_ptr(MakoNativeString *a0) { return (int64_t)mako_gfx_asset_size(bridge_borrow_str(a0)); }
+int64_t mako_c_abs(int64_t n) { return n < 0 ? -n : n; }
+int64_t mako_c_add(int64_t a, int64_t b) { return a + b; }
 MakoNativeString *mako_native_h3_stream_read_ptr(int64_t a0, int64_t a1) { return bridge_take_str(mako_h3_stream_read(a0, a1)); }
 int64_t mako_native_hindex_del(int64_t a0, int64_t a1) { return (int64_t)mako_hindex_del((void*)(intptr_t)a0, a1); }
 int64_t mako_native_hindex_free(int64_t a0) { return (int64_t)mako_hindex_free((void*)(intptr_t)a0); }

@@ -2,6 +2,10 @@
 #ifndef MAKO_RT_H
 #define MAKO_RT_H
 
+#if defined(__cplusplus) && (defined(__clang__) || defined(__GNUC__))
+#pragma GCC diagnostic ignored "-Wc++11-narrowing"
+#endif
+
 /* Portability: this runs before <pthread.h> is reachable, so on Windows
  * PTHREAD_MUTEX_INITIALIZER is never defined here and the zero-init arm is
  * always taken. That is correct only because the Windows shim in
@@ -565,7 +569,7 @@ static inline int mako_str_is_empty_singleton(MakoString s) {
 /* Free an owned string. Borrowed views must never reach this ownership-only
  * boundary; probing before an arbitrary view pointer would itself be UB. */
 static inline void mako_str_free(MakoString s) {
-    if (s._rc == 2 || !s.data || s.data == &mako_str_empty_byte) return;
+    if (s._rc >= 2 || !s.data || s.data == &mako_str_empty_byte) return;
     if (s._rc == 1) {
         mako_rc_release(s.data);
     } else {
@@ -581,9 +585,21 @@ static inline MakoString mako_str_from_cstr(const char *s) {
     size_t n = strlen(s);
     char *d = (char *)mako_rc_alloc(n + 1);
     memcpy(d, s, n + 1);
-    MakoString out = {d, n, 1};
+    MakoString out = {d, (uint32_t)n, 1};
     return out;
 }
+
+static inline MakoString mako_str_lit(const char *s, size_t n) {
+    if (!s || n == 0) return mako_str_empty;
+    MakoString out = {(char *)(uintptr_t)s, (uint32_t)n, 2};
+    return out;
+}
+#if defined(__GNUC__) || defined(__clang__)
+#define mako_str_from_cstr(s) \
+    (__builtin_constant_p(s) && (s) != NULL && __builtin_constant_p(strlen(s)) \
+        ? mako_str_lit((s), strlen(s)) \
+        : (mako_str_from_cstr)(s))
+#endif
 
 static inline MakoString mako_runtime_stats_json(void) {
     char *d = (char *)malloc(512);
@@ -616,18 +632,20 @@ static inline MakoString mako_runtime_stats_json(void) {
 /* Borrowed (non-owning) view of [p, p+n). Caller must keep the underlying
  * storage alive for the lifetime of the returned MakoString. Do NOT free.
  * Compile-time constant pointers (string literals) get _rc=2 (immortal), so
- * mako_str_clone is an O(1) value copy and mako_str_free is a no-op. */
+ * mako_str_clone is an O(1) value copy and mako_str_free is a no-op.
+ * Non-constant borrowed views get _rc=3 so mako_str_free is a safe no-op while
+ * mako_str_clone deep-copies into an RC buffer. */
 static inline MakoString mako_str_view_impl(const char *p, size_t n, uint8_t rc) {
     static char empty_ch = 0;
-    MakoString out = {(char *)(uintptr_t)(p ? p : &empty_ch), n, rc};
+    MakoString out = {(char *)(uintptr_t)(p ? p : &empty_ch), (uint32_t)n, rc};
     return out;
 }
 static inline MakoString mako_str_view(const char *p, size_t n) {
-    return mako_str_view_impl(p, n, 0);
+    return mako_str_view_impl(p, n, 3);
 }
 #if defined(__GNUC__) || defined(__clang__)
 #define mako_str_view(p, n) \
-    mako_str_view_impl((p), (n), (__builtin_constant_p(p) && (p) != NULL) ? 2 : 0)
+    mako_str_view_impl((p), (n), (__builtin_constant_p(p) && (p) != NULL) ? 2 : 3)
 #endif
 
 static inline MakoString mako_str_concat(MakoString a, MakoString b) {
@@ -1867,6 +1885,11 @@ static inline void mako_arr_arr_int_free(MakoArr_arr_int a) {
     for (size_t i = 0; i < a.len; i++) mako_int_array_free(a.data[i]);
     free(a.data);
 }
+static inline MakoArr_arr_int mako_arr_arr_int_clone(MakoArr_arr_int a) {
+    MakoArr_arr_int out = mako_arr_arr_int_make((int64_t)a.len, (int64_t)a.len);
+    for (size_t i = 0; i < a.len; i++) out.data[i] = mako_int_array_clone(a.data[i]);
+    return out;
+}
 /* Free-on-reassign: drop unshared inners + old outer only. Shared headers after
  * append/grow must not be deep-freed (would UAF the new array). */
 static inline void mako_arr_arr_int_release_replaced(MakoArr_arr_int old, MakoArr_arr_int neu) {
@@ -1957,6 +1980,11 @@ static inline void mako_arr_arr_string_free(MakoArr_arr_string a) {
     for (size_t i = 0; i < a.len; i++) mako_str_array_free(a.data[i]);
     free(a.data);
 }
+static inline MakoArr_arr_string mako_arr_arr_string_clone(MakoArr_arr_string a) {
+    MakoArr_arr_string out = mako_arr_arr_string_make((int64_t)a.len, (int64_t)a.len);
+    for (size_t i = 0; i < a.len; i++) out.data[i] = mako_str_array_clone(a.data[i]);
+    return out;
+}
 static inline void mako_arr_arr_string_release_replaced(MakoArr_arr_string old, MakoArr_arr_string neu) {
     if (!(old.cap > 0 && old.data)) return;
     for (size_t i = 0; i < old.len; i++) {
@@ -2044,6 +2072,11 @@ static inline void mako_arr_arr_float_free(MakoArr_arr_float a) {
     for (size_t i = 0; i < a.len; i++) mako_float_array_free(a.data[i]);
     free(a.data);
 }
+static inline MakoArr_arr_float mako_arr_arr_float_clone(MakoArr_arr_float a) {
+    MakoArr_arr_float out = mako_arr_arr_float_make((int64_t)a.len, (int64_t)a.len);
+    for (size_t i = 0; i < a.len; i++) out.data[i] = mako_float_array_clone(a.data[i]);
+    return out;
+}
 static inline void mako_arr_arr_float_release_replaced(MakoArr_arr_float old, MakoArr_arr_float neu) {
     if (!(old.cap > 0 && old.data)) return;
     for (size_t i = 0; i < old.len; i++) {
@@ -2130,6 +2163,11 @@ static inline void mako_arr_arr_bool_free(MakoArr_arr_bool a) {
     if (!(a.cap > 0 && a.data)) return;
     for (size_t i = 0; i < a.len; i++) mako_bool_array_free(a.data[i]);
     free(a.data);
+}
+static inline MakoArr_arr_bool mako_arr_arr_bool_clone(MakoArr_arr_bool a) {
+    MakoArr_arr_bool out = mako_arr_arr_bool_make((int64_t)a.len, (int64_t)a.len);
+    for (size_t i = 0; i < a.len; i++) out.data[i] = mako_bool_array_clone(a.data[i]);
+    return out;
 }
 static inline void mako_arr_arr_bool_release_replaced(MakoArr_arr_bool old, MakoArr_arr_bool neu) {
     if (!(old.cap > 0 && old.data)) return;
@@ -2365,10 +2403,15 @@ static inline MakoResultFloat mako_err_float(MakoString e) {
  * Go-like: fmt.Errorf("context: %w", err) — message chain for humans + error_is. */
 static inline MakoResultInt mako_wrap_err(MakoResultInt r, MakoString prefix) {
     if (r.ok) return r;
-    MakoString mid = mako_str_concat(prefix, mako_str_view(": ", 2));
-    MakoString out = mako_str_concat(mid, r.err);
-    mako_str_free(mid);
-    return mako_err_int(out);
+    size_t n = prefix.len + 2 + r.err.len;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("wrap_err OOM");
+    if (prefix.len && prefix.data) memcpy(d, prefix.data, prefix.len);
+    memcpy(d + prefix.len, ": ", 2);
+    if (r.err.len && r.err.data) memcpy(d + prefix.len + 2, r.err.data, r.err.len);
+    d[n] = 0;
+    if (r.err_kind == 0) mako_str_free(r.err);
+    return mako_err_int((MakoString){d, (uint32_t)n, 0});
 }
 
 /* Join two Results: prefer first Err; if both Err, combine messages; if both Ok, keep a. */
@@ -2376,18 +2419,28 @@ static inline MakoResultInt mako_error_join(MakoResultInt a, MakoResultInt b) {
     if (a.ok && b.ok) return a;
     if (!a.ok && b.ok) return a;
     if (a.ok && !b.ok) return b;
-    MakoString mid = mako_str_concat(a.err, mako_str_view("; ", 2));
-    MakoString out = mako_str_concat(mid, b.err);
-    mako_str_free(mid);
-    return mako_err_int(out);
+    size_t n = a.err.len + 2 + b.err.len;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("error_join OOM");
+    if (a.err.len && a.err.data) memcpy(d, a.err.data, a.err.len);
+    memcpy(d + a.err.len, "; ", 2);
+    if (b.err.len && b.err.data) memcpy(d + a.err.len + 2, b.err.data, b.err.len);
+    d[n] = 0;
+    if (a.err_kind == 0) mako_str_free(a.err);
+    if (b.err_kind == 0) mako_str_free(b.err);
+    return mako_err_int((MakoString){d, (uint32_t)n, 0});
 }
 
 /* Enum-like tagged errors: error_tag("NotFound", "user 7") → Err("NotFound: user 7"). */
 static inline MakoResultInt mako_error_tag(MakoString tag, MakoString msg) {
-    MakoString mid = mako_str_concat(tag, mako_str_view(": ", 2));
-    MakoString out = mako_str_concat(mid, msg);
-    mako_str_free(mid);
-    return mako_err_int(out);
+    size_t n = tag.len + 2 + msg.len;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("error_tag OOM");
+    if (tag.len && tag.data) memcpy(d, tag.data, tag.len);
+    memcpy(d + tag.len, ": ", 2);
+    if (msg.len && msg.data) memcpy(d + tag.len + 2, msg.data, msg.len);
+    d[n] = 0;
+    return mako_err_int((MakoString){d, (uint32_t)n, 0});
 }
 
 /* errorf("open %s", path) — format a string error (printf-style, one %s or plain). */
@@ -2401,22 +2454,22 @@ static inline MakoResultInt mako_errorf(MakoString fmt, MakoString arg) {
         }
     }
     if (!has_pct) {
-        MakoString mid = mako_str_concat(fmt, mako_str_view(": ", 2));
-        MakoString out = mako_str_concat(mid, arg);
-        mako_str_free(mid);
-        return mako_err_int(out);
+        return mako_error_tag(fmt, arg);
     }
     /* Split on first "%s" */
     size_t pos = 0;
     for (; pos + 1 < fmt.len; pos++) {
         if (fmt.data[pos] == '%' && fmt.data[pos + 1] == 's') break;
     }
-    MakoString left = {fmt.data, pos};
-    MakoString right = {fmt.data + pos + 2, fmt.len - pos - 2};
-    MakoString mid = mako_str_concat(left, arg);
-    MakoString out = mako_str_concat(mid, right);
-    mako_str_free(mid);
-    return mako_err_int(out);
+    size_t right_len = fmt.len - pos - 2;
+    size_t n = pos + arg.len + right_len;
+    char *d = (char *)malloc(n + 1);
+    if (!d) mako_abort("errorf OOM");
+    if (pos) memcpy(d, fmt.data, pos);
+    if (arg.len && arg.data) memcpy(d + pos, arg.data, arg.len);
+    if (right_len) memcpy(d + pos + arg.len, fmt.data + pos + 2, right_len);
+    d[n] = 0;
+    return mako_err_int((MakoString){d, (uint32_t)n, 0});
 }
 
 /* Extract Err message; empty string if Ok. */
@@ -2914,10 +2967,10 @@ static inline MakoString mako_sbstack_finish_view(MakoSBStack *b) {
     if (b->len == 0) return mako_str_empty;
     if (b->data == b->stack) {
         b->stack[b->len] = 0;
-        return (MakoString){b->stack, b->len};
+        return (MakoString){b->stack, (uint32_t)b->len, 3};
     }
     b->data[b->len] = 0;
-    return (MakoString){b->data, b->len};
+    return (MakoString){b->data, (uint32_t)b->len, 3};
 }
 
 static inline void mako_str_builder_grow(MakoStrBuilder *b, size_t need) {
@@ -8067,7 +8120,7 @@ static inline int64_t mako_debug_bp(int64_t id) {
     if (id < 0 || id >= 16 || !mako_debug_bp_enabled[id]) return 0;
     char lab[32];
     snprintf(lab, sizeof(lab), "bp-%lld", (long long)id);
-    return mako_debug_break(mako_str_from_cstr(lab));
+    return mako_debug_break(mako_str_view(lab, strlen(lab)));
 }
 
 /* Soft trap mode: when enabled, debug_break may raise SIGTRAP (off by default). */
@@ -8136,7 +8189,7 @@ static inline int64_t mako_debug_check_line_bps(const char *file, int64_t line) 
             hit = 1;
             char lab[160];
             snprintf(lab, sizeof(lab), "line-bp:%s:%lld", file, (long long)line);
-            (void)mako_debug_break(mako_str_from_cstr(lab));
+            (void)mako_debug_break(mako_str_view(lab, strlen(lab)));
         }
     }
     return hit ? 1 : 0;
@@ -8599,8 +8652,8 @@ static inline int64_t mako_nursery_err_count(MakoNursery *n) {
 }
 
 static inline MakoString mako_nursery_first_err(MakoNursery *n) {
-    if (!n || !n->first_err) return mako_str_from_cstr("");
-    return mako_str_from_cstr(n->first_err);
+    if (!n || !n->first_err) return mako_str_empty;
+    return mako_str_lit(n->first_err, n->first_err_len);
 }
 
 /* After joins: 1 if no child errors, 0 if any (caller reads first_err). */

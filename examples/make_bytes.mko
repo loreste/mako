@@ -8,7 +8,7 @@ fn main() {
     let c = bytes("mako")
     print(string([]byte(c)))
 
-    let s = make([]int, 3, 8)
+    let mut s = make([]int, 3, 8)
     print_int(len(s))
     print_int(cap(s))
     s[0] = 10
@@ -16,7 +16,7 @@ fn main() {
     s[2] = 30
     print_int(s[1])
 
-    let z = make([]byte, 2)
+    let mut z = make([]byte, 2)
     print_int(len(z))
     print_int(cap(z))
     z[0] = 65

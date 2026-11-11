@@ -1975,7 +1975,7 @@ static inline int64_t mako_tls_serve(
             "Connection: close\r\n"
             "\r\n",
             reason,
-            body.len
+            (size_t)body.len
         );
         if (hn > 0) SSL_write(ssl, hdr, hn);
         if (body.len) SSL_write(ssl, body.data, (int)body.len);
@@ -2043,7 +2043,7 @@ static inline int64_t mako_tls_serve_once(
             "Content-Length: %zu\r\n"
             "Connection: close\r\n"
             "\r\n",
-            body.len
+            (size_t)body.len
         );
         if (hn > 0) SSL_write(ssl, hdr, hn);
         if (body.len) SSL_write(ssl, body.data, (int)body.len);
@@ -3233,7 +3233,7 @@ static inline int64_t mako_tls_serve_h2_routes(
                     hdr, sizeof(hdr),
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
                     "Content-Length: %zu\r\nConnection: close\r\n\r\n",
-                    body.len
+                    (size_t)body.len
                 );
                 if (hn > 0) SSL_write(ssl, hdr, hn);
                 if (body.len) SSL_write(ssl, body.data, (int)body.len);
@@ -4529,7 +4529,7 @@ static inline MakoString mako_tls_post(
         req, sizeof(req),
         "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Length: %zu\r\n"
         "Content-Type: text/plain\r\nConnection: close\r\n\r\n",
-        pbuf, hbuf, body.len
+        pbuf, hbuf, (size_t)body.len
     );
     if (rn > 0) SSL_write(ssl, req, rn);
     if (body.len && body.data) SSL_write(ssl, body.data, (int)body.len);

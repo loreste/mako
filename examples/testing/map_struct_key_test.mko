@@ -189,3 +189,48 @@ fn TestMapPackStructStruct() {
     let c = maps_clone(m)
     assert_eq(maps_equal(m, c), 1)
 }
+
+fn TestMapStructKeyOwnedDynamicStringsAndLoopReuse() {
+    let mut m = make(map[Label]Label)
+    m[Label { text: int_to_string(10), id: 1 }] = Label { text: int_to_string(100), id: 10 }
+    m[Label { text: int_to_string(10), id: 1 }] = Label { text: int_to_string(101), id: 11 }
+    m[Label { text: int_to_string(20), id: 2 }] = Label { text: int_to_string(200), id: 20 }
+    assert(has(m, Label { text: int_to_string(10), id: 1 }))
+    assert(not has(m, Label { text: int_to_string(99), id: 9 }))
+    assert_eq(m[Label { text: int_to_string(10), id: 1 }].id, 11)
+    let got, ok = m[Label { text: int_to_string(20), id: 2 }]
+    assert(ok)
+    assert_eq_str(got.text, "200")
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 2)
+    let vs = maps_values(m)
+    assert_eq(len(vs), 2)
+    let cloned = maps_clone(m)
+    assert_eq(maps_equal(m, cloned), 1)
+    delete(m, Label { text: int_to_string(10), id: 1 })
+    assert_eq(len(m), 1)
+    maps_clear(cloned)
+    assert_eq(len(cloned), 0)
+    maps_copy(cloned, m)
+    assert_eq(len(cloned), 1)
+
+    // Outer owned struct reused across loop iterations and in a 0-trip loop.
+    let shared_key = Label { text: int_to_string(77), id: 7 }
+    let shared_val = Label { text: int_to_string(88), id: 8 }
+    let zero_trip = Label { text: int_to_string(99), id: 9 }
+    let mut by_idx = make(map[int]Label)
+    let mut i = 0
+    while i < 3 {
+        by_idx[i] = shared_val
+        m[shared_key] = Label { text: int_to_string(500 + i), id: 50 + i }
+        i = i + 1
+    }
+    while i < 0 {
+        by_idx[i] = zero_trip
+        i = i + 1
+    }
+    assert_eq_str(by_idx[0].text, "88")
+    assert_eq_str(by_idx[1].text, "88")
+    assert_eq_str(by_idx[2].text, "88")
+    assert_eq_str(m[Label { text: int_to_string(77), id: 7 }].text, "502")
+}
