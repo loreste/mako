@@ -515,10 +515,16 @@ static inline MakoString mako_path_ext(MakoString path) {
     MakoString base = mako_path_base(path);
     for (size_t i = base.len; i > 0; i--) {
         if (base.data[i - 1] == '.') {
-            if (i == 1) return mako_str_from_cstr(""); /* hidden file .foo */
-            return mako_str_slice(base, (int64_t)(i - 1), (int64_t)base.len);
+            if (i == 1) {
+                mako_str_free(base);
+                return mako_str_from_cstr(""); /* hidden file .foo */
+            }
+            MakoString ext = mako_str_slice(base, (int64_t)(i - 1), (int64_t)base.len);
+            mako_str_free(base);
+            return ext;
         }
     }
+    mako_str_free(base);
     return mako_str_from_cstr("");
 }
 
@@ -694,9 +700,16 @@ static size_t mako_list_popped_str_len = 0;
 static inline MakoIntArray mako_list_pop_int(MakoIntArray a) {
     if (a.len == 0) {
         mako_list_popped_int_tls = 0;
+        if (a.cap == 0 || mako_rc_shared(a.data)) return mako_int_array_empty();
         return a;
     }
     mako_list_popped_int_tls = a.data[a.len - 1];
+    if (a.cap == 0 || mako_rc_shared(a.data)) {
+        MakoIntArray out = mako_int_array_make((int64_t)a.len - 1, (int64_t)a.len - 1);
+        if (a.len > 1) memcpy(out.data, a.data, (a.len - 1) * sizeof(int64_t));
+        out.len = a.len - 1;
+        return out;
+    }
     a.len--;
     return a;
 }
@@ -705,6 +718,7 @@ static inline MakoStrArray mako_list_pop_str(MakoStrArray a) {
     if (a.len == 0) {
         mako_list_popped_str_buf[0] = 0;
         mako_list_popped_str_len = 0;
+        if (a.cap == 0 || mako_rc_shared(a.data)) return (MakoStrArray){NULL, 0, 0};
         return a;
     }
     MakoString last = a.data[a.len - 1];
@@ -712,7 +726,13 @@ static inline MakoStrArray mako_list_pop_str(MakoStrArray a) {
     if (n && last.data) memcpy(mako_list_popped_str_buf, last.data, n);
     mako_list_popped_str_buf[n] = 0;
     mako_list_popped_str_len = n;
-    if (!mako_rc_shared(a.data)) mako_str_free(last);
+    if (a.cap == 0 || mako_rc_shared(a.data)) {
+        MakoStrArray out = mako_str_array_make((int64_t)a.len - 1, (int64_t)a.len - 1);
+        for (size_t i = 0; i < a.len - 1; i++) out.data[i] = mako_str_clone(a.data[i]);
+        out.len = a.len - 1;
+        return out;
+    }
+    mako_str_free(last);
     a.len--;
     return a;
 }
@@ -730,13 +750,13 @@ static inline MakoString mako_list_get_str(MakoStrArray a, int64_t a_idx) {
 static inline int64_t mako_list_len_int(MakoIntArray a) { return (int64_t)a.len; }
 static inline int64_t mako_list_len_str(MakoStrArray a) { return (int64_t)a.len; }
 static inline MakoIntArray mako_list_clear_int(MakoIntArray a) {
+    if (a.cap == 0 || mako_rc_shared(a.data)) return mako_int_array_empty();
     a.len = 0;
     return a;
 }
 static inline MakoStrArray mako_list_clear_str(MakoStrArray a) {
-    if (!mako_rc_shared(a.data)) {
-        for (size_t i = 0; i < a.len; i++) mako_str_free(a.data[i]);
-    }
+    if (a.cap == 0 || mako_rc_shared(a.data)) return (MakoStrArray){NULL, 0, 0};
+    for (size_t i = 0; i < a.len; i++) mako_str_free(a.data[i]);
     a.len = 0;
     return a;
 }
@@ -811,7 +831,7 @@ static size_t mako_queue_popped_str_len = 0;
 static inline MakoIntArray mako_queue_pop_int(MakoIntArray a) {
     if (a.len == 0) {
         mako_queue_popped_int_tls = 0;
-        return a;
+        return mako_int_array_empty();
     }
     mako_queue_popped_int_tls = a.data[0];
     MakoIntArray out = mako_int_array_make((int64_t)a.len - 1, (int64_t)a.len - 1);
@@ -824,7 +844,7 @@ static inline MakoStrArray mako_queue_pop_str(MakoStrArray a) {
     if (a.len == 0) {
         mako_queue_popped_str_buf[0] = 0;
         mako_queue_popped_str_len = 0;
-        return a;
+        return (MakoStrArray){NULL, 0, 0};
     }
     MakoString front = a.data[0];
     size_t n = front.len < sizeof(mako_queue_popped_str_buf) - 1 ? front.len : sizeof(mako_queue_popped_str_buf) - 1;
@@ -1007,9 +1027,20 @@ static int64_t mako_heap_popped_tls = 0;
 static inline MakoIntArray mako_heap_pop_int(MakoIntArray h) {
     if (h.len == 0) {
         mako_heap_popped_tls = 0;
+        if (h.cap == 0 || mako_rc_shared(h.data)) return mako_int_array_empty();
         return h;
     }
     mako_heap_popped_tls = h.data[0];
+    if (h.cap == 0 || mako_rc_shared(h.data)) {
+        MakoIntArray out = mako_int_array_make((int64_t)h.len - 1, (int64_t)h.len - 1);
+        if (h.len > 1) {
+            out.data[0] = h.data[h.len - 1];
+            for (size_t i = 1; i < h.len - 1; i++) out.data[i] = h.data[i];
+            out.len = h.len - 1;
+            mako_heap_sift_down(&out, 0);
+        }
+        return out;
+    }
     h.data[0] = h.data[h.len - 1];
     h.len--;
     if (h.len > 0) mako_heap_sift_down(&h, 0);

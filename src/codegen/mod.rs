@@ -1695,6 +1695,29 @@ impl Codegen {
                 }
                 "int64_t".into()
             }
+            Expr::Method {
+                receiver,
+                method,
+                args,
+            } => {
+                if let Expr::Ident(rname) = receiver.as_ref() {
+                    let candidate = format!("{rname}__{method}");
+                    if let Some(t) = self.fn_rets.get(&candidate) {
+                        return t.clone();
+                    }
+                    let mono = self.generic_mono_name_for_call(&candidate, args);
+                    if let Some(t) = self.fn_rets.get(&mono) {
+                        return t.clone();
+                    }
+                }
+                let rty = self.peek_expr_c_ty(receiver);
+                let base = rty.trim_end_matches('*');
+                let mname = format!("{base}_{method}");
+                if let Some(t) = self.fn_rets.get(&mname) {
+                    return t.clone();
+                }
+                "int64_t".into()
+            }
             _ => "int64_t".into(),
         }
     }
@@ -2006,24 +2029,113 @@ impl Codegen {
         }
     }
 
+    fn emit_bag_boxed_bag_unbox(
+        &mut self,
+        binding: &str,
+        scrut: &str,
+        ptr_fn: &str,
+        bag_cty: &str,
+        prefix: &str,
+        own_payload: bool,
+    ) {
+        let b = mangle(binding);
+        let p = self.fresh(prefix);
+        self.locals.insert(binding.to_string(), bag_cty.to_string());
+        self.line(&format!("{bag_cty} *{p} = ({bag_cty}*){ptr_fn}({scrut});"));
+        self.line(&format!("{bag_cty} {b};"));
+        if own_payload {
+            self.line(&format!(
+                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
+            ));
+        } else {
+            self.line(&format!(
+                "if ({p}) {{ {b} = *{p}; }} else {{ memset(&{b}, 0, sizeof({b})); }}"
+            ));
+        }
+    }
+
+    fn emit_bag_boxed_struct_unbox(
+        &mut self,
+        binding: &str,
+        scrut: &str,
+        ptr_fn: &str,
+        cname: &str,
+        prefix: &str,
+        own_payload: bool,
+    ) {
+        let b = mangle(binding);
+        let p = self.fresh(prefix);
+        self.locals.insert(binding.to_string(), cname.to_string());
+        self.line(&format!("{cname} *{p} = ({cname}*){ptr_fn}({scrut});"));
+        self.line(&format!("{cname} {b};"));
+        if own_payload {
+            self.line(&format!(
+                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
+            ));
+        } else {
+            self.line(&format!("if ({p}) {{"));
+            self.indent += 1;
+            let cloned = self.clone_own_val(cname, &format!("*{p}"));
+            self.line(&format!("{b} = {cloned};"));
+            self.indent -= 1;
+            self.line(&format!("}} else {{ memset(&{b}, 0, sizeof({b})); }}"));
+        }
+        self.note_own_bind_scope(&b);
+        self.register_own_drop(&b, cname);
+        self.scope_drop_safe.insert(b);
+    }
+
+    fn emit_bag_boxed_slice_unbox(
+        &mut self,
+        binding: &str,
+        scrut: &str,
+        ptr_fn: &str,
+        arr_cty: &str,
+        clone_fn: &str,
+        prefix: &str,
+        own_payload: bool,
+    ) {
+        let b = mangle(binding);
+        let p = self.fresh(prefix);
+        self.locals.insert(binding.to_string(), arr_cty.to_string());
+        self.line(&format!("{arr_cty} *{p} = ({arr_cty}*){ptr_fn}({scrut});"));
+        self.line(&format!("{arr_cty} {b};"));
+        if own_payload {
+            self.line(&format!(
+                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
+            ));
+        } else {
+            self.line(&format!(
+                "if ({p}) {{ {b} = {clone_fn}(*{p}); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
+            ));
+        }
+        self.note_own_bind_scope(&b);
+        self.register_own_drop(&b, arr_cty);
+        self.scope_drop_safe.insert(b);
+    }
+
     /// Bind Option Some payload into `bindings[0]` according to kind.
-    fn emit_option_some_bind(&mut self, scrut: &str, bindings: &[String], kind: &str) {
+    fn emit_option_some_bind(
+        &mut self,
+        scrut: &str,
+        bindings: &[String],
+        kind: &str,
+        own_payload: bool,
+    ) {
         if bindings.len() != 1 {
             return;
         }
         let b = mangle(&bindings[0]);
         if kind == "option" {
             // Nested Option: unbox heap Option and consume one link of the kind chain.
-            let p = self.fresh("opnest");
-            self.locals
-                .insert(bindings[0].clone(), "MakoOptionInt".into());
-            self.line(&format!(
-                "MakoOptionInt *{p} = (MakoOptionInt*)mako_option_some_ptr({scrut});"
-            ));
-            self.line(&format!("MakoOptionInt {b};"));
-            self.line(&format!(
-                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
-            ));
+            self.emit_bag_boxed_bag_unbox(
+                &bindings[0],
+                scrut,
+                "mako_option_some_ptr",
+                "MakoOptionInt",
+                "opnest",
+                own_payload,
+            );
             if let Some(chain) = self.deep_nest_chains.get(scrut).cloned() {
                 self.apply_deep_nest_chain(&bindings[0], "option", &chain);
             } else {
@@ -2057,16 +2169,14 @@ impl Codegen {
         }
         if kind == "result" {
             // Option[Result[T,E]]: unbox nested Result
-            let p = self.fresh("opres");
-            self.locals
-                .insert(bindings[0].clone(), "MakoResultInt".into());
-            self.line(&format!(
-                "MakoResultInt *{p} = (MakoResultInt*)mako_option_some_ptr({scrut});"
-            ));
-            self.line(&format!("MakoResultInt {b};"));
-            self.line(&format!(
-                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
-            ));
+            self.emit_bag_boxed_bag_unbox(
+                &bindings[0],
+                scrut,
+                "mako_option_some_ptr",
+                "MakoResultInt",
+                "opres",
+                own_payload,
+            );
             if let Some(chain) = self.deep_nest_chains.get(scrut).cloned() {
                 self.apply_deep_nest_chain(&bindings[0], "result", &chain);
             } else if let Some(ik) = self.option_result_inners.get(scrut).cloned() {
@@ -2101,7 +2211,11 @@ impl Codegen {
         }
         if kind == "string" {
             self.locals.insert(bindings[0].clone(), "MakoString".into());
-            self.line(&format!("MakoString {b} = {scrut}.ok_s;"));
+            if own_payload {
+                self.line(&format!("MakoString {b} = {scrut}.ok_s;"));
+            } else {
+                self.line(&format!("MakoString {b} = mako_str_clone({scrut}.ok_s);"));
+            }
             self.note_own_bind_scope(&b);
             self.register_own_drop(&b, "MakoString");
             self.scope_drop_safe.insert(b.clone());
@@ -2119,60 +2233,44 @@ impl Codegen {
                 .get(&sn)
                 .map(|s| s.c_name.clone())
                 .unwrap_or(sn);
-            let p = self.fresh("opp");
-            self.locals.insert(bindings[0].clone(), cname.clone());
-            self.line(&format!(
-                "{cname} *{p} = ({cname}*)mako_option_some_ptr({scrut});"
-            ));
-            self.line(&format!("{cname} {b};"));
-            self.line(&format!(
-                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
-            ));
-            self.note_own_bind_scope(&b);
-            self.register_own_drop(&b, &cname);
-            self.scope_drop_safe.insert(b.clone());
+            self.emit_bag_boxed_struct_unbox(
+                &bindings[0],
+                scrut,
+                "mako_option_some_ptr",
+                &cname,
+                "opp",
+                own_payload,
+            );
         } else if kind == "slice" {
-            let p = self.fresh("ops");
-            self.locals
-                .insert(bindings[0].clone(), "MakoIntArray".into());
-            self.line(&format!(
-                "MakoIntArray *{p} = (MakoIntArray*)mako_option_some_ptr({scrut});"
-            ));
-            self.line(&format!("MakoIntArray {b};"));
-            self.line(&format!(
-                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
-            ));
-            self.note_own_bind_scope(&b);
-            self.register_own_drop(&b, "MakoIntArray");
-            self.scope_drop_safe.insert(b.clone());
+            self.emit_bag_boxed_slice_unbox(
+                &bindings[0],
+                scrut,
+                "mako_option_some_ptr",
+                "MakoIntArray",
+                "mako_int_array_clone",
+                "ops",
+                own_payload,
+            );
         } else if kind == "slice_str" {
-            let p = self.fresh("ops");
-            self.locals
-                .insert(bindings[0].clone(), "MakoStrArray".into());
-            self.line(&format!(
-                "MakoStrArray *{p} = (MakoStrArray*)mako_option_some_ptr({scrut});"
-            ));
-            self.line(&format!("MakoStrArray {b};"));
-            self.line(&format!(
-                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
-            ));
-            self.note_own_bind_scope(&b);
-            self.register_own_drop(&b, "MakoStrArray");
-            self.scope_drop_safe.insert(b.clone());
+            self.emit_bag_boxed_slice_unbox(
+                &bindings[0],
+                scrut,
+                "mako_option_some_ptr",
+                "MakoStrArray",
+                "mako_str_array_clone",
+                "ops",
+                own_payload,
+            );
         } else if kind == "slice_float" {
-            let p = self.fresh("ops");
-            self.locals
-                .insert(bindings[0].clone(), "MakoFloatArray".into());
-            self.line(&format!(
-                "MakoFloatArray *{p} = (MakoFloatArray*)mako_option_some_ptr({scrut});"
-            ));
-            self.line(&format!("MakoFloatArray {b};"));
-            self.line(&format!(
-                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
-            ));
-            self.note_own_bind_scope(&b);
-            self.register_own_drop(&b, "MakoFloatArray");
-            self.scope_drop_safe.insert(b.clone());
+            self.emit_bag_boxed_slice_unbox(
+                &bindings[0],
+                scrut,
+                "mako_option_some_ptr",
+                "MakoFloatArray",
+                "mako_float_array_clone",
+                "ops",
+                own_payload,
+            );
         } else if kind == "slice_struct" {
             let sn = self
                 .option_some_structs
@@ -2185,18 +2283,16 @@ impl Codegen {
                 .map(|s| s.c_name.clone())
                 .unwrap_or(sn);
             let arr = format!("MakoArr_{cname}");
-            let p = self.fresh("ops");
-            self.locals.insert(bindings[0].clone(), arr.clone());
-            self.line(&format!(
-                "{arr} *{p} = ({arr}*)mako_option_some_ptr({scrut});"
-            ));
-            self.line(&format!("{arr} {b};"));
-            self.line(&format!(
-                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
-            ));
-            self.note_own_bind_scope(&b);
-            self.register_own_drop(&b, &arr);
-            self.scope_drop_safe.insert(b.clone());
+            let clone_fn = format!("mako_arr_{cname}_clone");
+            self.emit_bag_boxed_slice_unbox(
+                &bindings[0],
+                scrut,
+                "mako_option_some_ptr",
+                &arr,
+                &clone_fn,
+                "ops",
+                own_payload,
+            );
         } else if kind == "map"
             || kind == "map_si"
             || kind == "map_ii"
@@ -2923,7 +3019,9 @@ impl Codegen {
         // emitted and every builder leaks its struct and buffer.
         matches!(
             name,
-            "env_keys"
+            "append"
+                | "mako_byte_append"
+                | "env_keys"
                 | "read_dir"
                 | "str_builder"
                 | "str_split"
@@ -3872,7 +3970,12 @@ impl Codegen {
                         // borrowed views stay excluded. Move analysis still
                         // suppresses the drop when the value is passed on /
                         // returned / stored.
-                        || (self.fn_ret_types.contains_key(name)
+                        || ((self.fn_ret_types.contains_key(name)
+                            || self.generic_templates.contains_key(name)
+                            || self
+                                .fn_ret_types
+                                .contains_key(&self.generic_mono_name_for_call(name, args)))
+                            && !self.extern_fns.contains(name)
                             && Self::own_free_fn(c_ty).is_some()
                             && !c_ty.starts_with("MakoEnum_"))
             ),
@@ -3915,9 +4018,10 @@ impl Codegen {
                 callee.as_ref(),
                 Expr::Ident(name) if Self::builtin_returns_borrowed_string(name)
             ),
-            // A string received from a channel transfers its allocation to
-            // the receiver, including when used directly in a comparison.
-            Expr::Method { method, .. } if method == "recv" => true,
+            // A string returned by a method call (including package-qualified
+            // `pkg.fn(...)` and `ch.recv()`), `?`, or `join` transfers ownership.
+            Expr::Method { method, .. } => method != "query",
+            Expr::Try(_) | Expr::Join(_) => true,
             // String-valued map lookups return clones, unlike array indexing.
             Expr::Index { base, .. } => matches!(
                 self.peek_expr_c_ty(base).as_str(),
@@ -5087,7 +5191,23 @@ impl Codegen {
         }
         if let Some(ff) = Self::own_free_fn(cty) {
             let cond = Self::owning_field_replaced_cond(cty, old, new);
-            let _ = writeln!(self.out, "{indent}if ({cond}) {{ {ff}({old}); }}");
+            let is_rc_array = matches!(
+                cty,
+                "MakoIntArray"
+                    | "MakoByteArray"
+                    | "MakoStrArray"
+                    | "MakoFloatArray"
+                    | "MakoBoolArray"
+            ) || cty.starts_with("MakoArr_");
+            if is_rc_array {
+                let _ = writeln!(
+                    self.out,
+                    "{indent}if ({cond}) {{ {ff}({old}); }} \
+                     else if ({old}.cap > 0 && {old}.data && mako_rc_shared({old}.data)) {{ mako_rc_release({old}.data); }}"
+                );
+            } else {
+                let _ = writeln!(self.out, "{indent}if ({cond}) {{ {ff}({old}); }}");
+            }
             self.write_retained_replacement_release(old, new, cty, indent);
         }
     }
@@ -5419,7 +5539,10 @@ impl Codegen {
     fn expr_is_owning_borrow(&self, value: &Expr) -> bool {
         match value {
             Expr::Field { .. } => true,
-            Expr::Index { base, .. } => !self.peek_expr_c_ty(base).starts_with("MakoMap"),
+            Expr::Index { base, .. } => !matches!(
+                self.peek_expr_c_ty(base).as_str(),
+                "MakoMapSS*" | "MakoMapFS*" | "MakoMapBS*"
+            ),
             _ => false,
         }
     }
@@ -5686,7 +5809,13 @@ impl Codegen {
             Expr::Field { .. } => self
                 .prepare_owned_field_move(value, c_ty, &val)
                 .unwrap_or_else(|| self.clone_own_val(c_ty, &val)),
-            Expr::Index { .. } => self.clone_own_val(c_ty, &val),
+            Expr::Index { .. } => {
+                if self.expr_is_owning_borrow(value) {
+                    self.clone_own_val(c_ty, &val)
+                } else {
+                    val
+                }
+            }
             _ => {
                 if self.string_header_passthrough(value) {
                     return self.prepare_string_passthrough(value, c_ty, val);
@@ -5697,6 +5826,93 @@ impl Codegen {
                 }
                 val
             }
+        }
+    }
+
+    fn prepare_map_bag_store_rhs(
+        &mut self,
+        value: &Expr,
+        fnp: &str,
+        tag: &str,
+        vty: &str,
+        val: String,
+    ) -> String {
+        let is_boxed_arr_bag = tag.starts_with("opt_arr_") || tag.starts_with("res_arr_");
+        let boxed_struct_c = tag
+            .strip_prefix("opt_")
+            .or_else(|| tag.strip_prefix("res_"))
+            .and_then(|n| self.structs.get(n).map(|s| s.c_name.clone()));
+        let is_str_bag = matches!(
+            tag,
+            "opt_string" | "res_string" | "res_int" | "res_float" | "res_bool"
+        );
+        if !is_boxed_arr_bag && boxed_struct_c.is_none() && !is_str_bag {
+            return val;
+        }
+        match value {
+            Expr::Call { callee, args } => {
+                if let Expr::Ident(ctor) = callee.as_ref() {
+                    if matches!(ctor.as_str(), "Some" | "Ok" | "Err") {
+                        if let Some(Expr::Ident(n)) = args.first() {
+                            let mn = mangle(n);
+                            if self.own_drop_live.contains(&mn) {
+                                if !self.ident_used_after_current(n) {
+                                    self.note_own_drop_moved(&mn);
+                                    return val;
+                                }
+                                if is_boxed_arr_bag && ctor != "Err" {
+                                    let arr_c = map_slice_val_c_ty(&tag[4..]);
+                                    let arr_clone =
+                                        Self::own_clone_fn(&arr_c).unwrap_or_default();
+                                    let tmp = self.fresh("mbag");
+                                    self.emit_line(format_args!("{vty} {tmp} = {val};"));
+                                    self.emit_line(format_args!(
+                                        "if ({tmp}.value != 0) {{ {arr_c} *__p = ({arr_c}*)(intptr_t){tmp}.value; *__p = {arr_clone}(*__p); }}"
+                                    ));
+                                    return tmp;
+                                }
+                                if let Some(ref st_c) = boxed_struct_c {
+                                    if ctor != "Err" {
+                                        let tmp = self.fresh("mbag");
+                                        self.emit_line(format_args!("{vty} {tmp} = {val};"));
+                                        self.emit_line(format_args!("if ({tmp}.value != 0) {{"));
+                                        self.emit_line(format_args!(
+                                            "    {st_c} *__p = ({st_c}*)(intptr_t){tmp}.value;"
+                                        ));
+                                        let st_cloned = self.clone_own_val(st_c, "*__p");
+                                        self.emit_line(format_args!("    *__p = {st_cloned};"));
+                                        self.emit_line(format_args!("}}"));
+                                        return tmp;
+                                    }
+                                }
+                                let tmp = self.fresh("mbag");
+                                self.emit_line(format_args!(
+                                    "{vty} {tmp} = {fnp}_val_clone({val});"
+                                ));
+                                return tmp;
+                            }
+                        }
+                    }
+                }
+                val
+            }
+            Expr::Index { .. } | Expr::Field { .. } => {
+                let tmp = self.fresh("mbag");
+                self.emit_line(format_args!("{vty} {tmp} = {fnp}_val_clone({val});"));
+                tmp
+            }
+            Expr::Ident(n) => {
+                if self.owned_result_errors.contains(n) {
+                    if !self.ident_used_after_current(n) {
+                        self.owned_result_errors.remove(n);
+                        return val;
+                    }
+                }
+                let tmp = self.fresh("mbag");
+                self.emit_line(format_args!("{vty} {tmp} = {fnp}_val_clone({val});"));
+                tmp
+            }
+            _ => val,
         }
     }
 
@@ -5757,6 +5973,8 @@ impl Codegen {
                     || fname.starts_with("list_push")
                     || fname.starts_with("list_pop")
                     || fname.starts_with("list_clear")
+                    || fname == "heap_push_int"
+                    || fname == "heap_pop_int"
                     || fname == "buf_put"
                     || fname == "mako_byte_append";
                 if is_consuming {
@@ -9717,6 +9935,16 @@ impl Codegen {
             _ => "m->keys[i] == key".to_string(),
         };
         let free_str_key = key_suf == "s";
+        let is_boxed_arr_bag = val_tag.starts_with("opt_arr_") || val_tag.starts_with("res_arr_");
+        let boxed_struct_c = val_tag
+            .strip_prefix("opt_")
+            .or_else(|| val_tag.strip_prefix("res_"))
+            .and_then(|n| self.structs.get(n).map(|s| s.c_name.clone()));
+        let is_str_bag = matches!(
+            val_tag,
+            "opt_string" | "res_string" | "res_int" | "res_float" | "res_bool"
+        );
+        let has_val_drop = is_boxed_arr_bag || boxed_struct_c.is_some() || is_str_bag;
 
         let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
@@ -9725,6 +9953,197 @@ impl Codegen {
         let _ = writeln!(self.out, "    size_t cap;");
         let _ = writeln!(self.out, "    size_t len;");
         let _ = writeln!(self.out, "}} {mt};");
+        if is_boxed_arr_bag {
+            let is_opt = val_tag.starts_with("opt_");
+            let arr_tag = &val_tag[4..];
+            let arr_c = map_slice_val_c_ty(arr_tag);
+            let arr_free = Self::own_free_fn(&arr_c).unwrap_or_default();
+            let arr_clone = Self::own_clone_fn(&arr_c).unwrap_or_default();
+            let _ = writeln!(self.out, "static inline void {fnp}_val_drop({val_c} v) {{");
+            if is_opt {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.some && v.value != 0) {{ {arr_c} *__p = ({arr_c}*)(intptr_t)v.value; {arr_free}(*__p); free(__p); }}"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.ok && v.value != 0) {{ {arr_c} *__p = ({arr_c}*)(intptr_t)v.value; {arr_free}(*__p); free(__p); }} else if (!v.ok && v.err_kind == 0) {{ mako_str_free(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "}}");
+            let _ = writeln!(self.out, "static inline {val_c} {fnp}_val_clone({val_c} v) {{");
+            if is_opt {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.some && v.value != 0) {{ {arr_c} *__src = ({arr_c}*)(intptr_t)v.value; {arr_c} *__dst = ({arr_c}*)malloc(sizeof({arr_c})); *__dst = {arr_clone}(*__src); v.value = (int64_t)(intptr_t)__dst; }}"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.ok && v.value != 0) {{ {arr_c} *__src = ({arr_c}*)(intptr_t)v.value; {arr_c} *__dst = ({arr_c}*)malloc(sizeof({arr_c})); *__dst = {arr_clone}(*__src); v.value = (int64_t)(intptr_t)__dst; }} else if (!v.ok && v.err_kind == 0) {{ v.err = mako_str_clone(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "    return v;\n}}");
+            let elem_neq = if arr_c == "MakoStrArray" {
+                "!mako_str_eq(ap->data[j], bp->data[j])".to_string()
+            } else if let Some(sn) = arr_c.strip_prefix("MakoArr_") {
+                if sn.starts_with("arr_") {
+                    "(ap->data[j].data != bp->data[j].data || ap->data[j].len != bp->data[j].len)"
+                        .to_string()
+                } else if sn.starts_with("map_") {
+                    "ap->data[j] != bp->data[j]".to_string()
+                } else if sn.starts_with("opt_") {
+                    "!mako_eq_option_int(ap->data[j], bp->data[j])".to_string()
+                } else if sn.starts_with("res_") {
+                    "!mako_eq_result_int(ap->data[j], bp->data[j])".to_string()
+                } else if self.enums.contains_key(sn) {
+                    format!("!mako_eq_MakoEnum_{sn}(ap->data[j], bp->data[j])")
+                } else if self.structs.contains_key(sn) {
+                    format!("!mako_eq_{sn}(ap->data[j], bp->data[j])")
+                } else {
+                    "ap->data[j] != bp->data[j]".to_string()
+                }
+            } else {
+                "ap->data[j] != bp->data[j]".to_string()
+            };
+            let _ = writeln!(
+                self.out,
+                "static inline bool {fnp}_val_eq({val_c} av, {val_c} bv) {{"
+            );
+            if is_opt {
+                let _ = writeln!(
+                    self.out,
+                    "    if (av.some != bv.some) return false; if (!av.some) return true;"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (av.ok != bv.ok) return false; if (!av.ok) return mako_eq_result_int(av, bv);"
+                );
+            }
+            let _ = writeln!(
+                self.out,
+                "    if (av.value == bv.value) return true; if (!av.value || !bv.value) return false;"
+            );
+            let _ = writeln!(
+                self.out,
+                "    {arr_c} *ap = ({arr_c}*)(intptr_t)av.value, *bp = ({arr_c}*)(intptr_t)bv.value;"
+            );
+            let _ = writeln!(self.out, "    if (ap->len != bp->len) return false;");
+            let _ = writeln!(
+                self.out,
+                "    for (size_t j = 0; j < ap->len; j++) {{ if ({elem_neq}) return false; }}"
+            );
+            let _ = writeln!(self.out, "    return true;\n}}");
+        } else if let Some(ref st_c) = boxed_struct_c {
+            let is_opt = val_tag.starts_with("opt_");
+            let st_drop_fields = self.struct_own_field_frees(st_c);
+            let _ = writeln!(self.out, "static inline void {fnp}_val_drop({val_c} v) {{");
+            if is_opt {
+                let _ = writeln!(self.out, "    if (v.some && v.value != 0) {{");
+            } else {
+                let _ = writeln!(self.out, "    if (v.ok && v.value != 0) {{");
+            }
+            let _ = writeln!(self.out, "        {st_c} *__p = ({st_c}*)(intptr_t)v.value;");
+            if st_drop_fields.len() > STRUCT_INLINE_FIELD_DROP_MAX {
+                let _ = writeln!(self.out, "        mako_struct_{st_c}_drop_fields(__p);");
+            } else {
+                for (field, free_fn) in &st_drop_fields {
+                    let _ = writeln!(self.out, "        {free_fn}(__p->{field});");
+                }
+            }
+            let _ = writeln!(self.out, "        free(__p);");
+            if is_opt {
+                let _ = writeln!(self.out, "    }}");
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    }} else if (!v.ok && v.err_kind == 0) {{ mako_str_free(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "}}");
+            let _ = writeln!(self.out, "static inline {val_c} {fnp}_val_clone({val_c} v) {{");
+            if is_opt {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.some && v.value != 0) {{ {st_c} *__src = ({st_c}*)(intptr_t)v.value; {st_c} *__dst = ({st_c}*)malloc(sizeof({st_c}));"
+                );
+                let st_cloned = self.clone_own_val(st_c, "*__src");
+                let _ = writeln!(
+                    self.out,
+                    "    *__dst = {st_cloned}; v.value = (int64_t)(intptr_t)__dst; }}"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.ok && v.value != 0) {{ {st_c} *__src = ({st_c}*)(intptr_t)v.value; {st_c} *__dst = ({st_c}*)malloc(sizeof({st_c}));"
+                );
+                let st_cloned = self.clone_own_val(st_c, "*__src");
+                let _ = writeln!(
+                    self.out,
+                    "    *__dst = {st_cloned}; v.value = (int64_t)(intptr_t)__dst; }} else if (!v.ok && v.err_kind == 0) {{ v.err = mako_str_clone(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "    return v;\n}}");
+            let _ = writeln!(
+                self.out,
+                "static inline bool {fnp}_val_eq({val_c} av, {val_c} bv) {{"
+            );
+            if is_opt {
+                let _ = writeln!(
+                    self.out,
+                    "    if (av.some != bv.some) return false; if (!av.some) return true;"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (av.ok != bv.ok) return false; if (!av.ok) return mako_eq_result_int(av, bv);"
+                );
+            }
+            let _ = writeln!(
+                self.out,
+                "    if (av.value == bv.value) return true; if (!av.value || !bv.value) return false;"
+            );
+            let _ = writeln!(
+                self.out,
+                "    return mako_eq_{st_c}(*({st_c}*)(intptr_t)av.value, *({st_c}*)(intptr_t)bv.value);\n}}"
+            );
+        } else if is_str_bag {
+            let _ = writeln!(self.out, "static inline void {fnp}_val_drop({val_c} v) {{");
+            if val_tag == "opt_string" {
+                let _ = writeln!(self.out, "    if (v.some) {{ mako_str_free(v.ok_s); }}");
+            } else if val_tag == "res_string" {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.ok) {{ mako_str_free(v.ok_s); }} else if (v.err_kind == 0) {{ mako_str_free(v.err); }}"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (!v.ok && v.err_kind == 0) {{ mako_str_free(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "}}");
+            let _ = writeln!(self.out, "static inline {val_c} {fnp}_val_clone({val_c} v) {{");
+            if val_tag == "opt_string" {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.some) {{ v.ok_s = mako_str_clone(v.ok_s); }}"
+                );
+            } else if val_tag == "res_string" {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.ok) {{ v.ok_s = mako_str_clone(v.ok_s); }} else if (v.err_kind == 0) {{ v.err = mako_str_clone(v.err); }}"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (!v.ok && v.err_kind == 0) {{ v.err = mako_str_clone(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "    return v;\n}}");
+        }
         let _ = writeln!(self.out, "static inline {mt} {fnp}_new(size_t hint) {{");
         let _ = writeln!(self.out, "    size_t cap = 8;");
         let _ = writeln!(self.out, "    size_t need = hint ? (hint * 4 / 3 + 1) : 8;");
@@ -9788,7 +10207,33 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        self.write_map_hit_replace(&key_eq, &val_c);
+        if is_boxed_arr_bag || boxed_struct_c.is_some() {
+            let _ = writeln!(self.out, "        else if ({key_eq}) {{");
+            let _ = writeln!(self.out, "            {val_c} old = m->vals[i];");
+            let _ = writeln!(self.out, "            m->vals[i] = val;");
+            if val_tag.starts_with("opt_") {
+                let _ = writeln!(
+                    self.out,
+                    "            if (old.value != val.value) {fnp}_val_drop(old);"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "            if (!(old.ok && val.ok && old.value == val.value)) {fnp}_val_drop(old);"
+                );
+            }
+            let _ = writeln!(self.out, "            return;");
+            let _ = writeln!(self.out, "        }}");
+        } else if is_str_bag {
+            let _ = writeln!(self.out, "        else if ({key_eq}) {{");
+            let _ = writeln!(self.out, "            {val_c} old = m->vals[i];");
+            let _ = writeln!(self.out, "            m->vals[i] = val;");
+            let _ = writeln!(self.out, "            {fnp}_val_drop(old);");
+            let _ = writeln!(self.out, "            return;");
+            let _ = writeln!(self.out, "        }}");
+        } else {
+            self.write_map_hit_replace(&key_eq, &val_c);
+        }
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -9894,6 +10339,12 @@ impl Codegen {
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{"
         );
+        if has_val_drop {
+            let _ = writeln!(
+                self.out,
+                "            {fnp}_val_drop(m->vals[i]); memset(&m->vals[i], 0, sizeof({val_c}));"
+            );
+        }
         if free_str_key {
             let _ = writeln!(self.out, "            mako_str_free(m->keys[i]); m->keys[i].data = NULL; m->keys[i].len = 0;");
         }
@@ -9987,17 +10438,34 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, m->vals[i]);");
+        if is_str_bag {
+            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, {fnp}_val_clone(m->vals[i]));");
+        } else {
+            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, m->vals[i]);");
+        }
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
             "static inline void mako_maps_clear_{key_suf}_{val_tag}({mt} *m) {{"
         );
-        if free_str_key {
+        if free_str_key || has_val_drop {
             let _ = writeln!(self.out, "    if (!m) return;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{ mako_str_free(m->keys[i]); m->keys[i].data = NULL; m->keys[i].len = 0; }}");
+            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
+            if has_val_drop {
+                let _ = writeln!(
+                    self.out,
+                    "            {fnp}_val_drop(m->vals[i]); memset(&m->vals[i], 0, sizeof({val_c}));"
+                );
+            }
+            if free_str_key {
+                let _ = writeln!(
+                    self.out,
+                    "            mako_str_free(m->keys[i]); m->keys[i].data = NULL; m->keys[i].len = 0;"
+                );
+            }
+            let _ = writeln!(self.out, "        }}");
             let _ = writeln!(self.out, "        m->state[i] = MAKO_MAP_EMPTY;");
             let _ = writeln!(self.out, "    }} m->len = 0;");
         } else {
@@ -10009,26 +10477,15 @@ impl Codegen {
         let _ = writeln!(self.out, "}}");
         {
             let free_str = key_suf == "s";
-            if val_tag.starts_with("opt_arr_") || val_tag.starts_with("res_arr_") {
-                let is_opt = val_tag.starts_with("opt_");
-                let arr_tag = &val_tag[4..];
-                let arr_c = map_slice_val_c_ty(arr_tag);
-                let arr_free = Self::own_free_fn(&arr_c).unwrap_or_default();
+            if has_val_drop {
                 let _ = writeln!(self.out, "static inline void {fnp}_free({mt} *m) {{");
                 let _ = writeln!(self.out, "    if (!m) return;");
                 let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
                 let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
-                if is_opt {
-                    let _ = writeln!(
-                        self.out,
-                        "            if (m->vals[i].some && m->vals[i].value != 0) {{ {arr_c} *__p = ({arr_c}*)(intptr_t)m->vals[i].value; {arr_free}(*__p); free(__p); m->vals[i].value = 0; }}"
-                    );
-                } else {
-                    let _ = writeln!(
-                        self.out,
-                        "            if (m->vals[i].ok && m->vals[i].value != 0) {{ {arr_c} *__p = ({arr_c}*)(intptr_t)m->vals[i].value; {arr_free}(*__p); free(__p); m->vals[i].value = 0; }} else if (!m->vals[i].ok && m->vals[i].err_kind == 0) {{ mako_str_free(m->vals[i].err); }}"
-                    );
-                }
+                let _ = writeln!(
+                    self.out,
+                    "            {fnp}_val_drop(m->vals[i]); memset(&m->vals[i], 0, sizeof({val_c}));"
+                );
                 if free_str {
                     let _ = writeln!(
                         self.out,
@@ -10056,10 +10513,17 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!m) return n;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(
-            self.out,
-            "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
-        );
+        if has_val_drop {
+            let _ = writeln!(
+                self.out,
+                "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], {fnp}_val_clone(m->vals[i]));"
+            );
+        } else {
+            let _ = writeln!(
+                self.out,
+                "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
+            );
+        }
         let _ = writeln!(self.out, "    }} return n;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -10081,7 +10545,11 @@ impl Codegen {
             self.out,
             "        {val_c} av = a->vals[i], bv = {fnp}_get(b, a->keys[i]);"
         );
-        let _ = writeln!(self.out, "        if (!{eq_fn}) return 0;");
+        if is_boxed_arr_bag || boxed_struct_c.is_some() {
+            let _ = writeln!(self.out, "        if (!{fnp}_val_eq(av, bv)) return 0;");
+        } else {
+            let _ = writeln!(self.out, "        if (!{eq_fn}) return 0;");
+        }
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -10090,7 +10558,17 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!dst || !src) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < src->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);");
+        if has_val_drop {
+            let _ = writeln!(
+                self.out,
+                "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], {fnp}_val_clone(src->vals[i]));"
+            );
+        } else {
+            let _ = writeln!(
+                self.out,
+                "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);"
+            );
+        }
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
     }
@@ -10109,6 +10587,230 @@ impl Codegen {
         let fnp = format!("mako_map_k_{key_name}_{val_tag}");
         let hash = format!("mako_hash_{key_c}(key)");
         let key_eq = format!("mako_eq_{key_c}(m->keys[i], key)");
+        let is_boxed_arr_bag = val_tag.starts_with("opt_arr_") || val_tag.starts_with("res_arr_");
+        let boxed_struct_c = val_tag
+            .strip_prefix("opt_")
+            .or_else(|| val_tag.strip_prefix("res_"))
+            .and_then(|n| self.structs.get(n).map(|s| s.c_name.clone()));
+        let is_str_bag = matches!(
+            val_tag,
+            "opt_string" | "res_string" | "res_int" | "res_float" | "res_bool"
+        );
+        let has_val_drop = is_boxed_arr_bag || boxed_struct_c.is_some() || is_str_bag;
+
+        let _ = writeln!(
+            self.out,
+            "static inline {key_c} {fnp}_key_clone({key_c} value) {{"
+        );
+        let key_cloned = self.clone_own_val(key_c, "value");
+        let _ = writeln!(self.out, "    return {key_cloned};\n}}");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_key_drop({key_c} value) {{"
+        );
+        let _ = writeln!(self.out, "    (void)value;");
+        let key_drop_fields = self.struct_own_field_frees(key_c);
+        if key_drop_fields.len() > STRUCT_INLINE_FIELD_DROP_MAX {
+            let _ = writeln!(self.out, "    mako_struct_{key_c}_drop_fields(&value);");
+        } else if !key_drop_fields.is_empty() {
+            for (field, free_fn) in key_drop_fields {
+                let _ = writeln!(self.out, "    {free_fn}(value.{field});");
+            }
+        } else if let Some(ff) = Self::own_free_fn(key_c) {
+            let _ = writeln!(self.out, "    {ff}(value);");
+        }
+        let _ = writeln!(self.out, "}}");
+        if is_boxed_arr_bag {
+            let is_opt = val_tag.starts_with("opt_");
+            let arr_tag = &val_tag[4..];
+            let arr_c = map_slice_val_c_ty(arr_tag);
+            let arr_free = Self::own_free_fn(&arr_c).unwrap_or_default();
+            let arr_clone = Self::own_clone_fn(&arr_c).unwrap_or_default();
+            let _ = writeln!(self.out, "static inline void {fnp}_val_drop({val_c} v) {{");
+            if is_opt {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.some && v.value != 0) {{ {arr_c} *__p = ({arr_c}*)(intptr_t)v.value; {arr_free}(*__p); free(__p); }}"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.ok && v.value != 0) {{ {arr_c} *__p = ({arr_c}*)(intptr_t)v.value; {arr_free}(*__p); free(__p); }} else if (!v.ok && v.err_kind == 0) {{ mako_str_free(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "}}");
+            let _ = writeln!(self.out, "static inline {val_c} {fnp}_val_clone({val_c} v) {{");
+            if is_opt {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.some && v.value != 0) {{ {arr_c} *__src = ({arr_c}*)(intptr_t)v.value; {arr_c} *__dst = ({arr_c}*)malloc(sizeof({arr_c})); *__dst = {arr_clone}(*__src); v.value = (int64_t)(intptr_t)__dst; }}"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.ok && v.value != 0) {{ {arr_c} *__src = ({arr_c}*)(intptr_t)v.value; {arr_c} *__dst = ({arr_c}*)malloc(sizeof({arr_c})); *__dst = {arr_clone}(*__src); v.value = (int64_t)(intptr_t)__dst; }} else if (!v.ok && v.err_kind == 0) {{ v.err = mako_str_clone(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "    return v;\n}}");
+            let elem_neq = if arr_c == "MakoStrArray" {
+                "!mako_str_eq(ap->data[j], bp->data[j])".to_string()
+            } else if let Some(sn) = arr_c.strip_prefix("MakoArr_") {
+                if sn.starts_with("arr_") {
+                    "(ap->data[j].data != bp->data[j].data || ap->data[j].len != bp->data[j].len)"
+                        .to_string()
+                } else if sn.starts_with("map_") {
+                    "ap->data[j] != bp->data[j]".to_string()
+                } else if sn.starts_with("opt_") {
+                    "!mako_eq_option_int(ap->data[j], bp->data[j])".to_string()
+                } else if sn.starts_with("res_") {
+                    "!mako_eq_result_int(ap->data[j], bp->data[j])".to_string()
+                } else if self.enums.contains_key(sn) {
+                    format!("!mako_eq_MakoEnum_{sn}(ap->data[j], bp->data[j])")
+                } else if self.structs.contains_key(sn) {
+                    format!("!mako_eq_{sn}(ap->data[j], bp->data[j])")
+                } else {
+                    "ap->data[j] != bp->data[j]".to_string()
+                }
+            } else {
+                "ap->data[j] != bp->data[j]".to_string()
+            };
+            let _ = writeln!(
+                self.out,
+                "static inline bool {fnp}_val_eq({val_c} av, {val_c} bv) {{"
+            );
+            if is_opt {
+                let _ = writeln!(
+                    self.out,
+                    "    if (av.some != bv.some) return false; if (!av.some) return true;"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (av.ok != bv.ok) return false; if (!av.ok) return mako_eq_result_int(av, bv);"
+                );
+            }
+            let _ = writeln!(
+                self.out,
+                "    if (av.value == bv.value) return true; if (!av.value || !bv.value) return false;"
+            );
+            let _ = writeln!(
+                self.out,
+                "    {arr_c} *ap = ({arr_c}*)(intptr_t)av.value, *bp = ({arr_c}*)(intptr_t)bv.value;"
+            );
+            let _ = writeln!(self.out, "    if (ap->len != bp->len) return false;");
+            let _ = writeln!(
+                self.out,
+                "    for (size_t j = 0; j < ap->len; j++) {{ if ({elem_neq}) return false; }}"
+            );
+            let _ = writeln!(self.out, "    return true;\n}}");
+        } else if let Some(ref st_c) = boxed_struct_c {
+            let is_opt = val_tag.starts_with("opt_");
+            let st_drop_fields = self.struct_own_field_frees(st_c);
+            let _ = writeln!(self.out, "static inline void {fnp}_val_drop({val_c} v) {{");
+            if is_opt {
+                let _ = writeln!(self.out, "    if (v.some && v.value != 0) {{");
+            } else {
+                let _ = writeln!(self.out, "    if (v.ok && v.value != 0) {{");
+            }
+            let _ = writeln!(self.out, "        {st_c} *__p = ({st_c}*)(intptr_t)v.value;");
+            if st_drop_fields.len() > STRUCT_INLINE_FIELD_DROP_MAX {
+                let _ = writeln!(self.out, "        mako_struct_{st_c}_drop_fields(__p);");
+            } else {
+                for (field, free_fn) in &st_drop_fields {
+                    let _ = writeln!(self.out, "        {free_fn}(__p->{field});");
+                }
+            }
+            let _ = writeln!(self.out, "        free(__p);");
+            if is_opt {
+                let _ = writeln!(self.out, "    }}");
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    }} else if (!v.ok && v.err_kind == 0) {{ mako_str_free(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "}}");
+            let _ = writeln!(self.out, "static inline {val_c} {fnp}_val_clone({val_c} v) {{");
+            if is_opt {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.some && v.value != 0) {{ {st_c} *__src = ({st_c}*)(intptr_t)v.value; {st_c} *__dst = ({st_c}*)malloc(sizeof({st_c}));"
+                );
+                let st_cloned = self.clone_own_val(st_c, "*__src");
+                let _ = writeln!(
+                    self.out,
+                    "    *__dst = {st_cloned}; v.value = (int64_t)(intptr_t)__dst; }}"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.ok && v.value != 0) {{ {st_c} *__src = ({st_c}*)(intptr_t)v.value; {st_c} *__dst = ({st_c}*)malloc(sizeof({st_c}));"
+                );
+                let st_cloned = self.clone_own_val(st_c, "*__src");
+                let _ = writeln!(
+                    self.out,
+                    "    *__dst = {st_cloned}; v.value = (int64_t)(intptr_t)__dst; }} else if (!v.ok && v.err_kind == 0) {{ v.err = mako_str_clone(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "    return v;\n}}");
+            let _ = writeln!(
+                self.out,
+                "static inline bool {fnp}_val_eq({val_c} av, {val_c} bv) {{"
+            );
+            if is_opt {
+                let _ = writeln!(
+                    self.out,
+                    "    if (av.some != bv.some) return false; if (!av.some) return true;"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (av.ok != bv.ok) return false; if (!av.ok) return mako_eq_result_int(av, bv);"
+                );
+            }
+            let _ = writeln!(
+                self.out,
+                "    if (av.value == bv.value) return true; if (!av.value || !bv.value) return false;"
+            );
+            let _ = writeln!(
+                self.out,
+                "    return mako_eq_{st_c}(*({st_c}*)(intptr_t)av.value, *({st_c}*)(intptr_t)bv.value);\n}}"
+            );
+        } else if is_str_bag {
+            let _ = writeln!(self.out, "static inline void {fnp}_val_drop({val_c} v) {{");
+            if val_tag == "opt_string" {
+                let _ = writeln!(self.out, "    if (v.some) {{ mako_str_free(v.ok_s); }}");
+            } else if val_tag == "res_string" {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.ok) {{ mako_str_free(v.ok_s); }} else if (v.err_kind == 0) {{ mako_str_free(v.err); }}"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (!v.ok && v.err_kind == 0) {{ mako_str_free(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "}}");
+            let _ = writeln!(self.out, "static inline {val_c} {fnp}_val_clone({val_c} v) {{");
+            if val_tag == "opt_string" {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.some) {{ v.ok_s = mako_str_clone(v.ok_s); }}"
+                );
+            } else if val_tag == "res_string" {
+                let _ = writeln!(
+                    self.out,
+                    "    if (v.ok) {{ v.ok_s = mako_str_clone(v.ok_s); }} else if (v.err_kind == 0) {{ v.err = mako_str_clone(v.err); }}"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "    if (!v.ok && v.err_kind == 0) {{ v.err = mako_str_clone(v.err); }}"
+                );
+            }
+            let _ = writeln!(self.out, "    return v;\n}}");
+        }
 
         let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
@@ -10166,7 +10868,34 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        self.write_map_hit_replace(&key_eq, &val_c);
+        let _ = writeln!(self.out, "        else if ({key_eq}) {{");
+        let _ = writeln!(self.out, "            {key_c} old_k = m->keys[i];");
+        let _ = writeln!(self.out, "            m->keys[i] = key;");
+        self.write_elem_dest_destroy("old_k", "key", key_c, "            ");
+        if is_boxed_arr_bag || boxed_struct_c.is_some() {
+            let _ = writeln!(self.out, "            {val_c} old = m->vals[i];");
+            let _ = writeln!(self.out, "            m->vals[i] = val;");
+            if val_tag.starts_with("opt_") {
+                let _ = writeln!(
+                    self.out,
+                    "            if (old.value != val.value) {fnp}_val_drop(old);"
+                );
+            } else {
+                let _ = writeln!(
+                    self.out,
+                    "            if (!(old.ok && val.ok && old.value == val.value)) {fnp}_val_drop(old);"
+                );
+            }
+            let _ = writeln!(self.out, "            return;");
+        } else if is_str_bag {
+            let _ = writeln!(self.out, "            {val_c} old = m->vals[i];");
+            let _ = writeln!(self.out, "            m->vals[i] = val;");
+            let _ = writeln!(self.out, "            {fnp}_val_drop(old);");
+            let _ = writeln!(self.out, "            return;");
+        } else {
+            self.write_map_val_replace(&val_c);
+        }
+        let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -10259,6 +10988,16 @@ impl Codegen {
         );
         let _ = writeln!(
             self.out,
+            "            {fnp}_key_drop(m->keys[i]); memset(&m->keys[i], 0, sizeof({key_c}));"
+        );
+        if has_val_drop {
+            let _ = writeln!(
+                self.out,
+                "            {fnp}_val_drop(m->vals[i]); memset(&m->vals[i], 0, sizeof({val_c}));"
+            );
+        }
+        let _ = writeln!(
+            self.out,
             "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;"
         );
         let _ = writeln!(self.out, "        }}");
@@ -10286,7 +11025,7 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{key_name}_append(out, m->keys[i]);");
+        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{key_name}_append(out, {fnp}_key_clone(m->keys[i]));");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -10299,50 +11038,51 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, m->vals[i]);");
+        if is_str_bag {
+            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, {fnp}_val_clone(m->vals[i]));");
+        } else {
+            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{val_tag}_append(out, m->vals[i]);");
+        }
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
             self.out,
             "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{"
         );
+        let _ = writeln!(self.out, "    if (!m) return;");
+        let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
+        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
         let _ = writeln!(
             self.out,
-            "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;"
+            "            {fnp}_key_drop(m->keys[i]); memset(&m->keys[i], 0, sizeof({key_c}));"
         );
+        if has_val_drop {
+            let _ = writeln!(
+                self.out,
+                "            {fnp}_val_drop(m->vals[i]); memset(&m->vals[i], 0, sizeof({val_c}));"
+            );
+        }
+        let _ = writeln!(self.out, "        }}");
+        let _ = writeln!(self.out, "        m->state[i] = MAKO_MAP_EMPTY;");
+        let _ = writeln!(self.out, "    }} m->len = 0;");
         let _ = writeln!(self.out, "}}");
         {
             let free_name = format!("mako_map_k_{key_name}_{val_tag}");
-            if val_tag.starts_with("opt_arr_") || val_tag.starts_with("res_arr_") {
-                let is_opt = val_tag.starts_with("opt_");
-                let arr_tag = &val_tag[4..];
-                let arr_c = map_slice_val_c_ty(arr_tag);
-                let arr_free = Self::own_free_fn(&arr_c).unwrap_or_default();
-                let _ = writeln!(self.out, "static inline void {free_name}_free({mt} *m) {{");
-                let _ = writeln!(self.out, "    if (!m) return;");
-                let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-                let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
-                if is_opt {
-                    let _ = writeln!(
-                        self.out,
-                        "            if (m->vals[i].some && m->vals[i].value != 0) {{ {arr_c} *__p = ({arr_c}*)(intptr_t)m->vals[i].value; {arr_free}(*__p); free(__p); m->vals[i].value = 0; }}"
-                    );
-                } else {
-                    let _ = writeln!(
-                        self.out,
-                        "            if (m->vals[i].ok && m->vals[i].value != 0) {{ {arr_c} *__p = ({arr_c}*)(intptr_t)m->vals[i].value; {arr_free}(*__p); free(__p); m->vals[i].value = 0; }} else if (!m->vals[i].ok && m->vals[i].err_kind == 0) {{ mako_str_free(m->vals[i].err); }}"
-                    );
-                }
-                let _ = writeln!(self.out, "        }}");
-                let _ = writeln!(self.out, "    }}");
-                let _ = writeln!(
-                    self.out,
-                    "    free(m->state); free(m->keys); free(m->vals); free(m);"
-                );
-                let _ = writeln!(self.out, "}}");
-            } else {
-                self.emit_map_heap_free(&free_name, &mt, false);
+            let _ = writeln!(self.out, "static inline void {free_name}_free({mt} *m) {{");
+            let _ = writeln!(self.out, "    if (!m) return;");
+            let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
+            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
+            let _ = writeln!(self.out, "            {fnp}_key_drop(m->keys[i]);");
+            if has_val_drop {
+                let _ = writeln!(self.out, "            {fnp}_val_drop(m->vals[i]);");
             }
+            let _ = writeln!(self.out, "        }}");
+            let _ = writeln!(self.out, "    }}");
+            let _ = writeln!(
+                self.out,
+                "    free(m->state); free(m->keys); free(m->vals); free(m);"
+            );
+            let _ = writeln!(self.out, "}}");
         }
         let _ = writeln!(
             self.out,
@@ -10354,10 +11094,17 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!m) return n;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(
-            self.out,
-            "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
-        );
+        if has_val_drop {
+            let _ = writeln!(
+                self.out,
+                "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, {fnp}_key_clone(m->keys[i]), {fnp}_val_clone(m->vals[i]));"
+            );
+        } else {
+            let _ = writeln!(
+                self.out,
+                "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, {fnp}_key_clone(m->keys[i]), m->vals[i]);"
+            );
+        }
         let _ = writeln!(self.out, "    }} return n;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -10379,7 +11126,11 @@ impl Codegen {
             self.out,
             "        {val_c} av = a->vals[i], bv = {fnp}_get(b, a->keys[i]);"
         );
-        let _ = writeln!(self.out, "        if (!{eq_fn}) return 0;");
+        if is_boxed_arr_bag || boxed_struct_c.is_some() {
+            let _ = writeln!(self.out, "        if (!{fnp}_val_eq(av, bv)) return 0;");
+        } else {
+            let _ = writeln!(self.out, "        if (!{eq_fn}) return 0;");
+        }
         let _ = writeln!(self.out, "    }} return 1;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -10388,7 +11139,17 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!dst || !src) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < src->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);");
+        if has_val_drop {
+            let _ = writeln!(
+                self.out,
+                "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, {fnp}_key_clone(src->keys[i]), {fnp}_val_clone(src->vals[i]));"
+            );
+        } else {
+            let _ = writeln!(
+                self.out,
+                "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, {fnp}_key_clone(src->keys[i]), src->vals[i]);"
+            );
+        }
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
     }
@@ -10874,6 +11635,29 @@ impl Codegen {
             "av.data[j] != bv.data[j]".to_string()
         };
 
+        let _ = writeln!(
+            self.out,
+            "static inline {key_c} {fnp}_key_clone({key_c} value) {{"
+        );
+        let key_cloned = self.clone_own_val(key_c, "value");
+        let _ = writeln!(self.out, "    return {key_cloned};\n}}");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_key_drop({key_c} value) {{"
+        );
+        let _ = writeln!(self.out, "    (void)value;");
+        let key_drop_fields = self.struct_own_field_frees(key_c);
+        if key_drop_fields.len() > STRUCT_INLINE_FIELD_DROP_MAX {
+            let _ = writeln!(self.out, "    mako_struct_{key_c}_drop_fields(&value);");
+        } else if !key_drop_fields.is_empty() {
+            for (field, free_fn) in key_drop_fields {
+                let _ = writeln!(self.out, "    {free_fn}(value.{field});");
+            }
+        } else if let Some(ff) = Self::own_free_fn(key_c) {
+            let _ = writeln!(self.out, "    {ff}(value);");
+        }
+        let _ = writeln!(self.out, "}}");
+
         let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
         let _ = writeln!(self.out, "    {key_c} *keys;");
@@ -10930,7 +11714,12 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        self.write_map_hit_replace(&key_eq, &val_c);
+        let _ = writeln!(self.out, "        else if ({key_eq}) {{");
+        let _ = writeln!(self.out, "            {key_c} old_k = m->keys[i];");
+        let _ = writeln!(self.out, "            m->keys[i] = key;");
+        self.write_elem_dest_destroy("old_k", "key", key_c, "            ");
+        self.write_map_val_replace(&val_c);
+        let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -11021,6 +11810,10 @@ impl Codegen {
             self.out,
             "        if (m->state[i] == MAKO_MAP_FULL && {key_eq}) {{"
         );
+        let _ = writeln!(
+            self.out,
+            "            {fnp}_key_drop(m->keys[i]); memset(&m->keys[i], 0, sizeof({key_c}));"
+        );
         if !val_free.is_empty() {
             let _ = writeln!(
                 self.out,
@@ -11057,7 +11850,7 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{key_name}_append(out, m->keys[i]);");
+        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{key_name}_append(out, {fnp}_key_clone(m->keys[i]));");
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -11083,9 +11876,18 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!m) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
+        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
+        let _ = writeln!(
+            self.out,
+            "            {fnp}_key_drop(m->keys[i]); memset(&m->keys[i], 0, sizeof({key_c}));"
+        );
         if !val_free.is_empty() {
-            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{ {val_free}(m->vals[i]); memset(&m->vals[i], 0, sizeof({val_c})); }}");
+            let _ = writeln!(
+                self.out,
+                "            {val_free}(m->vals[i]); memset(&m->vals[i], 0, sizeof({val_c}));"
+            );
         }
+        let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        m->state[i] = MAKO_MAP_EMPTY;");
         let _ = writeln!(self.out, "    }} m->len = 0;");
         let _ = writeln!(self.out, "}}");
@@ -11094,12 +11896,12 @@ impl Codegen {
             let _ = writeln!(self.out, "static inline void {free_name}_free({mt} *m) {{");
             let _ = writeln!(self.out, "    if (!m) return;");
             let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
+            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
+            let _ = writeln!(self.out, "            {fnp}_key_drop(m->keys[i]);");
             if !val_free.is_empty() {
-                let _ = writeln!(
-                    self.out,
-                    "        if (m->state[i] == MAKO_MAP_FULL) {val_free}(m->vals[i]);"
-                );
+                let _ = writeln!(self.out, "            {val_free}(m->vals[i]);");
             }
+            let _ = writeln!(self.out, "        }}");
             let _ = writeln!(self.out, "    }}");
             let _ = writeln!(
                 self.out,
@@ -11120,12 +11922,12 @@ impl Codegen {
         if !val_clone.is_empty() {
             let _ = writeln!(
                 self.out,
-                "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], {val_clone}(m->vals[i]));"
+                "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, {fnp}_key_clone(m->keys[i]), {val_clone}(m->vals[i]));"
             );
         } else {
             let _ = writeln!(
                 self.out,
-                "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
+                "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, {fnp}_key_clone(m->keys[i]), m->vals[i]);"
             );
         }
         let _ = writeln!(self.out, "    }} return n;");
@@ -11162,9 +11964,9 @@ impl Codegen {
         let _ = writeln!(self.out, "    if (!dst || !src) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < src->cap; i++) {{");
         if !val_clone.is_empty() {
-            let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], {val_clone}(src->vals[i]));");
+            let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, {fnp}_key_clone(src->keys[i]), {val_clone}(src->vals[i]));");
         } else {
-            let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);");
+            let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, {fnp}_key_clone(src->keys[i]), src->vals[i]);");
         }
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -11810,6 +12612,29 @@ impl Codegen {
         let key_eq = format!("mako_eq_{key_c}(m->keys[i], key)");
         let zero_val = "NULL";
 
+        let _ = writeln!(
+            self.out,
+            "static inline {key_c} {fnp}_key_clone({key_c} value) {{"
+        );
+        let key_cloned = self.clone_own_val(key_c, "value");
+        let _ = writeln!(self.out, "    return {key_cloned};\n}}");
+        let _ = writeln!(
+            self.out,
+            "static inline void {fnp}_key_drop({key_c} value) {{"
+        );
+        let _ = writeln!(self.out, "    (void)value;");
+        let key_drop_fields = self.struct_own_field_frees(key_c);
+        if key_drop_fields.len() > STRUCT_INLINE_FIELD_DROP_MAX {
+            let _ = writeln!(self.out, "    mako_struct_{key_c}_drop_fields(&value);");
+        } else if !key_drop_fields.is_empty() {
+            for (field, free_fn) in key_drop_fields {
+                let _ = writeln!(self.out, "    {free_fn}(value.{field});");
+            }
+        } else if let Some(ff) = Self::own_free_fn(key_c) {
+            let _ = writeln!(self.out, "    {ff}(value);");
+        }
+        let _ = writeln!(self.out, "}}");
+
         let _ = writeln!(self.out, "typedef struct {mt} {{");
         let _ = writeln!(self.out, "    uint8_t *state;");
         let _ = writeln!(self.out, "    {key_c} *keys;");
@@ -11866,7 +12691,12 @@ impl Codegen {
             self.out,
             "        if (st == MAKO_MAP_TOMB) {{ if (first_tomb == (size_t)-1) first_tomb = i; }}"
         );
-        self.write_map_hit_replace(&key_eq, &val_c);
+        let _ = writeln!(self.out, "        else if ({key_eq}) {{");
+        let _ = writeln!(self.out, "            {key_c} old_k = m->keys[i];");
+        let _ = writeln!(self.out, "            m->keys[i] = key;");
+        self.write_elem_dest_destroy("old_k", "key", key_c, "            ");
+        self.write_map_val_replace(&val_c);
+        let _ = writeln!(self.out, "        }}");
         let _ = writeln!(self.out, "        i = (i + 1) & mask;");
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
@@ -11959,6 +12789,10 @@ impl Codegen {
         );
         let _ = writeln!(
             self.out,
+            "            {fnp}_key_drop(m->keys[i]); memset(&m->keys[i], 0, sizeof({key_c}));"
+        );
+        let _ = writeln!(
+            self.out,
             "            m->state[i] = MAKO_MAP_TOMB; m->len--; return;"
         );
         let _ = writeln!(self.out, "        }}");
@@ -11986,7 +12820,10 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!m) return out;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{key_name}_append(out, m->keys[i]);");
+        let _ = writeln!(
+            self.out,
+            "        if (m->state[i] == MAKO_MAP_FULL) out = mako_arr_{key_name}_append(out, {fnp}_key_clone(m->keys[i]));"
+        );
         let _ = writeln!(self.out, "    }} return out;");
         let _ = writeln!(self.out, "}}");
         let _ = writeln!(
@@ -12006,14 +12843,31 @@ impl Codegen {
             self.out,
             "static inline void mako_maps_clear_k_{key_name}_{val_tag}({mt} *m) {{"
         );
+        let _ = writeln!(self.out, "    if (!m) return;");
+        let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
+        let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
         let _ = writeln!(
             self.out,
-            "    if (!m) return; memset(m->state, 0, m->cap); m->len = 0;"
+            "            {fnp}_key_drop(m->keys[i]); memset(&m->keys[i], 0, sizeof({key_c}));"
         );
+        let _ = writeln!(self.out, "        }}");
+        let _ = writeln!(self.out, "        m->state[i] = MAKO_MAP_EMPTY;");
+        let _ = writeln!(self.out, "    }} m->len = 0;");
         let _ = writeln!(self.out, "}}");
         {
             let free_name = format!("mako_map_k_{key_name}_{val_tag}");
-            self.emit_map_heap_free(&free_name, &mt, false);
+            let _ = writeln!(self.out, "static inline void {free_name}_free({mt} *m) {{");
+            let _ = writeln!(self.out, "    if (!m) return;");
+            let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
+            let _ = writeln!(self.out, "        if (m->state[i] == MAKO_MAP_FULL) {{");
+            let _ = writeln!(self.out, "            {fnp}_key_drop(m->keys[i]);");
+            let _ = writeln!(self.out, "        }}");
+            let _ = writeln!(self.out, "    }}");
+            let _ = writeln!(
+                self.out,
+                "    free(m->state); free(m->keys); free(m->vals); free(m);"
+            );
+            let _ = writeln!(self.out, "}}");
         }
         let _ = writeln!(
             self.out,
@@ -12027,7 +12881,7 @@ impl Codegen {
         let _ = writeln!(self.out, "    for (size_t i = 0; i < m->cap; i++) {{");
         let _ = writeln!(
             self.out,
-            "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, m->keys[i], m->vals[i]);"
+            "        if (m->state[i] == MAKO_MAP_FULL) {fnp}_set(n, {fnp}_key_clone(m->keys[i]), m->vals[i]);"
         );
         let _ = writeln!(self.out, "    }} return n;");
         let _ = writeln!(self.out, "}}");
@@ -12058,7 +12912,10 @@ impl Codegen {
         );
         let _ = writeln!(self.out, "    if (!dst || !src) return;");
         let _ = writeln!(self.out, "    for (size_t i = 0; i < src->cap; i++) {{");
-        let _ = writeln!(self.out, "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, src->keys[i], src->vals[i]);");
+        let _ = writeln!(
+            self.out,
+            "        if (src->state[i] == MAKO_MAP_FULL) {fnp}_set(dst, {fnp}_key_clone(src->keys[i]), src->vals[i]);"
+        );
         let _ = writeln!(self.out, "    }}");
         let _ = writeln!(self.out, "}}");
     }
@@ -16967,6 +17824,40 @@ impl Codegen {
                     },
                     _ => None,
                 };
+                let retained_consumed_arg = if self.current_arena.is_none() {
+                    Self::extract_consumed_arg(init).and_then(|moved_arg| {
+                        let arg_m = mangle(&moved_arg);
+                        let cty = self.locals.get(&moved_arg).cloned().unwrap_or_default();
+                        let is_rc_slice = matches!(
+                            cty.as_str(),
+                            "MakoIntArray"
+                                | "MakoByteArray"
+                                | "MakoStrArray"
+                                | "MakoFloatArray"
+                                | "MakoBoolArray"
+                        ) || cty.starts_with("MakoArr_");
+                        if is_rc_slice
+                            && !self.append_releases_backing(&cty)
+                            && self.own_drop_live.contains(&arg_m)
+                            && self.ident_used_after_current(&moved_arg)
+                        {
+                            if cty == "MakoByteArray" {
+                                self.emit_line(format_args!(
+                                    "if (({arg_m}.cap & ~MAKO_POOL_CAP_FLAG) > 0 && !({arg_m}.cap & MAKO_POOL_CAP_FLAG) && {arg_m}.data) mako_rc_retain({arg_m}.data);"
+                                ));
+                            } else {
+                                self.emit_line(format_args!(
+                                    "if ({arg_m}.cap > 0 && {arg_m}.data) mako_rc_retain({arg_m}.data);"
+                                ));
+                            }
+                            Some(arg_m)
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    None
+                };
                 let (ty, val) = if matches!(
                     ann,
                     Some(TypeExpr::Named(n)) if n == "string_view"
@@ -17452,8 +18343,52 @@ impl Codegen {
                     // the argument's ownership is consumed (e.g. list_push returns new list).
                     if let Some(moved_arg) = Self::extract_consumed_arg(init) {
                         let arg_m = mangle(&moved_arg);
-                        if self.own_drop_live.contains(&arg_m) {
+                        let is_rc_slice = matches!(
+                            ty.as_str(),
+                            "MakoIntArray"
+                                | "MakoByteArray"
+                                | "MakoStrArray"
+                                | "MakoFloatArray"
+                                | "MakoBoolArray"
+                        ) || ty.starts_with("MakoArr_");
+                        if retained_consumed_arg.as_deref() == Some(arg_m.as_str()) {
+                            // Source is used again later: release the temporary COW retain
+                            // when the call allocated a new backing buffer, or keep it if
+                            // the result still aliases the source buffer.
+                            if is_rc_slice
+                                && !self.append_releases_backing(&ty)
+                                && self.current_arena.is_none()
+                            {
+                                let mn = mangle(name);
+                                if ty == "MakoByteArray" {
+                                    self.emit_line(format_args!(
+                                        "if ({arg_m}.data != {mn}.data && ({arg_m}.cap & ~MAKO_POOL_CAP_FLAG) > 0 && !({arg_m}.cap & MAKO_POOL_CAP_FLAG) && {arg_m}.data) mako_rc_release({arg_m}.data);"
+                                    ));
+                                } else {
+                                    let release = Self::slice_backing_release(&ty);
+                                    self.emit_line(format_args!(
+                                        "if ({arg_m}.data != {mn}.data && {arg_m}.cap > 0 && {arg_m}.data) {release}({arg_m}.data);"
+                                    ));
+                                }
+                            }
+                        } else if self.own_drop_live.contains(&arg_m) {
                             if Self::own_free_fn(&ty).is_some() {
+                                if is_rc_slice
+                                    && !self.append_releases_backing(&ty)
+                                    && self.current_arena.is_none()
+                                {
+                                    let mn = mangle(name);
+                                    if ty == "MakoByteArray" {
+                                        self.emit_line(format_args!(
+                                            "if ({arg_m}.data != {mn}.data && ({arg_m}.cap & ~MAKO_POOL_CAP_FLAG) > 0 && !({arg_m}.cap & MAKO_POOL_CAP_FLAG) && {arg_m}.data) mako_rc_release({arg_m}.data);"
+                                        ));
+                                    } else {
+                                        let release = Self::slice_backing_release(&ty);
+                                        self.emit_line(format_args!(
+                                            "if ({arg_m}.data != {mn}.data && {arg_m}.cap > 0 && {arg_m}.data) {release}({arg_m}.data);"
+                                        ));
+                                    }
+                                }
                                 self.note_own_drop_moved(&arg_m);
                             }
                         }
@@ -17505,13 +18440,37 @@ impl Codegen {
                 // Unpack MakoTup_* fields — declare new locals or assign existing.
                 // Prefer registered element C types (structs / pack-prefixed names).
                 for (i, n) in names.iter().enumerate() {
+                    let cty = self.tuple_elem_c_type(&ty, i);
                     if n == "_" {
+                        if self.current_arena.is_none()
+                            && Self::expr_is_fresh_own(init)
+                            && !matches!(init, Expr::Field { .. } | Expr::Index { .. })
+                        {
+                            if let Some(ff) = Self::own_free_fn(&cty) {
+                                self.emit_line(format_args!("{ff}({tmp}._{i});"));
+                            } else {
+                                let fields = self.struct_own_field_frees(&cty);
+                                for (field, ff) in fields {
+                                    self.emit_line(format_args!("{ff}({tmp}._{i}.{field});"));
+                                }
+                            }
+                        }
                         continue;
                     }
-                    let cty = self.tuple_elem_c_type(&ty, i);
                     if self.locals.contains_key(n) {
                         // Reassignment: `a, b = f()`
-                        self.line(&format!("{} = {tmp}._{i};", mangle(n)));
+                        let mn = mangle(n);
+                        if self.current_arena.is_none() {
+                            if let Some(ff) = Self::own_free_fn(&cty) {
+                                let cond = Self::owning_field_replaced_cond(
+                                    &cty,
+                                    &mn,
+                                    &format!("{tmp}._{i}"),
+                                );
+                                self.emit_line(format_args!("if ({cond}) {ff}({mn});"));
+                            }
+                        }
+                        self.line(&format!("{mn} = {tmp}._{i};"));
                     } else {
                         let mn = mangle(n);
                         self.locals.insert(n.clone(), cty.clone());
@@ -18232,7 +19191,9 @@ impl Codegen {
                     if self.expr_is_fresh_string_key(index) {
                         self.emit_line(format_args!("mako_map_ss_set_take({b}, {i}, {v});"));
                     } else {
-                        self.emit_line(format_args!("mako_map_ss_set({b}, {i}, {v});"));
+                        self.emit_line(format_args!(
+                            "mako_map_ss_set_take({b}, mako_str_clone({i}), {v});"
+                        ));
                     }
                 } else if bty == "MakoMapIF*" {
                     self.emit_line(format_args!("mako_map_if_set({b}, {i}, {v});"));
@@ -18241,7 +19202,7 @@ impl Codegen {
                 } else if bty == "MakoMapFI*" {
                     self.emit_line(format_args!("mako_map_fi_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapFS*" {
-                    self.emit_line(format_args!("mako_map_fs_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_fs_set_take({b}, {i}, {v});"));
                 } else if bty == "MakoMapFF*" {
                     self.emit_line(format_args!("mako_map_ff_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapIB*" {
@@ -18253,18 +19214,24 @@ impl Codegen {
                 } else if bty == "MakoMapBI*" {
                     self.emit_line(format_args!("mako_map_bi_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapBS*" {
-                    self.emit_line(format_args!("mako_map_bs_set({b}, {i}, {v});"));
+                    self.emit_line(format_args!("mako_map_bs_set_take({b}, {i}, {v});"));
                 } else if bty == "MakoMapBF*" {
                     self.emit_line(format_args!("mako_map_bf_set({b}, {i}, {v});"));
                 } else if bty == "MakoMapBB*" {
                     self.emit_line(format_args!("mako_map_bb_set({b}, {i}, {v});"));
                 } else if let Some((ks, tag)) = parse_map_slice_val(&bty) {
+                    let fnp = format!("mako_map_{ks}_{tag}");
+                    let v = self.prepare_map_bag_store_rhs(value, &fnp, &tag, &vty, v);
                     self.emit_line(format_args!("mako_map_{ks}_{tag}_set({b}, {i}, {v});"));
                 } else if let Some((ks, tag)) = parse_map_map_val(&bty) {
                     self.emit_line(format_args!("mako_map_{ks}_{tag}_set({b}, {i}, {v});"));
                 } else if let Some((kn, tag)) = parse_map_k_slice_val(&bty) {
+                    let i = self.prepare_own_store_rhs(index, &ity, i);
+                    let fnp = format!("mako_map_k_{kn}_{tag}");
+                    let v = self.prepare_map_bag_store_rhs(value, &fnp, &tag, &vty, v);
                     self.emit_line(format_args!("mako_map_k_{kn}_{tag}_set({b}, {i}, {v});"));
                 } else if let Some((kn, tag)) = parse_map_k_map_val(&bty) {
+                    let i = self.prepare_own_store_rhs(index, &ity, i);
                     self.emit_line(format_args!("mako_map_k_{kn}_{tag}_set({b}, {i}, {v});"));
                 } else if let Some(sn) = bty
                     .strip_prefix("MakoMapI_")
@@ -18529,7 +19496,7 @@ impl Codegen {
                 // SAFE: returning a struct field or a borrowed struct param must
                 // clone — the caller owns the result, the source still owns its
                 // fields. A header copy of `(*borrow)` aliases the caller.
-                let val = if Self::is_field_borrow_return(e) && self.c_ty_owns_fields(&ty) {
+                let val = if self.expr_is_owning_borrow(e) && self.c_ty_owns_fields(&ty) {
                     self.clone_own_val(&ty, &val)
                 } else if let Expr::Ident(n) = e {
                     let mn = mangle(n);
@@ -19875,6 +20842,7 @@ impl Codegen {
                         "Err" => {
                             let (ty, v) = self.emit_expr(&args[0]);
                             if ty.starts_with("MakoEnum_") {
+                                let v = self.clone_if_borrowed(&args[0], &ty, v);
                                 let tmp = self.fresh("erre");
                                 self.line(&format!(
                                     "MakoResultInt {tmp} = mako_err_enum_ex((int)({v}).tag, ({v}).i0, ({v}).i1, ({v}).i2, ({v}).s0, ({v}).s1);"
@@ -19890,6 +20858,7 @@ impl Codegen {
                                 ));
                                 return ("MakoResultInt".into(), tmp);
                             }
+                            let v = self.clone_if_borrowed(&args[0], &ty, v);
                             return ("MakoResultInt".into(), format!("mako_err_int({v})"));
                         }
                         "error" => {
@@ -38649,24 +39618,28 @@ impl Codegen {
                                 let value = self.emit_str_arg_borrow(&args[0]);
                                 return ("int64_t".into(), format!("mako_str_len({value})"));
                             }
-                            let (ty, v) = self.emit_expr(&args[0]);
+                            let (ty, mut v) = self.emit_expr(&args[0]);
                             // Raw arrays: same struct layout, len is at same offset.
                             if ty.starts_with("MakoRaw") {
                                 return ("int64_t".into(), format!("(int64_t){v}.len"));
                             }
+                            if self.current_arena.is_none()
+                                && Self::own_free_fn(&ty).is_some()
+                                && !matches!(
+                                    &args[0],
+                                    Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                                )
+                                && self.expr_is_scope_drop_safe(&args[0], &ty)
+                                && !self.own_drop_live.contains(&v)
+                            {
+                                let owned = self.fresh("len_tmp");
+                                self.emit_line(format_args!("{ty} {owned} = {v};"));
+                                self.note_own_bind_scope(&owned);
+                                self.register_own_drop(&owned, &ty);
+                                self.scope_drop_safe.insert(owned.clone());
+                                v = owned;
+                            }
                             if ty == "MakoString" {
-                                let v = if self.expr_is_scope_drop_safe(&args[0], &ty)
-                                    && !self.own_drop_live.contains(&v)
-                                {
-                                    let owned = self.fresh("len_string");
-                                    self.emit_line(format_args!("MakoString {owned} = {v};"));
-                                    self.note_own_bind_scope(&owned);
-                                    self.register_own_drop(&owned, &ty);
-                                    self.scope_drop_safe.insert(owned.clone());
-                                    owned
-                                } else {
-                                    v
-                                };
                                 return ("int64_t".into(), format!("mako_str_len({v})"));
                             }
                             if ty == "MakoByteArray" {
@@ -38979,7 +39952,23 @@ impl Codegen {
                             return ("bool".into(), "false".into());
                         }
                         "cap" => {
-                            let (ty, v) = self.emit_expr(&args[0]);
+                            let (ty, mut v) = self.emit_expr(&args[0]);
+                            if self.current_arena.is_none()
+                                && Self::own_free_fn(&ty).is_some()
+                                && !matches!(
+                                    &args[0],
+                                    Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                                )
+                                && self.expr_is_scope_drop_safe(&args[0], &ty)
+                                && !self.own_drop_live.contains(&v)
+                            {
+                                let owned = self.fresh("cap_tmp");
+                                self.emit_line(format_args!("{ty} {owned} = {v};"));
+                                self.note_own_bind_scope(&owned);
+                                self.register_own_drop(&owned, &ty);
+                                self.scope_drop_safe.insert(owned.clone());
+                                v = owned;
+                            }
                             if ty == "MakoByteArray" {
                                 return ("int64_t".into(), format!("mako_byte_array_cap({v})"));
                             }
@@ -39336,8 +40325,10 @@ impl Codegen {
                                     if matches!(
                                         &args[i],
                                         Expr::Call { .. }
+                                            | Expr::Method { .. }
                                             | Expr::StructLit { .. }
                                             | Expr::StructLitPos { .. }
+                                            | Expr::Try(_)
                                     ) && !Self::is_user_struct_ptr(aty)
                                         && !self.struct_own_field_frees(aty).is_empty()
                                         && !self.own_drop_live.contains(&v)
@@ -39350,6 +40341,22 @@ impl Codegen {
                                 } else if Self::is_user_struct_ptr(aty) {
                                     Self::coerce_user_struct_value(aty, v).1
                                 } else {
+                                    if self.current_arena.is_none()
+                                        && matches!(
+                                            &args[i],
+                                            Expr::Call { .. }
+                                                | Expr::Method { .. }
+                                                | Expr::StructLit { .. }
+                                                | Expr::StructLitPos { .. }
+                                                | Expr::Try(_)
+                                        )
+                                        && !self.struct_own_field_frees(aty).is_empty()
+                                        && !self.own_drop_live.contains(&v)
+                                    {
+                                        self.note_own_bind_scope(&v);
+                                        self.register_own_drop(&v, aty);
+                                        self.scope_drop_safe.insert(v.clone());
+                                    }
                                     v
                                 };
                                 arg_vals.push(v);
@@ -39391,18 +40398,14 @@ impl Codegen {
                                 if Self::own_free_fn(aty).is_some()
                                     && self.current_arena.is_none()
                                     && !self.own_drop_live.contains(&arg_vals[i])
-                                    && (matches!(
-                                        args.get(i),
-                                        Some(Expr::Call { .. } | Expr::Array(_))
-                                    )
-                                        || (aty == "MakoString"
-                                            && matches!(
-                                                args.get(i),
-                                                Some(
-                                                    Expr::Binary { op: BinOp::Add, .. }
-                                                        | Expr::StringInterp(_)
-                                                )
-                                            )))
+                                    && args.get(i).is_some_and(|a| {
+                                        !matches!(
+                                            a,
+                                            Expr::Ident(_)
+                                                | Expr::Field { .. }
+                                                | Expr::Index { .. }
+                                        ) && self.expr_is_scope_drop_safe(a, aty)
+                                    })
                                 {
                                     let cap = self.fresh("trs");
                                     let cty = aty.clone();
@@ -40707,14 +41710,24 @@ impl Codegen {
     fn emit_index_expr(&mut self, expr: &Expr) -> (String, String) {
         match expr {
             Expr::Index { base, index } => {
-                let (bty, b) = self.emit_expr(base);
-                // Indexing an allocating byte expression owns the temporary
+                let (bty, mut b) = self.emit_expr(base);
+                // Indexing an allocating expression owns the temporary
                 // backing until after the access. Keep the copy (and evaluation
                 // order), then release it on the enclosing scope's exit.
-                if bty == "MakoByteArray"
+                if self.current_arena.is_none()
+                    && Self::own_free_fn(&bty).is_some()
+                    && !matches!(
+                        base.as_ref(),
+                        Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                    )
                     && self.expr_is_scope_drop_safe(base, &bty)
                     && !self.own_drop_live.contains(&b)
                 {
+                    if !Self::is_c_lvalue(&b) {
+                        let tmp = self.fresh("idx_base");
+                        self.line(&format!("{bty} {tmp} = {b};"));
+                        b = tmp;
+                    }
                     self.note_own_bind_scope(&b);
                     self.register_own_drop(&b, &bty);
                     self.scope_drop_safe.insert(b.clone());
@@ -41655,7 +42668,41 @@ impl Codegen {
                         }
                     }
                 }
-                let (rty, rv) = self.emit_expr(receiver);
+                let (rty, mut rv) = self.emit_expr(receiver);
+                if self.current_arena.is_none()
+                    && method != "query"
+                    && !matches!(
+                        receiver.as_ref(),
+                        Expr::Ident(_) | Expr::Field { .. } | Expr::Index { .. }
+                    )
+                    && !self.own_drop_live.contains(&rv)
+                {
+                    if Self::own_free_fn(&rty).is_some()
+                        && self.expr_is_scope_drop_safe(receiver, &rty)
+                    {
+                        if !Self::is_c_lvalue(&rv) {
+                            let tmp = self.fresh("mrecv");
+                            self.line(&format!("{rty} {tmp} = {rv};"));
+                            rv = tmp;
+                        }
+                        self.note_own_bind_scope(&rv);
+                        self.register_own_drop(&rv, &rty);
+                        self.scope_drop_safe.insert(rv.clone());
+                    } else if matches!(
+                        receiver.as_ref(),
+                        Expr::Call { .. }
+                            | Expr::Method { .. }
+                            | Expr::StructLit { .. }
+                            | Expr::StructLitPos { .. }
+                            | Expr::Try(_)
+                    ) && !Self::is_user_struct_ptr(&rty)
+                        && !self.struct_own_field_frees(&rty).is_empty()
+                    {
+                        self.note_own_bind_scope(&rv);
+                        self.register_own_drop(&rv, &rty);
+                        self.scope_drop_safe.insert(rv.clone());
+                    }
+                }
                 match method.as_str() {
                     "map" if rty.contains("Array") && args.len() == 1 => {
                         let src = rv.clone();
@@ -42333,12 +43380,43 @@ impl Codegen {
                                     let v = if self.param_passed_by_ptr(&key, ai + 1) {
                                         self.emit_struct_ptr_arg(a).1
                                     } else {
-                                        let (aty, v) = self.emit_expr(a);
+                                        let (aty, mut v) = self.emit_expr(a);
                                         if Self::is_user_struct_ptr(&aty) {
-                                            Self::coerce_user_struct_value(&aty, v).1
-                                        } else {
-                                            v
+                                            v = Self::coerce_user_struct_value(&aty, v).1;
                                         }
+                                        if self.current_arena.is_none()
+                                            && !self.own_drop_live.contains(&v)
+                                            && !matches!(
+                                                a,
+                                                Expr::Ident(_)
+                                                    | Expr::Field { .. }
+                                                    | Expr::Index { .. }
+                                            )
+                                        {
+                                            if Self::own_free_fn(&aty).is_some()
+                                                && self.expr_is_scope_drop_safe(a, &aty)
+                                            {
+                                                let cap = self.fresh("mtrs");
+                                                self.line(&format!("{aty} {cap} = {v};"));
+                                                self.note_own_bind_scope(&cap);
+                                                self.register_own_drop(&cap, &aty);
+                                                self.scope_drop_safe.insert(cap.clone());
+                                                v = cap;
+                                            } else if matches!(
+                                                a,
+                                                Expr::Call { .. }
+                                                    | Expr::Method { .. }
+                                                    | Expr::StructLit { .. }
+                                                    | Expr::StructLitPos { .. }
+                                                    | Expr::Try(_)
+                                            ) && !self.struct_own_field_frees(&aty).is_empty()
+                                            {
+                                                self.note_own_bind_scope(&v);
+                                                self.register_own_drop(&v, &aty);
+                                                self.scope_drop_safe.insert(v.clone());
+                                            }
+                                        }
+                                        v
                                     };
                                     arg_vals.push(v);
                                 }
@@ -42392,7 +43470,40 @@ impl Codegen {
                                 let v = if self.param_passed_by_ptr(&key, param_index) {
                                     self.emit_struct_ptr_arg(a).1
                                 } else {
-                                    self.emit_expr(a).1
+                                    let (aty, mut v) = self.emit_expr(a);
+                                    if self.current_arena.is_none()
+                                        && !self.own_drop_live.contains(&v)
+                                        && !matches!(
+                                            a,
+                                            Expr::Ident(_)
+                                                | Expr::Field { .. }
+                                                | Expr::Index { .. }
+                                        )
+                                    {
+                                        if Self::own_free_fn(&aty).is_some()
+                                            && self.expr_is_scope_drop_safe(a, &aty)
+                                        {
+                                            let cap = self.fresh("mtrs");
+                                            self.line(&format!("{aty} {cap} = {v};"));
+                                            self.note_own_bind_scope(&cap);
+                                            self.register_own_drop(&cap, &aty);
+                                            self.scope_drop_safe.insert(cap.clone());
+                                            v = cap;
+                                        } else if matches!(
+                                            a,
+                                            Expr::Call { .. }
+                                                | Expr::Method { .. }
+                                                | Expr::StructLit { .. }
+                                                | Expr::StructLitPos { .. }
+                                                | Expr::Try(_)
+                                        ) && !self.struct_own_field_frees(&aty).is_empty()
+                                        {
+                                            self.note_own_bind_scope(&v);
+                                            self.register_own_drop(&v, &aty);
+                                            self.scope_drop_safe.insert(v.clone());
+                                        }
+                                    }
+                                    v
                                 };
                                 arg_vals.push(v);
                             }
@@ -42470,12 +43581,43 @@ impl Codegen {
                                 let v = if self.param_passed_by_ptr(&key, param_index) {
                                     self.emit_struct_ptr_arg(a).1
                                 } else {
-                                    let (aty, v) = self.emit_expr(a);
+                                    let (aty, mut v) = self.emit_expr(a);
                                     if Self::is_user_struct_ptr(&aty) {
-                                        Self::coerce_user_struct_value(&aty, v).1
-                                    } else {
-                                        v
+                                        v = Self::coerce_user_struct_value(&aty, v).1;
                                     }
+                                    if self.current_arena.is_none()
+                                        && !self.own_drop_live.contains(&v)
+                                        && !matches!(
+                                            a,
+                                            Expr::Ident(_)
+                                                | Expr::Field { .. }
+                                                | Expr::Index { .. }
+                                        )
+                                    {
+                                        if Self::own_free_fn(&aty).is_some()
+                                            && self.expr_is_scope_drop_safe(a, &aty)
+                                        {
+                                            let cap = self.fresh("mtrs");
+                                            self.line(&format!("{aty} {cap} = {v};"));
+                                            self.note_own_bind_scope(&cap);
+                                            self.register_own_drop(&cap, &aty);
+                                            self.scope_drop_safe.insert(cap.clone());
+                                            v = cap;
+                                        } else if matches!(
+                                            a,
+                                            Expr::Call { .. }
+                                                | Expr::Method { .. }
+                                                | Expr::StructLit { .. }
+                                                | Expr::StructLitPos { .. }
+                                                | Expr::Try(_)
+                                        ) && !self.struct_own_field_frees(&aty).is_empty()
+                                        {
+                                            self.note_own_bind_scope(&v);
+                                            self.register_own_drop(&v, &aty);
+                                            self.scope_drop_safe.insert(v.clone());
+                                        }
+                                    }
+                                    v
                                 };
                                 arg_vals.push(v);
                             }
@@ -43045,7 +44187,12 @@ impl Codegen {
                 Expr::Ident(name) if name == "Err" => args
                     .first()
                     .is_some_and(|arg| self.expr_is_scope_drop_safe(arg, "MakoString")),
-                Expr::Ident(name) => name != "Ok",
+                Expr::Ident(name)
+                    if matches!(name.as_str(), "Ok" | "error_unwrap" | "error_root") =>
+                {
+                    false
+                }
+                Expr::Ident(_) => true,
                 _ => false,
             },
             _ => false,
@@ -43063,6 +44210,18 @@ impl Codegen {
         let mut result_ty: Option<String> = None;
         let scrut = self.fresh("scrut");
         self.line(&format!("{sty} {scrut} = {sval};"));
+        if sty.starts_with("MakoEnum_")
+            && !matches!(
+                scrutinee,
+                Expr::Ident(_) | Expr::Index { .. } | Expr::Field { .. }
+            )
+            && self.expr_is_scope_drop_safe(scrutinee, &sty)
+            && !self.own_drop_live.contains(&sval)
+        {
+            self.note_own_bind_scope(&scrut);
+            self.register_own_drop(&scrut, &sty);
+            self.scope_drop_safe.insert(scrut.clone());
+        }
         // Propagate Result Err enum type from local/ident, call target, or current fn return.
         if sty == "MakoResultInt" {
             let err_c = match scrutinee {
@@ -43371,7 +44530,20 @@ impl Codegen {
                     }
                     _ => true,
                 };
-            self.bind_pattern_locals(&scrut, &sty, &arm.pattern, own_error);
+            let own_payload = !matches!(scrutinee, Expr::Index { .. } | Expr::Field { .. })
+                && arms.iter().all(|arm| arm.guard.is_none())
+                && match scrutinee {
+                    Expr::Ident(n) => {
+                        !self.ident_used_after_current(n)
+                            && self.loop_drop_bases.last().is_none_or(|base| {
+                                self.own_bind_scope
+                                    .get(&mangle(n))
+                                    .is_some_and(|scope| scope >= base)
+                            })
+                    }
+                    _ => true,
+                };
+            self.bind_pattern_locals(&scrut, &sty, &arm.pattern, own_error, own_payload);
             // Own transfers are registered inside bind_pattern_locals /
             // emit_option_some_bind (Result/Option payloads). Struct field
             // patterns are aliases and must not be free-registered.
@@ -43512,7 +44684,14 @@ impl Codegen {
         }
     }
 
-    fn bind_pattern_locals(&mut self, scrut: &str, sty: &str, pattern: &Pattern, own_error: bool) {
+    fn bind_pattern_locals(
+        &mut self,
+        scrut: &str,
+        sty: &str,
+        pattern: &Pattern,
+        own_error: bool,
+        own_payload: bool,
+    ) {
         match pattern {
             Pattern::Or(_) => {}
             Pattern::Struct { name: _, fields } => {
@@ -43550,7 +44729,7 @@ impl Codegen {
                                 .unwrap_or_else(|| "int64_t".into());
                             self.line(&format!("{cty} {tmp} = {scrut}.{fname};"));
                             self.locals.insert(tmp.clone(), cty.clone());
-                            self.bind_pattern_locals(&tmp, &cty, other, false);
+                            self.bind_pattern_locals(&tmp, &cty, other, false, false);
                         }
                     }
                 }
@@ -43600,9 +44779,15 @@ impl Codegen {
                                 "MakoOptionInt *{tmp}_p = (MakoOptionInt*)mako_result_ok_ptr({scrut});"
                             ));
                             self.line(&format!("MakoOptionInt {tmp};"));
-                            self.line(&format!(
-                                "if ({tmp}_p) {{ {tmp} = *{tmp}_p; free({tmp}_p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
-                            ));
+                            if own_payload {
+                                self.line(&format!(
+                                    "if ({tmp}_p) {{ {tmp} = *{tmp}_p; free({tmp}_p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "if ({tmp}_p) {{ {tmp} = *{tmp}_p; }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+                                ));
+                            }
                             if let Some(ik) = self.result_option_inners.get(scrut).cloned() {
                                 self.option_some_kinds.insert(tmp.clone(), ik);
                             }
@@ -43612,9 +44797,15 @@ impl Codegen {
                                 "MakoResultInt *{tmp}_p = (MakoResultInt*)mako_result_ok_ptr({scrut});"
                             ));
                             self.line(&format!("MakoResultInt {tmp};"));
-                            self.line(&format!(
-                                "if ({tmp}_p) {{ {tmp} = *{tmp}_p; free({tmp}_p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
-                            ));
+                            if own_payload {
+                                self.line(&format!(
+                                    "if ({tmp}_p) {{ {tmp} = *{tmp}_p; free({tmp}_p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "if ({tmp}_p) {{ {tmp} = *{tmp}_p; }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+                                ));
+                            }
                             if let Some(ik) = self.result_result_inners.get(scrut).cloned() {
                                 self.result_ok_kinds.insert(tmp.clone(), ik);
                             }
@@ -43627,7 +44818,13 @@ impl Codegen {
                             "int64_t"
                         };
                         self.locals.insert(tmp.clone(), nested_sty.into());
-                        self.bind_pattern_locals(&tmp, nested_sty, &bindings[0], own_error);
+                        self.bind_pattern_locals(
+                            &tmp,
+                            nested_sty,
+                            &bindings[0],
+                            own_error,
+                            own_payload,
+                        );
                         return;
                     }
                     if sty == "MakoOptionInt" && name == "Some" {
@@ -43642,41 +44839,61 @@ impl Codegen {
                                 "MakoOptionInt *{tmp}_p = (MakoOptionInt*)mako_option_some_ptr({scrut});"
                             ));
                             self.line(&format!("MakoOptionInt {tmp};"));
-                            self.line(&format!(
-                                "if ({tmp}_p) {{ {tmp} = *{tmp}_p; free({tmp}_p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
-                            ));
+                            if own_payload {
+                                self.line(&format!(
+                                    "if ({tmp}_p) {{ {tmp} = *{tmp}_p; free({tmp}_p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "if ({tmp}_p) {{ {tmp} = *{tmp}_p; }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+                                ));
+                            }
                             self.locals.insert(tmp.clone(), "MakoOptionInt".into());
                             self.bind_pattern_locals(
                                 &tmp,
                                 "MakoOptionInt",
                                 &bindings[0],
                                 own_error,
+                                own_payload,
                             );
                         } else if kind == "result" {
                             self.line(&format!(
                                 "MakoResultInt *{tmp}_p = (MakoResultInt*)mako_option_some_ptr({scrut});"
                             ));
                             self.line(&format!("MakoResultInt {tmp};"));
-                            self.line(&format!(
-                                "if ({tmp}_p) {{ {tmp} = *{tmp}_p; free({tmp}_p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
-                            ));
+                            if own_payload {
+                                self.line(&format!(
+                                    "if ({tmp}_p) {{ {tmp} = *{tmp}_p; free({tmp}_p); }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+                                ));
+                            } else {
+                                self.line(&format!(
+                                    "if ({tmp}_p) {{ {tmp} = *{tmp}_p; }} else {{ memset(&{tmp}, 0, sizeof({tmp})); }}"
+                                ));
+                            }
                             self.locals.insert(tmp.clone(), "MakoResultInt".into());
                             self.bind_pattern_locals(
                                 &tmp,
                                 "MakoResultInt",
                                 &bindings[0],
                                 own_error,
+                                own_payload,
                             );
                         } else {
                             // Leaf: unbox into tmp then recurse nested pattern.
                             let names = vec![tmp.clone()];
-                            self.emit_option_some_bind(scrut, &names, &kind);
+                            self.emit_option_some_bind(scrut, &names, &kind, own_payload);
                             let nested_sty = self
                                 .locals
                                 .get(&tmp)
                                 .cloned()
                                 .unwrap_or_else(|| "int64_t".into());
-                            self.bind_pattern_locals(&tmp, &nested_sty, &bindings[0], own_error);
+                            self.bind_pattern_locals(
+                                &tmp,
+                                &nested_sty,
+                                &bindings[0],
+                                own_error,
+                                own_payload,
+                            );
                         }
                         return;
                     }
@@ -43700,7 +44917,11 @@ impl Codegen {
                         if ok_kind == "string" {
                             let b = mangle(&bindings[0]);
                             self.locals.insert(bindings[0].clone(), "MakoString".into());
-                            self.line(&format!("MakoString {b} = {scrut}.ok_s;"));
+                            if own_payload {
+                                self.line(&format!("MakoString {b} = {scrut}.ok_s;"));
+                            } else {
+                                self.line(&format!("MakoString {b} = mako_str_clone({scrut}.ok_s);"));
+                            }
                             self.note_own_bind_scope(&b);
                             self.register_own_drop(&b, "MakoString");
                             self.scope_drop_safe.insert(b);
@@ -43718,64 +44939,44 @@ impl Codegen {
                                 .get(&sn)
                                 .map(|s| s.c_name.clone())
                                 .unwrap_or(sn);
-                            let b = mangle(&bindings[0]);
-                            let p = self.fresh("okp");
-                            self.locals.insert(bindings[0].clone(), cname.clone());
-                            self.line(&format!(
-                                "{cname} *{p} = ({cname}*)mako_result_ok_ptr({scrut});"
-                            ));
-                            self.line(&format!("{cname} {b};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
-                            ));
-                            self.note_own_bind_scope(&b);
-                            self.register_own_drop(&b, &cname);
-                            self.scope_drop_safe.insert(b);
+                            self.emit_bag_boxed_struct_unbox(
+                                &bindings[0],
+                                scrut,
+                                "mako_result_ok_ptr",
+                                &cname,
+                                "okp",
+                                own_payload,
+                            );
                         } else if ok_kind == "slice" {
-                            let b = mangle(&bindings[0]);
-                            let p = self.fresh("oks");
-                            self.locals
-                                .insert(bindings[0].clone(), "MakoIntArray".into());
-                            self.line(&format!(
-                                "MakoIntArray *{p} = (MakoIntArray*)mako_result_ok_ptr({scrut});"
-                            ));
-                            self.line(&format!("MakoIntArray {b};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
-                            ));
-                            self.note_own_bind_scope(&b);
-                            self.register_own_drop(&b, "MakoIntArray");
-                            self.scope_drop_safe.insert(b);
+                            self.emit_bag_boxed_slice_unbox(
+                                &bindings[0],
+                                scrut,
+                                "mako_result_ok_ptr",
+                                "MakoIntArray",
+                                "mako_int_array_clone",
+                                "oks",
+                                own_payload,
+                            );
                         } else if ok_kind == "slice_str" {
-                            let b = mangle(&bindings[0]);
-                            let p = self.fresh("oks");
-                            self.locals
-                                .insert(bindings[0].clone(), "MakoStrArray".into());
-                            self.line(&format!(
-                                "MakoStrArray *{p} = (MakoStrArray*)mako_result_ok_ptr({scrut});"
-                            ));
-                            self.line(&format!("MakoStrArray {b};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
-                            ));
-                            self.note_own_bind_scope(&b);
-                            self.register_own_drop(&b, "MakoStrArray");
-                            self.scope_drop_safe.insert(b);
+                            self.emit_bag_boxed_slice_unbox(
+                                &bindings[0],
+                                scrut,
+                                "mako_result_ok_ptr",
+                                "MakoStrArray",
+                                "mako_str_array_clone",
+                                "oks",
+                                own_payload,
+                            );
                         } else if ok_kind == "slice_float" {
-                            let b = mangle(&bindings[0]);
-                            let p = self.fresh("oks");
-                            self.locals
-                                .insert(bindings[0].clone(), "MakoFloatArray".into());
-                            self.line(&format!(
-                                "MakoFloatArray *{p} = (MakoFloatArray*)mako_result_ok_ptr({scrut});"
-                            ));
-                            self.line(&format!("MakoFloatArray {b};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
-                            ));
-                            self.note_own_bind_scope(&b);
-                            self.register_own_drop(&b, "MakoFloatArray");
-                            self.scope_drop_safe.insert(b);
+                            self.emit_bag_boxed_slice_unbox(
+                                &bindings[0],
+                                scrut,
+                                "mako_result_ok_ptr",
+                                "MakoFloatArray",
+                                "mako_float_array_clone",
+                                "oks",
+                                own_payload,
+                            );
                         } else if ok_kind == "slice_struct" {
                             let sn = self
                                 .result_ok_structs
@@ -43788,19 +44989,16 @@ impl Codegen {
                                 .map(|s| s.c_name.clone())
                                 .unwrap_or(sn);
                             let arr = format!("MakoArr_{cname}");
-                            let b = mangle(&bindings[0]);
-                            let p = self.fresh("oks");
-                            self.locals.insert(bindings[0].clone(), arr.clone());
-                            self.line(&format!(
-                                "{arr} *{p} = ({arr}*)mako_result_ok_ptr({scrut});"
-                            ));
-                            self.line(&format!("{arr} {b};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {b} = *{p}; memset({p}, 0, sizeof(*{p})); }} else {{ {b}.data = NULL; {b}.len = 0; {b}.cap = 0; }}"
-                            ));
-                            self.note_own_bind_scope(&b);
-                            self.register_own_drop(&b, &arr);
-                            self.scope_drop_safe.insert(b);
+                            let clone_fn = format!("mako_arr_{cname}_clone");
+                            self.emit_bag_boxed_slice_unbox(
+                                &bindings[0],
+                                scrut,
+                                "mako_result_ok_ptr",
+                                &arr,
+                                &clone_fn,
+                                "oks",
+                                own_payload,
+                            );
                         } else if ok_kind == "map"
                             || ok_kind == "map_si"
                             || ok_kind == "map_ii"
@@ -43851,17 +45049,14 @@ impl Codegen {
                                 }
                             }
                         } else if ok_kind == "option" {
-                            let b = mangle(&bindings[0]);
-                            let p = self.fresh("okopt");
-                            self.locals
-                                .insert(bindings[0].clone(), "MakoOptionInt".into());
-                            self.line(&format!(
-                                "MakoOptionInt *{p} = (MakoOptionInt*)mako_result_ok_ptr({scrut});"
-                            ));
-                            self.line(&format!("MakoOptionInt {b};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
-                            ));
+                            self.emit_bag_boxed_bag_unbox(
+                                &bindings[0],
+                                scrut,
+                                "mako_result_ok_ptr",
+                                "MakoOptionInt",
+                                "okopt",
+                                own_payload,
+                            );
                             if let Some(chain) = self.deep_nest_chains.get(scrut).cloned() {
                                 self.apply_deep_nest_chain(&bindings[0], "option", &chain);
                             } else {
@@ -43884,17 +45079,14 @@ impl Codegen {
                                 }
                             }
                         } else if ok_kind == "result" {
-                            let b = mangle(&bindings[0]);
-                            let p = self.fresh("okres");
-                            self.locals
-                                .insert(bindings[0].clone(), "MakoResultInt".into());
-                            self.line(&format!(
-                                "MakoResultInt *{p} = (MakoResultInt*)mako_result_ok_ptr({scrut});"
-                            ));
-                            self.line(&format!("MakoResultInt {b};"));
-                            self.line(&format!(
-                                "if ({p}) {{ {b} = *{p}; free({p}); }} else {{ memset(&{b}, 0, sizeof({b})); }}"
-                            ));
+                            self.emit_bag_boxed_bag_unbox(
+                                &bindings[0],
+                                scrut,
+                                "mako_result_ok_ptr",
+                                "MakoResultInt",
+                                "okres",
+                                own_payload,
+                            );
                             if let Some(chain) = self.deep_nest_chains.get(scrut).cloned() {
                                 self.apply_deep_nest_chain(&bindings[0], "result", &chain);
                             } else if let Some(ik) = self.result_result_inners.get(scrut).cloned() {
@@ -43951,7 +45143,7 @@ impl Codegen {
                             .get(scrut)
                             .cloned()
                             .unwrap_or_else(|| "int".into());
-                        self.emit_option_some_bind(scrut, &bindings, &kind);
+                        self.emit_option_some_bind(scrut, &bindings, &kind, own_payload);
                     }
                 } else {
                     // Qualified variant lookup using scrutinee type

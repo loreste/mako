@@ -3195,6 +3195,8 @@ struct FunctionLowerer<'a> {
     mut_i64_cells: HashMap<String, Value>,
     /// Local variables holding boxed 128-bit (`i128` / `u128`) values.
     i128_vars: HashSet<String>,
+    /// LHS local name when lowering the RHS of `Stmt::Assign`.
+    assign_target: Option<String>,
 }
 
 struct LoopFrame {
@@ -3297,6 +3299,7 @@ impl<'a> FunctionLowerer<'a> {
             return_as_yield: false,
             mut_i64_cells: HashMap::new(),
             i128_vars,
+            assign_target: None,
         })
     }
 
@@ -4067,7 +4070,10 @@ impl<'a> FunctionLowerer<'a> {
                     self.locals.get(name).copied().ok_or_else(|| {
                         IrError::new(format!("native IR: unknown local `{name}`"))
                     })?;
-                let (mut value, actual, mut owned) = self.lower_expr(rhs)?;
+                let prev_assign_target = self.assign_target.replace(name.clone());
+                let lowered_rhs = self.lower_expr(rhs);
+                self.assign_target = prev_assign_target;
+                let (mut value, actual, mut owned) = lowered_rhs?;
                 if actual.is_heap() && !actual.is_shared_handle() {
                     if self.take_owned_field(rhs, actual)? {
                         owned = true;
@@ -10759,12 +10765,15 @@ impl<'a> FunctionLowerer<'a> {
                         (Type::PtrSlice(_), _, _) if ptr_elem_ok => {}
                         _ => return Err(IrError::new("native IR: append element type mismatch")),
                     }
-                    // `append` consumes its input header. A borrowed parameter
-                    // or alias must first be cloned; otherwise append would free
-                    // a caller-owned header. An owned local/temp transfers its
-                    // header directly and is cleared from scope-drop tracking.
+                    // `append` consumes its input header when reassigning the
+                    // same owned local (`xs = append(xs, v)`). Any other local
+                    // reference (such as `let ys = append(xs, v)` or a borrowed
+                    // parameter) is cloned first so `xs` retains its value and
+                    // ownership.
                     let source_owned = if let Expr::Ident(name) = &args[0] {
-                        if self.heap_owned.get(name).copied().unwrap_or(false) {
+                        if self.assign_target.as_deref() == Some(name.as_str())
+                            && self.heap_owned.get(name).copied().unwrap_or(false)
+                        {
                             self.heap_owned.insert(name.clone(), false);
                             true
                         } else {
@@ -34165,7 +34174,15 @@ impl<'a> FunctionLowerer<'a> {
         let consumes_str_arg2 = matches!(function, "map_ss_set_take");
         if consumes_first {
             if let Some(Expr::Ident(name)) = args.first() {
-                self.heap_owned.insert(name.clone(), false);
+                if function == "buf_put" {
+                    self.heap_owned.insert(name.clone(), false);
+                } else if self.assign_target.as_deref() == Some(name.as_str())
+                    && self.heap_owned.get(name).copied().unwrap_or(false)
+                {
+                    self.heap_owned.insert(name.clone(), false);
+                } else if !lowered.is_empty() && param_tys[0].is_heap() {
+                    lowered[0] = self.emit_clone(lowered[0], param_tys[0]);
+                }
             }
         }
         if consumes_str_arg1 {

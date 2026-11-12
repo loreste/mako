@@ -5,6 +5,91 @@ struct Point {
     y: int
 }
 
+struct NamedKey {
+    label: string
+    id: int
+}
+
+fn TestMapIntOptionStringHeapLifecycle() {
+    let mut m = make(map[int]Option[string])
+    let s1 = "hello_" + int_to_string(1)
+    m[1] = Some(s1)
+    assert_eq_str(s1, "hello_1")
+    m[1] = Some("replaced_" + int_to_string(2))
+    m[2] = Some("delete_" + int_to_string(3))
+    delete(m, 2)
+    match m[1] {
+        Some(s) => assert_eq_str(s, "replaced_2"),
+        None => assert(false),
+    }
+    match m[1] {
+        Some(s2) => assert_eq_str(s2, "replaced_2"),
+        None => assert(false),
+    }
+    let mut c = maps_clone(m)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+    match m[1] {
+        Some(s3) => assert_eq_str(s3, "replaced_2"),
+        None => assert(false),
+    }
+}
+
+fn TestMapIntResultStringHeapLifecycle() {
+    let mut m = make(map[int]Result[string, string])
+    let ok_s = "ok_" + int_to_string(10)
+    let err_s = "err_" + int_to_string(20)
+    m[1] = Ok(ok_s)
+    m[2] = Err(err_s)
+    assert_eq_str(ok_s, "ok_10")
+    assert_eq_str(err_s, "err_20")
+    m[1] = Ok("ok_" + int_to_string(11))
+    m[2] = Err("err_" + int_to_string(21))
+    m[3] = Err("err_" + int_to_string(30))
+    delete(m, 3)
+    match m[1] {
+        Ok(s) => assert_eq_str(s, "ok_11"),
+        Err(_) => assert(false),
+    }
+    match m[1] {
+        Ok(s2) => assert_eq_str(s2, "ok_11"),
+        Err(_) => assert(false),
+    }
+    match m[2] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "err_21"),
+    }
+    match m[2] {
+        Ok(_) => assert(false),
+        Err(e2) => assert_eq_str(e2, "err_21"),
+    }
+    let mut c = maps_clone(m)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+}
+
+fn TestMapNamedKeyWithStringOption() {
+    let mut m = make(map[NamedKey]Option[string])
+    let k1 = NamedKey { label: "k_" + int_to_string(1), id: 1 }
+    let v1 = "val_" + int_to_string(1)
+    m[k1] = Some(v1)
+    assert_eq_str(k1.label, "k_1")
+    assert_eq_str(v1, "val_1")
+    m[NamedKey { label: "k_" + int_to_string(1), id: 1 }] = Some("val_" + int_to_string(99))
+    m[NamedKey { label: "k_" + int_to_string(2), id: 2 }] = Some("val_" + int_to_string(2))
+    delete(m, NamedKey { label: "k_" + int_to_string(2), id: 2 })
+    match m[k1] {
+        Some(s) => assert_eq_str(s, "val_99"),
+        None => assert(false),
+    }
+    let ks = maps_keys(m)
+    assert_eq(len(ks), 1)
+    assert_eq_str(ks[0].label, "k_1")
+    let mut c = maps_clone(m)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+}
+
 fn TestMapStringOptionInt() {
     let mut m = make(map[string]Option[int])
     m["a"] = Some(42)

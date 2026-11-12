@@ -92,7 +92,10 @@ static _Atomic int64_t mako_rc_free_bytes = 0;
 static int mako_leak_check_enabled = 0;
 static int mako_leak_trace_enabled = 0;
 
+static inline void mako_select_str_flush_tls(void);
+
 static void mako_leak_check_atexit(void) {
+    mako_select_str_flush_tls();
     int64_t allocs = atomic_load_explicit(&mako_rc_alloc_count, memory_order_relaxed);
     int64_t frees = atomic_load_explicit(&mako_rc_free_count, memory_order_relaxed);
     int64_t alloc_bytes = atomic_load_explicit(&mako_rc_alloc_bytes, memory_order_relaxed);
@@ -594,11 +597,13 @@ static inline MakoString mako_str_lit(const char *s, size_t n) {
     MakoString out = {(char *)(uintptr_t)s, (uint32_t)n, 2};
     return out;
 }
+static inline MakoString mako_str_from_const_cstr(const char *s) {
+    if (!s || !s[0]) return mako_str_empty;
+    return mako_str_lit(s, strlen(s));
+}
 #if defined(__GNUC__) || defined(__clang__)
 #define mako_str_from_cstr(s) \
-    (__builtin_constant_p(s) && (s) != NULL && __builtin_constant_p(strlen(s)) \
-        ? mako_str_lit((s), strlen(s)) \
-        : (mako_str_from_cstr)(s))
+    __builtin_choose_expr(__builtin_constant_p(s), mako_str_from_const_cstr(s), (mako_str_from_cstr)(s))
 #endif
 
 static inline MakoString mako_runtime_stats_json(void) {
@@ -645,7 +650,7 @@ static inline MakoString mako_str_view(const char *p, size_t n) {
 }
 #if defined(__GNUC__) || defined(__clang__)
 #define mako_str_view(p, n) \
-    mako_str_view_impl((p), (n), (__builtin_constant_p(p) && (p) != NULL) ? 2 : 3)
+    mako_str_view_impl((p), (n), __builtin_constant_p(p) ? 2 : 3)
 #endif
 
 static inline MakoString mako_str_concat(MakoString a, MakoString b) {
@@ -1858,6 +1863,7 @@ static inline void mako_arr_arr_int_set(MakoArr_arr_int a, int64_t i, MakoIntArr
     MakoIntArray old = a.data[i];
     a.data[i] = v;
     if (old.data != v.data) mako_int_array_free(old);
+    else if (old.cap > 0 && old.data && mako_rc_shared(old.data)) mako_rc_release(old.data);
 }
 static inline MakoArr_arr_int mako_arr_arr_int_append(MakoArr_arr_int s, MakoIntArray v) {
     if (s.len + 1 > s.cap) {
@@ -1955,6 +1961,7 @@ static inline void mako_arr_arr_string_set(MakoArr_arr_string a, int64_t i, Mako
     MakoStrArray old = a.data[i];
     a.data[i] = v;
     if (old.data != v.data) mako_str_array_free(old);
+    else if (old.cap > 0 && old.data && mako_rc_shared(old.data)) mako_rc_release(old.data);
 }
 static inline MakoArr_arr_string mako_arr_arr_string_append(MakoArr_arr_string s, MakoStrArray v) {
     if (s.len + 1 > s.cap) {
@@ -2047,6 +2054,7 @@ static inline void mako_arr_arr_float_set(MakoArr_arr_float a, int64_t i, MakoFl
     MakoFloatArray old = a.data[i];
     a.data[i] = v;
     if (old.data != v.data) mako_float_array_free(old);
+    else if (old.cap > 0 && old.data && mako_rc_shared(old.data)) mako_rc_release(old.data);
 }
 static inline MakoArr_arr_float mako_arr_arr_float_append(MakoArr_arr_float s, MakoFloatArray v) {
     if (s.len + 1 > s.cap) {
@@ -2139,6 +2147,7 @@ static inline void mako_arr_arr_bool_set(MakoArr_arr_bool a, int64_t i, MakoBool
     MakoBoolArray old = a.data[i];
     a.data[i] = v;
     if (old.data != v.data) mako_bool_array_free(old);
+    else if (old.cap > 0 && old.data && mako_rc_shared(old.data)) mako_rc_release(old.data);
 }
 static inline MakoArr_arr_bool mako_arr_arr_bool_append(MakoArr_arr_bool s, MakoBoolArray v) {
     if (s.len + 1 > s.cap) {
@@ -2760,8 +2769,7 @@ static inline MakoResultInt mako_error_unwrap(MakoResultInt r) {
     if (!e.data || e.len < 3) return r;
     for (size_t i = 0; i + 1 < e.len; i++) {
         if (e.data[i] == ':' && e.data[i + 1] == ' ') {
-            MakoString rest = {e.data + i + 2, e.len - i - 2};
-            return mako_err_int(mako_str_clone(rest));
+            return mako_err_int(mako_str_view(e.data + i + 2, e.len - i - 2));
         }
     }
     return r;
@@ -2784,8 +2792,7 @@ static inline MakoResultInt mako_error_root(MakoResultInt r) {
             }
         }
         if (!found) return r;
-        MakoString rest = {e.data + pos + 2, e.len - pos - 2};
-        r = mako_err_int(mako_str_clone(rest));
+        r = mako_err_int(mako_str_view(e.data + pos + 2, e.len - pos - 2));
     }
     return r;
 }
@@ -5220,7 +5227,7 @@ static inline MakoMapBS mako_map_bs_new(size_t hint) {
 
 static inline void mako_map_bs_rehash(MakoMapBS *m, size_t ncap);
 
-static inline void mako_map_bs_set(MakoMapBS *m, bool key, MakoString val) {
+static inline void mako_map_bs_set_take(MakoMapBS *m, bool key, MakoString val) {
     if (MAKO_UNLIKELY((m->len + m->tombs + 1) * 4 >= m->cap * 3)) mako_map_bs_rehash(m, m->cap * 2);
     uint64_t h = mako_hash_i64(key ? 1 : 0);
     size_t mask = m->cap - 1;
@@ -5233,15 +5240,19 @@ static inline void mako_map_bs_set(MakoMapBS *m, bool key, MakoString val) {
             if (first_tomb != (size_t)-1 && m->tombs) m->tombs--;
             m->state[slot] = MAKO_MAP_FULL;
             m->keys[slot] = key;
-            m->vals[slot] = mako_str_clone(val);
+            m->vals[slot] = val;
             m->len++; return;
         }
         if (st == MAKO_MAP_TOMB) { if (first_tomb == (size_t)-1) first_tomb = i; }
         else if (m->keys[i] == key) {
-            mako_str_free(m->vals[i]); m->vals[i] = mako_str_clone(val); return;
+            mako_str_free(m->vals[i]); m->vals[i] = val; return;
         }
         i = (i + 1) & mask;
     }
+}
+
+static inline void mako_map_bs_set(MakoMapBS *m, bool key, MakoString val) {
+    mako_map_bs_set_take(m, key, mako_str_clone(val));
 }
 
 static inline void mako_map_bs_rehash(MakoMapBS *m, size_t ncap) {
@@ -7447,6 +7458,13 @@ static inline int64_t mako_chan_str_try_recv(MakoChanStr *c, MakoString *out) {
 static __thread MakoString mako_select_last_str = {NULL, 0};
 static __thread int64_t mako_select_rr_str = 0;
 
+static inline void mako_select_str_flush_tls(void) {
+    if (mako_select_last_str.data) {
+        mako_str_free(mako_select_last_str);
+        mako_select_last_str = (MakoString){NULL, 0};
+    }
+}
+
 static inline MakoString mako_chan_select_value_str(void) {
     return mako_str_clone(mako_select_last_str);
 }
@@ -8516,6 +8534,7 @@ static void *mako_sched_worker_main(void *arg) {
         void *r = NULL;
         if (job.fn) r = job.fn(job.arg);
         mako_actor_flush_tls();
+        mako_select_str_flush_tls();
         if (job.task) {
             job.task->result = r;
             atomic_store_explicit(&job.task->done, 1, memory_order_release);
@@ -8676,6 +8695,7 @@ static void *mako_task_trampoline(void *arg) {
     void *r = NULL;
     if (t->fn) r = t->fn(t->arg);
     mako_actor_flush_tls();
+    mako_select_str_flush_tls();
     t->result = r;
     atomic_store_explicit(&t->done, 1, memory_order_release);
     return r;

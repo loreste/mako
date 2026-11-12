@@ -4680,34 +4680,26 @@ MakoNativeString *mako_native_list_get_str_ptr(MakoNativeStringSlice *a, int64_t
     return mako_native_string_slice_get_ptr(a, i);
 }
 
-static MakoNativeString *mako_native_list_popped_str_tls = NULL;
-
 MakoNativeStringSlice *mako_native_list_pop_str_ptr(MakoNativeStringSlice *a) {
     if (!a || a->len == 0) {
-        if (mako_native_list_popped_str_tls) {
-            mako_native_string_drop_ptr(mako_native_list_popped_str_tls);
-            mako_native_list_popped_str_tls = NULL;
-        }
-        mako_native_list_popped_str_tls = mako_native_string_literal_ptr("", 0);
+        mako_list_popped_str_buf[0] = 0;
+        mako_list_popped_str_len = 0;
         return a ? a : mako_native_string_slice_make_ptr(0, 0);
     }
-    if (mako_native_list_popped_str_tls) {
-        mako_native_string_drop_ptr(mako_native_list_popped_str_tls);
-    }
-    /* Take ownership of last element (no clone). */
-    mako_native_list_popped_str_tls = a->data[a->len - 1];
+    MakoNativeString *last = a->data[a->len - 1];
+    MakoString b = bridge_borrow_str(last);
+    size_t n = b.len < sizeof(mako_list_popped_str_buf) - 1 ? b.len : sizeof(mako_list_popped_str_buf) - 1;
+    if (n && b.data) memcpy(mako_list_popped_str_buf, b.data, n);
+    mako_list_popped_str_buf[n] = 0;
+    mako_list_popped_str_len = n;
+    mako_native_string_drop_ptr(last);
     a->data[a->len - 1] = NULL;
     a->len--;
     return a;
 }
 
 MakoNativeString *mako_native_list_popped_str_ptr(void) {
-    if (!mako_native_list_popped_str_tls) {
-        return mako_native_string_literal_ptr("", 0);
-    }
-    MakoNativeString *out = mako_native_list_popped_str_tls;
-    mako_native_list_popped_str_tls = NULL;
-    return out;
+    return mako_native_string_literal_ptr(mako_list_popped_str_buf, mako_list_popped_str_len);
 }
 
 MakoNativeStringSlice *mako_native_list_clear_str_ptr(MakoNativeStringSlice *a) {
@@ -8912,19 +8904,18 @@ int64_t mako_native_time_before(int64_t a, int64_t b) { return mako_time_before(
 int64_t mako_native_syscall_errno(void) { return mako_syscall_errno(); }
 int64_t mako_native_ws_accept(int64_t fd) { return mako_ws_accept(fd); }
 
-static MakoNativeString *mako_native_queue_popped_str_tls = NULL;
-
 MakoNativeStringSlice *mako_native_queue_pop_str_ptr(MakoNativeStringSlice *a) {
-    /* Pop front (queue), store value in TLS for queue_popped_str. */
-    if (mako_native_queue_popped_str_tls) {
-        mako_native_string_drop_ptr(mako_native_queue_popped_str_tls);
-        mako_native_queue_popped_str_tls = NULL;
-    }
+    /* Pop front (queue), store value in TLS buffer for queue_popped_str. */
     if (!a || a->len == 0) {
-        mako_native_queue_popped_str_tls = mako_native_string_literal_ptr("", 0);
+        mako_queue_popped_str_buf[0] = 0;
+        mako_queue_popped_str_len = 0;
         return a ? a : mako_native_string_slice_make_ptr(0, 0);
     }
-    mako_native_queue_popped_str_tls = mako_native_string_clone_ptr(a->data[0]);
+    MakoString front = bridge_borrow_str(a->data[0]);
+    size_t fn_len = front.len < sizeof(mako_queue_popped_str_buf) - 1 ? front.len : sizeof(mako_queue_popped_str_buf) - 1;
+    if (fn_len && front.data) memcpy(mako_queue_popped_str_buf, front.data, fn_len);
+    mako_queue_popped_str_buf[fn_len] = 0;
+    mako_queue_popped_str_len = fn_len;
     size_t n = a->len - 1;
     MakoNativeStringSlice *out = mako_native_string_slice_make_ptr(n, n);
     for (size_t i = 0; i < n; i++) out->data[i] = mako_native_string_clone_ptr(a->data[i + 1]);
@@ -8935,10 +8926,8 @@ MakoNativeStringSlice *mako_native_queue_pop_str_ptr(MakoNativeStringSlice *a) {
 }
 
 MakoNativeString *mako_native_queue_popped_str(void) {
-    if (!mako_native_queue_popped_str_tls)
-        return mako_native_string_literal_ptr("", 0);
-    /* Caller takes ownership of a clone so repeated reads stay valid. */
-    return mako_native_string_clone_ptr(mako_native_queue_popped_str_tls);
+    /* Caller takes ownership of a fresh header so repeated reads stay valid. */
+    return mako_native_string_literal_ptr(mako_queue_popped_str_buf, mako_queue_popped_str_len);
 }
 
 int64_t mako_native_sql_commit(int64_t key) {

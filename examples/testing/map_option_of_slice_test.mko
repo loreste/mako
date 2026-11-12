@@ -94,3 +94,41 @@ fn TestMapOptionOfSliceHelpers() {
     assert_eq(len(c), 0)
     assert_eq(len(m), 2)
 }
+
+struct NamedKey {
+    label: string
+    id: int
+}
+
+fn TestMapOptionAndResultSliceHeapLifecycle() {
+    let mut m = make(map[string]Option[[]string])
+    let xs = ["alpha_" + int_to_string(1), "beta_" + int_to_string(2)]
+    m["k"] = Some(xs)
+    assert_eq_str(xs[0], "alpha_1")
+    m["k"] = Some(["gamma_" + int_to_string(3)])
+    m["del"] = Some(["temp_" + int_to_string(4)])
+    delete(m, "del")
+    match m["k"] {
+        Some(got) => assert_eq_str(got[0], "gamma_3"),
+        None => assert(false),
+    }
+    match m["k"] {
+        Some(got2) => assert_eq_str(got2[0], "gamma_3"),
+        None => assert(false),
+    }
+    let mut c = maps_clone(m)
+    maps_clear(c)
+    assert_eq(len(c), 0)
+
+    let mut mr = make(map[NamedKey]Result[[]string, string])
+    let nk = NamedKey { label: "key_" + int_to_string(10), id: 10 }
+    mr[nk] = Ok(["item_" + int_to_string(1)])
+    mr[NamedKey { label: "key_" + int_to_string(10), id: 10 }] = Err("bad_" + int_to_string(9))
+    match mr[nk] {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq_str(e, "bad_9"),
+    }
+    let mut mrc = maps_clone(mr)
+    maps_clear(mrc)
+    assert_eq(len(mrc), 0)
+}
